@@ -1,0 +1,8 @@
+[package]
+name = "wow-sync-core"
+description = "Core library for WoW Sync"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
