@@ -90,14 +90,14 @@ in a Copilot CLI session on 2026-11-14, against spec revision `7a2ccdf`.
 - Run plans, work packets, handoffs and cumulative usage: `docs/runs/<run-id>/`.
 - Evidence retention policy will be proposed during bootstrap.
 
-## Open
+## Resolved after initial recording
 
 ### D-13: AI-credit ceiling for the first run
 
-- Owner chose: run one small bootstrap trial task, measure its credit cost, and
-  then have the orchestrator propose a ceiling for approval.
-- Only that single trial task is authorized before the ceiling is approved.
-- Reporting: usage per worker and cumulative; pause and ask at 80%; stop at 100%.
+- **Approved 2026-11-14: 2,500 AIU cumulative for run-001**, including the
+  ~424 AIU spent before approval. Pause and ask at 2,000; stop at 2,500.
+- Includes the orchestrator's own usage. Fresh orchestrator session per phase.
+- Reporting: per worker and cumulative in `docs/runs/run-001/USAGE.md`.
 
 ### D-10: Representative addon dataset
 
@@ -137,3 +137,4 @@ in a Copilot CLI session on 2026-11-14, against spec revision `7a2ccdf`.
 |---|---|---|---|
 | 2026-11-14 | D-01–D-09 | Initial owner answers recorded; D-10, D-13 open | `7a2ccdf` |
 | 2026-11-14 | D-10, D-14, D-15 | Dev PC WoW data is test data; run-001 plan approved | `baa81e3` |
+| 2026-11-14 | D-13 | Run-001 ceiling 2,500 AIU cumulative approved | `a4d471b` |

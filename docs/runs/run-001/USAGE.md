@@ -4,7 +4,7 @@ Cumulative across sessions, workers and retries (E-02). Source: Copilot CLI
 local session store, `assistant_usage_events` (actual `model`, `total_nano_aiu`
 per `agent_id`). Values in AIU = `total_nano_aiu / 1e9`.
 
-Credit ceiling: **not set** (D-13). Only P0-trial is authorized until it is.
+Credit ceiling: **2,500 AIU cumulative** (D-13, approved 2026-11-14).
 
 ## Workers
 
@@ -29,7 +29,7 @@ commands pass (0 tests run). Combined checks rerun on merged `main`: pass.
 
 **Run total so far: 423.70 AIU** (orchestrator 402.00 + workers 21.70).
 
-## Ceiling proposal (D-13, awaiting owner approval)
+## Ceiling (D-13): **approved 2,500 AIU cumulative**, 2026-11-14
 
 Observation: P0 cost 21.70 AIU, but orchestrator overhead dominates because
 per-call cost grows with session context. Mitigation: start a fresh
