@@ -1,7 +1,7 @@
 # WoW Sync: product intent and definition of success
 
-Status: first complete draft for owner review, 2026-11-13.
-Implementation requires owner approval of this specification and a run budget.
+Status: approved by the owner at revision `7a2ccdf` on 2026-11-14
+(docs/OWNER-DECISIONS.md D-03). Implementation requires an approved run plan.
 
 ## 1. Purpose
 

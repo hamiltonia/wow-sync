@@ -8,10 +8,13 @@ This repository is agent-first, not agent-uncontrolled.
 2. [SPEC.md](SPEC.md) for product intent and constraints.
 3. [ACCEPTANCE.md](ACCEPTANCE.md) for observable verification obligations.
 4. [ENGINEERING.md](ENGINEERING.md) for roles, budgets, evidence and delivery.
-5. The current approved run plan, role/model policy, task state and your work
-   packet once those exist.
+5. [docs/OWNER-DECISIONS.md](docs/OWNER-DECISIONS.md) for recorded approvals,
+   role/model policy, run limits, and machine/Dropbox/WoW data scope.
+6. The current approved run plan, task state and your work packet once those
+   exist (under `docs/runs/`).
 
-This seed is a draft for owner review. Do not implement because the files exist.
+The specification is approved, but implementation still requires an approved
+run plan and credit ceiling. Do not implement because the files exist.
 If approval/current policy cannot be found, report the missing prerequisite.
 Do not assume the previous conversation is available or authoritative.
 

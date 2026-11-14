@@ -1,17 +1,20 @@
 # WoW Sync: intent specification seed
 
-Status: first complete draft for product-owner review, 2026-11-13.
+Status: specification approved by the owner at `7a2ccdf` on 2026-11-14.
+No implementation exists yet. See [docs/OWNER-DECISIONS.md](docs/OWNER-DECISIONS.md)
+for recorded decisions and the prerequisites still open before a swarm run.
 
-This bundle specifies a new project. It is not the application, an approved
-implementation plan, or permission to launch a swarm. The product owner intends
-to create a separate GitHub repository from it.
+This repository (`hamiltonia/wow-sync`) is the permanent project home. It is not
+yet the application, and its presence is not permission to launch a swarm.
 
 ## Read in this order
 
 1. [SPEC.md](SPEC.md): product intent, constraints, user scenarios and success.
 2. [ACCEPTANCE.md](ACCEPTANCE.md): observable acceptance obligations and evidence.
 3. [ENGINEERING.md](ENGINEERING.md): agentic delivery, quality and repository contract.
-4. [AGENTS.md](AGENTS.md): concise entry point for agents in the future repository.
+4. [AGENTS.md](AGENTS.md): concise entry point for agents.
+5. [docs/OWNER-DECISIONS.md](docs/OWNER-DECISIONS.md): recorded owner decisions,
+   approved model policy, run limits, data/machine scope and open questions.
 
 The `.github` directory contains a short Copilot instruction entry point that
 points back to these documents instead of duplicating requirements.
@@ -76,8 +79,7 @@ can recover code and associated settings without a terminal.
 
 ## How to use this seed
 
-Copy the contents into the new repository root. Read and approve the product
-specification first. An orchestrator should then propose a bounded initial run
+The specification is approved (D-03). An orchestrator should then propose a bounded initial run
 covering repository bootstrap and feasibility, with an explicit worker/model
 policy and budget. Do not start by implementing every screen or choosing a
 snapshot format.
@@ -92,7 +94,8 @@ must become owner decisions before a large implementation investment.
 - No application source or Cargo scaffold.
 - No launched swarm or approved worker/model matrix.
 - No numerical AI-credit, concurrency or elapsed-time authorization.
-- No access to real WoW installations, Dropbox data, accounts or credentials.
+- No access to real WoW installations, Dropbox data, accounts or credentials,
+  except the narrow read-only/synthetic scopes recorded in D-08 and D-09.
 - No cloud service, telemetry vendor, paid subscription or public publishing.
 - No automatic migration or deletion of old CMD/PowerShell data or jobs.
 
