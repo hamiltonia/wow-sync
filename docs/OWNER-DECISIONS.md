@@ -80,10 +80,10 @@ in a Copilot CLI session on 2026-11-14, against spec revision `7a2ccdf`.
 
 - Installation root: `D:\Games\World of Warcraft`. Only `_forever_` is installed
   on the dev PC; no `_retail_` or `_classic_` client is present there.
-- Workers may **read** installation metadata (directory layout, build/product
-  information) to verify the identity of "Forever" (R-02, A-02).
-- Never write there. Do not read saved settings (`WTF`), account or character
-  names, or addon contents. The owner reviews sanitized output before commit.
+- Superseded in part by D-14 (2026-11-14): this installation is dev/test data.
+- Original rule (still applies to any non-dev machine): read installation
+  metadata only; never write; do not read `WTF`, account/character names or
+  addon contents without a further decision.
 
 ### D-06: Run-state location (orchestrator default within approved scope)
 
@@ -101,9 +101,29 @@ in a Copilot CLI session on 2026-11-14, against spec revision `7a2ccdf`.
 
 ### D-10: Representative addon dataset
 
-- Needed for R-05 version-recognition and R-14 performance datasets.
-- Open: approximate addon count/sizes, and whether a sanitized name/version list
-  may be used to build fixtures.
+- Resolved by D-14: the dev PC's `_forever_` addons (102 folders, ~3.3 GB as of
+  2026-11-14) are the representative dataset for this phase. Testing with the
+  owner's real gaming data comes later and needs a new decision.
+
+### D-14: Dev PC WoW data is test data (2026-11-14)
+
+- Owner: the dev PC is not a primary gaming system; its addons are there for
+  agents to work with, and `WTF` is in a basic state ready for testing.
+- Workers may read and modify `D:\Games\World of Warcraft\_forever_\Interface\AddOns`
+  and `...\_forever_\WTF` for development and tests.
+- Still required: never execute addon Lua, saved-variable files or legacy
+  scripts (AGENTS.md); do not run, kill or inject into WoW or launchers;
+  snapshot before destructive tests so the dev install can be restored.
+- Do not commit addon contents or saved settings to the repository. Third-party
+  addon code is not ours to redistribute (E-06). Committed fixtures must be
+  synthetic or minimal derived metadata (names, versions, interface numbers).
+- This does not extend to the owner's other machines or real gaming data.
+
+### D-15: Run-001 plan approved (2026-11-14)
+
+- `docs/runs/run-001/PLAN.md` approved as committed in `baa81e3`.
+- Phase 0 may start; Phase 1 still waits for the D-13 credit ceiling.
+- S-forever and S-addon may use the dev PC data under D-14.
 
 ## Deferred
 
@@ -116,3 +136,4 @@ in a Copilot CLI session on 2026-11-14, against spec revision `7a2ccdf`.
 | Date | IDs | Summary | Revision |
 |---|---|---|---|
 | 2026-11-14 | D-01–D-09 | Initial owner answers recorded; D-10, D-13 open | `7a2ccdf` |
+| 2026-11-14 | D-10, D-14, D-15 | Dev PC WoW data is test data; run-001 plan approved | `baa81e3` |

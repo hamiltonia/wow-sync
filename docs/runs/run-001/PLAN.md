@@ -1,6 +1,7 @@
 # Run 001: Bootstrap and feasibility
 
-Status: **proposed, awaiting owner approval.** No worker has started.
+Status: **approved 2026-11-14 (D-15).** Phase 0 authorized; Phase 1 waits for
+the D-13 credit ceiling.
 Prepared 2026-11-14 by the Opus 5.5 orchestrator against `ee880db`.
 Authority: SPEC.md, ACCEPTANCE.md, ENGINEERING.md and
 [../../OWNER-DECISIONS.md](../../OWNER-DECISIONS.md) (D-01..D-09, D-13).
@@ -21,7 +22,8 @@ R-14 without claiming any product acceptance case.
 ## 2. Non-goals
 
 - No product features, sync engine, protocol, snapshot format or real UI flows.
-- No writes to WoW installations, `WTF` reads, or real addon/settings content.
+- Dev PC `_forever_` AddOns and WTF may be read/modified as test data (D-14);
+  no Lua execution, no committed addon contents or saved settings.
 - No access to `D:\Dropbox\Gaming Sync` outside `WoW Sync Test` (D-08).
 - No telemetry service, paid service, new credentials or public release.
 - No support claim for Windows ARM64 or macOS Intel (D-07).
@@ -60,7 +62,7 @@ deleted after its findings are recorded.
 | S-mem | Idle private resident memory after UI open/close cycles; GPU reported separately (R-14) | sonnet-5.5, verified by gpt-6.1-sol | Win x64 | Raw measurements, method |
 | S-a11y | Screen-reader feasibility with GPUI (Narrator) | opus-5.5 design + sonnet-5.5 | Win x64; VoiceOver blocked | Findings and options (feeds D-12) |
 | S-forever | Identity of `_forever_` from install metadata only (D-09) | sonnet-5.5, verified by gpt-6.1-sol | Win x64, read-only | Sanitized report; **owner reviews before commit** |
-| S-addon | Addon/package identity and version ordering from `.toc` metadata | sonnet-5.5 | Synthetic fixtures; real coverage blocked on D-10 | Coverage report, ambiguity catalog |
+| S-addon | Addon/package identity and version ordering from `.toc` metadata | sonnet-5.5 | Dev PC `_forever_` addons (D-14) plus synthetic fixtures | Coverage report, ambiguity catalog |
 | S-state | Whether addon-owned saved-variable files can be identified safely without executing Lua (R-07) | opus-5.5 | Synthetic fixtures only | Findings, unknown/shared cases |
 | S-proc | Detect WoW/updater activity and file stability without killing or injecting (R-11) | sonnet-5.5 | Win x64 | Findings, race notes |
 | S-dropbox | Local Dropbox client behavior: online-only files, partial files, conflicted copies, rename visibility | sonnet-5.5, verified by gpt-6.1-sol | `D:\Dropbox\Gaming Sync\WoW Sync Test` only, synthetic data | Observed provider behavior log |
@@ -128,13 +130,13 @@ Stop, preserve state and ask the owner when:
 
 | Item | Needed by | Status |
 |---|---|---|
-| Approve this plan | P0 | **Open** |
+| Approve this plan | P0 | Done (D-15) |
 | Credit ceiling | Phase 1 | Open (after P0) |
-| Addon count and sanitized-list permission (D-10) | S-addon real coverage | Open; spike proceeds with synthetic data |
+| Addon dataset (D-10) | S-addon | Done: dev PC data (D-14) |
 | M3 MacBook available to agents | macOS runtime spikes | Later; reported blocked |
 
 ## 9. Approval
 
 | Date | Decision | Plan revision |
 |---|---|---|
-| | | |
+| 2026-11-14 | Approved by owner (D-15) | `baa81e3` |
