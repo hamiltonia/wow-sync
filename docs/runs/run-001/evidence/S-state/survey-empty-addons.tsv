@@ -1,0 +1,117 @@
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-1>\AddOns.txt	client-file
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-2>\AddOns.txt	client-file
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-3>\AddOns.txt	client-file
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-4>\AddOns.txt	client-file
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-5>\AddOns.txt	client-file
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-6>\AddOns.txt	client-file
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\AddOns.txt	client-file
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\<orphan>.lua	orphan		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\Blizzard_ClientSavedVariables.lua	blizzard		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\Blizzard_Communities.lua	blizzard		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\Blizzard_DamageMeter.lua	blizzard		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\Blizzard_LegacyChallengeTracker.lua	blizzard		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\Blizzard_Professions.lua	blizzard		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\Blizzard_TimeManager.lua	blizzard		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\<orphan>.lua	orphan		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\<orphan>.lua	orphan		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\<orphan>.lua	orphan		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\<orphan>.lua	orphan		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\<orphan>.lua	orphan		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\<orphan>.lua	orphan		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\<orphan>.lua	orphan		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\<orphan>.lua	orphan		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\<orphan>.lua	orphan		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\<orphan>.lua	orphan		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\<orphan>.lua	orphan		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\<orphan>.lua	orphan		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\<orphan>.lua	orphan		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\<orphan>.lua	orphan		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\SavedVariables\<orphan>.lua	orphan		
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\cache.md5	client-file
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\chat-cache.txt	client-file
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\click-bindings-cache.txt	client-file
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\config-cache.old	client-file
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\config-cache.wtf	client-file
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\edit-mode-cache-character.old	client-file
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\edit-mode-cache-character.txt	client-file
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\flagged-cache-character.old	client-file
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\flagged-cache-character.txt	client-file
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\layout-local.txt	client-file
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\macros-cache.txt	client-file
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-7>\tts-cache-character.txt	client-file
+Character	WTF\Account\<ACCOUNT-1>\<REALM-1>\<CHARACTER-8>\AddOns.txt	client-file
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\Blizzard_CombatLog.lua	blizzard		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\Blizzard_GamepadSmartNavigation.lua	blizzard		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\Blizzard_GamepadSmartNavigation.lua.bak	blizzard		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\Blizzard_SavedSets.lua	blizzard		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\Blizzard_SavedSets.lua.bak	blizzard		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\Blizzard_SettingsDefinitions_Shared.lua	blizzard		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\Blizzard_SettingsDefinitions_Shared.lua.bak	blizzard		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\Blizzard_SharedMapDataProviders.lua	blizzard		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\SavedVariables\<orphan>.lua	orphan		
+Account	WTF\Account\<ACCOUNT-1>\bindings-cache.wtf	client-file
+Account	WTF\Account\<ACCOUNT-1>\cache.md5	client-file
+Account	WTF\Account\<ACCOUNT-1>\character-list-order.txt	client-file
+Account	WTF\Account\<ACCOUNT-1>\chat-frontend-cache.txt	client-file
+Account	WTF\Account\<ACCOUNT-1>\config-cache.old	client-file
+Account	WTF\Account\<ACCOUNT-1>\config-cache.wtf	client-file
+Account	WTF\Account\<ACCOUNT-1>\edit-mode-cache-account.old	client-file
+Account	WTF\Account\<ACCOUNT-1>\edit-mode-cache-account.txt	client-file
+Account	WTF\Account\<ACCOUNT-1>\flagged-cache-account.old	client-file
+Account	WTF\Account\<ACCOUNT-1>\flagged-cache-account.txt	client-file
+Account	WTF\Account\<ACCOUNT-1>\macros-cache.old	client-file
+Account	WTF\Account\<ACCOUNT-1>\macros-cache.txt	client-file
+Account	WTF\Account\<ACCOUNT-1>\tts-cache-account.txt	client-file
+Root	WTF\Config.wtf	client-file
+Root	WTF\GamePadConfig_Default.json	client-file
+Machine	WTF\SavedVariables\Blizzard_AddOnList.lua	blizzard		
+Machine	WTF\SavedVariables\Blizzard_AddOnList.lua.bak	blizzard		
+Machine	WTF\SavedVariables\Blizzard_Console.lua	blizzard		
+Machine	WTF\SavedVariables\Blizzard_Console.lua.bak	blizzard		
+Machine	WTF\SavedVariables\Blizzard_GlueSavedVariables.lua	blizzard		
+Root	WTF\gamecontrollerdb.txt	client-file
+
+# addon folders with .toc: 0
+# folders declaring saved variables: 0
+# folders whose declarations differ across flavor .toc files: 0
+# saved-variable files scanned: 66 (1030022 bytes) in 12.4679ms
+3	Account	bak	blizzard
+13	Account	client-file
+5	Account	lua	blizzard
+31	Account	lua	orphan
+20	Character	client-file
+6	Character	lua	blizzard
+16	Character	lua	orphan
+2	Machine	bak	blizzard
+3	Machine	lua	blizzard
+3	Root	client-file

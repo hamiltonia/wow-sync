@@ -1,0 +1,1 @@
+SynthDB = { ["x"] = SomeOtherGlobal }
