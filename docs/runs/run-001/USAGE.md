@@ -11,11 +11,13 @@ Credit ceiling: **2,500 AIU cumulative** (D-13, approved 2026-11-14).
 | # | Packet | Requested model | Actual model(s) | AIU | Status |
 |---|---|---|---|---|---|
 | 1 | P0-trial | claude-sonnet-5.5 | claude-sonnet-5.5 (agent `c52c05a7`, 13 calls) | 21.70 | Done. Merged to `main` in `d3b2df1` after orchestrator re-verification |
-| 2 | P1-verify | claude-sonnet-5.5 | claude-sonnet-5.5 (agent `a83d3830`, 18 calls incl. fix 1) | 53.35 | Done `44f170e` + fix `59199af` (inline-code link false positive found at integration) |
+| 2 | P1-verify | claude-sonnet-5.5 | claude-sonnet-5.5 (agent `a83d3830`, 30 calls incl. fixes 1–2) | 97.00 | Done `44f170e`; fix 1 `59199af` (inline-code link false positive); fix 2 `08163c1` (P1-check false green, report freshness, link-scan scope) |
 | 3 | P1-ci | claude-sonnet-5.5 | claude-sonnet-5.5 (agent `d37350b4`, 10 calls) | 23.11 | Done `34c8f50` |
-| 4 | P1-map | claude-opus-5.5 | claude-opus-5.5 (agent `6e7b0d6d`, 14 calls) | 88.55 | Done `4b1dd04` |
+| 4 | P1-map | claude-opus-5.5 | claude-opus-5.5 (agent `6e7b0d6d`, 25 calls incl. fix 1) | 165.27 | Done `4b1dd04`; fix 1 `a154850` (stale REPO-MAP) |
+| 5 | P1-check | gpt-6.1-sol | gpt-6.1-sol (agent `ed40bcc0`, 62 calls incl. re-verification) | 95.30 | Done `98ea632`; re-verification `d397ac7` |
 
-Worker count: 4 / 20. Concurrent max: 5 (3 used). Retries: P1-verify 1 / 2.
+Worker count: 5 / 20. Concurrent max: 5 (3 used). Retries: P1-verify 2 / 2
+(exhausted), P1-map 1 / 2.
 
 Independent check (orchestrator, clean clone of `main` + the three branches,
 2026-11-15): first run `offline/markdown-links` FAIL (false positive on inline
@@ -36,12 +38,21 @@ commands pass (0 tests run). Combined checks rerun on merged `main`: pass.
 | `fea20f53` | claude-opus-5.5 393.86, gpt-6.1-sol 8.14 | 402.00 | After P0 merge |
 | `fea20f53` | claude-opus-5.5 508.79, gpt-6.1-sol 8.14 | 516.93 | Final (session closed after handoff) |
 | `961f3baa` | gpt-6.1-sol 27.14 (session started on wrong model; stopped per D-04), claude-opus-5.5 41.36 | 68.50 | 2026-11-15 00:26Z, Phase 1 start |
+| `961f3baa` | gpt-6.1-sol 27.14, claude-opus-5.5 424.38 | 451.52 | 2026-11-15, Phase 1 close (excludes final ledger edits) |
 
 **Run total at Phase 1 start: 607.13 AIU** (orchestrator 585.43 + workers 21.70).
 Excluded: session `13d6d36b` (`D:\GitHub\shell`, unrelated repository).
 
-**Run total after P1 merges: 840.70 AIU** (orchestrator 516.93 + 137.05;
-workers 21.70 + 165.02). 34% of ceiling.
+**Run total at Phase 1 close: ≈1,371 AIU** (orchestrator 516.93 + 451.52;
+workers 21.70 + 380.68). 55% of ceiling; 629 AIU until the 2,000 pause.
+
+Phase 1 actual vs estimate: workers 380.68 vs 200 (two verifier-driven fix
+rounds); orchestrator ≈452 for one phase vs 800 budgeted for all phases.
+
+Independent check (orchestrator, clean clone of `main` + P1-check, P1-verify
+fix 2, P1-map fix 1, 2026-11-15): offline PASS exit 0; `all` BLOCKED exit 1;
+P1-check's false-green scenario (all xtask test modules disabled, inventory
+emptied) now FAIL exit 1.
 
 ## Ceiling (D-13): **approved 2,500 AIU cumulative**, 2026-11-14
 
