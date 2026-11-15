@@ -48,14 +48,33 @@ tests = ["inventory::tests::zero_tests_with_listed_cases_is_a_problem"]
 ```
 
 Names are exactly as `cargo test` prints them (`module::test_name`, without the
-crate). The verifier fails when a listed test did not run, was ignored, or
-failed, or when a tier ran zero tests while it has listed cases. To add a case,
-append a `[[case]]` entry in the same change as the test. Unknown tiers,
-duplicate ID/tier pairs, empty test lists and unknown keys are rejected.
-Currently only the `offline` inventory is enforced by running tests.
+crate). The `required-cases` check of an executable tier (today `offline`)
+FAILS when any of these hold, independent of the inventory contents:
+
+- the tier executed zero tests (ignored tests do not count as executed);
+- the inventory lists no cases for that tier (an empty inventory is a missing
+  obligation, not success);
+- a listed test did not run, was ignored, or failed.
+
+To add a case, append a `[[case]]` entry in the same change as the test.
+Unknown tiers, duplicate ID/tier pairs, empty test lists and unknown keys are
+rejected. Blocked tiers (`native`, `provider`) are not subject to this check
+because they do not run.
 
 ## Markdown link check
 
-All `*.md` files (except `target/` and `.git/`) are scanned for inline
-relative links outside fenced code blocks and inline code spans; missing targets fail. External URLs
-and `#anchor` fragments are not validated.
+Only git-tracked `*.md` files (`git ls-files -z -- '*.md'`) are scanned, so
+untracked caches and vendored files are ignored; symlinks and junctions are
+never followed. Inline relative links outside fenced code blocks and inline
+code spans must resolve; missing targets fail. External URLs and `#anchor`
+fragments are not validated. If git is unavailable the check is BLOCKED.
+
+## Report validity
+
+`target/verify/report.json` includes `git_sha`, `git_dirty` and `generated_at`
+(UTC). A report is valid only for the commit it names (and only if
+`git_dirty` is false when claiming a clean commit); compare it with
+`git rev-parse HEAD` and check the timestamp. xtask deletes any existing
+report before running checks, so a missing report means the run did not
+complete. If `xtask` itself fails to compile, it cannot run and cannot delete
+the old report: treat a report whose SHA/timestamp does not match as stale.

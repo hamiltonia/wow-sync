@@ -66,6 +66,9 @@ pub fn exit_ok(checks: &[Check], allow_blocked: bool) -> bool {
 
 #[derive(Serialize)]
 pub struct Report<'a> {
+    pub git_sha: Option<String>,
+    pub git_dirty: Option<bool>,
+    pub generated_at: String,
     pub tiers: Vec<String>,
     pub allow_blocked: bool,
     pub overall: Status,
@@ -73,8 +76,43 @@ pub struct Report<'a> {
     pub checks: &'a [Check],
 }
 
-pub fn build<'a>(tiers: &[String], allow_blocked: bool, checks: &'a [Check]) -> Report<'a> {
+pub struct Meta {
+    pub git_sha: Option<String>,
+    pub git_dirty: Option<bool>,
+    pub unix_secs: u64,
+}
+
+/// Formats Unix seconds as `YYYY-MM-DDTHH:MM:SSZ` (civil-from-days, proleptic Gregorian).
+pub fn rfc3339_utc(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
+}
+
+pub fn build<'a>(
+    meta: Meta,
+    tiers: &[String],
+    allow_blocked: bool,
+    checks: &'a [Check],
+) -> Report<'a> {
     Report {
+        git_sha: meta.git_sha,
+        git_dirty: meta.git_dirty,
+        generated_at: rfc3339_utc(meta.unix_secs),
         tiers: tiers.to_vec(),
         allow_blocked,
         overall: overall(checks),
@@ -86,6 +124,26 @@ pub fn build<'a>(tiers: &[String], allow_blocked: bool, checks: &'a [Check]) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn report_carries_sha_dirty_flag_and_timestamp() {
+        let meta = Meta {
+            git_sha: Some("abc123".into()),
+            git_dirty: Some(true),
+            unix_secs: 1_700_000_000,
+        };
+        let rep = build(meta, &["offline".to_string()], false, &[]);
+        let json = serde_json::to_value(&rep).unwrap();
+        assert_eq!(json["git_sha"], "abc123");
+        assert_eq!(json["git_dirty"], true);
+        assert_eq!(json["generated_at"], "2023-11-14T22:13:20Z");
+    }
+
+    #[test]
+    fn rfc3339_formats_epoch_and_leap_day() {
+        assert_eq!(rfc3339_utc(0), "1970-01-01T00:00:00Z");
+        assert_eq!(rfc3339_utc(1_709_164_800), "2024-02-29T00:00:00Z");
+    }
 
     fn c(s: Status) -> Check {
         Check::new("offline", "x", s, "")

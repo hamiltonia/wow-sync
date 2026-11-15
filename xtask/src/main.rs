@@ -207,7 +207,13 @@ fn required_cases_check(root: &Path, tests_ran: bool, test_output: &str) -> Chec
 
 fn link_check(root: &Path) -> Check {
     match links::check_repo(root) {
-        Err(e) => Check::new(
+        Err(links::LinkError::GitUnavailable(e)) => Check::new(
+            "offline",
+            "markdown-links",
+            Status::Blocked,
+            format!("git is required to list tracked Markdown files ({e}); install git"),
+        ),
+        Err(links::LinkError::Io(e)) => Check::new(
             "offline",
             "markdown-links",
             Status::Fail,
@@ -247,6 +253,17 @@ fn blocked_tier(root: &Path, tier: &str, reason: &str) -> Vec<Check> {
     )]
 }
 
+fn git_output(root: &Path, args: &[&str]) -> Option<String> {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let opts = match parse_args(&args) {
@@ -257,6 +274,15 @@ fn main() -> ExitCode {
         }
     };
     let root = repo_root();
+    // A missing report means the run did not complete; never leave a stale one behind.
+    let report_dir = root.join("target").join("verify");
+    let report_path = report_dir.join("report.json");
+    if let Err(e) = std::fs::remove_file(&report_path) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            eprintln!("cannot remove stale {}: {e}", report_path.display());
+            return ExitCode::from(1);
+        }
+    }
     let mut checks = Vec::new();
     for tier in &opts.tiers {
         match tier.as_str() {
@@ -277,17 +303,24 @@ fn main() -> ExitCode {
             }
         }
     }
-    let rep = report::build(&opts.tiers, opts.allow_blocked, &checks);
+    let meta = report::Meta {
+        git_sha: git_output(&root, &["rev-parse", "HEAD"]),
+        git_dirty: git_output(&root, &["status", "--porcelain"]).map(|s| !s.is_empty()),
+        unix_secs: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    };
+    let rep = report::build(meta, &opts.tiers, opts.allow_blocked, &checks);
     println!(
         "overall: {} (allow-blocked: {}) -> exit {}",
         rep.overall.label(),
         opts.allow_blocked,
         if rep.exit_ok { 0 } else { 1 }
     );
-    let dir = root.join("target").join("verify");
-    let written = std::fs::create_dir_all(&dir).and_then(|_| {
+    let written = std::fs::create_dir_all(&report_dir).and_then(|_| {
         std::fs::write(
-            dir.join("report.json"),
+            &report_path,
             serde_json::to_string_pretty(&rep).expect("report serializes"),
         )
     });

@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 /// Removes inline code spans (any backtick run length, CommonMark matching) from one line.
 /// An unmatched backtick run is kept as literal text.
@@ -89,28 +90,53 @@ pub fn broken_links(text: &str, dir: &Path) -> Vec<String> {
         .collect()
 }
 
-fn collect_markdown(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
-    for entry in fs::read_dir(dir)? {
-        let path = entry?.path();
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if path.is_dir() {
-            if name != "target" && name != ".git" {
-                collect_markdown(&path, out)?;
-            }
-        } else if name.ends_with(".md") {
-            out.push(path);
-        }
-    }
-    Ok(())
+pub enum LinkError {
+    /// git could not be run, so the tracked-file list is unknown.
+    GitUnavailable(String),
+    Io(String),
 }
 
-/// Checks every Markdown file under `root`; returns (files checked, "file: target" problems).
-pub fn check_repo(root: &Path) -> std::io::Result<(usize, Vec<String>)> {
-    let mut files = Vec::new();
-    collect_markdown(root, &mut files)?;
+/// Splits `git ls-files -z` output into tracked Markdown paths.
+fn parse_ls_files(output: &[u8]) -> Vec<PathBuf> {
+    output
+        .split(|&b| b == 0)
+        .filter_map(|p| std::str::from_utf8(p).ok())
+        .filter(|p| p.ends_with(".md"))
+        .map(PathBuf::from)
+        .collect()
+}
+
+fn tracked_markdown(root: &Path) -> Result<Vec<PathBuf>, LinkError> {
+    let out = Command::new("git")
+        .args(["ls-files", "-z", "--", "*.md"])
+        .current_dir(root)
+        .output()
+        .map_err(|e| LinkError::GitUnavailable(format!("cannot start git: {e}")))?;
+    if !out.status.success() {
+        let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(LinkError::GitUnavailable(format!(
+            "git ls-files failed: {msg}"
+        )));
+    }
+    Ok(parse_ls_files(&out.stdout)
+        .into_iter()
+        .map(|p| root.join(p))
+        // Never follow symlinks or junctions; skip tracked files deleted from the work tree.
+        .filter(|p| {
+            fs::symlink_metadata(p)
+                .map(|m| m.file_type().is_file())
+                .unwrap_or(false)
+        })
+        .collect())
+}
+
+/// Checks git-tracked Markdown files under `root`; returns (files checked, "file: target" problems).
+pub fn check_repo(root: &Path) -> Result<(usize, Vec<String>), LinkError> {
+    let files = tracked_markdown(root)?;
     let mut problems = Vec::new();
     for f in &files {
-        let text = fs::read_to_string(f)?;
+        let text =
+            fs::read_to_string(f).map_err(|e| LinkError::Io(format!("{}: {e}", f.display())))?;
         let dir = f.parent().unwrap_or(root);
         for t in broken_links(&text, dir) {
             let rel = f.strip_prefix(root).unwrap_or(f);
@@ -128,6 +154,41 @@ mod tests {
     fn extracts_links_and_skips_fenced_code() {
         let text = "see [a](A.md) and [b](docs/B.md#x \"t\")\n```\n[c](C.md)\n```\n[d](<D.md>)";
         assert_eq!(extract_links(text), vec!["A.md", "docs/B.md#x", "D.md"]);
+    }
+
+    #[test]
+    fn ls_files_output_is_split_on_nul_and_filtered_to_markdown() {
+        let out = b"README.md\0src/a.rs\0docs/sp ace.md\0";
+        assert_eq!(
+            parse_ls_files(out),
+            vec![PathBuf::from("README.md"), PathBuf::from("docs/sp ace.md")]
+        );
+    }
+
+    #[test]
+    fn untracked_markdown_is_not_scanned() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("target")
+            .join(format!("xtask-links-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("cache")).unwrap();
+        fs::write(root.join("tracked.md"), "[bad](gone.md)").unwrap();
+        fs::write(root.join("cache").join("untracked.md"), "[bad](other.md)").unwrap();
+        let git = |args: &[&str]| {
+            let s = Command::new("git")
+                .args(args)
+                .current_dir(&root)
+                .status()
+                .unwrap();
+            assert!(s.success());
+        };
+        git(&["init", "-q"]);
+        git(&["add", "tracked.md"]);
+        let (n, problems) = check_repo(&root).ok().unwrap();
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(problems, vec!["tracked.md: gone.md"]);
     }
 
     #[test]
