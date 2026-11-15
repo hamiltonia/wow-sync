@@ -1,0 +1,10 @@
+12:09:37.159 launched pid=31424
+12:09:41.217 windows: 10815814|tray_icon_app|False ; 526112|Zed::Window|True ; 331088|PseudoConsoleWindow|True ; 2033828|MSCTFIME UI|False ; 4064566|IME|False
+12:09:41.222 main window class=Zed::Window visible=True (expect True); tray hidden window found=True
+12:09:41.249 WM_CLOSE -> hidden=True; process alive=True
+12:09:41.321 tray click #1 -> shown=True
+12:09:41.446 tray click #2 -> hidden=True
+12:09:41.679 second instance exited=True code=; first -> shown=True; first alive=True
+12:09:41.695 spike-gpui process count=1 (expect 1)
+12:09:41.703 working set MiB=58.6 (informational only)
+12:09:41.716 stopped test process

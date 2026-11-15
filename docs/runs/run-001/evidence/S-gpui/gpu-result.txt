@@ -1,0 +1,4 @@
+prior preference for exe: []
+[     0 ms] pid=2988 start selftest=false
+[   298 ms] pid=2988 gpu_specs: device=Intel(R) UHD Graphics driver=Intel Corporation software_emulated=false
+[   299 ms] pid=2988 window opened hwnd=0x18083c
