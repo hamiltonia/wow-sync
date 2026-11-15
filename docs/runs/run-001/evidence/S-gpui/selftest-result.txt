@@ -1,0 +1,12 @@
+[     0 ms] pid=19296 start selftest=true
+[   362 ms] pid=19296 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[   369 ms] pid=19296 window opened hwnd=0xb06f6
+[   373 ms] pid=19296 tray icon created
+[  1880 ms] pid=19296 SELFTEST open: visible=true
+[  2411 ms] pid=19296 SELFTEST hide: visible=false (process+tray alive)
+[  2926 ms] pid=19296 SELFTEST reopen: visible=true
+[  2933 ms] pid=19296 close requested -> intercepted, hiding to tray
+[  3739 ms] pid=19296 SELFTEST WM_CLOSE: visible=false (expect false, process alive)
+[  4252 ms] pid=19296 SELFTEST reopen2: visible=true
+[  4259 ms] pid=19296 SELFTEST quit
+[  4260 ms] pid=19296 run() returned; process exiting
