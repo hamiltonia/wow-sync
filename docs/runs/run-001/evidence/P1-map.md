@@ -70,3 +70,22 @@ check, which has not run on these files.
 
 - No verification tier run: P1-verify's entry point does not exist in this
   branch. Docs-only change; only the ad hoc link check above was run.
+
+## Fix 1 (retry 1 of 2, 2026-11-14)
+
+Trigger: P1-check reported `docs/REPO-MAP.md` stale on `main` at `367c0de`
+(A-40 current-state accuracy). Merged `main` (fast-forward to `367c0de`), then
+changed only `docs/REPO-MAP.md`:
+
+- Linked the now-present `xtask/`, `.cargo/config.toml`, `docs/VERIFY.md`,
+  `tests/required-cases.toml`, `deny.toml`, `.github/workflows/ci.yml` and
+  `Cargo.lock`; removed all "Planned" labels and the P0-only commands statement.
+- `docs/VERIFY.md` is named as the command authority; executed results are
+  referenced to `docs/runs/<run-id>/evidence/` without restating them.
+- `deny.toml` attributed to P1-verify, per its packet.
+- Removed volatile status ("exists yet", "not yet created", "None exist yet");
+  current state is referred to `docs/runs/<run-id>/HANDOFF.md`.
+
+Check (this worktree, Windows dev PC): `cargo xtask verify --tier offline`
+exit 0; `offline/markdown-links` PASS (fmt, clippy, test, required-cases, deny
+also PASS). This is the author's run, not independent verification.
