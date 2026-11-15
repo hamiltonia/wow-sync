@@ -90,7 +90,7 @@ instance, iGPU, build size/time, ARM64 blocker) and S-mem (memory) measured
 `0.2.2`. A move to a git pin changes the dependency tree (585 vs 709 packages;
 `wgpu` replaces `blade`; AccessKit adds a per-window adapter) and the public API
 (`gpui_platform::application()`). Their results are **evidence for 0.2.2 only**
-and must be re-run on the chosen pin before the memory gate (A-37 100 MiB) or
+and must be re-run on the chosen pin before the memory gate (A-37 [correction by P3-fix: A-29] 100 MiB) or
 tray lifecycle are claimed for the product. Code-level changes are expected to be
 small (S-a11y ported the same UI) but are unmeasured for the tray spike.
 Mixing pins (GUI on git, something else on crates.io GPUI) is not possible in one

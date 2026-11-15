@@ -17,6 +17,9 @@ plus this file is the full work packet (E-05). Read AGENTS.md first.
   contain an empty `[workspace]` table so it is not part of the product
   workspace; commit its `Cargo.lock`. Do not add `target/` output to git
   (root `.gitignore` covers `target/`; check `git status` before committing).
+  Correction (P3-fix, 2026-11-15): that was wrong when written; the root
+  `.gitignore` covered only `/target` (repo root) until P3-fix changed it to
+  `target/`, which ignores build output at any depth.
 - `cargo xtask verify --tier offline` from the worktree root must still pass
   before you commit (it checks Markdown links in tracked files, so links in
   your evidence must resolve; do not put `](...)` sequences in inline code).
