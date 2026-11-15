@@ -1,0 +1,56 @@
+== 2a process detection by image path ==
+enumerated 360 processes, 167 not openable with QUERY_LIMITED (system/protected)
+  A forever Wow.exe (match): pid 34780 name-only-match=true path-match-under-A=Some(("_forever_", Client))
+  A classic WowClassic.exe (match, other variant): pid 34488 name-only-match=true path-match-under-A=Some(("_classic_era_", Client))
+  A launcher (match, launcher kind): pid 35460 name-only-match=false path-match-under-A=Some(("", Launcher))
+  sibling prefix installA_evil Wow.exe (must NOT match): pid 2532 name-only-match=true path-match-under-A=None
+  other install B Wow.exe (must NOT match): pid 14816 name-only-match=true path-match-under-A=None
+  A non-client helper tool.exe (Other): pid 11348 name-only-match=false path-match-under-A=Some(("_forever_", Other))
+clients_under(installA) = [(34780, "_forever_"), (34488, "_classic_era_")]
+name-only detection would flag 4 processes (includes decoys); path detection flags 2
+case-insensitive root match count = 2
+real install root: 0 process(es) with image under it at this moment: []
+== 2b Restart Manager ==
+  held share=none holder pid=2356 -> RM=Ok([(2356, "Wow.exe")]) (103.2 ms) exclusive_probe=Ok(false)
+    after holder exit: RM=Ok([]) probe=Ok(true)
+  held share=read holder pid=36240 -> RM=Ok([(36240, "Wow.exe")]) (95.4 ms) exclusive_probe=Ok(false)
+    after holder exit: RM=Ok([]) probe=Ok(true)
+  held share=rw holder pid=13600 -> RM=Ok([(13600, "Wow.exe")]) (106.6 ms) exclusive_probe=Ok(false)
+    after holder exit: RM=Ok([]) probe=Ok(true)
+  held share=rwd holder pid=34680 -> RM=Ok([(34680, "Wow.exe")]) (100.2 ms) exclusive_probe=Ok(false)
+    after holder exit: RM=Ok([]) probe=Ok(true)
+  control unheld RM=Ok([])
+  control missing RM=Ok([])
+  held read-only by self with full sharing: RM=Ok([(33060, "wowsync-proc-spike.exe")]) probe=Ok(false)
+== 2c file stability heuristic ==
+  scenario hold-and-append: writer open failures caused by detectors/other = 0
+    meta-only: declared stable at +360 ms relative to writer final close -> ok
+    probe-only: declared stable at +59 ms relative to writer final close -> ok
+    meta+probe: declared stable at +360 ms relative to writer final close -> ok
+  scenario open-write-close-bursts: writer open failures caused by detectors/other = 0
+    meta-only: declared stable at +257 ms relative to writer final close -> ok
+    probe-only: declared stable at -1652 ms relative to writer final close -> PREMATURE (false idle)
+    meta+probe: declared stable at +258 ms relative to writer final close -> ok
+  scenario silent-hold: writer open failures caused by detectors/other = 0
+    meta-only: declared stable at -1247 ms relative to writer final close -> PREMATURE (false idle)
+    probe-only: declared stable at +60 ms relative to writer final close -> ok
+    meta+probe: declared stable at +59 ms relative to writer final close -> ok
+  -- can the probe itself disturb a writer? (writer: open-append-close loop, share=read, 3 s) --
+    no probe: writer attempts=47244 failed opens=0 (probe iterations=60)
+    exclusive probe hot loop: writer attempts=269278 failed opens=268944 (probe iterations=1137)
+    exclusive probe every 100 ms: writer attempts=74865 failed opens=38473 (probe iterations=26)
+    Restart Manager every 5 ms: writer attempts=75959 failed opens=9994 (probe iterations=10)
+== 2d launch-during-write race (8-file staged write, ~25 ms/file, client stand-in spawned at offsets 0..~200 ms) ==
+  (commit classes: safe = rename finished before client process was created; violating = rename began after CreateProcess returned; ambiguous = overlapping)
+  mode 'no check': 20 trials: commits safe=66 ambiguous=8 violating=86; trials aborted=0; trials with any non-safe commit=20; max check->rename-complete window=3359 us
+  mode 'poll 1000 ms flag': 20 trials: commits safe=66 ambiguous=2 violating=84; trials aborted=1; trials with any non-safe commit=19; max check->rename-complete window=2713 us
+  mode 'per-commit recheck': 20 trials: commits safe=45 ambiguous=0 violating=1; trials aborted=20; trials with any non-safe commit=1; max check->rename-complete window=27865 us
+== 3 notification approach: polling latency and CPU ==
+  poll 1000 ms: detection latency after CreateProcess returned: n=10 min=54 mean=446 max=943 ms
+  poll 250 ms: detection latency after CreateProcess returned: n=10 min=10 mean=133 max=259 ms
+  poll 100 ms: detection latency after CreateProcess returned: n=10 min=6 mean=27 max=69 ms
+  one names-only scan + path resolution over 372 processes: 10.05 ms avg (50 runs)
+  full scan (resolve path of every process): 16.04 ms avg
+  CPU polling (names-only scan) every 1000 ms for 30 s: 30 polls, 0.281 s CPU = 0.927% of one core (this process, user+kernel)
+  CPU polling (names-only scan) every 100 ms for 10 s: 93 polls, 0.734 s CPU = 7.284% of one core (this process, user+kernel)
+  CPU polling (full scan) every 1000 ms for 30 s: 30 polls, 0.359 s CPU = 1.184% of one core (this process, user+kernel)
