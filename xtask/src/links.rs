@@ -1,7 +1,46 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Extracts inline Markdown link targets, ignoring fenced code blocks.
+/// Removes inline code spans (any backtick run length, CommonMark matching) from one line.
+/// An unmatched backtick run is kept as literal text.
+fn strip_code_spans(line: &str) -> String {
+    let chars: Vec<char> = line.chars().collect();
+    let run_len = |from: usize| chars[from..].iter().take_while(|&&c| c == '`').count();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] != '`' {
+            out.push(chars[i]);
+            i += 1;
+            continue;
+        }
+        let n = run_len(i);
+        let mut j = i + n;
+        let mut close = None;
+        while j < chars.len() {
+            if chars[j] == '`' {
+                let m = run_len(j);
+                if m == n {
+                    close = Some(j + m);
+                    break;
+                }
+                j += m;
+            } else {
+                j += 1;
+            }
+        }
+        match close {
+            Some(end) => i = end,
+            None => {
+                out.extend(&chars[i..i + n]);
+                i += n;
+            }
+        }
+    }
+    out
+}
+
+/// Extracts inline Markdown link targets, ignoring fenced code blocks and inline code spans.
 pub fn extract_links(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut in_fence = false;
@@ -14,7 +53,8 @@ pub fn extract_links(text: &str) -> Vec<String> {
         if in_fence {
             continue;
         }
-        let mut rest = line;
+        let stripped = strip_code_spans(line);
+        let mut rest = stripped.as_str();
         while let Some(i) = rest.find("](") {
             let after = &rest[i + 2..];
             if let Some(end) = after.find(')') {
@@ -88,6 +128,20 @@ mod tests {
     fn extracts_links_and_skips_fenced_code() {
         let text = "see [a](A.md) and [b](docs/B.md#x \"t\")\n```\n[c](C.md)\n```\n[d](<D.md>)";
         assert_eq!(extract_links(text), vec!["A.md", "docs/B.md#x", "D.md"]);
+    }
+
+    #[test]
+    fn inline_code_spans_are_not_links() {
+        assert!(extract_links("check `](target)` here").is_empty());
+        assert!(extract_links("double ``a ` ](target)`` ok").is_empty());
+        assert_eq!(extract_links("lone ` tick [a](A.md)"), vec!["A.md"]);
+    }
+
+    #[test]
+    fn real_link_next_to_code_span_is_still_reported() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let text = "`](target)` and [bad](missing.md) then `x`";
+        assert_eq!(broken_links(text, dir), vec!["missing.md"]);
     }
 
     #[test]

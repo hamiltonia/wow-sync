@@ -57,5 +57,5 @@ Currently only the `offline` inventory is enforced by running tests.
 ## Markdown link check
 
 All `*.md` files (except `target/` and `.git/`) are scanned for inline
-relative links outside fenced code blocks; missing targets fail. External URLs
+relative links outside fenced code blocks and inline code spans; missing targets fail. External URLs
 and `#anchor` fragments are not validated.

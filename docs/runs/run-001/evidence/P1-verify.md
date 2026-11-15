@@ -60,3 +60,7 @@ checking and argument parsing are hand-written to avoid more crates.
   network access (it passed here).
 - The `target` list in `deny.toml` covers the four pinned targets.
 - Only Windows x64 was exercised; macOS not run.
+
+## Fix 1: inline code spans in link check
+
+Integration with P1-map failed: a `](target)` inside an inline code span in P1-map's evidence was reported as a broken link. The checker now strips inline code spans (any backtick run length, CommonMark matching; unmatched backticks stay literal; spans are per line only). New tests: `inline_code_spans_are_not_links`, `real_link_next_to_code_span_is_still_reported`.
