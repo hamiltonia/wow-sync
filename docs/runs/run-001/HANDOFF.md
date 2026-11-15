@@ -32,27 +32,28 @@ authoritative; prior chat is not (AGENTS.md).
   SPEC §7 items with no run-001 spike. None block Phase 2.
 - Final `main` CI run `43662904223` on `0f33116`: success.
 
+## Phase 2 (in progress, session `961f3baa`, D-16)
+
+Owner raised the ceiling to 10,000 AIU (D-16) and asked to continue to
+completion in this session. Packets: `packets/S-common.md` + `packets/S-*.md`.
+
+| Wave | Workers | Status |
+|---|---|---|
+| 1 | S-gpui, S-mem, S-addon, S-proc (sonnet-5.5), S-state (opus-5.5) | launching |
+| 2 | S-forever, S-dropbox, S-a11y (sonnet-5.5) | pending |
+| 3 | S-a11y-design (opus-5.5), S-check (gpt-6.1-sol verification) | pending |
+| Phase 3 | P3-review (opus-5.5), P3-report (orchestrator) | pending |
+
 ## Next actions for the orchestrator
 
-Phase 2 is authorized by D-15 (plan) and D-13 (ceiling, pause at 2,000). No
-further owner approval is needed to start. D-13 requires a **fresh
-orchestrator session** for it.
-
-1. Start a new Copilot CLI session on claude-opus-5.5 in `D:\GitHub\wow-sync`
-   (`main`) and resume from this handoff. Record its start in `USAGE.md`.
-2. Write Phase 2 packets (`packets/S-*.md`, E-05 fields, PLAN §3 table).
-   Order by information value per AIU so the most decision-relevant spikes
-   finish before the 2,000 pause: S-gpui, S-mem, S-addon, S-proc first;
-   then S-state, S-forever, S-dropbox, S-a11y.
-3. Launch at most 5 concurrently with D-04 models; Windows-only execution;
-   macOS runtime items reported BLOCKED. S-forever output waits for owner
-   review before commit (PLAN §7).
-4. Recheck cumulative usage after each worker; at ≥2,000 AIU, settle in-flight
-   workers, update this handoff and pause for the owner.
-5. Correct in P1-ci evidence at next touch: on `macos-latest` (Apple Silicon)
+1. Resume from this table; worktrees `D:\GitHub\wow-sync.worktrees\<ID>`,
+   branches `run001/<ID>`. Merge each spike after orchestrator rerun of offline
+   verify on the merged result; push `main`; record usage.
+2. S-forever report stays uncommitted until owner review (PLAN §7).
+3. Stop launching at ≥9,500 AIU cumulative (D-16).
+4. Correct in P1-ci evidence at next touch: on `macos-latest` (Apple Silicon)
    `aarch64-apple-darwin` is the native build and `x86_64-apple-darwin` the
    cross-compile; both remain build-only.
-
 ## Known issues and risks
 
 - Copilot CLI ignores `subagents.maxConcurrency`/`maxDepth` without
@@ -63,6 +64,5 @@ orchestrator session** for it.
 
 ## Open owner items
 
-- None blocking. Optional: raise the ceiling if all 8 spikes should finish
-  without a pause.
+- S-forever report review (when ready).
 - Mac availability needed for macOS runtime spikes.

@@ -1,7 +1,7 @@
 # Run 001: Bootstrap and feasibility
 
-Status: **approved 2026-11-14 (D-15); ceiling approved (D-13).** Phase 0 done;
-Phase 1 in progress. Current state: [HANDOFF.md](HANDOFF.md).
+Status: **approved 2026-11-14 (D-15); ceiling 10,000 AIU (D-16).** Phases 0–1
+done; Phase 2 in progress. Current state: [HANDOFF.md](HANDOFF.md).
 Prepared 2026-11-14 by the Opus 5.5 orchestrator against `ee880db`.
 Authority: SPEC.md, ACCEPTANCE.md, ENGINEERING.md and
 [../../OWNER-DECISIONS.md](../../OWNER-DECISIONS.md) (D-01..D-09, D-13).
@@ -107,16 +107,17 @@ Retries use the remaining headroom.
 | Nesting | None | Orchestrator; packets forbid spawning agents |
 | Retries per task | 2, each with a new hypothesis | Orchestrator |
 | Elapsed time | None | — |
-| AI credits | 2,500 AIU cumulative (D-13) | Orchestrator; post-paid, soft |
+| AI credits | 10,000 AIU cumulative (D-16; was 2,500 under D-13) | Orchestrator; post-paid, soft |
 
 Cumulative usage is recorded in `docs/runs/run-001/USAGE.md` after each worker
-completes and survives session restarts. Pause and ask at 80%; stop at 100%.
+completes and survives session restarts. Under D-16: no intermediate pause;
+stop launching at ≥9,500; in-flight work may settle up to 11,000.
 
 ## 7. Stop and escalation conditions
 
 Stop, preserve state and ask the owner when:
 
-- P0 completes (ceiling needed), or 80% / 100% of the ceiling is reached.
+- P0 completes (ceiling needed), or the D-16 stop point (≥9,500 AIU) is reached.
 - A required model is unavailable or the actual model cannot be established.
 - A task fails after 2 retries.
 - An action would touch data outside D-08/D-09 scope, need new credentials or a
@@ -140,4 +141,5 @@ Stop, preserve state and ask the owner when:
 | Date | Decision | Plan revision |
 |---|---|---|
 | 2026-11-14 | Approved by owner (D-15) | `baa81e3` |
-| 2026-11-15 | Record-only updates by orchestrator: status, D-13 ceiling, `deny.toml` ownership matched to packet P1-verify. No change to scope, limits or meaning. | this commit |
+| 2026-11-15 | Record-only updates by orchestrator: status, D-13 ceiling, `deny.toml` ownership matched to packet P1-verify. No change to scope, limits or meaning. | `4d1b14a` |
+| 2026-11-15 | Owner raised ceiling to 10,000 AIU (D-16); §6/§7 credit rules updated to match. | this commit |

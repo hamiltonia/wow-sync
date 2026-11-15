@@ -4,7 +4,8 @@ Cumulative across sessions, workers and retries (E-02). Source: Copilot CLI
 local session store, `assistant_usage_events` (actual `model`, `total_nano_aiu`
 per `agent_id`). Values in AIU = `total_nano_aiu / 1e9`.
 
-Credit ceiling: **2,500 AIU cumulative** (D-13, approved 2026-11-14).
+Credit ceiling: **10,000 AIU cumulative** (D-16, 2026-11-15; was 2,500 under
+D-13). Stop launching at ≥9,500; in-flight work may settle up to 11,000.
 
 ## Workers
 
@@ -39,6 +40,10 @@ commands pass (0 tests run). Combined checks rerun on merged `main`: pass.
 | `fea20f53` | claude-opus-5.5 508.79, gpt-6.1-sol 8.14 | 516.93 | Final (session closed after handoff) |
 | `961f3baa` | gpt-6.1-sol 27.14 (session started on wrong model; stopped per D-04), claude-opus-5.5 41.36 | 68.50 | 2026-11-15 00:26Z, Phase 1 start |
 | `961f3baa` | gpt-6.1-sol 27.14, claude-opus-5.5 424.38 | 451.52 | 2026-11-15, Phase 1 close (excludes final ledger edits) |
+| `961f3baa` | session totals incl. workers 1–5 run in it: opus 766.17, sol 122.44, sonnet 120.12 | — | 2026-11-15 ~20:00Z, Phase 2 start under D-16 (same session; D-13 fresh-session rule waived) |
+
+**Run total at Phase 2 start: ≈1,547 AIU** (all run sessions `fea20f53` +
+`961f3baa`, all models, workers included).
 
 **Run total at Phase 1 start: 607.13 AIU** (orchestrator 585.43 + workers 21.70).
 Excluded: session `13d6d36b` (`D:\GitHub\shell`, unrelated repository).

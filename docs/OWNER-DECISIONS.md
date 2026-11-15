@@ -98,6 +98,19 @@ in a Copilot CLI session on 2026-11-14, against spec revision `7a2ccdf`.
   ~424 AIU spent before approval. Pause and ask at 2,000; stop at 2,500.
 - Includes the orchestrator's own usage. Fresh orchestrator session per phase.
 - Reporting: per worker and cumulative in `docs/runs/run-001/USAGE.md`.
+- Superseded in part by D-16 (ceiling and session rule).
+
+### D-16: Run-001 ceiling raised to 10,000 AIU (2026-11-15)
+
+- Owner: "raise the ceiling to 10000, continue until you are complete or within
+  5% of the limit, if you go over by 10% it is acceptable".
+- Run-001 ceiling: **10,000 AIU cumulative**. Stop launching work at ≥9,500
+  (within 5%); settling in-flight work up to 11,000 (+10%) is acceptable.
+- The 2,000 pause no longer applies. The current orchestrator session
+  (`961f3baa`) may continue through the remaining phases; the D-13 fresh-session
+  rule is waived for this continuation.
+- D-04 models, D-05 worker limits, D-08/D-09/D-14 data scope and PLAN §7 stops
+  other than the credit pause (including owner review of S-forever) still apply.
 
 ### D-10: Representative addon dataset
 
@@ -138,3 +151,4 @@ in a Copilot CLI session on 2026-11-14, against spec revision `7a2ccdf`.
 | 2026-11-14 | D-01–D-09 | Initial owner answers recorded; D-10, D-13 open | `7a2ccdf` |
 | 2026-11-14 | D-10, D-14, D-15 | Dev PC WoW data is test data; run-001 plan approved | `baa81e3` |
 | 2026-11-14 | D-13 | Run-001 ceiling 2,500 AIU cumulative approved | `a4d471b` |
+| 2026-11-15 | D-16 | Run-001 ceiling raised to 10,000 AIU; continue in current session | this commit |
