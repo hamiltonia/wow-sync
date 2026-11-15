@@ -1,0 +1,3 @@
+## Interface: 110000, 50500
+## Version: 2.0.0-beta3
+## X-WoWI-ID: 222

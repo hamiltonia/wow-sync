@@ -1,0 +1,5 @@
+## Interface: 110000
+## Version: v1.2.3
+## X-Curse-Project-ID: 111
+## Dependencies: SynSemver
+## LoadOnDemand: 1
