@@ -1,0 +1,18 @@
+=== Target: baseline  2026-11-15T12:27:53 ===
+=== UIA raw tree ===
+[Window] name='Baseline' class='WindowsForms10.Window.8.app.0.4c0591_r13_ad1' autoId='' focusable=False enabled=True patterns=[WindowPattern,TransformPattern]
+  [Pane] name='A11y Baseline Heading' class='WindowsForms10.STATIC.app.0.4c0591_r13_ad1' autoId='3869372' focusable=False enabled=True patterns=[]
+  [Pane] name='' class='WindowsForms10.EDIT.app.0.4c0591_r13_ad1' autoId='723720' focusable=False enabled=True patterns=[]
+  [Pane] name='Save' class='WindowsForms10.BUTTON.app.0.4c0591_r13_ad1' autoId='11144488' focusable=False enabled=True patterns=[]
+  [Pane] name='Cancel' class='WindowsForms10.BUTTON.app.0.4c0591_r13_ad1' autoId='3542336' focusable=False enabled=True patterns=[]
+  [Pane] name='Enable sync' class='WindowsForms10.BUTTON.app.0.4c0591_r13_ad1' autoId='2100906' focusable=False enabled=True patterns=[]
+  [Pane] name='' class='WindowsForms10.LISTBOX.app.0.4c0591_r13_ad1' autoId='12324614' focusable=False enabled=True patterns=[]
+descendant count: 6
+=== Focus after Tab presses (UIA FocusedElement) ===
+tab#0: focused type=Pane name='' class='#32769' pid=1672
+tab#1: focused type=Pane name='' class='WindowsForms10.EDIT.app.0.4c0591_r13_ad1' pid=34824
+tab#2: focused type=Pane name='Save' class='WindowsForms10.BUTTON.app.0.4c0591_r13_ad1' pid=34824
+tab#3: focused type=Pane name='Cancel' class='WindowsForms10.BUTTON.app.0.4c0591_r13_ad1' pid=34824
+tab#4: focused type=Pane name='Enable sync' class='WindowsForms10.BUTTON.app.0.4c0591_r13_ad1' pid=34824
+tab#5: focused type=Pane name='' class='WindowsForms10.LISTBOX.app.0.4c0591_r13_ad1' pid=34824
+tab#6: focused type=Pane name='' class='WindowsForms10.EDIT.app.0.4c0591_r13_ad1' pid=34824

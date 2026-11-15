@@ -1,0 +1,28 @@
+=== Target: gpui-main  2026-11-15T12:27:30 ===
+=== UIA raw tree ===
+[Window] name='A11y Spike' class='Zed::Window' autoId='' focusable=False enabled=True patterns=[WindowPattern,TransformPattern]
+  [Text] name='A11y Spike Heading' class='' autoId='' focusable=False enabled=True patterns=[]
+  [Edit] name='Name' class='' autoId='' focusable=True enabled=True patterns=[ValuePattern]
+  [Button] name='Save (0)' class='' autoId='' focusable=True enabled=True patterns=[InvokePattern]
+  [Button] name='Cancel (0)' class='' autoId='' focusable=True enabled=True patterns=[InvokePattern]
+  [CheckBox] name='Enable sync' class='' autoId='' focusable=True enabled=True patterns=[TogglePattern]
+  [List] name='Items' class='' autoId='' focusable=False enabled=True patterns=[]
+    [ListItem] name='List item 1' class='' autoId='' focusable=True enabled=True patterns=[]
+    [ListItem] name='List item 2' class='' autoId='' focusable=True enabled=True patterns=[]
+    [ListItem] name='List item 3' class='' autoId='' focusable=True enabled=True patterns=[]
+    [ListItem] name='List item 4' class='' autoId='' focusable=True enabled=True patterns=[]
+    [ListItem] name='List item 5' class='' autoId='' focusable=True enabled=True patterns=[]
+    [ListItem] name='List item 6' class='' autoId='' focusable=True enabled=True patterns=[]
+    [ListItem] name='List item 7' class='' autoId='' focusable=True enabled=True patterns=[]
+    [ListItem] name='List item 8' class='' autoId='' focusable=True enabled=True patterns=[]
+    [ListItem] name='List item 9' class='' autoId='' focusable=True enabled=True patterns=[]
+    [ListItem] name='List item 10' class='' autoId='' focusable=True enabled=True patterns=[]
+descendant count: 16
+=== Focus after Tab presses (UIA FocusedElement) ===
+tab#0: focused type=Edit name='Name' class='' pid=35788
+tab#1: focused type=Button name='Save (0)' class='' pid=35788
+tab#2: focused type=Button name='Cancel (0)' class='' pid=35788
+tab#3: focused type=CheckBox name='Enable sync' class='' pid=35788
+tab#4: focused type=ListItem name='List item 1' class='' pid=35788
+tab#5: focused type=ListItem name='List item 2' class='' pid=35788
+tab#6: focused type=ListItem name='List item 3' class='' pid=35788

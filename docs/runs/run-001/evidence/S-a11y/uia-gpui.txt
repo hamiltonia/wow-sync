@@ -1,0 +1,12 @@
+=== Target: gpui  2026-11-15T12:27:44 ===
+=== UIA raw tree ===
+[Window] name='A11y Spike' class='Zed::Window' autoId='' focusable=False enabled=True patterns=[WindowPattern,TransformPattern]
+descendant count: 0
+=== Focus after Tab presses (UIA FocusedElement) ===
+tab#0: focused type=Window name='A11y Spike' class='Zed::Window' pid=36472
+tab#1: focused type=Window name='A11y Spike' class='Zed::Window' pid=36472
+tab#2: focused type=Window name='A11y Spike' class='Zed::Window' pid=36472
+tab#3: focused type=Window name='A11y Spike' class='Zed::Window' pid=36472
+tab#4: focused type=Window name='A11y Spike' class='Zed::Window' pid=36472
+tab#5: focused type=Window name='A11y Spike' class='Zed::Window' pid=36472
+tab#6: focused type=Window name='A11y Spike' class='Zed::Window' pid=36472
