@@ -1,0 +1,8 @@
+SetFocus Name -> ok
+Value before -> 
+Value after typing hello -> hello
+ValuePattern.SetValue -> ok; now reads: hello
+Invoke Save -> ok; element names now: Save (1)
+Toggle state before -> Off
+Toggle() -> state after: On
+SetFocus List item 5 -> focused: List item 5
