@@ -1,7 +1,8 @@
 # Run 001: Bootstrap and feasibility
 
-Status: **approved 2026-11-14 (D-15); ceiling 10,000 AIU (D-16).** Phases 0–1
-done; Phase 2 in progress. Current state: [HANDOFF.md](HANDOFF.md).
+Status: **approved 2026-11-14 (D-15); ceiling 10,000 AIU (D-16).** Phases 0–3
+done; report [REPORT.md](REPORT.md); S-forever report awaits owner review.
+Current state: [HANDOFF.md](HANDOFF.md).
 Prepared 2026-11-14 by the Opus 5.5 orchestrator against `ee880db`.
 Authority: SPEC.md, ACCEPTANCE.md, ENGINEERING.md and
 [../../OWNER-DECISIONS.md](../../OWNER-DECISIONS.md) (D-01..D-09, D-13).

@@ -24,11 +24,17 @@ D-13). Stop launching at ≥9,500; in-flight work may settle up to 11,000.
 | 11 | S-dropbox | claude-sonnet-5.5 | claude-sonnet-5.5 (agent `2685e17e`, 25 calls) | 33.62 | Done `69cb0df`; merged `064afae` |
 | 12 | S-a11y | claude-sonnet-5.5 | claude-sonnet-5.5 (agent `24eacf77`, 55 calls) | 96.23 | Done `e9baf20`; merged `c9b1830` (also added `spikes/a11y-main/` comparison, outside packet path; accepted) |
 | 13 | S-a11y-design | claude-opus-5.5 | claude-opus-5.5 (agent `e0e4339b`, 25 calls) | 113.36 | Done `afb308c`; merged `d6d6898` |
-| 14 | S-mem | claude-sonnet-5.5 | claude-sonnet-5.5 (agent `472aeb2c`) | in progress | Running |
+| 14 | S-mem | claude-sonnet-5.5 | claude-sonnet-5.5 (agent `472aeb2c`, 37 calls) | 51.40 | Done `5a0c51c`; merged `5be6ba0` |
+| 15 | S-check | gpt-6.1-sol | gpt-6.1-sol (agent `888464a0`, 68 calls) | 142.66 | Done `1005573`; merged `4cdc098` |
+| 16 | P3-review | claude-opus-5.5 | claude-opus-5.5 (agent `525fff1f`, 59 calls) | 217.54 | Done `60d6098`; merged `ee47a92` |
+| 17 | P3-fix | claude-sonnet-5.5 | claude-sonnet-5.5 (agent `39cc6e18`) | 17.94 | Done `ec271b5`; merged `aefee05` |
 
-Worker count: 14 / 20. Concurrent max: 5 (5 used). Retries: P1-verify 2 / 2
-(exhausted), P1-map 1 / 2. Run total mid-Phase 2 (S-mem running): ≈2,475 AIU
-(orchestrator `961f3baa` 873.12, `fea20f53` 516.93; workers ≈1,085).
+**Run-001 close (2026-11-15): ≈3,140 AIU** of 10,000 (D-16): orchestrator
+1,659.65 (`fea20f53` 516.93 + `961f3baa` 1,142.72 incl. 27.14 on gpt-6.1-sol),
+workers 1,480.18. Excludes the final closeout edits (a few tens of AIU).
+
+Worker count: 17 / 20. Concurrent max: 5 (5 used). Retries: P1-verify 2 / 2
+(exhausted), P1-map 1 / 2; no Phase 2/3 retries.
 
 Independent check (orchestrator, clean clone of `main` + the three branches,
 2026-11-15): first run `offline/markdown-links` FAIL (false positive on inline

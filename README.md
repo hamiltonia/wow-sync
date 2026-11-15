@@ -1,9 +1,11 @@
 # WoW Sync: intent specification seed
 
 Status: specification approved by the owner at `7a2ccdf` on 2026-11-14.
-Run-001 (bootstrap and feasibility) is approved and in progress; there is a
-pinned Rust workspace skeleton, verification tooling and CI, but no product
-features yet. Current state: [docs/runs/run-001/HANDOFF.md](docs/runs/run-001/HANDOFF.md).
+Run-001 (bootstrap and feasibility) is complete pending owner decisions; there
+is a pinned Rust workspace skeleton, verification tooling, CI and feasibility
+spikes (`spikes/`, not product code), but no product features. Report:
+[docs/runs/run-001/REPORT.md](docs/runs/run-001/REPORT.md). Current state:
+[docs/runs/run-001/HANDOFF.md](docs/runs/run-001/HANDOFF.md).
 Decisions: [docs/OWNER-DECISIONS.md](docs/OWNER-DECISIONS.md).
 Repository layout: [docs/REPO-MAP.md](docs/REPO-MAP.md).
 
@@ -96,7 +98,7 @@ must become owner decisions before a large implementation investment.
 
 - No product features or application behavior beyond the approved run-001
   scope (D-05, D-15).
-- No worker/model or budget authority beyond D-04, D-05 and D-13.
+- No worker/model or budget authority beyond D-04, D-05, D-13 and D-16.
 - No access to real WoW installations, Dropbox data, accounts or credentials,
   except the scopes recorded in D-08, D-09 and D-14.
 - No cloud service, telemetry vendor, paid subscription or public publishing.
