@@ -3,28 +3,32 @@
 Resume point for a fresh orchestrator session. Repository records are
 authoritative; prior chat is not (AGENTS.md).
 
-## State (2026-11-14)
+## State (2026-11-15, session `961f3baa`)
 
 - Checkout: `D:\GitHub\wow-sync`, branch `main`.
 - Spec approved (D-03). Run-001 plan approved (D-15). Ceiling 2,500 AIU
   cumulative (D-13). Model policy D-04. Worker limits D-05.
-- Phase 0: **done**, merged `d3b2df1`. Rust 1.100.0 pinned; MSVC Build Tools
-  17.14.45 and Windows SDK 10.0.26100.0 installed on dev PC.
-- Phase 1: **ready to start**. Packets in `packets/P1-*.md`.
-- Spent: see `USAGE.md` (≈ 424 AIU at handoff, plus handoff writing).
+- Phase 0: **done**, merged `d3b2df1`.
+- Phase 1: P1-verify, P1-ci, P1-map **done and merged locally** at `0e0b876`;
+  combined `cargo xtask verify --tier offline` PASS on `main`.
+  **Not pushed**: `git push` was rejected because the gh OAuth token lacks the
+  `workflow` scope needed to add `.github/workflows/ci.yml`. Owner action
+  required (new credential scope). P1-check not launched (needs first CI run).
+- Spent: 840.70 AIU (see `USAGE.md`). Workers 4 / 20; P1-verify retries 1 / 2.
 
 ## Next actions for the orchestrator
 
-1. Record this session's start in `USAGE.md`; query actual usage from the local
-   session store (`assistant_usage_events`: `agent_id`, `model`,
-   `total_nano_aiu`).
-2. Create worktrees and launch in parallel: P1-verify, P1-ci (sonnet-5.5),
-   P1-map (opus-5.5). Pass an explicit `model` for each worker.
-3. Review each result, rerun the author's checks from a clean clone, merge in
-   order P1-verify, P1-ci, P1-map; rerun combined checks on `main`; push.
-4. Launch P1-check (gpt-6.1-sol) after the first CI run on `main` exists.
-5. Record per-worker actual model and AIU in `USAGE.md`. Report Phase 1 actuals
-   to the owner before starting Phase 2 (per D-13 proposal).
+1. After the owner grants the `workflow` scope, push `main` and confirm the
+   first `ci` run on `main` exists (`gh run list --branch main`).
+2. Create worktree `D:\GitHub\wow-sync.worktrees\P1-check` (branch
+   `run001/P1-check`) and launch P1-check with model `gpt-6.1-sol`.
+3. Review P1-check evidence, merge it, record usage, report Phase 1 actuals to
+   the owner before Phase 2 (D-13).
+4. Raise P1-map's six recorded design questions
+   (`evidence/P1-map.md`) in the Phase 1 report.
+5. Correct in P1-ci evidence at next touch: on `macos-latest` (Apple Silicon)
+   `aarch64-apple-darwin` is the native build and `x86_64-apple-darwin` the
+   cross-compile; both remain build-only.
 
 ## Known issues and risks
 
@@ -36,4 +40,7 @@ authoritative; prior chat is not (AGENTS.md).
 
 ## Open owner items
 
-- None blocking Phase 1. Mac availability needed for macOS runtime spikes.
+- **Blocking P1-check:** grant the `workflow` scope to the GitHub credential
+  used for push (e.g. `gh auth refresh -h github.com -s workflow`), or push
+  `main` yourself.
+- Mac availability needed for macOS runtime spikes.
