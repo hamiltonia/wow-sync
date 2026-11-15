@@ -75,16 +75,25 @@ pub fn parse_test_output(output: &str) -> Vec<TestResult> {
 /// An empty result means every listed test ran, was not ignored, and passed.
 pub fn check_required(inv: &Inventory, tier: &str, results: &[TestResult]) -> Vec<String> {
     let cases: Vec<&Case> = inv.case.iter().filter(|c| c.tier == tier).collect();
-    if cases.is_empty() {
-        return Vec::new();
-    }
-    if results.is_empty() {
-        return vec![format!(
-            "tier '{tier}' ran zero tests but has {} listed case(s)",
-            cases.len()
-        )];
-    }
     let mut problems = Vec::new();
+    let executed = results
+        .iter()
+        .filter(|r| r.outcome != Outcome::Ignored)
+        .count();
+    if executed == 0 {
+        problems.push(format!(
+            "tier '{tier}' executed zero tests ({} listed case(s))",
+            cases.len()
+        ));
+    }
+    if cases.is_empty() {
+        problems.push(format!(
+            "inventory lists no cases for executable tier '{tier}'; an empty inventory is a missing obligation"
+        ));
+    }
+    if executed == 0 {
+        return problems;
+    }
     for case in cases {
         for test in &case.tests {
             let matches: Vec<&TestResult> = results.iter().filter(|r| &r.name == test).collect();
@@ -162,11 +171,25 @@ tests = ["a::one", "a::two"]
     }
 
     #[test]
-    fn zero_tests_without_listed_cases_is_not_flagged_here() {
+    fn zero_executed_tests_fail_even_with_empty_inventory() {
         let inv = parse("").unwrap();
-        assert!(check_required(&inv, "offline", &[]).is_empty());
+        let p = check_required(&inv, "offline", &[]);
+        assert_eq!(p.len(), 2);
+        assert!(p[0].contains("zero tests"));
+        // Ignored tests are not executed tests.
+        let p = check_required(&inv, "offline", &[r("x", Outcome::Ignored)]);
+        assert!(p[0].contains("zero tests"));
+    }
+
+    #[test]
+    fn empty_inventory_for_executable_tier_fails_even_when_tests_pass() {
+        let inv = parse("").unwrap();
+        let p = check_required(&inv, "offline", &[r("x", Outcome::Ok)]);
+        assert_eq!(p.len(), 1);
+        assert!(p[0].contains("no cases"));
+        // Cases listed only for another tier do not satisfy this tier.
         let inv = parse(INV).unwrap();
-        assert!(check_required(&inv, "native", &[]).is_empty());
+        assert!(!check_required(&inv, "native", &[r("x", Outcome::Ok)]).is_empty());
     }
 
     #[test]

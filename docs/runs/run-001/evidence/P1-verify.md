@@ -64,3 +64,32 @@ checking and argument parsing are hand-written to avoid more crates.
 ## Fix 1: inline code spans in link check
 
 Integration with P1-map failed: a `](target)` inside an inline code span in P1-map's evidence was reported as a broken link. The checker now strips inline code spans (any backtick run length, CommonMark matching; unmatched backticks stay literal; spans are per line only). New tests: `inline_code_spans_are_not_links`, `real_link_next_to_code_span_is_still_reported`.
+
+## Fix 2: false green, report freshness, link scope (retry 2 of 2)
+
+Merged `main` into the branch first (fast-forward). Changes:
+
+1. `required-cases` now FAILS when the tier executed zero tests (ignored do not
+   count), and when the inventory lists no cases for the executable tier.
+   Tests: `zero_executed_tests_fail_even_with_empty_inventory`,
+   `empty_inventory_for_executable_tier_fails_even_when_tests_pass`
+   (replaced the old test that asserted the weak behavior).
+2. `report.json` has `git_sha`, `git_dirty`, `generated_at`; the old report is
+   deleted at the start of a run. Tests: `report_carries_sha_dirty_flag_and_timestamp`,
+   `rfc3339_formats_epoch_and_leap_day`.
+3. Link check uses `git ls-files -z -- '*.md'`, skips non-regular files
+   (symlinks/junctions) and is BLOCKED without git. Tests:
+   `ls_files_output_is_split_on_nul_and_filtered_to_markdown`,
+   `untracked_markdown_is_not_scanned` (real throwaway git repo under `target/`).
+
+End-to-end reproduction (uncommitted throwaway copy under `target/`, since
+deleted): all xtask `#[cfg(test)]` replaced with `#[cfg(any())]` and an empty
+`tests/required-cases.toml`. Result: `[FAIL] offline/required-cases: tier
+'offline' executed zero tests (0 listed case(s))` and `inventory lists no cases
+for executable tier 'offline'`; overall FAIL, exit 1 (previously PASS, exit 0).
+On the branch: `cargo test -p xtask` 24 passed; `cargo xtask verify --tier
+offline` all six checks PASS, exit 0.
+
+Limitation: if xtask does not compile, it cannot delete the stale report; the
+SHA/timestamp in the report are the freshness evidence (documented in VERIFY.md).
+The `git_dirty` flag is computed after the checks ran.
