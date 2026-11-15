@@ -1,0 +1,62 @@
+S-dropbox observations 2026-11-15T12:20:08.5414037-08:00
+12:20:08.628 root: attr=0x80430 [ARCHIVE|REPARSE|PINNED] len=1 tag='Reparse Tag Value : 0x9000601a'
+12:20:08.669 work: attr=0x80430 [ARCHIVE|REPARSE|PINNED] len=1 tag='Reparse Tag Value : 0x9000601a'
+12:20:08.675 === 2a rep 1: attributes / online-only toggle ===
+12:20:08.739 created: attr=0x80020 [ARCHIVE|PINNED] len=4194304 tag=''
+12:20:16.769 after 8s: attr=0x80420 [ARCHIVE|REPARSE|PINNED] len=4194304 tag='Reparse Tag Value : 0x9000601a'
+12:20:27.116 after +U (waited 10s): attr=0x80420 [ARCHIVE|REPARSE|PINNED] len=4194304 tag='Reparse Tag Value : 0x9000601a'
+12:20:27.144 after metadata reads: attr=0x80420 [ARCHIVE|REPARSE|PINNED] len=4194304 tag='Reparse Tag Value : 0x9000601a'
+12:20:27.167 read online-only file: 4194304 bytes in 3 ms; attr=0x80420 [ARCHIVE|REPARSE|PINNED] len=4194304 tag='Reparse Tag Value : 0x9000601a'
+12:20:30.190 3s after read: attr=0x80420 [ARCHIVE|REPARSE|PINNED] len=4194304 tag='Reparse Tag Value : 0x9000601a'
+12:20:33.225 after +P: attr=0x80420 [ARCHIVE|REPARSE|PINNED] len=4194304 tag='Reparse Tag Value : 0x9000601a'
+12:20:33.226 === 2a rep 2: attributes / online-only toggle ===
+12:20:33.297 created: attr=0x80020 [ARCHIVE|PINNED] len=4194304 tag=''
+12:20:41.323 after 8s: attr=0x80420 [ARCHIVE|REPARSE|PINNED] len=4194304 tag='Reparse Tag Value : 0x9000601a'
+12:20:51.627 after +U (waited 10s): attr=0x80420 [ARCHIVE|REPARSE|PINNED] len=4194304 tag='Reparse Tag Value : 0x9000601a'
+12:20:51.647 after metadata reads: attr=0x80420 [ARCHIVE|REPARSE|PINNED] len=4194304 tag='Reparse Tag Value : 0x9000601a'
+12:20:51.670 read online-only file: 4194304 bytes in 1 ms; attr=0x80420 [ARCHIVE|REPARSE|PINNED] len=4194304 tag='Reparse Tag Value : 0x9000601a'
+12:20:54.693 3s after read: attr=0x80420 [ARCHIVE|REPARSE|PINNED] len=4194304 tag='Reparse Tag Value : 0x9000601a'
+12:20:57.727 after +P: attr=0x80420 [ARCHIVE|REPARSE|PINNED] len=4194304 tag='Reparse Tag Value : 0x9000601a'
+12:20:57.728 === 2b rep 1: large file upload visibility (200 MB) ===
+12:20:59.012 write done in 1264 ms
+12:20:59.037 t=0s dir=[big1.bin,hyd1.bin,hyd2.bin,p.bin] big=attr=0x80020 [ARCHIVE|PINNED] len=209715200 tag=''
+12:21:00.054 t=1s dir=[big1.bin,hyd1.bin,hyd2.bin,p.bin] big=attr=0x80420 [ARCHIVE|REPARSE|PINNED] len=209715200 tag='Reparse Tag Value : 0x9000201a'
+12:21:02.116 t=3s dir=[big1.bin,hyd1.bin,hyd2.bin,p.bin] big=attr=0x80420 [ARCHIVE|REPARSE|PINNED] len=209715200 tag='Reparse Tag Value : 0x9000601a'
+12:22:32.519 exclusive open ok
+12:22:32.520 === 2b rep 2: large file upload visibility (200 MB) ===
+12:22:33.744 write done in 1200 ms
+12:22:33.757 t=0s dir=[big1.bin,big2.bin,hyd1.bin,hyd2.bin,p.bin] big=attr=0x80020 [ARCHIVE|PINNED] len=209715200 tag=''
+12:22:34.788 t=1s dir=[big1.bin,big2.bin,hyd1.bin,hyd2.bin,p.bin] big=attr=0x80420 [ARCHIVE|REPARSE|PINNED] len=209715200 tag='Reparse Tag Value : 0x9000201a'
+12:22:36.829 t=3s dir=[big1.bin,big2.bin,hyd1.bin,hyd2.bin,p.bin] big=attr=0x80420 [ARCHIVE|REPARSE|PINNED] len=209715200 tag='Reparse Tag Value : 0x9000601a'
+12:24:06.371 exclusive open ok
+12:24:06.372 === 2c rep 1: replace patterns ===
+12:24:06.420 temp+rename replace ok: v2 (4 ms) attr=0x80020 [ARCHIVE|PINNED] len=4 tag=''
+12:24:06.440 in-place overwrite ok: v3 attr=0x80020 [ARCHIVE|PINNED] len=2 tag=''
+12:24:06.447 rename: renamed.txt
+12:24:06.469 dir rename: rep1-dir2
+12:24:11.489 case-only rename: RENAMED.TXT
+12:24:11.495 create 'a:b.txt' failed: Exception calling "WriteAllText" with "2" argument(s): "The given path's format is not supported."
+12:24:11.500 create 'a*b.txt' failed: Exception calling "WriteAllText" with "2" argument(s): "Illegal characters in path."
+12:24:11.524 create 'con.txt' ok -> con.txt,RENAMED.TXT
+12:24:11.542 create 'trail.' ok -> con.txt,RENAMED.TXT,trail
+12:24:11.561 create 'sp ace ' ok -> con.txt,RENAMED.TXT,sp ace,trail
+12:24:11.586 delete dir: exists=True
+12:24:11.598 === 2c rep 2: replace patterns ===
+12:24:11.653 temp+rename replace ok: v2 (1 ms) attr=0x80020 [ARCHIVE|PINNED] len=4 tag=''
+12:24:11.664 in-place overwrite ok: v3 attr=0x80020 [ARCHIVE|PINNED] len=2 tag=''
+12:24:11.675 rename: renamed.txt
+12:24:11.696 dir rename: rep1-dir2,rep2-dir2
+12:24:16.714 case-only rename: RENAMED.TXT
+12:24:16.715 create 'a:b.txt' failed: Exception calling "WriteAllText" with "2" argument(s): "The given path's format is not supported."
+12:24:16.738 create 'a*b.txt' failed: Exception calling "WriteAllText" with "2" argument(s): "Illegal characters in path."
+12:24:16.760 create 'con.txt' ok -> con.txt,RENAMED.TXT
+12:24:16.770 create 'trail.' ok -> con.txt,RENAMED.TXT,trail
+12:24:16.791 create 'sp ace ' ok -> con.txt,RENAMED.TXT,sp ace,trail
+12:24:16.824 delete dir: exists=True
+12:24:16.829 === 2d rep 1: edit while uploading ===
+12:24:18.900 append mid-upload ok
+12:24:58.917 dir: conf1.bin
+12:24:58.918 === 2d rep 2: edit while uploading ===
+12:25:00.986 append mid-upload ok
+12:25:41.000 dir: conf1.bin,conf2.bin
+12:25:41.001 done
