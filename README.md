@@ -1,11 +1,14 @@
 # WoW Sync: intent specification seed
 
 Status: specification approved by the owner at `7a2ccdf` on 2026-11-14.
-No implementation exists yet. See [docs/OWNER-DECISIONS.md](docs/OWNER-DECISIONS.md)
-for recorded decisions and the prerequisites still open before a swarm run.
+Run-001 (bootstrap and feasibility) is approved and in progress; there is a
+pinned Rust workspace skeleton, verification tooling and CI, but no product
+features yet. Current state: [docs/runs/run-001/HANDOFF.md](docs/runs/run-001/HANDOFF.md).
+Decisions: [docs/OWNER-DECISIONS.md](docs/OWNER-DECISIONS.md).
+Repository layout: [docs/REPO-MAP.md](docs/REPO-MAP.md).
 
 This repository (`hamiltonia/wow-sync`) is the permanent project home. It is not
-yet the application, and its presence is not permission to launch a swarm.
+yet the application. Work beyond an approved run plan needs a new approval.
 
 ## Read in this order
 
@@ -91,11 +94,11 @@ must become owner decisions before a large implementation investment.
 
 ## Not included or authorized
 
-- No application source or Cargo scaffold.
-- No launched swarm or approved worker/model matrix.
-- No numerical AI-credit, concurrency or elapsed-time authorization.
+- No product features or application behavior beyond the approved run-001
+  scope (D-05, D-15).
+- No worker/model or budget authority beyond D-04, D-05 and D-13.
 - No access to real WoW installations, Dropbox data, accounts or credentials,
-  except the narrow read-only/synthetic scopes recorded in D-08 and D-09.
+  except the scopes recorded in D-08, D-09 and D-14.
 - No cloud service, telemetry vendor, paid subscription or public publishing.
 - No automatic migration or deletion of old CMD/PowerShell data or jobs.
 

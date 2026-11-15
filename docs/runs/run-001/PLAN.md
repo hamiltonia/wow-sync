@@ -1,7 +1,7 @@
 # Run 001: Bootstrap and feasibility
 
-Status: **approved 2026-11-14 (D-15).** Phase 0 authorized; Phase 1 waits for
-the D-13 credit ceiling.
+Status: **approved 2026-11-14 (D-15); ceiling approved (D-13).** Phase 0 done;
+Phase 1 in progress. Current state: [HANDOFF.md](HANDOFF.md).
 Prepared 2026-11-14 by the Opus 5.5 orchestrator against `ee880db`.
 Authority: SPEC.md, ACCEPTANCE.md, ENGINEERING.md and
 [../../OWNER-DECISIONS.md](../../OWNER-DECISIONS.md) (D-01..D-09, D-13).
@@ -47,7 +47,7 @@ After P0 the orchestrator proposes the credit ceiling (D-13). **Stop for approva
 | ID | Role / model | Work | Owned writes |
 |---|---|---|---|
 | P1-verify | Implementation / sonnet-5.5 | Single verification entry point with tiers `offline`, `native`, `provider`; unavailable tiers report **blocked**, never pass; required-case inventory detects zero-test runs (A-39) | `xtask/` or `scripts/verify*`, `docs/VERIFY.md` |
-| P1-ci | Implementation / sonnet-5.5 | GitHub Actions: fmt, clippy, tests, `cargo-deny` (licenses/advisories), docs/link check; build all 4 targets; minimal permissions, no secrets (E-06) | `.github/workflows/`, `deny.toml` |
+| P1-ci | Implementation / sonnet-5.5 | GitHub Actions: fmt, clippy, tests, `cargo-deny` (licenses/advisories), docs/link check; build all 4 targets; minimal permissions, no secrets (E-06) | `.github/workflows/` (`deny.toml` is owned by P1-verify per its packet) |
 | P1-map | Design / opus-5.5 | Repository map and architecture skeleton: platform-free domain core, single policy authority, platform-adapter boundaries (docs only) | `docs/ARCHITECTURE.md`, `docs/REPO-MAP.md` |
 | P1-check | Verification / gpt-6.1-sol | Independently run verification from a clean clone; seed a broken/no-op test and a zero-test condition and show the gate fails (A-38, A-39); fresh-worker onboarding check (A-40) | `docs/runs/run-001/evidence/` only |
 
@@ -107,7 +107,7 @@ Retries use the remaining headroom.
 | Nesting | None | Orchestrator; packets forbid spawning agents |
 | Retries per task | 2, each with a new hypothesis | Orchestrator |
 | Elapsed time | None | — |
-| AI credits | **TBD after P0** | Orchestrator; post-paid, soft |
+| AI credits | 2,500 AIU cumulative (D-13) | Orchestrator; post-paid, soft |
 
 Cumulative usage is recorded in `docs/runs/run-001/USAGE.md` after each worker
 completes and survives session restarts. Pause and ask at 80%; stop at 100%.
@@ -131,7 +131,7 @@ Stop, preserve state and ask the owner when:
 | Item | Needed by | Status |
 |---|---|---|
 | Approve this plan | P0 | Done (D-15) |
-| Credit ceiling | Phase 1 | Open (after P0) |
+| Credit ceiling | Phase 1 | Done: 2,500 AIU (D-13) |
 | Addon dataset (D-10) | S-addon | Done: dev PC data (D-14) |
 | M3 MacBook available to agents | macOS runtime spikes | Later; reported blocked |
 
@@ -140,3 +140,4 @@ Stop, preserve state and ask the owner when:
 | Date | Decision | Plan revision |
 |---|---|---|
 | 2026-11-14 | Approved by owner (D-15) | `baa81e3` |
+| 2026-11-15 | Record-only updates by orchestrator: status, D-13 ceiling, `deny.toml` ownership matched to packet P1-verify. No change to scope, limits or meaning. | this commit |
