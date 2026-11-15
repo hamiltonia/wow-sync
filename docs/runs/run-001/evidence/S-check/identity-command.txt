@@ -1,0 +1,35 @@
+$ErrorActionPreference = 'Stop'
+$out = Join-Path $PWD 'docs\runs\run-001\evidence\S-check\identity.txt'
+$root = 'D:\Games\World of Warcraft'
+$lines = Get-Content -LiteralPath "$root\.build.info"
+$headers = $lines[0].Split('|') | ForEach-Object { ($_ -split '!')[0] }
+$rows = @()
+foreach ($line in $lines | Select-Object -Skip 1) {
+    if (-not $line.Trim()) { continue }
+    $values = $line.Split('|')
+    $row = [ordered]@{}
+    for ($i = 0; $i -lt $headers.Count; $i++) {
+        if ($headers[$i]) { $row[$headers[$i]] = $values[$i] }
+    }
+    $rows += [pscustomobject]$row
+}
+$result = @("Observed=$(Get-Date -Format o)")
+$result += ($rows | Select-Object Product, Branch, Active, Version | ConvertTo-Json -Compress)
+$flavor = @(Get-Content -LiteralPath "$root\_forever_\.flavor.info")
+$result += "flavorHeader=$($flavor[0]); flavor=$($flavor[1])"
+$exe = Get-Item -LiteralPath "$root\_forever_\Wow.exe"
+$result += "exeProduct=$($exe.VersionInfo.ProductName); exeVersion=$($exe.VersionInfo.FileVersion); exeBytes=$($exe.Length)"
+$text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes("$root\.product.db"))
+foreach ($needle in @('wowf', '_forever_', $rows[0].Version)) {
+    $result += "productDbContainsKnownMetadata=$needle present=$($text.Contains($needle))"
+}
+$tocs = Get-ChildItem -LiteralPath "$root\_forever_\Interface\AddOns" -Directory |
+    ForEach-Object { Get-ChildItem -LiteralPath $_.FullName -Filter *.toc -File }
+$interfaces = @($tocs | ForEach-Object {
+    Get-Content -LiteralPath $_.FullName | Select-String '^##\s*Interface\s*:' | ForEach-Object {
+        (($_.Line -split ':', 2)[1] -split ',') | ForEach-Object { $_.Trim() }
+    }
+})
+$result += "tocFiles=$($tocs.Count); Interface16001Occurrences=$(@($interfaces | Where-Object { $_ -eq '16001' }).Count)"
+$result += 'Read-only metadata and TOC text only; binary database searched for known substrings, not structurally parsed; no Lua executed.'
+$result | Tee-Object -FilePath $out

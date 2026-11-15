@@ -1,0 +1,19 @@
+$ErrorActionPreference = 'Stop'
+$out = Join-Path $PWD 'docs\runs\run-001\evidence\S-check'
+$exe = Join-Path $PWD 'spikes\mem\target\release\gpui_mem.exe'
+$harness = Join-Path $PWD 'spikes\mem\measure.ps1'
+"Started=$(Get-Date -Format o) cargoRustcCount=$(@(Get-Process cargo,rustc -ErrorAction SilentlyContinue).Count) preexistingAppCount=$(@(Get-Process gpui_mem -ErrorAction SilentlyContinue).Count)" |
+    Set-Content (Join-Path $out 'memory-run.txt')
+try {
+    $env:WOWSYNC_ANCHOR = '1'
+    & $harness -Scenario b -Run 1 -Exe $exe -ExeArgs 'show-hide 60' -Seconds 180 -OutDir $out
+    & $harness -Scenario c -Run 1 -Exe $exe -ExeArgs 'cycles 20' -Seconds 360 -OutDir $out
+    Remove-Item Env:WOWSYNC_ANCHOR
+    & $harness -Scenario a-noanchor -Run 1 -Exe $exe -ExeArgs 'hidden' -Seconds 120 -OutDir $out
+} finally {
+    Remove-Item Env:WOWSYNC_ANCHOR -ErrorAction SilentlyContinue
+}
+"Ended=$(Get-Date -Format o) cargoRustcCount=$(@(Get-Process cargo,rustc -ErrorAction SilentlyContinue).Count) remainingAppCount=$(@(Get-Process gpui_mem -ErrorAction SilentlyContinue).Count)" |
+    Add-Content (Join-Path $out 'memory-run.txt')
+& (Join-Path $PWD 'spikes\mem\summarize.ps1') -Dir $out |
+    Tee-Object -FilePath (Join-Path $out 'memory-summary.txt')

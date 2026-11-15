@@ -1,0 +1,3 @@
+Observed=2026-11-15T13:16:44.8004680-08:00
+appCount=1
+childName=conhost.exe childPid=10084 parentPid=7144 grandchildCount=0

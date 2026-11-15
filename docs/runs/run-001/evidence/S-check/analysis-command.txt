@@ -1,0 +1,36 @@
+$ErrorActionPreference = 'Stop'
+$out = 'docs\runs\run-001\evidence\S-check'
+$lines = [Collections.Generic.List[string]]::new()
+foreach ($scenario in @('a-noanchor-run1', 'b-run1', 'c-run1', 'c-run2')) {
+    $rows = @(Import-Csv (Join-Path $out "$scenario.csv"))
+    $invalid = @($rows | Where-Object { $_.private_ws -eq 'EXITED' -or -not $_.private_ws -or [double]$_.private_ws -le 0 })
+    $tail = @($rows | Select-Object -Last 60)
+    $sorted = @($tail | ForEach-Object { [double]$_.private_ws / 1MB } | Sort-Object)
+    $median = $sorted[[int][math]::Floor(($sorted.Count - 1) / 2)]
+    $peak = ($rows | ForEach-Object { [double]$_.private_ws / 1MB } | Measure-Object -Maximum).Maximum
+    $steadyMin = $sorted[0]
+    $steadyMax = $sorted[-1]
+    $busy = @($rows | Where-Object { [int]$_.other_cargo_rustc -ne 0 }).Count
+    $lines.Add(('{0}: samples={1} invalidOrExited={2} steadyPrivateMiB={3:F3}/{4:F3}/{5:F3} wholePeakMiB={6:F3} cargoRustcSamples={7}' -f $scenario, $rows.Count, $invalid.Count, $steadyMin, $median, $steadyMax, $peak, $busy))
+}
+foreach ($loadFile in @('load.csv', 'load-c-retry.csv')) {
+$load = @(Import-Csv (Join-Path $out $loadFile))
+$cpu = @($load | ForEach-Object { [double]$_.total_cpu_percent } | Sort-Object)
+$mean = ($cpu | Measure-Object -Average).Average
+$median = $cpu[[int][math]::Floor(($cpu.Count - 1) / 2)]
+$max = $cpu[-1]
+$busy = @($load | Where-Object { [int]$_.cargo_rustc_count -ne 0 }).Count
+$children = ($load | ForEach-Object { [int]$_.child_count } | Measure-Object -Maximum).Maximum
+$apps = ($load | ForEach-Object { [int]$_.app_count } | Measure-Object -Maximum).Maximum
+$lines.Add(('{0}: samples={1} meanCpuPercent={2:F2} medianCpuPercent={3:F2} maxCpuPercent={4:F2} cargoRustcSamples={5} maxChildren={6} maxMeasuredApps={7}' -f $loadFile, $load.Count, $mean, $median, $max, $busy, $children, $apps))
+}
+$aggregate = @(Import-Csv (Join-Path $out 'aggregate-c-retry.csv'))
+$last = [double]$aggregate[-1].elapsed_s
+$tail = @($aggregate | Where-Object { [double]$_.elapsed_s -ge ($last - 60) })
+$values = @($tail | ForEach-Object { [double]$_.aggregate_private_ws / 1MB } | Sort-Object)
+$child = @($tail | ForEach-Object { [double]$_.child_private_ws / 1MB } | Sort-Object)
+$median = $values[[int][math]::Floor(($values.Count - 1) / 2)]
+$peak = ($aggregate | ForEach-Object { [double]$_.aggregate_private_ws / 1MB } | Measure-Object -Maximum).Maximum
+$names = @($aggregate.child_names | Sort-Object -Unique) -join ';'
+$lines.Add(('Aggregate c retry: samples={0} final60sSamples={1} steadyMiB={2:F3}/{3:F3}/{4:F3} observedPeakMiB={5:F3} childSteadyMiB={6:F3}..{7:F3} childNames={8}' -f $aggregate.Count, $tail.Count, $values[0], $median, $values[-1], $peak, $child[0], $child[-1], $names))
+$lines | Tee-Object -FilePath (Join-Path $out 'analysis.txt')

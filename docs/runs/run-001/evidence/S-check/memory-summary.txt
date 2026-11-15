@@ -1,0 +1,6 @@
+a-noanchor-run1      n=121 exited=0 min=7.2 med=13.2 max=13.2 | last60 min=13.2 med=13.2 max=13.2 | privBytes=55 WS=53 gpuDed=7.8 gpuShr=0.7 buildSamples=0
+aggregate-c-retry    n=121 exited=0 min=0.0 med=0.0 max=0.0 | last60 min=0.0 med=0.0 max=0.0 | privBytes=0 WS=0 gpuDed=0.0 gpuShr=0.0 buildSamples=0
+b-run1               n=181 exited=0 min=12.8 med=21.4 max=24.1 | last60 min=21.3 med=21.4 max=21.4 | privBytes=74 WS=70 gpuDed=12.6 gpuShr=1.0 buildSamples=0
+c-run1               n=361 exited=0 min=13.1 med=27.1 max=29.6 | last60 min=27.1 med=27.1 max=27.2 | privBytes=80 WS=75 gpuDed=13.6 gpuShr=0.2 buildSamples=26
+c-run2               n=361 exited=0 min=18.6 med=27.1 max=30.0 | last60 min=27.1 med=27.1 max=27.1 | privBytes=80 WS=67 gpuDed=13.6 gpuShr=0.2 buildSamples=0
+load                 n=117 exited=0 min=0.0 med=0.0 max=0.0 | last60 min=0.0 med=0.0 max=0.0 | privBytes=0 WS=0 gpuDed=0.0 gpuShr=0.0 buildSamples=0

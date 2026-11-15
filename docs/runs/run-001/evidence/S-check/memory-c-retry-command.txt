@@ -1,0 +1,22 @@
+$ErrorActionPreference = 'Stop'
+$out = Join-Path $PWD 'docs\runs\run-001\evidence\S-check'
+$log = Join-Path $out 'memory-c-retry.txt'
+foreach ($i in 1..3) {
+    $builds = @(Get-Process cargo,rustc -ErrorAction SilentlyContinue).Count
+    "$(Get-Date -Format o) precheck=$i cargoRustcCount=$builds" | Tee-Object -FilePath $log -Append
+    if ($builds) { throw 'Another build is active: do not start a contaminated retry.' }
+    Start-Sleep 5
+}
+"preexistingAppCount=$(@(Get-Process gpui_mem -ErrorAction SilentlyContinue).Count)" | Add-Content $log
+try {
+    $env:WOWSYNC_ANCHOR = '1'
+    & (Join-Path $PWD 'spikes\mem\measure.ps1') -Scenario c -Run 2 `
+        -Exe (Join-Path $PWD 'spikes\mem\target\release\gpui_mem.exe') `
+        -ExeArgs 'cycles 20' -Seconds 360 -OutDir $out
+} finally {
+    Remove-Item Env:WOWSYNC_ANCHOR -ErrorAction SilentlyContinue
+}
+Start-Sleep 2
+"$(Get-Date -Format o) ended cargoRustcCount=$(@(Get-Process cargo,rustc -ErrorAction SilentlyContinue).Count) remainingAppCount=$(@(Get-Process gpui_mem -ErrorAction SilentlyContinue).Count)" | Add-Content $log
+& (Join-Path $PWD 'spikes\mem\summarize.ps1') -Dir $out |
+    Tee-Object -FilePath (Join-Path $out 'memory-summary.txt')

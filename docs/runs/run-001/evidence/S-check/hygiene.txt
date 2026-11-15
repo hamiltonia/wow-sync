@@ -1,0 +1,65 @@
+Read folder names only; accounts=1 realms=1 characters=8; values never printed or persisted.
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\a-anchor-run1.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\a-anchor-run2.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\a-anchor-run3.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\a-noanchor-run1.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\a-noanchor-run2.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\a-noanchor-run3.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\b-run1.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\b-run2.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\b-run3.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\b-trim-run1.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\c-run1.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\c-run2.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\c-run3.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\d-run1.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\d-run2.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\d-run3.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\summary.txt
+category=email matches=1 file=docs\runs\run-001\packets\P0-trial.md
+category=email matches=1 file=docs\runs\run-001\packets\S-common.md
+Scanned tracked files plus uncommitted report: text=182 binary-skipped=19
+TOTAL category=local-account-realm-character matches=17
+TOTAL category=current-windows-user matches=0
+TOTAL category=absolute-user-profile-path matches=0
+TOTAL category=sid matches=0
+TOTAL category=email matches=2
+TOTAL category=credential-like matches=0
+Patterns are triage, not proof of absence. Binary/image visual inspection is separate. No saved-variable contents read.
+Triage: all identity-name matches are numeric-only=True; all CSV matches in synthetic elapsed-time column=True; summary collision is a numeric measurement, not an identifier. Email matches are only the required public Copilot trailer.
+Read folder names only; accounts=1 realms=1 characters=8; values never printed or persisted.
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-check\a-noanchor-run1.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-check\b-run1.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-check\c-run1.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-check\c-run2.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-check\load-c-retry.csv
+category=local-account-realm-character matches=3 file=docs\runs\run-001\evidence\S-check\load.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\a-anchor-run1.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\a-anchor-run2.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\a-anchor-run3.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\a-noanchor-run1.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\a-noanchor-run2.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\a-noanchor-run3.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\b-run1.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\b-run2.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\b-run3.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\b-trim-run1.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\c-run1.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\c-run2.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\c-run3.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\d-run1.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\d-run2.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\d-run3.csv
+category=local-account-realm-character matches=1 file=docs\runs\run-001\evidence\S-mem\summary.txt
+category=email matches=1 file=docs\runs\run-001\packets\P0-trial.md
+category=email matches=1 file=docs\runs\run-001\packets\S-common.md
+Scanned tracked files plus uncommitted report: text=215 binary-skipped=19
+TOTAL category=local-account-realm-character matches=25
+TOTAL category=current-windows-user matches=0
+TOTAL category=absolute-user-profile-path matches=0
+TOTAL category=sid matches=0
+TOTAL category=battle-tag-like matches=0
+TOTAL category=email matches=2
+TOTAL category=credential-like matches=0
+Patterns are triage, not proof of absence. Binary/image visual inspection is separate. No saved-variable contents read.
+Final evidence triage: all new CSV identity-name coincidences numeric-only=True; fields/counts=t_s:4,elapsed_s:4; no actual identifier value persisted.

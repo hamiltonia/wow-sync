@@ -1,0 +1,7 @@
+Checkout=D:\GitHub\wow-sync.worktrees\S-check branch=run001/S-check commit=5be6ba051b92bb8e6fd7c0f8d7664acc9c604d9e
+PowerShell=7.7.0
+{"Caption":"Microsoft Windows 11 Pro","Version":"10.0.26300","BuildNumber":"26300","OSArchitecture":"64-bit"}
+{"Name":"13th Gen Intel(R) Core(TM) i7-13700HX","NumberOfLogicalProcessors":24}
+{"TotalPhysicalMemory":68375879680}
+gpuiMemSHA256=C31ED3F7E0DE07369D70A5AEA53A61CBD75717254A3FF49377EE2512FC77849A
+SforeverReportSHA256=543A93491FC99D9BE3FF160B7C0DB6BCF8E1F80044A1D4DE0FA92585553E81C6
