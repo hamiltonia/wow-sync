@@ -480,3 +480,302 @@ Defects/limitations for orchestrator and assigned authors:
 Persistent output is this evidence file only. The orchestrator owns evidence
 review, current-state/usage updates and defect assignment. No push or merge
 authorized or performed.
+
+## Re-verification (2026-11-15)
+
+### Scope, identity and isolation
+
+Bounded follow-up requested by the orchestrator: A-39 zero-test/inventory
+regression controls, report provenance/freshness, optional link-scan isolation,
+A-40 record consistency, and the corresponding CI run. No fixes or sub-agents.
+This section supplements, and does not rewrite, the first-pass evidence.
+
+Source: remote `main`,
+**`4d1b14a0b4678e07c9cfd996f35fb408f6fe5f73`**, including verifier fix
+`08163c1`, map fix `a154850`, and record update `e9af6eb`.
+The author's fix descriptions were not treated as execution evidence.
+
+In the owned worktree on `run001/P1-check`, first checked clean status and ran
+`git merge main`: fast-forward from `98ea632` to `4d1b14a`.
+Created a new sibling project clone outside the repositories/worktrees, using
+the earlier non-OS-temporary-directory isolation convention:
+
+```powershell
+Set-Location D:\GitHub
+git clone --quiet https://github.com/hamiltonia/wow-sync wow-sync-verification-run001
+git -C .\wow-sync-verification-run001 rev-parse HEAD
+Set-Location D:\GitHub\wow-sync-verification-run001
+$env:PATH="$env:USERPROFILE\.cargo\bin;$env:PATH"
+```
+
+HEAD equaled the full source SHA above. Clone and evidence worktree were clean
+before testing. Each required mutation was independently restored with
+`git checkout -- .` and `git clean -fd` before the next control.
+Only this evidence file was changed in the evidence worktree. No commit/push
+from the clone; clone removed at completion.
+
+Same independent verifier agent `ed40bcc0-b03a-4b5e-820b-85dd213318eb`,
+resumed, actual **gpt-6.1-sol**. Runtime usage events at
+`2026-11-15T01:20:58Z` and `01:21:34Z` recorded `model` and `responseModel`
+as `gpt-6.1-sol` for this exact agent. No usage counter was reset.
+OS rechecked: Windows `10.0.26300`, build 26300, 64-bit.
+Tools rechecked: rustc `1.100.0 (0ef1bc386 2026-11-09)`, cargo
+`1.100.0 (3acc79c0c 2026-11-05)`, cargo-deny `0.20.2`.
+Native MSVC/development profile; synthetic clone-only data; no product app,
+WoW/Dropbox, private data, new credential, or paid-service access.
+
+### A-39 baseline, controls and restored run
+
+Followed the revised `docs/VERIFY.md`, executing:
+
+```powershell
+cargo xtask verify --tier all
+$LASTEXITCODE
+Get-Content target\verify\report.json
+```
+
+Actual baseline:
+
+```text
+[PASS   ] offline/fmt
+[PASS   ] offline/clippy
+[PASS   ] offline/test
+[PASS   ] offline/required-cases
+[PASS   ] offline/deny
+[PASS   ] offline/markdown-links
+[BLOCKED] native/tier
+          no native cases defined yet
+[BLOCKED] provider/tier
+          requires D-08 Dropbox test folder and enrolled peers
+overall: BLOCKED (allow-blocked: false) -> exit 1
+```
+
+Report matched this output; required-cases detail was
+`1 listed offline case(s) verified against 24 test result(s)`;
+link detail was `23 Markdown file(s), no broken relative links`.
+All four subprocess checks (fmt/clippy/test/deny) reported exit 0.
+Internal inventory/link checks have no subprocess exit.
+
+| Re-check | Status of expectation | Observed check/result | Command exit |
+|---|---|---|---|
+| Clean all-tier baseline | PASS | Offline all PASS; native/provider BLOCKED | 1 |
+| Zero tests, inventory retained | PASS, caught | required-cases FAIL | 1 |
+| Zero tests, inventory emptied | PASS, caught | required-cases FAIL with both missing obligations | 1 |
+| Empty inventory, tests still execute | PASS, caught | required-cases FAIL; 24 tests passed | 1 |
+| Report SHA/clean state/time | PASS | Exact source SHA, false dirty flag, current UTC timestamp | baseline 1 |
+| Existing report deletion at run start | PASS | Observed filesystem Deleted before Created event | 0 |
+| Dirty report state | PASS | Each mutation reported `git_dirty: true` | controls 1 |
+| Untracked broken Markdown + clone-local junction | PASS | Ignored; link check PASS, 23 tracked Markdown files | 0 |
+| Tracked broken Markdown | PASS, caught | markdown-links FAIL | 1 |
+| Restored all-tier override | PASS | Offline PASS, runtime tiers still BLOCKED; clean report | 0 |
+| Native execution | BLOCKED | No native cases defined | not executed |
+| Provider execution | BLOCKED | Scoped prerequisite unavailable | not executed |
+
+**Zero-tests retained:** added `#[cfg(any())]` immediately after `#[cfg(test)]`
+on all four xtask test modules in `main.rs`, `inventory.rs`, `links.rs`,
+`report.rs`; kept `tests\required-cases.toml` unchanged.
+Ran `cargo xtask verify --tier offline`:
+
+```text
+[FAIL   ] offline/required-cases
+          tier 'offline' executed zero tests (1 listed case(s))
+overall: FAIL (allow-blocked: false) -> exit 1
+```
+
+All other offline checks PASS. Direct `cargo test --workspace` ran zero tests
+in all suites and returned 0, proving the inventory gate, not Cargo alone,
+caught the missing execution. Restored the four files.
+
+**Zero-tests emptied:** independently reapplied those four module filters and
+removed the `[[case]]` block from the required-case inventory (comments only).
+Same verifier command:
+
+```text
+[FAIL   ] offline/required-cases
+          tier 'offline' executed zero tests (0 listed case(s))
+          inventory lists no cases for executable tier 'offline'; an empty inventory is a missing obligation
+overall: FAIL (allow-blocked: false) -> exit 1
+```
+
+All other offline checks PASS. This is the exact formerly missed false-green
+relationship, now caught. Restored all five files.
+
+**Empty inventory with execution:** removed only the inventory case block from
+the restored source. Same verifier command failed required-cases with:
+`inventory lists no cases for executable tier 'offline'; an empty inventory is a missing obligation`.
+All other offline checks PASS. Direct `cargo test --workspace` returned 0:
+xtask **24 passed, 0 failed/ignored**; empty core/doctest suites ran 0.
+Restored the inventory.
+
+The first-pass confirmed A-39 empty-inventory/zero-tests defect is
+**closed for these independently exercised cases**. This is initial bootstrap
+verification, not product acceptance or permission to drop future obligations.
+
+### Report provenance and actual startup deletion
+
+Clean baseline JSON included:
+
+```json
+{
+  "git_sha": "4d1b14a0b4678e07c9cfd996f35fb408f6fe5f73",
+  "git_dirty": false,
+  "generated_at": "2026-11-15T01:17:50Z",
+  "overall": "BLOCKED",
+  "exit_ok": false
+}
+```
+
+System UTC at baseline completion was `2026-11-15T01:17:50.8381579Z`.
+Mutated runs preserved the source SHA but reported `git_dirty: true`.
+The restored final run reported false again, with a new timestamp.
+
+To establish deletion behavior independently of reading the implementation,
+used .NET FileSystemWatcher on the existing report:
+
+```powershell
+$report=Join-Path (Get-Location) 'target\verify\report.json'
+Test-Path $report
+$watcher=[System.IO.FileSystemWatcher]::new((Split-Path $report),'report.json')
+$watcher.NotifyFilter=[System.IO.NotifyFilters]::FileName
+$watcher.EnableRaisingEvents=$true
+Register-ObjectEvent $watcher Deleted -SourceIdentifier P1ReportDeleted
+Register-ObjectEvent $watcher Created -SourceIdentifier P1ReportCreated
+& .\target\debug\xtask.exe verify --tier offline
+# Read queued events; unregister subscriptions, remove events, dispose watcher.
+```
+
+Report preexisted: **true**. Invocation started
+`2026-11-15T01:18:29.3651766Z`. Observed actual events:
+`Deleted report.json` at local 17:18:29 (UTC 01:18:29), then
+`Created report.json` at local 17:18:31 (UTC 01:18:31).
+Command returned 0 with all offline checks PASS; recreated report timestamp
+was `2026-11-15T01:18:31Z`.
+This establishes removal at the start of a real running verifier, before
+completion/recreation, rather than merely overwriting old JSON at the end.
+No watcher remained active.
+
+Documented limitation remains: if xtask itself cannot compile, startup cannot
+execute and cannot remove an old report. Revised VERIFY explicitly documents
+this and requires SHA/dirty-state/timestamp checking. Compile-failure mutation
+was **NOT RUN** in this bounded follow-up; the prior observation is retained,
+not represented as cured before the process can start.
+
+### Optional clone-local link/junction re-check
+
+Created untracked `.p1-check-links\source\broken.md` containing an inline
+relative link to nonexistent `missing-relative-target.md`. Created junction
+`.p1-check-links\junction` targeting that source directory **inside this same
+clone** using `New-Item -ItemType Junction`. No outside target/cache accessed.
+`cargo xtask verify --tier offline` returned 0; all checks PASS.
+Markdown count remained 23; report correctly marked the untracked mutation dirty.
+
+Then added an inline link to nonexistent
+`docs/P1-check-missing-relative-link.md` in tracked README.md.
+Same command returned 1:
+
+```text
+[FAIL   ] offline/markdown-links
+          broken relative links:
+          README.md: docs/P1-check-missing-relative-link.md
+```
+
+Thus ignoring untracked data did not disable checking modified tracked files.
+Removed the junction itself with its directory object's `Delete()`, deleted the
+clone-local synthetic directory, and reverted README.
+This tests the previously contaminating untracked-junction scenario;
+tracked symlink/reparse-point cases were **NOT RUN**.
+
+Restored `cargo xtask verify --tier all --allow-blocked` returned 0:
+all six offline checks PASS; native/provider still BLOCKED; JSON
+`git_dirty: false`, source SHA unchanged, `generated_at: "2026-11-15T01:21:02Z"`,
+`overall: "BLOCKED"`, `allow_blocked: true`, `exit_ok: true`.
+
+### A-40: current records and historical snapshot fairness
+
+Again started at AGENTS.md, followed README/intent/decisions/run paths, then
+PLAN, HANDOFF, REPO-MAP, USAGE and VERIFY. Locations, verification commands,
+scope/ownership and approval boundaries remain independently discoverable.
+
+| Record | Status | Finding at checked source |
+|---|---|---|
+| README | PASS | Recognizes approved bootstrap, workspace/verifier/CI, no product features; points to current records |
+| PLAN | PASS | Records approved 2,500 AIU ceiling, Phase 0 done/Phase 1 in progress; deny ownership matches packet/map |
+| REPO-MAP | PASS | Location map, no stale Planned claims; verification authority and evidence paths linked |
+| HANDOFF snapshot | PASS as of its record commit | Correctly records first CI success, initial P1-check findings and pending integration/re-verification |
+| USAGE/current cumulative handoff | **FAIL** | Still four workers and pre-first-verifier amounts; missing completed verification and fix follow-up usage |
+
+Historical context was checked rather than treating pending work as a defect:
+`e9af6eb` updated the handoff at `2026-11-14T16:55:55-08:00`, before evidence
+and fix branches were merged to main at `16:56:46-08:00`.
+The handoff's “fixes in progress” and pending independent recheck are therefore
+reasonable **pre-integration snapshot** statements. They are not falsely
+asserting Phase 1 complete or runtime support. A fresh orchestrator must
+reconcile its pending actions with HEAD before redoing integration.
+
+However, **USAGE was not updated by those fixes/record updates in this SHA**.
+Direct history check:
+
+```powershell
+git log -1 --format='%h %cI %s' -- docs\runs\run-001\USAGE.md
+```
+
+Returned `598903c`, `2026-11-14T16:34:51-08:00`,
+“docs: record Phase 1 worker usage and integration check”.
+That predates the first P1-check invocation. It still has four worker rows,
+`Worker count: 4 / 20`, P1-verify retries `1 / 2`, and no first P1-check row.
+HANDOFF says five workers and P1-verify retry `2 / 2`.
+
+The existing 840.70 AIU total is labeled “after P1 merges”, so it is a legitimate
+historical snapshot, **not evidence of present remaining headroom**.
+The missing subsequent completed-worker/retry costs and inconsistent counts
+prevent establishing a clean, cumulative-budget-preserving current handoff
+from the checked-in records. This is a narrower remaining **A-40/E-02/E-08
+FAIL**, not a missing plan/ceiling approval and not criticism of a pending
+recheck snapshot. No ledger repair or estimated cost was substituted.
+The orchestrator must persist measured totals/counts; this verifier cannot
+claim current remaining budget from the stale ledger.
+
+### CI for the exact fixed source
+
+Read-only:
+
+```powershell
+gh run list --repo hamiltonia/wow-sync --branch main --limit 3 --json databaseId,headSha,status,conclusion,url
+gh run view 43660710531 --repo hamiltonia/wow-sync --json status,conclusion,headSha,jobs,url
+```
+
+Initially in progress; subsequently observed completed without rerun.
+Run https://github.com/hamiltonia/wow-sync/actions/runs/43660710531
+matched the full checked SHA. Created `2026-11-15T00:56:59Z`, completed/updated
+`01:01:01Z`, overall conclusion **success**.
+
+| Job | Status | Conclusion | Completed UTC |
+|---|---|---|---|
+| verify-offline (windows-latest) | PASS / completed | success | 01:01:01 |
+| verify-offline (macos-latest) | PASS / completed | success | 01:00:53 |
+| build-only x86_64-apple-darwin | PASS / completed | success | 00:57:48 |
+| build-only aarch64-pc-windows-msvc | PASS / completed | success | 00:57:51 |
+| build-only aarch64-apple-darwin | PASS / completed | success | 00:57:39 |
+| build-only x86_64-pc-windows-msvc | PASS / completed | success | 00:57:41 |
+
+No failed steps in returned job records. Failed-step logs **NOT RUN** because
+no job failed. Names still honestly distinguish offline checks and build-only
+targets; no product/native/provider/runtime support is inferred.
+
+### Follow-up disposition
+
+- **A-39 initial targeted regressions: PASS.** All three missing-obligation
+  relationships fail, clean offline checks pass, runtime blockers remain visible.
+- **Report/link-scan fix scope: PASS for exercised cases.** Actual startup
+  deletion and metadata observed; untracked clone-local junction ignored while
+  tracked bad link remains caught.
+- **A-40: FAIL, narrower residual ledger issue.** README/PLAN/REPO-MAP fixed;
+  HANDOFF pre-integration snapshot reasonable; USAGE still misses completed
+  verification/retry costs and disagrees on current counts.
+- **CI: PASS, all six jobs.**
+- Native/provider remain BLOCKED; product/GUI/performance/other negative
+  controls outside this bounded follow-up are NOT RUN. Prior first-pass
+  evidence remains authoritative for those earlier executions.
+
+No fixes, push, merge of evidence to main, or nested workers. The clone was
+restored and deleted; appended evidence only committed on `run001/P1-check`.
