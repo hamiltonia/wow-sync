@@ -1,0 +1,12 @@
+# Required test-case inventory. See docs/VERIFY.md.
+# Each [[case]] maps an acceptance/case ID to libtest names (as printed by
+# `cargo test`, e.g. "module::test_name") that must run, not be ignored, and pass.
+
+# A-39: the verifier itself must detect false greens.
+[[case]]
+id = "A-39"
+tier = "offline"
+tests = [
+    "inventory::tests::zero_tests_with_listed_cases_is_a_problem",
+    "inventory::tests::missing_ignored_and_failed_listed_tests_are_reported",
+]

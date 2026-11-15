@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/wow-sync-core"]
+members = ["crates/wow-sync-core", "xtask"]
 
 [workspace.package]
 version = "0.0.0"
