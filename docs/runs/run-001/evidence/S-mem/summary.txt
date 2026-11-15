@@ -1,0 +1,16 @@
+a-anchor-run1        n=121 exited=0 min=8.9 med=17.6 max=17.6 | last60 min=17.6 med=17.6 max=17.6 | privBytes=61 WS=53 gpuDed=7.8 gpuShr=0.7 buildSamples=66
+a-anchor-run2        n=121 exited=0 min=5.2 med=17.9 max=17.9 | last60 min=17.7 med=17.7 max=17.9 | privBytes=60 WS=53 gpuDed=7.8 gpuShr=0.7 buildSamples=26
+a-anchor-run3        n=121 exited=0 min=8.8 med=17.6 max=17.6 | last60 min=17.6 med=17.6 max=17.6 | privBytes=61 WS=53 gpuDed=7.8 gpuShr=0.7 buildSamples=0
+a-noanchor-run1      n=121 exited=0 min=12.2 med=13.1 max=13.1 | last60 min=13.1 med=13.1 max=13.1 | privBytes=55 WS=44 gpuDed=7.8 gpuShr=0.7 buildSamples=40
+a-noanchor-run2      n=121 exited=0 min=12.9 med=13.0 max=15.0 | last60 min=13.0 med=13.0 max=13.1 | privBytes=55 WS=44 gpuDed=7.8 gpuShr=0.7 buildSamples=0
+a-noanchor-run3      n=121 exited=0 min=9.6 med=13.1 max=13.2 | last60 min=13.1 med=13.1 max=13.1 | privBytes=55 WS=44 gpuDed=7.8 gpuShr=0.7 buildSamples=0
+b-run1               n=181 exited=0 min=8.4 med=22.4 max=24.4 | last60 min=22.3 med=22.3 max=22.4 | privBytes=74 WS=62 gpuDed=12.6 gpuShr=1.0 buildSamples=91
+b-run2               n=181 exited=0 min=9.4 med=20.9 max=23.9 | last60 min=20.9 med=20.9 max=20.9 | privBytes=72 WS=60 gpuDed=12.6 gpuShr=1.0 buildSamples=25
+b-run3               n=181 exited=0 min=7.1 med=21.7 max=24.1 | last60 min=21.6 med=21.6 max=21.7 | privBytes=73 WS=61 gpuDed=12.6 gpuShr=1.0 buildSamples=0
+b-trim-run1          n=181 exited=0 min=0.1 med=0.1 max=15.2 | last60 min=0.1 med=0.1 max=1.2 | privBytes=73 WS=0 gpuDed=12.6 gpuShr=0.2 buildSamples=0
+c-run1               n=361 exited=0 min=9.4 med=26.9 max=29.8 | last60 min=26.8 med=26.8 max=26.8 | privBytes=79 WS=67 gpuDed=13.6 gpuShr=0.2 buildSamples=184
+c-run2               n=361 exited=0 min=14.7 med=27.6 max=30.8 | last60 min=27.6 med=27.6 max=27.6 | privBytes=80 WS=67 gpuDed=13.6 gpuShr=0.2 buildSamples=28
+c-run3               n=361 exited=0 min=14.7 med=27.1 max=29.6 | last60 min=27.1 med=27.1 max=27.1 | privBytes=82 WS=67 gpuDed=13.6 gpuShr=0.2 buildSamples=0
+d-run1               n=121 exited=0 min=0.4 med=0.4 max=0.4 | last60 min=0.4 med=0.4 max=0.4 | privBytes=1 WS=4 gpuDed=0.0 gpuShr=0.0 buildSamples=62
+d-run2               n=121 exited=0 min=0.3 med=0.3 max=0.4 | last60 min=0.3 med=0.3 max=0.3 | privBytes=1 WS=4 gpuDed=0.0 gpuShr=0.0 buildSamples=0
+d-run3               n=121 exited=0 min=0.3 med=0.3 max=0.4 | last60 min=0.3 med=0.3 max=0.3 | privBytes=1 WS=4 gpuDed=0.0 gpuShr=0.0 buildSamples=0
