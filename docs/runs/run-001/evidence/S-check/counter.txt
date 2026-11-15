@@ -1,0 +1,10 @@
+CookingType=PERF_COUNTER_LARGE_RAWCOUNT
+Counter=WorkingSetPrivate
+CounterType=65792
+DisplayName=Working Set - Private
+DisplayName009=Working Set - Private
+HelpIndex=0
+PerfIndex=0
+PerfTimeFreq=Frequency_PerfTime
+PerfTimeStamp=Timestamp_PerfTime
+CounterHelp=Working Set - Private displays the size of the working set, in bytes, that is use for this process only and not shared nor sharable by other processes.

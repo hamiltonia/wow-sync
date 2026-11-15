@@ -1,0 +1,53 @@
+$ErrorActionPreference = 'Stop'
+$out = Join-Path $PWD 'docs\runs\run-001\evidence\S-check\hygiene.txt'
+function L($s) { Add-Content -LiteralPath $out -Value $s; $s }
+$sensitive = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+$accountRoot = 'D:\Games\World of Warcraft\_forever_\WTF\Account'
+$accounts = @(Get-ChildItem -LiteralPath $accountRoot -Directory)
+$realms = @()
+$characters = @()
+foreach ($a in $accounts) {
+    [void]$sensitive.Add($a.Name)
+    foreach ($r in Get-ChildItem -LiteralPath $a.FullName -Directory) {
+        if ($r.Name -eq 'SavedVariables') { continue }
+        $realms += $r
+        [void]$sensitive.Add($r.Name)
+        foreach ($c in Get-ChildItem -LiteralPath $r.FullName -Directory) {
+            $characters += $c
+            [void]$sensitive.Add($c.Name)
+        }
+    }
+}
+L "Read folder names only; accounts=$($accounts.Count) realms=$($realms.Count) characters=$($characters.Count); values never printed or persisted."
+$patterns = [ordered]@{
+    'local-account-realm-character' = '(?i)(?<![\p{L}\p{N}_])(?:' + (($sensitive | ForEach-Object { [regex]::Escape($_) }) -join '|') + ')(?![\p{L}\p{N}_])'
+    'current-windows-user' = '(?i)(?<![\p{L}\p{N}_])' + [regex]::Escape($env:USERNAME) + '(?![\p{L}\p{N}_])'
+    'absolute-user-profile-path' = '(?i)[A-Z]:[\\/]+Users[\\/]+(?!Public\b|Default\b|<|%|\$)[a-z0-9._-]+'
+    'sid' = '\bS-1-5-\d+(?:-\d+){1,}\b'
+    'battle-tag-like' = '(?i)\b[\p{L}][\p{L}\p{N}]{2,15}#\d{4,}\b'
+    'email' = '(?i)\b[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}\b'
+    'credential-like' = '(?i)\b(?:gh[pousr]_[a-z0-9]{20,}|github_pat_[a-z0-9_]{20,}|AKIA[A-Z0-9]{16})\b|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----'
+}
+$files = @(git ls-files)
+$files += 'D:\GitHub\wow-sync.worktrees\S-forever\docs\runs\run-001\evidence\S-forever.md'
+$counts = @{}
+$textCount = 0
+$binaryCount = 0
+foreach ($f in $files) {
+    $bytes = [IO.File]::ReadAllBytes($(if ([IO.Path]::IsPathRooted($f)) { $f } else { Join-Path $PWD $f }))
+    if ($bytes -contains 0) { $binaryCount++; continue }
+    $textCount++
+    $text = [Text.Encoding]::UTF8.GetString($bytes)
+    foreach ($category in $patterns.Keys) {
+        $matches = [regex]::Matches($text, $patterns[$category])
+        if ($matches.Count) {
+            if (-not $counts.ContainsKey($category)) { $counts[$category] = 0 }
+            $counts[$category] += $matches.Count
+            $display = if ([IO.Path]::IsPathRooted($f)) { 'S-forever uncommitted report' } else { $f.Replace('/', '\') }
+            L "category=$category matches=$($matches.Count) file=$display"
+        }
+    }
+}
+L "Scanned tracked files plus uncommitted report: text=$textCount binary-skipped=$binaryCount"
+foreach ($category in $patterns.Keys) { L "TOTAL category=$category matches=$([int]$counts[$category])" }
+L 'Patterns are triage, not proof of absence. Binary/image visual inspection is separate. No saved-variable contents read.'

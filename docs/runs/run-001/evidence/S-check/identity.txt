@@ -1,0 +1,9 @@
+Observed=2026-11-15T13:04:21.4368225-08:00
+{"Product":"wowf","Branch":"us","Active":"1","Version":"1.60.1.70938"}
+flavorHeader=Product Flavor!STRING:0; flavor=wowf
+exeProduct=World of Warcraft; exeVersion=1.60.1.70938; exeBytes=81760464
+productDbContainsKnownMetadata=wowf present=True
+productDbContainsKnownMetadata=_forever_ present=True
+productDbContainsKnownMetadata=1.60.1.70938 present=True
+tocFiles=171; Interface16001Occurrences=112
+Read-only metadata and TOC text only; binary database searched for known substrings, not structurally parsed; no Lua executed.

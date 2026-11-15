@@ -1,0 +1,27 @@
+2026-11-15T13:01:00.7152058-08:00 Safe subset of spikes\dropbox\observe.ps1: same attribute and rename operations; no online-only toggle, large upload, conflict or invalid-name experiments.
+2026-11-15T13:01:00.7429930-08:00 Dropbox running=True
+2026-11-15T13:01:00.7838898-08:00 Dropbox version=279.4.5723
+2026-11-15T13:01:00.9154569-08:00 rep=1 created attr=0x80020 length=4194304 tag=Reparse Tag Value : 0x9000201a
+2026-11-15T13:01:02.0820451-08:00 rep=1 t=1s attr=0x80420 length=4194304 tag=Reparse Tag Value : 0x9000201a
+2026-11-15T13:01:03.2178087-08:00 rep=1 t=2s attr=0x80420 length=4194304 tag=Reparse Tag Value : 0x9000201a
+2026-11-15T13:01:04.2912300-08:00 rep=1 t=3s attr=0x80420 length=4194304 tag=Reparse Tag Value : 0x9000201a
+2026-11-15T13:01:05.4083592-08:00 rep=1 t=4s attr=0x80420 length=4194304 tag=Reparse Tag Value : 0x9000201a
+2026-11-15T13:01:06.5989780-08:00 rep=1 t=5s attr=0x80420 length=4194304 tag=Reparse Tag Value : 0x9000201a
+2026-11-15T13:01:07.7772168-08:00 rep=1 t=6s attr=0x80420 length=4194304 tag=Reparse Tag Value : 0x9000201a
+2026-11-15T13:01:08.9471254-08:00 rep=1 t=7s attr=0x80420 length=4194304 tag=Reparse Tag Value : 0x9000201a
+2026-11-15T13:01:11.9974816-08:00 rep=1 t=8s attr=0x80420 length=4194304 tag=Reparse Tag Value : 0x9000201a
+2026-11-15T13:01:12.0447482-08:00 rep=1 before rename old=synthetic-v1 tempExists=True
+2026-11-15T13:01:12.2273368-08:00 rep=1 after rename new=synthetic-v2 tempExists=False elapsedMs=7.5459 attr=0x80020 length=12 tag=
+2026-11-15T13:01:12.5474188-08:00 rep=2 created attr=0x80020 length=4194304 tag=
+2026-11-15T13:01:13.6084672-08:00 rep=2 t=1s attr=0x80420 length=4194304 tag=Reparse Tag Value : 0x9000201a
+2026-11-15T13:01:14.6475559-08:00 rep=2 t=2s attr=0x80420 length=4194304 tag=Reparse Tag Value : 0x9000201a
+2026-11-15T13:01:15.6816819-08:00 rep=2 t=3s attr=0x80420 length=4194304 tag=Reparse Tag Value : 0x9000601a
+2026-11-15T13:01:16.7418515-08:00 rep=2 t=4s attr=0x80420 length=4194304 tag=Reparse Tag Value : 0x9000601a
+2026-11-15T13:01:17.7764360-08:00 rep=2 t=5s attr=0x80420 length=4194304 tag=Reparse Tag Value : 0x9000601a
+2026-11-15T13:01:18.8399136-08:00 rep=2 t=6s attr=0x80420 length=4194304 tag=Reparse Tag Value : 0x9000601a
+2026-11-15T13:01:19.8827477-08:00 rep=2 t=7s attr=0x80420 length=4194304 tag=Reparse Tag Value : 0x9000601a
+2026-11-15T13:01:20.9202612-08:00 rep=2 t=8s attr=0x80420 length=4194304 tag=Reparse Tag Value : 0x9000601a
+2026-11-15T13:01:20.9353837-08:00 rep=2 before rename old=synthetic-v1 tempExists=True
+2026-11-15T13:01:20.9646070-08:00 rep=2 after rename new=synthetic-v2 tempExists=False elapsedMs=1.0152 attr=0x80020 length=12 tag=
+2026-11-15T13:01:20.9990146-08:00 cleanup attempt=1 failed (message withheld)
+2026-11-15T13:01:26.0297968-08:00 cleanup own work directory exists=False

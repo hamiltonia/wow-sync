@@ -1,0 +1,35 @@
+$ErrorActionPreference = 'Stop'
+$out = 'docs\runs\run-001\evidence\S-check'
+$rows = [Collections.Generic.List[object]]::new()
+$sw = [Diagnostics.Stopwatch]::StartNew()
+$seen = $false
+while ($sw.Elapsed.TotalSeconds -lt 360) {
+    $app = @(Get-CimInstance Win32_Process -Filter "Name='gpui_mem.exe'")
+    if (-not $app.Count) {
+        if ($seen) { break }
+        Start-Sleep 1
+        continue
+    }
+    if ($app.Count -ne 1) { throw 'Ambiguous target process count' }
+    $seen = $true
+    $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($app[0].ProcessId)")
+    $childPrivate = 0
+    foreach ($child in $children) {
+        $p = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -Filter "IDProcess=$($child.ProcessId)"
+        $childPrivate += [int64]$p.WorkingSetPrivate
+    }
+    $main = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -Filter "IDProcess=$($app[0].ProcessId)"
+    if ($null -eq $main) { break }
+    $rows.Add([pscustomobject]@{
+        timestamp = (Get-Date -Format o)
+        elapsed_s = [math]::Round($sw.Elapsed.TotalSeconds, 3)
+        main_private_ws = [int64]$main.WorkingSetPrivate
+        child_private_ws = $childPrivate
+        aggregate_private_ws = ([int64]$main.WorkingSetPrivate + $childPrivate)
+        child_names = ($children.Name -join ';')
+        child_count = $children.Count
+    })
+    Start-Sleep 1
+}
+$rows | Export-Csv -NoTypeInformation -LiteralPath (Join-Path $out 'aggregate-c-retry.csv')
+'Aggregate sampler completed'

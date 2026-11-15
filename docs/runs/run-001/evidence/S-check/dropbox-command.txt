@@ -1,0 +1,40 @@
+$ErrorActionPreference = 'Stop'
+$out = Join-Path $PWD 'docs\runs\run-001\evidence\S-check\dropbox.txt'
+$root = 'D:\Dropbox\Gaming Sync\WoW Sync Test'
+$work = Join-Path $root ('s-check-' + [guid]::NewGuid().ToString('N'))
+function L($s) { $s = "$(Get-Date -Format o) $s"; Add-Content -LiteralPath $out -Value $s; $s }
+function Info($p) {
+    $i = Get-Item -LiteralPath $p -Force
+    $tag = (fsutil reparsepoint query $p 2>&1 | Select-String 'Reparse Tag Value').Line
+    'attr=0x{0:X} length={1} tag={2}' -f [int]$i.Attributes, $i.Length, $tag
+}
+New-Item -ItemType Directory -Path $work | Out-Null
+try {
+    L 'Safe subset of spikes\dropbox\observe.ps1: same attribute and rename operations; no online-only toggle, large upload, conflict or invalid-name experiments.'
+    $client = Get-Process Dropbox -ErrorAction SilentlyContinue | Select-Object -First 1
+    L "Dropbox running=$($null -ne $client)"
+    if ($client) { L "Dropbox version=$((Get-Item -LiteralPath $client.Path).VersionInfo.FileVersion)" }
+    for ($rep = 1; $rep -le 2; $rep++) {
+        $f = Join-Path $work "hyd$rep.bin"
+        $bytes = New-Object byte[] (4MB)
+        (New-Object Random $rep).NextBytes($bytes)
+        [IO.File]::WriteAllBytes($f, $bytes)
+        L "rep=$rep created $(Info $f)"
+        foreach ($t in 1..8) { Start-Sleep 1; L "rep=$rep t=${t}s $(Info $f)" }
+        $target = Join-Path $work "target$rep.txt"
+        $temp = "$target.tmp"
+        [IO.File]::WriteAllText($target, 'synthetic-v1')
+        [IO.File]::WriteAllText($temp, 'synthetic-v2')
+        L "rep=$rep before rename old=$([IO.File]::ReadAllText($target)) tempExists=$(Test-Path -LiteralPath $temp)"
+        $sw = [Diagnostics.Stopwatch]::StartNew()
+        Move-Item -LiteralPath $temp -Destination $target -Force
+        $sw.Stop()
+        L "rep=$rep after rename new=$([IO.File]::ReadAllText($target)) tempExists=$(Test-Path -LiteralPath $temp) elapsedMs=$($sw.Elapsed.TotalMilliseconds) $(Info $target)"
+    }
+} finally {
+    foreach ($attempt in 1..2) {
+        try { Remove-Item -LiteralPath $work -Recurse -Force; break }
+        catch { L "cleanup attempt=$attempt failed (message withheld)"; if ($attempt -eq 1) { Start-Sleep 5 } }
+    }
+    L "cleanup own work directory exists=$(Test-Path -LiteralPath $work)"
+}

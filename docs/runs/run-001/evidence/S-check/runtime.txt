@@ -1,0 +1,21 @@
+Actual runtime checked from local session usage records, not inferred from packet.
+session_store_sql, source=local:
+SELECT agent_id, model, COUNT(*) AS calls, MIN(created_at) AS first_call,
+MAX(created_at) AS last_call
+FROM assistant_usage_events
+WHERE session_id = '961f3baa-ee85-4e41-b05f-131f1d4d574f'
+AND substr(created_at, 1, 10) >= date('now', '-1 day')
+AND model = 'gpt-6.1-sol'
+GROUP BY agent_id, model
+
+This worker's time-correlated row:
+agent_id=888464a0-1316-44cb-9780-07e4c7ac0b30
+model=gpt-6.1-sol
+calls=31
+first_call=2026-11-15T20:59:25.598Z
+last_call=2026-11-15T21:03:56.712Z
+
+Initial schema inspection using pragma_table_info was denied ("not authorized").
+A read-only sqlite_master schema query succeeded; the usage query above then
+confirmed the runtime. No model substitution and no nested agents.
+This is a point-in-time record, not final worker or cumulative run credit use.

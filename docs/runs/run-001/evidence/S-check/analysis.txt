@@ -1,0 +1,7 @@
+a-noanchor-run1: samples=121 invalidOrExited=0 steadyPrivateMiB=13.184/13.184/13.184 wholePeakMiB=13.242 cargoRustcSamples=0
+b-run1: samples=181 invalidOrExited=0 steadyPrivateMiB=21.344/21.359/21.422 wholePeakMiB=24.074 cargoRustcSamples=0
+c-run1: samples=361 invalidOrExited=0 steadyPrivateMiB=27.141/27.141/27.191 wholePeakMiB=29.602 cargoRustcSamples=26
+c-run2: samples=361 invalidOrExited=0 steadyPrivateMiB=27.121/27.121/27.121 wholePeakMiB=29.992 cargoRustcSamples=0
+load.csv: samples=117 meanCpuPercent=9.14 medianCpuPercent=7.00 maxCpuPercent=40.00 cargoRustcSamples=5 maxChildren=1 maxMeasuredApps=1
+load-c-retry.csv: samples=68 meanCpuPercent=9.82 medianCpuPercent=10.00 maxCpuPercent=28.00 cargoRustcSamples=0 maxChildren=1 maxMeasuredApps=1
+Aggregate c retry: samples=121 final60sSamples=23 steadyMiB=28.176/28.234/28.234 observedPeakMiB=30.395 childSteadyMiB=1.070..1.113 childNames=conhost.exe

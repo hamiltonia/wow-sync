@@ -1,0 +1,21 @@
+param([int]$Seconds = 675, [string]$Filename = 'load.csv')
+$ErrorActionPreference = 'Stop'
+$rows = [Collections.Generic.List[object]]::new()
+$sw = [Diagnostics.Stopwatch]::StartNew()
+while ($sw.Elapsed.TotalSeconds -lt $Seconds) {
+    $cpu = Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor -Filter "Name='_Total'"
+    $apps = @(Get-CimInstance Win32_Process -Filter "Name='gpui_mem.exe'")
+    $children = 0
+    foreach ($app in $apps) { $children += @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($app.ProcessId)").Count }
+    $rows.Add([pscustomobject]@{
+        timestamp = (Get-Date -Format o)
+        elapsed_s = [math]::Round($sw.Elapsed.TotalSeconds, 2)
+        total_cpu_percent = $cpu.PercentProcessorTime
+        cargo_rustc_count = @(Get-Process cargo,rustc -ErrorAction SilentlyContinue).Count
+        app_count = $apps.Count
+        child_count = $children
+    })
+    Start-Sleep 5
+}
+$rows | Export-Csv -NoTypeInformation -LiteralPath (Join-Path 'docs\runs\run-001\evidence\S-check' $Filename)
+'Load monitor completed'
