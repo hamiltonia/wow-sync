@@ -23,6 +23,9 @@ release, publish or deploy workflow). Not pushed; no workflow has run yet.
     --locked --target <t>` for `x86_64-pc-windows-msvc` and
     `aarch64-pc-windows-msvc` on `windows-latest`, `x86_64-apple-darwin` and
     `aarch64-apple-darwin` on `macos-latest`. Nothing is run or uploaded.
+  - Correction note (P3-fix): `macos-latest` is Apple Silicon, so
+    `aarch64-apple-darwin` is the native build and `x86_64-apple-darwin` is a
+    cross-compile. Both remain build-only; neither is executed.
 
 ## Pinned actions
 

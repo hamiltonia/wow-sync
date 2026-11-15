@@ -53,7 +53,7 @@ The in-process self-test (`WOWSYNC_SPIKE_SELFTEST=1`) logs timestamped transitio
 | Quit via real tray menu click | NOT RUN | Needs a person to right-click the tray icon (below). |
 | Real tray icon visible and clickable in the shell | NOT RUN | Not automated; owner manual check (below). |
 | Single instance | PASS | Named mutex `Local\WowSyncSpikeGpuiSingleInstance`; second launch signalled a named event and exited; first window (hidden) reappeared; process count stayed 1. |
-| Memory | informational | Working set 59-62 MiB for a trivial window (not the A-37 private-resident gate; not measured properly). |
+| Memory | informational | Working set 59-62 MiB for a trivial window (not the A-37 [correction by P3-fix: A-29] private-resident gate; not measured properly). |
 
 Finding: GPUI 0.2.2 has no public hide/show window API (only minimize, remove,
 activate). Hide/show therefore uses the raw HWND (via `HasWindowHandle`) and
@@ -113,7 +113,7 @@ may not have clang and ARM64 MSVC tools; the run will show it.
 - Hiding/showing needs OS-specific code outside GPUI's API; budget for it on macOS.
 - gpui 0.2.2 drags a heavy dependency tree (reqwest/rustls/ring, blade, etc.) even for
   a tray-resident process. 11 MB binary and about 60 MiB working set for a trivial
-  window mean the 100 MiB aggregate background-memory budget (R-13/A-37) needs real
+  window mean the 100 MiB aggregate background-memory budget (R-13/A-37 [correction by P3-fix: memory case is A-29]) needs real
   measurement, and a design that closes the GPUI window (or runs the sync engine in a
   separate process) when idle may be needed. Not measured here.
 - Windows ARM64 needs clang and ARM64 MSVC tooling in CI/dev (ring build script).
@@ -137,3 +137,12 @@ powershell -NoProfile -File gpu-pref.ps1                              # iGPU for
 Method limits: single machine, single run of each scripted pass; tray events were
 synthesized by posting the library's callback message rather than real shell input;
 no soak, no DPI/multi-monitor, no sleep/resume tests.
+
+## CI build-only evidence (added by P3-fix)
+
+`gh run view 43756896472 --json conclusion,headSha,jobs` showed: conclusion
+`success`, headSha `88242f196a50e16b94ed944f9bc1b28d49a9689e` (commit 88242f1),
+workflow spike-gpui.yml, four jobs all `success`: build-only
+x86_64-pc-windows-msvc, aarch64-pc-windows-msvc, x86_64-apple-darwin and
+aarch64-apple-darwin. This shows the spike compiles for all four targets; it is
+build-only and says nothing about running, tray behavior or memory on any of them.

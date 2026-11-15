@@ -68,6 +68,7 @@ meanings and how to add a required case. This table only says where things are.
 | Dependency/license policy for `cargo deny` | [deny.toml](../deny.toml) | P1-verify |
 | Verifier report output | `target/verify/report.json` (generated, not committed) | P1-verify |
 | CI workflow | [.github/workflows/ci.yml](../.github/workflows/ci.yml) | [P1-ci](runs/run-001/packets/P1-ci.md) |
+| Build-only spike workflow (not product CI) | [.github/workflows/spike-gpui.yml](../.github/workflows/spike-gpui.yml) | [S-gpui](runs/run-001/packets/S-gpui.md) |
 
 What was actually executed, where and with what result is recorded per packet
 under `docs/runs/<run-id>/evidence/` (run-001: [evidence/](runs/run-001/evidence/)),
@@ -81,6 +82,7 @@ not here.
 | Cargo virtual workspace, members, shared package metadata | [Cargo.toml](../Cargo.toml), [Cargo.lock](../Cargo.lock); members change only via owning packets |
 | Platform-free domain core | [crates/wow-sync-core/](../crates/wow-sync-core/); intended role in [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Verification tooling (not product code) | [xtask/](../xtask/) |
+| `spikes/` run-001 feasibility spikes, each its own Cargo workspace (not product code) | [spikes/](../spikes/); see Spikes below |
 | Platform adapters, GPUI app | Location chosen by the packet that creates them; boundaries proposed in [ARCHITECTURE.md](ARCHITECTURE.md) |
 
 ## Spikes
