@@ -1,0 +1,10 @@
+[package]
+name = "state-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "S-state spike: non-executing saved-variable scanner and ownership classifier"
+
+[workspace]
+
+[dependencies]
