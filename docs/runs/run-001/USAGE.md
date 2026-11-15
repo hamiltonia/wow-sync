@@ -16,9 +16,19 @@ D-13). Stop launching at ≥9,500; in-flight work may settle up to 11,000.
 | 3 | P1-ci | claude-sonnet-5.5 | claude-sonnet-5.5 (agent `d37350b4`, 10 calls) | 23.11 | Done `34c8f50` |
 | 4 | P1-map | claude-opus-5.5 | claude-opus-5.5 (agent `6e7b0d6d`, 25 calls incl. fix 1) | 165.27 | Done `4b1dd04`; fix 1 `a154850` (stale REPO-MAP) |
 | 5 | P1-check | gpt-6.1-sol | gpt-6.1-sol (agent `ed40bcc0`, 62 calls incl. re-verification) | 95.30 | Done `98ea632`; re-verification `d397ac7` |
+| 6 | S-addon | claude-sonnet-5.5 | claude-sonnet-5.5 (agent `92343665`, 23 calls) | 64.99 | Done `33d6f83`; merged `651a670` |
+| 7 | S-state | claude-opus-5.5 | claude-opus-5.5 (agent `df792b20`, 42 calls) | 192.29 | Done `9278813`; merged `8cecb2a` |
+| 8 | S-forever | claude-sonnet-5.5 | claude-sonnet-5.5 (agent `07f81097`, 9 calls) | 11.99 | Report uncommitted, awaiting owner review (PLAN §7) |
+| 9 | S-gpui | claude-sonnet-5.5 | claude-sonnet-5.5 (agent `e373d2ac`, 32 calls) | 67.88 | Done `2d5d966`; merged `88242f1`; spike-gpui run `43756896472` 4/4 build-only success |
+| 10 | S-proc | claude-sonnet-5.5 | claude-sonnet-5.5 (agent `dbfad9e6`, 25 calls) | 67.90 | Done `bae1e6b`; merged `fc41192` |
+| 11 | S-dropbox | claude-sonnet-5.5 | claude-sonnet-5.5 (agent `2685e17e`, 25 calls) | 33.62 | Done `69cb0df`; merged `064afae` |
+| 12 | S-a11y | claude-sonnet-5.5 | claude-sonnet-5.5 (agent `24eacf77`, 55 calls) | 96.23 | Done `e9baf20`; merged `c9b1830` (also added `spikes/a11y-main/` comparison, outside packet path; accepted) |
+| 13 | S-a11y-design | claude-opus-5.5 | claude-opus-5.5 (agent `e0e4339b`, 25 calls) | 113.36 | Done `afb308c`; merged `d6d6898` |
+| 14 | S-mem | claude-sonnet-5.5 | claude-sonnet-5.5 (agent `472aeb2c`) | in progress | Running |
 
-Worker count: 5 / 20. Concurrent max: 5 (3 used). Retries: P1-verify 2 / 2
-(exhausted), P1-map 1 / 2.
+Worker count: 14 / 20. Concurrent max: 5 (5 used). Retries: P1-verify 2 / 2
+(exhausted), P1-map 1 / 2. Run total mid-Phase 2 (S-mem running): ≈2,475 AIU
+(orchestrator `961f3baa` 873.12, `fea20f53` 516.93; workers ≈1,085).
 
 Independent check (orchestrator, clean clone of `main` + the three branches,
 2026-11-15): first run `offline/markdown-links` FAIL (false positive on inline
