@@ -7,8 +7,7 @@ and run-002; settle up to 11,000). Prerequisite decisions in §6 are
 **provisional orchestrator defaults** pending owner review (D-17).
 Drafted 2026-11-15 by the Opus 5.5 orchestrator from
 [../run-001/REPORT.md](../run-001/REPORT.md) §4–5.
-State: [HANDOFF.md](HANDOFF.md). Ledger: [../run-001/USAGE.md](../run-001/USAGE.md)
-(continues for run-002).
+State: [HANDOFF.md](HANDOFF.md). Ledger: [USAGE.md](USAGE.md).
 
 ## 1. Goal
 
