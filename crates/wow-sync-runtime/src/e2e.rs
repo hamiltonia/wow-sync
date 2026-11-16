@@ -706,11 +706,14 @@ mod tests {
             let r = synced(&mut b);
             let done = !r.crashed;
             let applied = r.applied.iter().any(|l| l.text == "applied");
+            let pending_file = b.cfg.state_dir.join("pending-report.json");
+            let mut uncleared = None;
             if r.crashed && applied {
                 assert!(
                     published_applied(&lab, &g, &b, "alpha").is_empty(),
                     "k={k}: crashed before the report was published"
                 );
+                uncleared = Some(std::fs::read(&pending_file).expect("report kept locally"));
                 window_hit = true;
             }
             b.restart();
@@ -733,6 +736,17 @@ mod tests {
             );
             let last = last.unwrap();
             assert!(last.published.is_none(), "k={k}: republished {last:?}");
+            if let Some(bytes) = uncleared {
+                // A crash after the state was written but before the store was cleared:
+                // the next start must not publish the same report again.
+                std::fs::write(&pending_file, bytes).unwrap();
+                b.restart();
+                for _ in 0..2 {
+                    let r = synced(&mut b);
+                    assert!(r.published.is_none(), "k={k}: republished {r:?}");
+                }
+                assert_eq!(published_applied(&lab, &g, &b, "alpha").len(), 1, "k={k}");
+            }
             let t = texts(&synced(&mut a));
             assert!(t.contains("applied and reported by"), "k={k}: {t}");
             if done {
