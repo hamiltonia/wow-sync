@@ -48,7 +48,9 @@ Report: [REPORT.md](REPORT.md).
 - Dependabot alert count on `main` rose from 4 to 6 (moderate) during run-002;
   not triaged (PLAN §6 #5 held for owner).
 - CI on `50e5029`: macOS `offline/required-cases` FAIL because the Windows-only
-  R3-M1 test was listed for all OSes (R2-fix5 assigned). Earlier, Windows CI on
+  R3-M1 test was listed for all OSes. Fixed by R2-fix5 (`chflags uchg` lock on
+  macOS, test-only); CI on `41e14ca` fully green, including macOS running the
+  test. Earlier, Windows CI on
   `7da6d0f` failed once in `wow-sync-adapters` tests with no test name in the
   log; it passed on the next run with adapters unchanged. Treat it as a
   suspected flaky test that needs investigating.
@@ -61,7 +63,7 @@ Report: [REPORT.md](REPORT.md).
 
 ## Remaining work (for owner discussion)
 
-Rough sizing in run-002 terms (run-002 ≈5,600 AIU built design + slice).
+Rough sizing in run-002 terms (run-002 ≈5,800 AIU built design + slice).
 
 | Item | Needs owner? | Rough size |
 |---|---|---|
