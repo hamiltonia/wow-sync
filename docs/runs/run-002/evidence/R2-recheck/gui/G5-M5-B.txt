@@ -1,0 +1,18 @@
+
+ControlType.Text: WoW Sync
+ControlType.Group: Developer build - synthetic installs only. This computer: Recheck-B
+ControlType.Text: Waiting
+ControlType.Group: Add-on sync group on Recheck-B (World of Warcraft: Forever (wowf) / _forever_)
+ControlType.Group: Game activity: NotRunning
+ControlType.Button: Sync now
+ControlType.Text: Add-ons
+ControlType.List: Add-ons
+ControlType.ListItem: alpha: cannot tell which version is newer: alpha (4.0 vs 4.0: same label, different content) [version 4.0 on this computer; version 4.0 on computer Recheck-A]
+ControlType.Group: Recovery: 2 recovery point(s) kept, 0 interrupted update(s)
+ControlType.Text: Other computers
+ControlType.List: Other computers
+ControlType.ListItem: Recheck-A: data received; reported at 1794810483496 by its own clock (peer clock); last seen here at 1794810485878
+ControlType.Group: Published 3 s ago
+ControlType.Text: Last sync
+ControlType.List: Last sync
+ControlType.ListItem: published seq 3 (2 new objects)

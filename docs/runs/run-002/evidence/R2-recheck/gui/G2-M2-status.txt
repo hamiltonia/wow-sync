@@ -1,0 +1,17 @@
+
+ControlType.Text: WoW Sync
+ControlType.Group: Developer build - synthetic installs only. This computer: Recheck-C
+ControlType.Text: Everything is up to date
+ControlType.Group: Add-on sync group on Recheck-C (Unfamiliar game version (wow_test) / _test_)
+ControlType.Group: Game activity: NotRunning
+ControlType.Button: Sync now
+ControlType.Text: Add-ons
+ControlType.List: Add-ons
+ControlType.ListItem: blocked: Blocked has client-specific .toc files that are not validated for this client, so it is not synced
+ControlType.ListItem: good: up to date with the versions this computer can see
+ControlType.Text: Other computers
+ControlType.List: Other computers
+ControlType.Group: Published 0 s ago
+ControlType.Text: Last sync
+ControlType.List: Last sync
+ControlType.ListItem: published seq 1 (3 new objects)

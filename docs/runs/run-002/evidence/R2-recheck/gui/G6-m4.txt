@@ -1,0 +1,14 @@
+Provider root replaced by a file; error duplication and identity text checked.
+ControlType.Text: WoW Sync
+ControlType.Group: Developer build - synthetic installs only. This computer: Recheck-A
+ControlType.Text: Something needs attention
+ControlType.Group: Game activity:
+ControlType.Group: Problem: shared folder problem: NotPlainFile at <synthetic-lab>\provider: not a directory
+ControlType.Button: Sync now
+ControlType.Text: Add-ons
+ControlType.List: Add-ons
+ControlType.Text: Other computers
+ControlType.List: Other computers
+ControlType.Text: Last sync
+ControlType.List: Last sync
+ControlType.ListItem: published seq 5 (3 new objects)

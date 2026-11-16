@@ -1,0 +1,18 @@
+No FakeClient exists; injected failure after two mutating effects.
+ControlType.Text: WoW Sync
+ControlType.Group: Developer build - synthetic installs only. This computer: Recheck-B
+ControlType.Text: Waiting
+ControlType.Group: Add-on sync group on Recheck-B (World of Warcraft: Forever (wowf) / _forever_)
+ControlType.Group: Game activity: NotRunning
+ControlType.Button: Sync now
+ControlType.Text: Add-ons
+ControlType.List: Add-ons
+ControlType.ListItem: alpha: updating alpha was interrupted; it will be finished or restored on the next sync
+ControlType.Group: Recovery: 2 recovery point(s) kept, 1 interrupted update(s)
+ControlType.Text: Other computers
+ControlType.List: Other computers
+ControlType.ListItem: Recheck-A: data received; reported at 1794810492814 by its own clock (peer clock); last seen here at 1794810496741
+ControlType.Text: Last sync
+ControlType.List: Last sync
+ControlType.ListItem: alpha: failed - could not prepare alpha: Crashed: simulated crash
+ControlType.ListItem: Stopped mid-way (simulated crash for the developer check)

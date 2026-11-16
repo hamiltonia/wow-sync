@@ -1,0 +1,20 @@
+B remains a2 while directly launched FakeClient runs; A is a3.
+ControlType.Text: WoW Sync
+ControlType.Group: Developer build - synthetic installs only. This computer: Recheck-B
+ControlType.Text: Waiting — WoW is running
+ControlType.Group: Add-on sync group on Recheck-B (World of Warcraft: Forever (wowf) / _forever_)
+ControlType.Group: Game activity: Running { pids: [22148] }
+ControlType.Button: Sync now
+ControlType.Text: Waiting
+ControlType.List: Waiting
+ControlType.ListItem: WoW is running; nothing was changed
+ControlType.Text: Add-ons
+ControlType.List: Add-ons
+ControlType.ListItem: alpha: Alpha: version 3.0 from computer Recheck-A is newer than 2.0 here
+ControlType.Group: Recovery: 1 recovery point(s) kept, 0 interrupted update(s)
+ControlType.Text: Other computers
+ControlType.List: Other computers
+ControlType.ListItem: Recheck-A: data received; reported at 1794810473219 by its own clock (peer clock); last seen here at 1794810475576
+ControlType.Text: Last sync
+ControlType.List: Last sync
+ControlType.ListItem: WoW is running; nothing was changed

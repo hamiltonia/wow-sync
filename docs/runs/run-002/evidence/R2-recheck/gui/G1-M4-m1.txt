@@ -1,0 +1,21 @@
+Fresh recognized enrollment: independently captured disclosures before consent.
+ControlType.Text: WoW Sync
+ControlType.Group: Developer build - synthetic installs only. This computer: Recheck-A
+ControlType.Text: Set up this computer
+ControlType.Group: World of Warcraft: Forever (wowf) - folder _forever_, build 1.0.0.1
+ControlType.Group: 1 add-on folder(s) in _forever_/Interface/AddOns would sync; 0 blocked
+ControlType.Group: Only add-on code (Interface/AddOns) is synced. Game settings, saved variables and accounts are excluded.
+ControlType.Text: What setting this up does
+ControlType.List: What setting this up does
+ControlType.ListItem: This computer will share its installed add-ons for World of Warcraft: Forever (wowf) with other computers in this group, and will install newer versions found on them.
+ControlType.ListItem: Chosen install location: <synthetic-lab>\A\install. Add-ons are read from and changed only in <synthetic-lab>\A\install\_forever_\Interface\AddOns.
+ControlType.ListItem: Folder rule validated-plain/1: an add-on folder is synced only if it has a plain <Name>.toc and no client-specific variants of it. Other folders are listed as blocked and are never changed.
+ControlType.ListItem: Newer add-on versions found on other computers are installed, replacing the folder here, automatically.
+ControlType.ListItem: Add-ons missing on this computer are installed, never treated as removed; an add-on missing elsewhere is never deleted here.
+ControlType.ListItem: Folders it replaces are kept on this computer for recovery under <synthetic-lab>\A\install\_forever_\.wowsync\recovery.
+ControlType.ListItem: Settings (WTF) are not synchronized in this version; their layout for this client has not been validated.
+ControlType.Text: Add-on folders that would sync
+ControlType.List: Add-on folders that would sync
+ControlType.ListItem: alpha
+ControlType.CheckBox: I agree to sync the add-on code listed above for this installation
+ControlType.Button: Create a new sync group
