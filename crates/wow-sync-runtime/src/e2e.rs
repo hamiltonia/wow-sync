@@ -1,0 +1,629 @@
+//! End-to-end slice cases (tests.md §5): real adapters, synthetic installs under a temp
+//! directory, one temp directory standing in for the shared provider folder.
+
+#[cfg(test)]
+mod tests {
+    use crate::*;
+    use std::path::{Path, PathBuf};
+    use wow_sync_adapters::fs_install::InstallArea;
+    use wow_sync_adapters::localstate::LocalState;
+    use wow_sync_adapters::testkit::{SyntheticInstall, TempDir};
+    use wow_sync_core::hash::sha256;
+    use wow_sync_core::ids::GroupId;
+    use wow_sync_core::layout;
+    use wow_sync_core::plan::Activity;
+
+    struct Pc {
+        install: SyntheticInstall,
+        cfg: ServiceConfig,
+        svc: SliceService,
+        act: ActivityHandle,
+    }
+
+    struct Lab {
+        tmp: TempDir,
+        shared: PathBuf,
+    }
+
+    impl Lab {
+        fn new() -> Lab {
+            let tmp = TempDir::new();
+            let shared = tmp.join("shared");
+            std::fs::create_dir(&shared).unwrap();
+            Lab { tmp, shared }
+        }
+
+        fn pc(&self, name: &str) -> Pc {
+            self.pc_with(name, "_forever_", "wowf")
+        }
+
+        fn pc_with(&self, name: &str, folder: &str, product: &str) -> Pc {
+            let install = SyntheticInstall::with_product(self.tmp.path(), name, folder, product);
+            let state = self.tmp.join(&format!("{name}-state"));
+            let cfg = ServiceConfig {
+                install_root: install.root.clone(),
+                variant_folder: folder.to_string(),
+                shared_root: self.shared.clone(),
+                state_dir: state,
+                display_name: name.to_string(),
+                app_version: "0.0.0-e2e".into(),
+                recent_ms: 0,
+            };
+            let (src, act) = ScriptedActivity::new(Activity::NotRunning);
+            let svc = SliceService::with_activity(cfg.clone(), Box::new(src)).unwrap();
+            Pc {
+                install,
+                cfg,
+                svc,
+                act,
+            }
+        }
+    }
+
+    impl Pc {
+        /// A tag ending in a digit N is version N+1.0 so later tags are demonstrably newer.
+        fn addon(&self, name: &str, tag: &str) {
+            let n = tag
+                .chars()
+                .last()
+                .and_then(|c| c.to_digit(10))
+                .map_or(1, |d| d + 1);
+            self.addon_with(
+                name,
+                tag,
+                &format!("## Interface: 11508\n## Version: {n}.0\n"),
+            );
+        }
+
+        fn addon_with(&self, name: &str, tag: &str, toc: &str) {
+            self.install.add_addon(
+                name,
+                &format!("{name}.toc"),
+                toc,
+                &[("main.lua", tag.as_bytes())],
+            );
+            self.install.set_old_mtimes();
+        }
+
+        fn read(&self, rel: &str) -> Option<String> {
+            std::fs::read_to_string(self.install.addons.join(rel)).ok()
+        }
+
+        fn confirm_request(&self, join: JoinChoice) -> EnrollRequest {
+            let p = self.svc.inspect();
+            EnrollRequest {
+                join,
+                identity_confirmed: true,
+                scope_confirmed: true,
+                digest: p.digest,
+                display_name: self.cfg.display_name.clone(),
+            }
+        }
+
+        fn create(&mut self) -> GroupId {
+            let req = self.confirm_request(JoinChoice::New {
+                name: "Slice".into(),
+            });
+            self.svc.enroll(&req).unwrap()
+        }
+
+        fn join(&mut self, g: &GroupId) {
+            let req = self.confirm_request(JoinChoice::Existing(g.clone()));
+            self.svc.enroll(&req).unwrap();
+        }
+
+        fn journals(&self) -> usize {
+            InstallArea::open(&self.install.variant_dir)
+                .unwrap()
+                .read_journals()
+                .unwrap()
+                .len()
+        }
+
+        fn restart(&mut self) {
+            let (src, act) = ScriptedActivity::new(Activity::NotRunning);
+            self.svc = SliceService::with_activity(self.cfg.clone(), Box::new(src)).unwrap();
+            self.act = act;
+        }
+    }
+
+    fn synced(pc: &mut Pc) -> SyncReport {
+        pc.svc.sync_once().unwrap()
+    }
+
+    fn computer_id(pc: &Pc) -> String {
+        let st = LocalState::open_at(&pc.cfg.state_dir).unwrap();
+        let c = String::from_utf8(st.read("computer.json", 65536).unwrap().unwrap()).unwrap();
+        c.split('"')
+            .find(|s| s.len() == 32 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+            .unwrap()
+            .to_string()
+    }
+
+    fn provider_state_files(lab: &Lab, g: &GroupId, pc: &Pc) -> usize {
+        let id = computer_id(pc);
+        let dir = lab
+            .shared
+            .join("WoWSync")
+            .join(format!("groups/{g}/members/{id}/state"));
+        std::fs::read_dir(dir).map(|d| d.count()).unwrap_or(0)
+    }
+
+    fn remove_blob(lab: &Lab, g: &GroupId, content: &[u8]) {
+        let rel = layout::blob(g, &sha256(content));
+        let p: PathBuf = rel
+            .split('/')
+            .fold(lab.shared.join("WoWSync"), |a, s| a.join(s));
+        std::fs::remove_file(p).unwrap();
+    }
+
+    fn texts(r: &SyncReport) -> String {
+        let s = &r.status;
+        format!(
+            "{} | {} | {} | {}",
+            s.headline,
+            s.packages
+                .iter()
+                .map(|p| p.text.clone())
+                .collect::<Vec<_>>()
+                .join(" ; "),
+            s.members.join(" ; "),
+            s.blocks.join(" ; ")
+        )
+    }
+
+    fn same_tree(a: &Path, b: &Path) -> bool {
+        fn list(p: &Path, base: &Path, out: &mut Vec<(String, Vec<u8>)>) {
+            for e in std::fs::read_dir(p).unwrap().flatten() {
+                let q = e.path();
+                if q.is_dir() {
+                    list(&q, base, out);
+                } else {
+                    out.push((
+                        q.strip_prefix(base).unwrap().to_string_lossy().into_owned(),
+                        std::fs::read(&q).unwrap(),
+                    ));
+                }
+            }
+        }
+        let (mut x, mut y) = (vec![], vec![]);
+        list(a, a, &mut x);
+        list(b, b, &mut y);
+        x.sort();
+        y.sort();
+        x == y
+    }
+
+    #[test]
+    fn two_installs_publish_and_apply_through_temp_provider() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Alpha", "alpha-v1");
+        a.addon("Beta", "beta-v1");
+        let g = a.create();
+        let r = synced(&mut a);
+        assert!(r.published.is_some(), "{r:?}");
+        b.join(&g);
+        let r = synced(&mut b);
+        assert_eq!(r.applied.len(), 2, "{r:?}");
+        assert!(same_tree(&a.install.addons, &b.install.addons));
+        assert_eq!(b.journals(), 0);
+        // Idempotent when nothing changed.
+        let r = synced(&mut b);
+        assert!(r.applied.is_empty(), "{r:?}");
+    }
+
+    #[test]
+    fn independent_updates_converge() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Alpha", "alpha-v1");
+        b.addon("Beta", "beta-v1");
+        let g = a.create();
+        b.join(&g);
+        for _ in 0..3 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        assert!(same_tree(&a.install.addons, &b.install.addons));
+        assert_eq!(a.read("Beta/main.lua").as_deref(), Some("beta-v1"));
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+    }
+
+    #[test]
+    fn ambiguous_addon_stops_only_that_addon() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Amb", "from-a");
+        a.addon("Good", "good-v1");
+        b.addon("Amb", "from-b");
+        let g = a.create();
+        b.join(&g);
+        let mut last = SyncReport::default();
+        for _ in 0..3 {
+            synced(&mut a);
+            last = synced(&mut b);
+        }
+        assert_eq!(a.read("Amb/main.lua").as_deref(), Some("from-a"));
+        assert_eq!(b.read("Amb/main.lua").as_deref(), Some("from-b"));
+        assert_eq!(b.read("Good/main.lua").as_deref(), Some("good-v1"));
+        assert!(
+            last.status
+                .packages
+                .iter()
+                .any(|p| p.key == "amb" && p.text.contains("cannot tell which version is newer")),
+            "{}",
+            texts(&last)
+        );
+    }
+
+    fn suite_pair(a: &Pc) {
+        a.addon("Suite", "suite-v1");
+        a.addon_with(
+            "SuiteData",
+            "data-v1",
+            "## Interface: 11508\n## Version: 1.0\n## Dependencies: Suite\n",
+        );
+    }
+
+    #[test]
+    fn partial_suite_on_target_is_not_mixed() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        suite_pair(&a);
+        b.addon("Suite", "suite-v0");
+        let g = a.create();
+        synced(&mut a);
+        remove_blob(&lab, &g, b"data-v1");
+        b.join(&g);
+        let r = synced(&mut b);
+        assert_eq!(
+            b.read("Suite/main.lua").as_deref(),
+            Some("suite-v0"),
+            "{r:?}"
+        );
+        assert!(b.read("SuiteData/main.lua").is_none());
+    }
+
+    #[test]
+    fn empty_peer_does_not_receive_partial_suite() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        suite_pair(&a);
+        let g = a.create();
+        synced(&mut a);
+        remove_blob(&lab, &g, b"suite-v1");
+        b.join(&g);
+        let r = synced(&mut b);
+        assert!(b.read("Suite/main.lua").is_none(), "{r:?}");
+        assert!(b.read("SuiteData/main.lua").is_none(), "{r:?}");
+        assert_eq!(b.journals(), 0);
+    }
+
+    #[test]
+    fn game_running_on_target_blocks_apply_then_resumes() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        b.act.set(Activity::Running { pids: vec![4242] });
+        let r = synced(&mut b);
+        assert!(b.read("Alpha/main.lua").is_none(), "{r:?}");
+        assert!(
+            r.apply_note.as_deref().unwrap_or("").contains("running"),
+            "{r:?}"
+        );
+        b.act.set(Activity::Unknown("probe failed".into()));
+        synced(&mut b);
+        assert!(b.read("Alpha/main.lua").is_none());
+        b.act.set(Activity::NotRunning);
+        let r = synced(&mut b);
+        assert_eq!(
+            b.read("Alpha/main.lua").as_deref(),
+            Some("alpha-v1"),
+            "{r:?}"
+        );
+    }
+
+    #[test]
+    fn unfamiliar_variant_blocked_until_confirmed() {
+        let lab = Lab::new();
+        let mut t = lab.pc_with("t", "_test_", "wow_test");
+        t.addon("Alpha", "alpha-v1");
+        let p = t.svc.inspect();
+        assert_eq!(p.kind, PreviewKind::Unfamiliar, "{p:?}");
+        assert!(p.needs_guided_confirmation && p.digest.is_some());
+        let mut req = t.confirm_request(JoinChoice::New { name: "T".into() });
+        req.identity_confirmed = false;
+        assert!(matches!(t.svc.enroll(&req), Err(ServiceError::Refused(_))));
+        req.identity_confirmed = true;
+        req.scope_confirmed = false;
+        assert!(matches!(t.svc.enroll(&req), Err(ServiceError::Refused(_))));
+        req.scope_confirmed = true;
+        req.digest = Some(sha256(b"some other scope"));
+        assert!(matches!(t.svc.enroll(&req), Err(ServiceError::Refused(_))));
+        // Nothing was written for the refused attempts (G1: inspection and refusal are read-only).
+        assert!(!lab.shared.join("WoWSync").exists());
+        assert!(!t.cfg.state_dir.join("enrollment.json").exists());
+        req.digest = t.svc.inspect().digest;
+        t.svc.enroll(&req).unwrap();
+        assert!(t.cfg.state_dir.join("enrollment.json").exists());
+    }
+
+    #[test]
+    fn join_refused_for_other_product() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let g = a.create();
+        let mut t = lab.pc_with("t", "_test_", "wow_test");
+        let req = t.confirm_request(JoinChoice::Existing(g.clone()));
+        let e = t.svc.enroll(&req).unwrap_err();
+        assert!(matches!(e, ServiceError::Refused(_)), "{e}");
+        let members = lab
+            .shared
+            .join("WoWSync")
+            .join(format!("groups/{g}/members"));
+        assert_eq!(std::fs::read_dir(members).unwrap().count(), 1);
+        assert!(!t.cfg.state_dir.join("enrollment.json").exists());
+    }
+
+    #[test]
+    fn install_without_marker_refused() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        std::fs::remove_file(a.install.root.join(".wowsync-synthetic")).unwrap();
+        let p = a.svc.inspect();
+        assert_eq!(p.kind, PreviewKind::Refused, "{p:?}");
+        let req = EnrollRequest {
+            join: JoinChoice::New { name: "X".into() },
+            identity_confirmed: true,
+            scope_confirmed: true,
+            digest: p.digest,
+            display_name: "a".into(),
+        };
+        assert!(matches!(a.svc.enroll(&req), Err(ServiceError::Refused(_))));
+        assert!(!lab.shared.join("WoWSync").exists());
+    }
+
+    struct Crashy {
+        _lab: Lab,
+        _a: Pc,
+        b: Pc,
+    }
+
+    /// B holds old versions of two independent add-ons, A holds new ones; both enrolled and
+    /// A has published.
+    fn two_package_fixture() -> Crashy {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        b.addon("Alpha", "alpha-v0");
+        b.addon("Beta", "beta-v0");
+        let g = a.create();
+        b.join(&g);
+        synced(&mut b);
+        a.addon("Alpha", "alpha-v1");
+        a.addon("Beta", "beta-v1");
+        synced(&mut a);
+        Crashy {
+            _lab: lab,
+            _a: a,
+            b,
+        }
+    }
+
+    fn assert_whole(b: &Pc) {
+        for (name, old, new) in [
+            ("Alpha", "alpha-v0", "alpha-v1"),
+            ("Beta", "beta-v0", "beta-v1"),
+        ] {
+            let v = b.read(&format!("{name}/main.lua")).unwrap_or_default();
+            assert!(v == old || v == new, "{name} holds {v:?}");
+        }
+    }
+
+    #[test]
+    fn crash_mid_apply_recovers_on_restart() {
+        let mut f = two_package_fixture();
+        let b = &mut f.b;
+        b.svc.inject_crash_after(Some(3));
+        let r = synced(b);
+        assert!(r.crashed, "{r:?}");
+        assert!(b.journals() > 0, "a crash mid-apply leaves a journal");
+        b.restart();
+        let r = synced(b);
+        assert!(!r.recovered.is_empty(), "{r:?}");
+        assert_whole(b);
+        for _ in 0..2 {
+            synced(b);
+        }
+        assert_eq!(b.journals(), 0);
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        assert_eq!(b.read("Beta/main.lua").as_deref(), Some("beta-v1"));
+    }
+
+    #[test]
+    fn two_package_crash_at_every_effect_recovers_with_real_adapters() {
+        let mut k = 0;
+        loop {
+            let mut f = two_package_fixture();
+            let b = &mut f.b;
+            b.svc.inject_crash_after(Some(k));
+            let r = synced(b);
+            let done = !r.crashed;
+            b.restart();
+            for _ in 0..3 {
+                synced(b);
+                assert_whole(b);
+            }
+            assert_eq!(b.journals(), 0, "crash point {k}");
+            assert_eq!(
+                b.read("Alpha/main.lua").as_deref(),
+                Some("alpha-v1"),
+                "k={k}"
+            );
+            assert_eq!(b.read("Beta/main.lua").as_deref(), Some("beta-v1"), "k={k}");
+            if done {
+                break;
+            }
+            k += 1;
+            assert!(k < 200, "the cycle never completed");
+        }
+        assert!(k >= 6, "expected several crash points, saw {k}");
+    }
+
+    #[test]
+    fn crash_during_recovery_with_real_adapters_is_reentrant() {
+        let mut j = 0;
+        loop {
+            let mut f = two_package_fixture();
+            let b = &mut f.b;
+            b.svc.inject_crash_after(Some(4));
+            assert!(synced(b).crashed);
+            b.restart();
+            b.svc.inject_crash_after(Some(j));
+            let r = synced(b);
+            let done = !r.crashed;
+            b.restart();
+            for _ in 0..3 {
+                synced(b);
+                assert_whole(b);
+            }
+            assert_eq!(b.journals(), 0, "recovery crash point {j}");
+            assert_eq!(
+                b.read("Alpha/main.lua").as_deref(),
+                Some("alpha-v1"),
+                "j={j}"
+            );
+            assert_eq!(b.read("Beta/main.lua").as_deref(), Some("beta-v1"), "j={j}");
+            if done {
+                break;
+            }
+            j += 1;
+            assert!(j < 200);
+        }
+        assert!(j >= 1, "recovery itself must have had effects to interrupt");
+    }
+
+    #[test]
+    fn destination_updated_during_staging_is_not_replaced() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        b.addon("Alpha", "alpha-v0");
+        let g = a.create();
+        b.join(&g);
+        synced(&mut b);
+        a.addon("Alpha", "alpha-v1");
+        synced(&mut a);
+        let live = b.install.addons.join("Alpha").join("main.lua");
+        b.svc.hooks_mut().after_stage = Some(Box::new(move || {
+            std::fs::write(&live, b"user-edit").unwrap();
+        }));
+        let r = synced(&mut b);
+        assert_eq!(
+            b.read("Alpha/main.lua").as_deref(),
+            Some("user-edit"),
+            "{r:?}"
+        );
+        assert!(
+            r.applied.iter().all(|l| !l.text.starts_with("applied")),
+            "{r:?}"
+        );
+        assert_eq!(b.journals(), 0);
+    }
+
+    #[test]
+    fn publish_aborts_when_source_changes() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        let live = a.install.addons.join("Alpha").join("main.lua");
+        a.svc.hooks_mut().after_put = Some(Box::new(move || {
+            std::fs::write(&live, b"changed while publishing").unwrap();
+        }));
+        let r = synced(&mut a);
+        assert!(r.published.is_none(), "{r:?}");
+        assert!(
+            r.publish_note
+                .as_deref()
+                .unwrap_or("")
+                .contains("not published"),
+            "{r:?}"
+        );
+        assert_eq!(provider_state_files(&lab, &g, &a), 0);
+    }
+
+    #[test]
+    fn peer_confirmation_only_after_apply() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        let b_id = computer_id(&b);
+        b.act.set(Activity::Running { pids: vec![7] });
+        synced(&mut b);
+        let r = synced(&mut a);
+        let t = texts(&r);
+        assert!(!t.contains("reported by"), "published is not applied: {t}");
+        assert!(
+            r.status
+                .last_publish
+                .as_deref()
+                .unwrap_or("")
+                .contains("Published"),
+            "{t}"
+        );
+        b.act.set(Activity::NotRunning);
+        let rb = synced(&mut b);
+        assert_eq!(rb.applied.len(), 1, "{rb:?}");
+        let r = synced(&mut a);
+        let t = texts(&r);
+        assert!(t.contains("applied and reported by"), "{t}");
+        assert!(
+            t.contains("b") && !t.contains(&b_id),
+            "peer named by its display name: {t}"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn fake_client_blocks_real_apply() {
+        use wow_sync_adapters::testkit::FakeClient;
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        // Real process observation instead of the scripted source.
+        b.svc = SliceService::new(b.cfg.clone()).unwrap();
+        let client = FakeClient::start(&b.install.variant_dir);
+        let r = synced(&mut b);
+        assert!(b.read("Alpha/main.lua").is_none(), "{r:?}");
+        assert!(
+            r.apply_note.as_deref().unwrap_or("").contains("running"),
+            "{r:?}"
+        );
+        drop(client);
+        let r = synced(&mut b);
+        assert_eq!(
+            b.read("Alpha/main.lua").as_deref(),
+            Some("alpha-v1"),
+            "{r:?}"
+        );
+    }
+}

@@ -83,7 +83,9 @@ not here.
 | Platform-free domain core | [crates/wow-sync-core/](../crates/wow-sync-core/); intended role in [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Verification tooling (not product code) | [xtask/](../xtask/) |
 | `spikes/` run-001 feasibility spikes, each its own Cargo workspace (not product code) | [spikes/](../spikes/); see Spikes below |
-| Platform adapters, GPUI app | Location chosen by the packet that creates them; boundaries proposed in [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Platform adapters (filesystem, process, provider) | [crates/wow-sync-adapters/](../crates/wow-sync-adapters/) |
+| Runtime: port implementations over adapters, `SliceService`, failure-injecting effects, e2e slice tests | [crates/wow-sync-runtime/](../crates/wow-sync-runtime/) |
+| GPUI shell (tray, window, G1-G9 screens) and `devkit` synthetic-install helper | [crates/wow-sync-app/](../crates/wow-sync-app/) |
 
 ## Spikes
 
