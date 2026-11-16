@@ -10,3 +10,110 @@ tests = [
     "inventory::tests::zero_tests_with_listed_cases_is_a_problem",
     "inventory::tests::missing_ignored_and_failed_listed_tests_are_reported",
 ]
+
+# R2-adapters (docs/design/tests.md section 4).
+[[case]]
+id = "A-23:adapters"
+tier = "offline"
+tests = [
+    "fs_safe::tests::join_rejects_traversal_and_absolute",
+    "fs_safe::tests::classify_tag_cloud_vs_link_vs_other",
+    "fs_safe::tests::unavailable_attribute_combinations",
+    "fs_safe::tests::unavailable_directory_not_enumerated",
+    "fs_install::tests::deletion_only_inside_work_area",
+    "fs_install::tests::stage_file_rejects_hash_mismatch",
+]
+
+[[case]]
+id = "scan:adapters"
+tier = "offline"
+tests = [
+    "fs_scan::tests::scan_hashes_files_and_reads_tocs",
+    "fs_scan::tests::top_level_files_ignored",
+    "fs_scan::tests::recently_modified_file_is_unstable",
+    "fs_scan::tests::file_changed_after_hash_marks_unstable",
+    "fs_scan::tests::file_added_or_removed_during_scan_marks_unstable",
+    "fs_scan::tests::top_level_listing_change_detected",
+    "fs_scan::tests::fingerprint_covers_dirs_size_and_mtime",
+    "fs_scan::tests::read_variant_files_reports_missing_and_bytes",
+    "fs_scan::tests::list_variant_folders_matches_pattern",
+]
+
+[[case]]
+id = "A-22:adapters"
+tier = "offline"
+tests = [
+    "fs_install::tests::rename_refuses_existing_destination",
+    "fs_install::tests::second_lock_fails_while_held",
+    "fs_install::tests::journal_write_is_atomic_and_listed",
+    "fs_install::tests::hash_and_snapshot_any_slot",
+]
+
+[[case]]
+id = "A-20:adapters"
+tier = "offline"
+tests = [
+    "provider::tests::write_atomic_replaces_without_partial_file",
+    "provider::tests::put_object_verifies_temp_before_rename",
+    "provider::tests::put_object_replaces_corrupt_object",
+    "provider::tests::check_object_reports_wrong_hash",
+    "provider::tests::temp_and_conflicted_entries_classified",
+    "provider::tests::read_refuses_oversized_file",
+    "provider::tests::remove_stale_temps_only_own",
+]
+
+[[case]]
+id = "local:adapters"
+tier = "offline"
+tests = [
+    "localstate::tests::audit_rotates_at_limit_keeping_two",
+    "localstate::tests::second_instance_guard_fails",
+    "sysinfo::tests::random_ids_are_32_hex_and_distinct",
+    "winproc::tests::image_prefix_requires_separator",
+    "winproc::tests::inaccessible_possible_client_is_unknown",
+    "winproc::tests::inaccessible_unrelated_process_ignored",
+    "winproc::tests::accessible_image_under_variant_is_running",
+]
+
+[[case]]
+id = "fixture:adapters"
+tier = "offline"
+tests = [
+    "testkit::tests::synthetic_install_has_valid_variant_metadata",
+    "testkit::tests::synthetic_install_has_marker",
+    "testkit::tests::synthetic_dataset_respects_cap_and_is_deterministic",
+]
+
+[[case]]
+id = "A-23:adapters-native"
+tier = "native"
+tests = [
+    "fs_safe::tests::junction_inside_root_is_refused",
+    "fs_scan::tests::nested_junction_marks_folder_unsafe",
+    "provider::tests::junction_under_provider_root_is_refused",
+]
+
+[[case]]
+id = "A-22:adapters-native"
+tier = "native"
+tests = [
+    "fs_install::tests::rename_fails_while_live_file_is_open",
+    "fs_scan::tests::locked_file_marks_folder_unreadable",
+]
+
+[[case]]
+id = "A-21:adapters-native"
+tier = "native"
+tests = [
+    "winproc::tests::fake_client_under_variant_is_running",
+    "winproc::tests::process_outside_variant_is_not_running",
+]
+
+[[case]]
+id = "A-20:adapters-provider"
+tier = "provider"
+tests = [
+    "provider::tests::dropbox_test_root_round_trip",
+    "provider::tests::dropbox_hydrated_tagged_entries_accepted",
+    "provider::tests::dropbox_online_only_entry_refused",
+]
