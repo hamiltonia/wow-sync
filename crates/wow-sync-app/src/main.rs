@@ -23,7 +23,6 @@ use gpui::{
     px, size, App, AppContext, AsyncApp, Bounds, QuitMode, TitlebarOptions, Window, WindowBounds,
     WindowHandle, WindowOptions,
 };
-use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use wow_sync_runtime::ServiceConfig;
@@ -86,12 +85,18 @@ fn parse() -> Args {
 
 type Slot = Rc<RefCell<Option<WindowHandle<Root>>>>;
 
+#[cfg(windows)]
 fn hwnd_of(window: &Window) -> isize {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     match HasWindowHandle::window_handle(window).map(|h| h.as_raw()) {
-        #[cfg(windows)]
         Ok(RawWindowHandle::Win32(h)) => h.hwnd.get(),
         _ => 0,
     }
+}
+
+#[cfg(not(windows))]
+fn hwnd_of(_window: &Window) -> isize {
+    0
 }
 
 fn hwnd_of_slot(cx: &mut App, slot: &Slot) -> Option<isize> {
