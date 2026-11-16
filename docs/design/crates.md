@@ -31,7 +31,7 @@ wow-sync-app ──► wow-sync-runtime ──► wow-sync-core
 `wow-sync-adapters` does not depend on `wow-sync-core`, so the two can be built
 in parallel. Its API uses primitive types (strings, `[u8; 32]`, paths, small
 enums) that mirror the core port traits one-to-one ([adapters-api.md](adapters-api.md)
-§8 gives the mapping), so the runtime glue is mechanical. This also keeps every
+§9 gives the mapping), so the runtime glue is mechanical. This also keeps every
 policy decision in core: adapters never decide what is newer, deletable,
 complete or safe; they report observations and perform requested effects
 inside authorized roots (ARCHITECTURE §2.3).
@@ -55,12 +55,13 @@ background thread), per S-mem option 1. Not a final decision.
 | `hash` | incremental SHA-256 wrapper (`sha2`), tree and package hash composition |
 | `paths` | relative-path and folder-name validation, `FolderKey` |
 | `bpsv` | parser for Blizzard pipe-separated metadata (`.build.info`, `.flavor.info`) |
-| `variant` | variant observation, validation verdicts, known profiles, confirmation |
+| `variant` | variant observation, validation verdicts, known profiles, layout assessment, guided confirmation |
 | `toc` | `.toc` header parser and the single `.toc` selection rule |
 | `version` | version scheme classification and ordering |
 | `package` | folder metadata, package grouping, package comparison |
 | `inventory` | builds a validated local inventory from adapter scan results |
 | `records` | versioned JSON records (encode/decode/validate) |
+| `admit` | member-state admission and watermarks ([publication.md](publication.md) §6) |
 | `layout` | provider-folder and install work-area relative paths |
 | `target` | group target computation |
 | `plan` | publish plan and apply plan (pure) |
@@ -75,11 +76,11 @@ background thread), per S-mem option 1. Not a final decision.
 | Module | Contents |
 |---|---|
 | `lib.rs` | module declarations; `FsError` |
-| `fs_safe` | `Root` (authorized directory), containment, link/reparse refusal |
+| `fs_safe` | `Root` (authorized directory), containment, reparse classification (cloud-file tags allowed only for provider roots), link refusal |
 | `fs_scan` | AddOns scan with hashing and stability check; variant metadata reads |
 | `fs_install` | `InstallArea`: lock, staging, slot renames, journals, recovery records |
 | `provider` | `ProviderRoot`: bounded reads, atomic writes, listings with cloud state, blob put/copy |
-| `winproc` | WoW client observation by image path (`cfg(windows)`); `Unknown` elsewhere |
+| `winproc` | WoW client observation by image path plus possible-client names for uninspectable processes; pure `classify`/`image_is_under`; `Unknown` on non-Windows |
 | `sysinfo` | `now_unix_ms`, `random_id_hex` |
 | `localstate` | per-computer app state directory: atomic named files, bounded audit append |
 | `testkit` | `TempDir`, `SyntheticInstall`, synthetic dataset generator; `#[cfg(any(test, feature = "testkit"))]` |
@@ -175,10 +176,25 @@ Merge order: R2-core, then R2-adapters, then R2-slice.
 - `wow-sync-core` has `#![forbid(unsafe_code)]`.
 - `arch::tests::core_sources_use_no_os_io_or_clock` reads the crate's own
   `src/**/*.rs` (test-time `std::fs` is allowed in that test only) and fails
-  if any file other than `arch.rs` and `testkit.rs` contains one of:
+  if any file other than `arch.rs` and files under `testkit` (`testkit.rs` or `testkit/**`) contains one of:
   `std::fs`, `std::process`, `std::net`, `std::env`, `std::thread`,
   `SystemTime`, `Instant::now`, `File::`, `getrandom`, `windows_sys`, `gpui`.
   It also parses `crates/wow-sync-core/Cargo.toml` and fails if
   `[dependencies]` contains anything except `serde`, `serde_json`, `sha2`.
 - `wow-sync-runtime` and `wow-sync-app` must not re-implement ordering,
   grouping, target, plan or status logic; R2-review checks this by reading.
+
+## 7. Packets and verification ownership (run-002)
+
+| Packet | Builds / checks | Design inputs |
+|---|---|---|
+| R2-pin | GPUI/tray pin evidence | — |
+| R2-core | `wow-sync-core` and its `offline` cases ([tests.md](tests.md) §3) | [core-api.md](core-api.md), [domain.md](domain.md), [publication.md](publication.md), [apply.md](apply.md) |
+| R2-adapters | `wow-sync-adapters` and its `offline`/`native`/`provider` cases ([tests.md](tests.md) §4) | [adapters-api.md](adapters-api.md) |
+| R2-slice | `wow-sync-runtime` (glue, `SliceService`, failure-injecting effects wrapper over real adapters, e2e cases [tests.md](tests.md) §5) and `wow-sync-app`; developer GUI checks G1–G9 ([tests.md](tests.md) §5b) | all of the above |
+| R2-check | Independent verification: clean clone, all tiers (recording BLOCKED honestly), negative controls ([tests.md](tests.md) §6), two synthetic installs end to end, GUI checks G1–G9 with retained evidence, memory | [tests.md](tests.md) |
+| R2-review | Opus integration review: design conformance, no policy outside core, evidence matches claims | this design |
+
+The R2-slice packet text is written by the orchestrator; it must reference
+this section and [tests.md](tests.md) §5/§5b. There is no separate GUI
+worker.

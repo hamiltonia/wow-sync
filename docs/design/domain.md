@@ -22,10 +22,11 @@ Enrollment steps (GUI in R2-slice; rules in core):
    `D:\Dropbox\Gaming Sync\WoW Sync Test\<run-subdir>` (D-08).
 2. Install root chosen by the user; candidates = immediate subdirectories whose
    names match `^_[a-z0-9_]+_$` (case-insensitive) and contain `.flavor.info`.
-3. Variant validated (§2). `Refused` → no enrollment, shown with the reason.
-   `Unfamiliar` → GUI shows product code, folder, build version and requires
-   an explicit confirmation checkbox (A-46). The display name cannot change
-   any of these values.
+3. Variant validated (§2) and its layout assessed (§2.1). `Refused` or
+   `Unsupported` layout → no enrollment, shown with the reason.
+   `Unfamiliar` → guided validation (§2.1): the GUI shows the evidence and
+   requires two separate confirmations bound to that evidence (A-46). Consent
+   alone never validates. The display name cannot change any of these values.
 4. Create a new group (records the variant product code) or join an existing
    group in the shared location. Join is refused unless the group's product
    code equals the validated local product code byte for byte.
@@ -77,7 +78,49 @@ not assumed: only "exactly one column" is required.
 | 8 | code is a known profile and folder name (case-insensitive) differs from the profile's folder | `Refused(FolderMismatch)` (disagreement) |
 | 9 | AddOns directory absent or not a plain directory | `Refused(AddOnsMissing)` |
 | 10 | code is a known profile | `Recognized(identity)` |
-| 11 | otherwise | `Unfamiliar(identity)`: blocked until `confirm_variant(.., user_confirmed = true)` |
+| 11 | otherwise | `Unfamiliar(identity)`: blocked until guided validation (§2.1) |
+
+The verdict is re-derived every cycle; if it changes from the enrolled
+identity (different product, refused), the cycle stops before any write and
+status is `NeedsHelp(VariantChanged)`.
+
+### 2.1 Layout assessment and guided validation (M-02)
+
+`assess_layout(identity, addons: &[FolderScan], others: &OtherVariants) ->
+LayoutAssessment` (core, pure). Checks, all required:
+
+| Check | Fails as |
+|---|---|
+| AddOns is a plain directory at exactly `<variant>\Interface\AddOns` | `Unsupported(AddOnsLayout)` |
+| no other folder under the same install root reports the same product code | `Unsupported(DuplicateProductFolder)` |
+| this variant folder is not enrolled in another group on this computer | `Unsupported(AlreadyEnrolled)` |
+| `.toc` mapping for the client is known: a profile's suffix list (Recognized), or `validated-plain/1` (Unfamiliar, below) | — |
+
+For `validated-plain/1` (unfamiliar clients) a folder is **eligible** for
+transfer only if it has a plain `F.toc` and **no** suffixed candidate
+(`F_<S>.toc` / `F-<S>.toc`) at all; we do not know which suffix such a
+client loads, so every folder with suffixed tocs is `Blocked
+(UnvalidatedTocMapping)` — an addon-scoped decision, never installed or
+replaced automatically (Q-20). The result is
+`Supported { mapping, eligible: Vec<FolderKey>, blocked: Vec<(FolderKey, reason)>, digest: Sha256 }`
+where `digest` hashes the identity, mapping and both lists.
+
+Guided validation (GUI, R2-slice) shows: product code, folder path, client
+build version, AddOns path, the mapping, eligible/blocked folder counts with
+names, and the disclosure "Settings (WTF) are not synchronized; their layout
+for this client has not been validated." The user gives two separate
+confirmations: **identity** ("this is the client I mean") and **scope**
+("WoW Sync may change only the listed AddOns folders of this client").
+`confirm_variant(verdict, assessment, GuidedConfirmation { identity, scope,
+digest })` returns `ConfirmedVariant` only if the verdict is `Recognized`
+(with a `Supported` assessment), or `Unfamiliar` with a `Supported`
+assessment, both confirmations `true` and `digest` equal to the current
+assessment's digest (stale consent is rejected). The stored
+`validation` record keeps the evidence that was shown. Blocked folders
+remain blocked after confirmation. The scope confirmation covers the
+mapping rule, not a frozen folder list: folders that appear later are
+evaluated by the same rule each scan; the digest only rejects consent given
+for a different assessment at confirmation time.
 
 Known profiles (the only one in the slice; everything else is unfamiliar,
 Q-12):
@@ -131,10 +174,16 @@ in the slice. A candidate that cannot be read or parsed makes the selection an
 4. Else (only other suffixes, e.g. only `_Vanilla`) → `None { reason:
    "no toc for this variant" }`.
 
-For an unfamiliar variant the suffix list is empty, so only the plain toc is
-used. The `wowf` order and the treatment of `_Camelot` are the stated
-uncertainty (Q-3): owner-run client check needed; the rule fails closed on
-disagreement instead of guessing.
+For an unfamiliar variant (mapping `validated-plain/1`, §2.1): if any
+suffixed candidate exists → `Unvalidated { files }`; else the plain `F.toc`
+→ `Selected`; else `None`. The `wowf` order and the treatment of `_Camelot`
+are the stated uncertainty (Q-3): owner-run client check needed; the rule
+fails closed on disagreement instead of guessing.
+
+**Compatibility gate (M-03).** Only `Selected` is evidence that the client
+would load the folder. A folder whose selection is `None`, `Ambiguous`,
+`Unvalidated` or `Error` is **never installed or replaced automatically**:
+its package becomes `NeedsDecision(NoCompatibleToc)` ([§6](#6-group-target-r-05-r-06)).
 
 ## 4. Version ordering (R-05)
 
@@ -145,7 +194,7 @@ Less | Equal | Greater | Ambiguous(AmbiguityReason)`. Ported from
 
 | Scheme | Recognized as | Orders against |
 |---|---|---|
-| `DottedNumeric` | optional `v`/`V`, ≥ 2 numeric parts separated by `.`, optional pre-release `-`/`.`/none + `dev`/`alpha`/`a`/`beta`/`b`/`rc` + optional number; or git-describe `<dotted>-<n>-g<hex>` | same scheme only; numeric parts zero-padded (`1.2` = `1.2.0`); `dev < alpha < beta < rc < release`; describe `-n-g…` is newer than its tag by `n`. Covers the spike's semver-like, numeric-dotted and git-describe as **one** scheme (Q-10) |
+| `DottedNumeric` | optional `v`/`V`, ≥ 2 numeric parts separated by `.`, optional pre-release `-`/`.`/none + `dev`/`alpha`/`a`/`beta`/`b`/`rc` + optional number; or git-describe `<dotted>-<n>-g<hex>` | same scheme **and same channel** only; numeric parts zero-padded (`1.2` = `1.2.0`). Channel = `release`, or the pre-release word (`dev`, `alpha`, `beta`, `rc`); different channels → `Ambiguous("different channels")` (A-08 beta/stable), e.g. `1.3.0-beta1` vs `1.2.9`. Same pre-release channel and same base → ordered by its number. Git-describe: only `<tag>` < `<tag>-<n>-g<hex>` with the **identical** base tag is ordered; two describes (even with the same tag: different branches, M-03) or describe vs any other label → `Ambiguous`. Covers the spike's semver-like, numeric-dotted and git-describe as **one** scheme (Q-10) |
 | `Integer` | all digits, ≤ 18 digits | `Integer` only |
 | `Revision` | `r`/`R` + digits | `Revision` only |
 | `Date` | `YYYY-MM-DD`, `YYYY.MM.DD`, `YYYYMMDD` with a valid date | `Date` only (checked before `Integer`) |
@@ -157,8 +206,21 @@ Less | Equal | Greater | Ambiguous(AmbiguityReason)`. Ported from
 
 Rules: any `Missing`/`Token`/`GitHash`/`Other` → `Ambiguous`; different
 schemes → `Ambiguous("different version schemes")`; same scheme compares
-strictly. `Equal` means equal **labels**, never equal content. There is no
-input for file times, clocks or computer preference (R-05).
+strictly within the rules above. `Equal` means equal **labels**, never equal
+content. There is no input for file times, clocks or computer preference
+(R-05).
+
+What a `Greater` result is evidence of (M-03): the author's label is larger
+within one recognized scheme and channel. It is **not** proof that the
+release is unmodified, from the same distribution, or compatible; those
+come from other predicates in §6 (same variant group, same client build,
+`Selected` toc under a known mapping, complete package). Manual edits that
+keep the label but change content show up as equal labels with different
+content → `Ambiguous`; a manual edit that also changes the label to a larger
+one is indistinguishable from a release (stated limitation, Q-22). Real
+release-pair ordering has not been measured (S-addon: recognition only);
+tests use real labels for recognition and synthetic pairs for ordering,
+and the pairs are labeled as such.
 
 Tests use real labels from run-001 S-addon (`12.1.23`, `v1.3.9`, `3.220`,
 `r272`, `31217`, `Forever 1.60.1`, `BCC 2.5.4`, `a8e9f0e`,
@@ -186,12 +248,20 @@ inputs. Edges (each recorded with its kind for explanations):
 | `SharedId` | two folders' selected tocs have the same value for the same id kind | `DBM-Core`/`DBM-Raids-Midnight` (curse 3358); `VuhDo`/`VuhDoOptions` |
 | `Dependency` | `F` hard-depends on installed `G` **and** `stem(G)` is a prefix of `key(F)`, where `stem(G)` = `key(G)` up to its first `-` or `_` | `DBM-Party-BC → DBM-Core` (stem `dbm`); `AtlasLootClassic_Data → AtlasLootClassic`; **not** `AtlasBIStooltips → AtlasLootClassic` |
 | `NamePrefix` | `key(F)` = `key(G)` + (`-` or `_`) + more | `GearQuestForever_Languages → GearQuestForever` |
+| `Family` | `key(G)` has ≥ 5 characters and `key(F)` = `key(G)` + more (no separator) **and** neither folder has an external id that differs from the other's | `QuestieDB → Questie` (M-04) |
 
 Dependencies on folders not present in any observation (e.g. `Blizzard_*`)
 create no edge. Over-grouping only enlarges the unit that is replaced together
 and can only add ambiguity; under-grouping can mix package parts, so the rule
-errs toward grouping (Q-1). Known residual under-grouping: name-only
-relatives without a separator (`QuestieDB`/`Questie`) stay separate.
+errs toward grouping (Q-1). Every package with a `Family` or `NamePrefix`
+edge shows the relationship in its explanation, so a wrong grouping is
+visible, not silent.
+
+Grouping is computed from the union of all observations and can change when
+a new folder appears anywhere. The package hash is always computed over the
+**current** grouping, so a membership change produces new hashes; any
+earlier confirmation for the old grouping no longer matches (it is shown as
+unconfirmed rather than misattributed).
 
 **Package key** = smallest member `FolderKey` (byte order). **Display folder**
 = member with an external id and fewest in-package dependencies, ties by key.
@@ -206,17 +276,21 @@ package hash over the folder hashes ([publication.md](publication.md) §3).
    replacement, R-05).
 2. Any member folder of either side with status other than `Ok`
    → `Ambiguous(FolderNotUsable)`.
-3. For each folder key present on **both** sides whose tocs are `Selected` on
+3. Record the member-folder **set relation** (`Equal`, `AHasMore`,
+   `BHasMore`, `Different`) in the result; it is always part of the result
+   and the evidence. Ordering below uses common folders; §6 decides whether
+   a candidate with a different set may be applied (M-04).
+4. For each folder key present on **both** sides whose tocs are `Selected` on
    both and whose tree hashes differ: `version::compare`.
-   Folders with identical trees are skipped. Folders whose toc is `None`,
-   `Ambiguous` or `Error` on either side and whose trees differ contribute
-   `Unversioned`.
-4. Any `Ambiguous` result → `Ambiguous(reason, folder)`.
-5. Both `Less` and `Greater` present → `Ambiguous(MembersDisagree)`.
-6. Some `Greater` (and no `Less`) → `Greater`; some `Less` → `Less`.
+   Folders with identical trees are skipped. Folders whose toc is `Selected`
+   with a `Missing` version label on both sides and whose trees differ
+   contribute `Unversioned`.
+5. Any `Ambiguous` result → `Ambiguous(reason, folder)`.
+6. Both `Less` and `Greater` present → `Ambiguous(MembersDisagree)`.
+7. Some `Greater` (and no `Less`) → `Greater`; some `Less` → `Less`.
    `Unversioned` members follow this result (they ship with their package,
    e.g. version-less `DBM-Brawlers`).
-7. No ordered results (all `Equal` labels, only `Unversioned`, or no common
+8. No ordered results (all `Equal` labels, only `Unversioned`, or no common
    folder) → `Ambiguous(SameLabelsDifferentContent | NoComparableVersion)`
    (A-08 duplicate label, different content).
 
@@ -228,17 +302,46 @@ downgrade a sub-folder updated on another computer.
 ## 6. Group target (R-05, R-06)
 
 For each package key, candidates = distinct package hashes among: the local
-inventory and every **valid** member state of the group (excluding records
-rejected for group/variant/schema/hash reasons). Member states that are
-unavailable (online-only, unreadable, missing trees) contribute nothing and
-are shown as unavailable; they are not absence (R-04).
+inventory and the **admitted** state of every member
+([publication.md](publication.md) §6). Members whose newest state is
+unusable/regressed contribute nothing and are shown; they are not absence
+(R-04), and their older states are not used.
 
-- Exactly one candidate → `Chosen`.
-- A candidate `c` with `compare_package(c, x)` ∈ {`Same`, `Greater`} for every
-  other candidate `x` → `Chosen(c)` (it dominates even if other candidates are
-  mutually ambiguous).
-- Otherwise → `NeedsDecision { candidates }` for that package only; other
-  packages proceed (R-06).
+**Eligibility (compatibility and completeness predicates, M-03/M-04).** A
+candidate `c` can be chosen automatically only if all hold:
+
+| Predicate | Fails as `NeedsDecision(...)` |
+|---|---|
+| every member folder of `c` has status `Ok` and a `Selected` toc under the source member's mapping | `NoCompatibleToc` |
+| the source member's `client.toc_mapping` equals the local mapping | `DifferentTocMapping` |
+| the source member's `client.build_version` equals the local one (both present) | `DifferentClientBuild` (Q-21) |
+| no member folder is `Blocked(UnvalidatedTocMapping)` locally (§2.1) | `UnvalidatedTocMapping` |
+| `c` contains every folder of the package present **locally** (local set ⊆ `c`'s set) — applying `c` must not leave old local parts beside new ones | `PartialCandidate` |
+
+A local candidate is always "eligible" for the purpose of staying as it is
+(nothing is written). Eligibility is evaluated per local computer, so two
+computers may reach different results for the same package (e.g. one has an
+extra folder); each explains its own.
+
+**Choice:**
+
+- Exactly one candidate and it is the local one → `InSync`.
+- A candidate `c` with `compare_package(c, x)` ∈ {`Same`, `Greater`} for
+  every other candidate `x` → it **dominates**. If it is eligible →
+  `Chosen(c)`; if not → `NeedsDecision(reason)` (never fall back to a lesser
+  candidate).
+- A single non-local candidate (local has none of the package's folders) is
+  `Chosen` only if eligible (an addition, R-04).
+- Otherwise → `NeedsDecision { candidates, evidence }` for that package only;
+  other packages proceed (R-06).
+
+Example (review M-04): A has `Suite-Core` v1 + `Suite_Data` v1, B has only
+`Suite-Core` v2. On A, B's candidate dominates by Core but A's `Suite_Data`
+is not in it → `NeedsDecision(PartialCandidate)`; nothing changes on A. On
+B, B's own candidate dominates → `InSync`. After a successful apply, the
+local effective package hash must equal the chosen hash exactly
+([apply.md](apply.md) §2.2 step 5 verifies every folder; the package hash
+follows).
 
 `sources` = all members holding the chosen hash, sorted by `ComputerId`.
 Input order and duplicates never change the result: inputs are sorted by

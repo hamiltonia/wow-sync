@@ -18,22 +18,53 @@ pub struct FsError { pub kind: FsErrorKind, pub path: PathBuf, pub detail: Strin
 ## 2. `fs_safe`
 
 ```rust
-pub struct Root { /* canonical absolute path */ }
+/// Observation of one path component, without following it and without hydrating it.
+pub enum ReparseKind { None, CloudFile { tag: u32 }, Link { tag: u32 } /* symlink, junction/mount point */,
+                       Other { tag: u32 } }
+pub struct EntryMeta { pub is_dir: bool, pub size: u64, pub mtime_ns: i128, pub reparse: ReparseKind,
+                       pub cloud: CloudAttrs }
+pub struct CloudAttrs { pub recall_on_data_access: bool, pub recall_on_open: bool, pub offline: bool,
+                        pub pinned: bool, pub unpinned: bool }
+/// Pure: classify a Windows reparse tag. Cloud-files family: (tag & 0xFFFF0FFF) == 0x9000001A
+/// (Dropbox test folder: 0x9000601A, 0x9000201A; S-dropbox). SYMLINK 0xA000000C and
+/// MOUNT_POINT 0xA0000003 -> Link. Everything else -> Other.
+pub fn classify_tag(tag: u32) -> ReparseKind;
+/// Windows: open with FILE_READ_ATTRIBUTES + FILE_FLAG_OPEN_REPARSE_POINT |
+/// FILE_FLAG_BACKUP_SEMANTICS (no data access, no recall) and
+/// GetFileInformationByHandleEx(FileAttributeTagInfo / FileBasicInfo / FileStandardInfo).
+/// Non-Windows: symlink_metadata; symlink -> Link.
+pub fn entry_meta(path: &Path) -> Result<EntryMeta, FsError>;
+
+pub enum ReparsePolicy {
+    /// AddOns, install work area, local state: any reparse point is refused.
+    RejectAll,
+    /// Provider folder only: CloudFile tags are accepted as ordinary entries;
+    /// Link and Other are refused. Data availability is decided separately (CloudAttrs).
+    AllowCloudFiles,
+}
+pub struct Root { /* canonical absolute path + policy */ }
 impl Root {
-    /// Directory must exist and must not be (or traverse) a reparse point.
-    pub fn open(path: &Path) -> Result<Root, FsError>;
+    /// The root and every component from the drive down are checked with `entry_meta`
+    /// under `policy` (Link/Other anywhere -> ReparsePoint error).
+    pub fn open(path: &Path, policy: ReparsePolicy) -> Result<Root, FsError>;
     pub fn path(&self) -> &Path;
     /// Join a '/'-separated relative path; rejects '..', absolute, drive, ':' and empty segments.
     pub fn join(&self, rel: &str) -> Result<PathBuf, FsError>;
-    /// symlink_metadata of each component under the root; any reparse point -> ReparsePoint.
-    pub fn check_no_reparse(&self, rel: &str) -> Result<(), FsError>;
+    /// entry_meta of each component under the root, checked against the policy.
+    pub fn check_components(&self, rel: &str) -> Result<EntryMeta /* of the last component */, FsError>;
 }
-pub fn is_reparse(meta: &std::fs::Metadata) -> bool; // windows: FILE_ATTRIBUTE_REPARSE_POINT; else is_symlink
-pub fn is_cloud_only(meta: &std::fs::Metadata) -> bool; // windows: RECALL_ON_DATA_ACCESS | RECALL_ON_OPEN | OFFLINE
+/// Data must not be read: RECALL_ON_DATA_ACCESS or OFFLINE on a file, or RECALL_ON_OPEN on a directory.
+pub fn is_cloud_only(c: &CloudAttrs, is_dir: bool) -> bool;
 ```
 
-All file operations below go through a `Root`. Junctions, symlinks and other
-reparse points are never followed and never written through (A-23).
+All file operations below go through a `Root`. Links, junctions and unknown
+reparse points are never followed and never written through (A-23). Cloud
+placeholders are accepted only under the provider root (M-01); reading a
+cloud-only entry's data is refused with `CloudOnly` before any open for
+data, so the app never hydrates (Q-6). Directories with `RECALL_ON_OPEN`
+are not enumerated (reported `CloudOnly`). Whether `0x9000601A` means
+"in sync" is unverified (S-dropbox); the design does not depend on it:
+hashes, not attributes, prove content.
 
 ## 3. `fs_scan`
 
@@ -43,10 +74,20 @@ pub struct ScanOptions { pub max_file_bytes: u64 /* 512 MiB */, pub max_files_pe
 pub enum ScanStatus { Ok, Unreadable(String), Unsafe(String), Unstable(String) }
 pub struct ScannedFile { pub rel_path: String /* '/'-sep */, pub size: u64, pub sha256: [u8; 32] }
 pub struct TocFile { pub file_name: String, pub contents: Result<Vec<u8>, String> }
+/// Metadata-only snapshot of a folder: every file AND directory, sorted by path.
+pub struct Snapshot { pub entries: Vec<(String /* rel */, bool /* is_dir */, u64 /* size */, i128 /* mtime_ns */)> }
+impl Snapshot { pub fn fingerprint(&self) -> [u8; 32]; pub fn newest_mtime_ns(&self) -> Option<i128>; }
 pub struct ScannedFolder { pub name: String, pub status: ScanStatus, pub files: Vec<ScannedFile>,
-                           pub tocs: Vec<TocFile> /* top-level *.toc files */ }
-pub fn scan_addons(addons: &Root, opts: &ScanOptions) -> Result<Vec<ScannedFolder>, FsError>;
+                           pub tocs: Vec<TocFile> /* top-level *.toc files */, pub fingerprint: Option<[u8; 32]> }
+pub struct AddonsScan { pub folders: Vec<ScannedFolder>, pub listing_stable: bool }
+pub fn scan_addons(addons: &Root, opts: &ScanOptions) -> Result<AddonsScan, FsError>;
 pub fn scan_folder(addons: &Root, name: &str, opts: &ScanOptions) -> ScannedFolder;
+/// Test seam: `hook` runs after the first snapshot and after hashing (before the second snapshot).
+pub fn scan_folder_with_hook(addons: &Root, name: &str, opts: &ScanOptions,
+                             hook: &mut dyn FnMut(ScanPhase)) -> ScannedFolder;
+pub enum ScanPhase { AfterFirstSnapshot, AfterHashing }
+/// Metadata only; None = absent.
+pub fn snapshot_folder(addons: &Root, name: &str) -> Result<Option<Snapshot>, FsError>;
 pub fn hash_folder(addons: &Root, name: &str) -> Result<Option<Vec<ScannedFile>>, FsError>; // None = absent
 
 pub struct VariantFiles { pub folder_name: String, pub flavor_info: FileRead, pub build_info: FileRead,
@@ -57,24 +98,39 @@ pub fn read_variant_files(install_root: &Path, variant_folder: &str) -> VariantF
 pub fn list_variant_folders(install_root: &Path) -> Vec<String>; // dirs matching ^_[a-z0-9_]+_$ with .flavor.info
 ```
 
-Scan rules: top-level non-directories in AddOns are ignored; a top-level
-reparse point → `Unsafe`; a nested reparse point → folder `Unsafe`; any
-file/dir read error → `Unreadable`; stability per file: metadata before,
-stream hash, metadata after; `(len, mtime)` must be identical and `mtime`
-older than `now - recent_ms`, otherwise `Unstable`. No exclusive-open probe
-(S-proc showed it disturbs the client). Hidden/system files are included.
+Scan rules (B-02, complete-collection stability):
 
+1. `scan_addons`: list AddOns top level (L1); scan each folder; list again
+   (L2). `listing_stable = (L1 == L2)` by names and kinds. Top-level
+   non-directories are ignored; a top-level reparse point → `Unsafe`.
+2. `scan_folder`: snapshot S1 (all entries, metadata only); hash every file
+   (stream, ≤ `max_file_bytes`); snapshot S2. Stable only if `S1 == S2`
+   (same membership, sizes and mtimes of every file and directory) **and**
+   `newest_mtime_ns < now - recent_ms`. Otherwise `Unstable` with the first
+   difference. `fingerprint = S2.fingerprint()`.
+3. Nested reparse point → `Unsafe`; read error → `Unreadable`.
+4. No exclusive-open probe (S-proc showed it disturbs the client); hidden
+   and system files are included.
+
+Residual (stated, not hidden): a writer that changes a file and restores
+identical size and mtime between S1 and S2 is not detected; content hashes
+at stage/verify time ([apply.md](apply.md) §2.2) still protect the apply.
 ## 4. `fs_install` (install-side effects)
 
 ```rust
-pub struct InstallArea { /* addons: Root, work: Root (<variant>/.wowsync) */ }
+pub struct InstallArea { /* addons: Root(RejectAll), work: Root(RejectAll) at <variant>/.wowsync */ }
 impl InstallArea {
     /// Creates <variant>/.wowsync/{staging,recovery,journal} if needed; same volume as AddOns.
     pub fn open(variant_dir: &Path) -> Result<InstallArea, FsError>;
     /// Exclusive lock file <variant>/.wowsync/lock (create_new + held handle; stale lock = held by no process).
+    /// Excludes other WoW Sync instances only; not other writers (CurseForge).
     pub fn lock(&self) -> Result<InstallLock, FsError>;
+    /// Copies src into staging via a temp name, hashes the copy, renames into place;
+    /// HashMismatch if the copy differs from `expect`. Refuses CloudOnly sources.
     pub fn stage_file(&self, op: &str, folder: &str, rel: &str, src: &Path, expect: [u8; 32], size: u64) -> Result<(), FsError>;
-    pub fn hash_staged(&self, op: &str, folder: &str) -> Result<Vec<ScannedFile>, FsError>;
+    /// Content of any slot (live, staging, recovery); None = absent.
+    pub fn hash_slot(&self, slot: Slot) -> Result<Option<Vec<ScannedFile>>, FsError>;
+    pub fn snapshot_slot(&self, slot: Slot) -> Result<Option<Snapshot>, FsError>;
     /// Single same-volume directory rename; fails if destination exists.
     pub fn rename(&self, from: Slot, to: Slot) -> Result<(), FsError>;
     pub fn exists(&self, slot: Slot) -> Result<bool, FsError>;
@@ -96,53 +152,77 @@ Layout under `<variant>\.wowsync\`: `staging\<op>\<folder>\…`,
 `recovery`, never in `AddOns` (removal from `AddOns` is always a rename into
 recovery). Renames use `std::fs::rename` (MoveFileExW without
 `MOVEFILE_REPLACE_EXISTING` semantics for directories); destination existence
-is checked first and the error preserved.
+is checked first and the error preserved. Which recovery points may be
+removed is decided by core (pinning, [apply.md](apply.md) §2.4).
 
 ## 5. `provider`
 
 ```rust
-pub struct ProviderRoot { /* Root at <shared>/WoWSync */ }
-pub enum EntryState { Local, CloudOnly, Temp, Conflicted, Unexpected }
-pub struct Entry { pub name: String, pub is_dir: bool, pub size: u64, pub state: EntryState }
+pub struct ProviderRoot { /* Root(AllowCloudFiles) at <shared>/WoWSync */ }
+pub enum EntryState { Local, CloudOnly, Temp, Conflicted, Unexpected, UnsafeReparse }
+pub struct Entry { pub name: String, pub is_dir: bool, pub size: u64, pub mtime_ns: i128, pub state: EntryState }
 impl ProviderRoot {
-    /// Creates <shared>/WoWSync if missing (shared must exist).
+    /// Creates <shared>/WoWSync if missing (shared must exist). Cloud-file reparse tags on
+    /// <shared> and its parents are accepted (S-dropbox), links/junctions/unknown tags refused (Q-23).
     pub fn open_or_create(shared: &Path) -> Result<ProviderRoot, FsError>;
     pub fn list(&self, rel_dir: &str) -> Result<Vec<Entry>, FsError>; // NotFound -> empty vec
     /// Refuses CloudOnly (FsErrorKind::CloudOnly; never hydrates, Q-6) and files > limit.
     pub fn read(&self, rel: &str, limit: u64) -> Result<Vec<u8>, FsError>;
     /// <target>.<computer>.<rand>.tmp in same dir, write, flush (sync_all), rename over target.
     pub fn write_atomic(&self, rel: &str, bytes: &[u8], computer: &str) -> Result<(), FsError>;
-    /// Write-if-absent: copies src via temp, verifies sha256 of the temp file, renames; if target
-    /// exists and is Local, verifies its hash (mismatch -> HashMismatch, left in place).
-    pub fn put_blob(&self, rel: &str, src: &Path, expect: [u8; 32], computer: &str) -> Result<(), FsError>;
-    pub fn exists(&self, rel: &str) -> Result<Option<EntryState>, FsError>;
-    pub fn path_of(&self, rel: &str) -> Result<PathBuf, FsError>; // for staging copies, CloudOnly checked by caller
+    /// Observation for publish: Missing | CloudOnly | Local{size, mtime_ns, sha256} (hashes Local objects).
+    pub fn check_object(&self, rel: &str, max_bytes: u64) -> Result<ObjectObs, FsError>;
+    /// Copies src via temp, verifies sha256 of the temp file, renames over `rel` (replacing an
+    /// existing object, which by content addressing must hold the same bytes). Returns the
+    /// final (size, mtime_ns) for the verified-objects cache.
+    pub fn put_object(&self, rel: &str, src: &Path, expect: [u8; 32], computer: &str) -> Result<(u64, i128), FsError>;
+    pub fn put_object_bytes(&self, rel: &str, bytes: &[u8], expect: [u8; 32], computer: &str) -> Result<(u64, i128), FsError>;
+    pub fn path_of(&self, rel: &str) -> Result<PathBuf, FsError>; // for staging copies, CloudOnly checked by stage_file
     pub fn remove_file(&self, rel: &str) -> Result<(), FsError>;  // caller restricts to own member dir
     pub fn remove_stale_temps(&self, rel_dir: &str, computer: &str, older_than_ms: u64, now: i64) -> Result<u32, FsError>; // own temps only
 }
+pub enum ObjectObs { Missing, CloudOnly, Local { size: u64, mtime_ns: i128, sha256: [u8; 32] } }
 ```
 
 Classification: names ending `.tmp` → `Temp`; names containing
-`conflicted copy` (case-insensitive) → `Conflicted`; cloud attributes →
-`CloudOnly`; else `Local`. Readers skip `Temp`/`Conflicted`; the runtime
-reports them in diagnostics. No Dropbox API, no hydration, no credentials.
+`conflicted copy` (case-insensitive) → `Conflicted`; link/unknown reparse →
+`UnsafeReparse` (never read); cloud-only attributes (§2) → `CloudOnly`;
+else `Local` (including hydrated cloud placeholders). Readers skip
+`Temp`/`Conflicted`/`UnsafeReparse`; the runtime reports them in diagnostics.
+No Dropbox API, no hydration, no credentials.
 
-## 6. `winproc`
+## 6. `winproc` (M-06)
 
 ```rust
+pub struct ProcEntry { pub pid: u32, pub exe_name: String /* Toolhelp szExeFile, always available */,
+                       pub image: Result<PathBuf, String> /* QueryFullProcessImageNameW or error */ }
 pub enum ProcessActivity { NotRunning, Running { pids: Vec<u32>, images: Vec<PathBuf> },
                            Unknown(String) }
-/// Running if any process image path is inside `variant_dir` (case-insensitive prefix
-/// match after normalizing to `\`, with trailing `\`). Launchers outside the variant dir
-/// do not count. Inaccessible processes are counted in `inaccessible` but do not block (limitation).
-pub fn observe_variant(variant_dir: &Path) -> (ProcessActivity, u32 /* inaccessible */);
+/// Pure: is `image` inside `variant_dir` (case-insensitive, normalized to '\', trailing '\')?
+pub fn image_is_under(variant_dir: &Path, image: &Path) -> bool;
+/// Pure: names of possible clients = every "*.exe" directly in the variant folder (listed by
+/// the caller) plus any name matching `wow*.exe` (case-insensitive).
+pub fn is_possible_client(exe_name: &str, variant_exes: &[String]) -> bool;
+/// Pure decision over a snapshot:
+/// - any accessible image under variant_dir                     -> Running
+/// - any inaccessible entry whose exe_name is a possible client -> Unknown("possible client <name> pid <pid> cannot be inspected")
+/// - otherwise                                                  -> NotRunning
+/// Inaccessible entries with other names are counted and reported, not blocking.
+pub fn classify(entries: &[ProcEntry], variant_dir: &Path, variant_exes: &[String]) -> (ProcessActivity, u32);
+pub fn observe_variant(variant_dir: &Path) -> (ProcessActivity, u32 /* inaccessible, non-client */);
 ```
 
-Windows: `CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS)`, per pid
+Windows: `CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS)` gives every pid and
+`szExeFile` even for elevated/other-session processes; per pid
 `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` + `QueryFullProcessImageNameW`
 (S-proc). Snapshot failure → `Unknown`. Non-Windows → `Unknown("unsupported
 platform")`, which blocks writes in core.
 
+Supported detection boundary (stated in status/diagnostics): a client is
+detected if its image path is readable and under the variant folder, or if
+it is uninspectable and its executable name is `wow*.exe` or equals an
+`.exe` in the variant folder. A renamed client copied outside the variant
+folder and run elevated is not detected (limitation; Q-16).
 ## 7. `sysinfo`, `localstate`
 
 ```rust
@@ -188,14 +268,20 @@ pub fn synthetic_dataset(dir: &Path, seed: u64, total_bytes: u64) -> Vec<PathBuf
 | Core port / input | Adapter call |
 |---|---|
 | `VariantObservation` | `fs_scan::read_variant_files` |
-| `FolderScan` | `fs_scan::scan_addons` (field-for-field) |
+| `FolderScan`, `listing_stable` | `fs_scan::scan_addons` (field-for-field, incl. `fingerprint`) |
+| `OtherVariants` | runtime lists sibling `_*_` folders + `LocalState` enrollments |
 | `ApplyEffects::activity` | `winproc::observe_variant` → `Activity` |
-| `lock`, `write_journal`, `read_journals` | `InstallArea::lock`, `write_journal`, `read_journals` |
+| `lock`, `write_journal`, `read_journals`, `remove_journal` | `InstallArea::{lock, write_journal, read_journals, remove_journal}` |
 | `stage_folder` | for each tree file: `ProviderRoot::path_of(blob)` → `InstallArea::stage_file` (CloudOnly → `NotAvailableYet`) |
-| `verify_staged`, `hash_live_folder` | `InstallArea::hash_staged`, `fs_scan::hash_folder` + `core::hash::tree_hash` |
-| `move_*` | `InstallArea::rename(Slot, Slot)` |
-| `write_recovery_point`, `list_recovery`, `prune_recovery` | `InstallArea::{write_recovery_meta, list_recovery, remove_recovery}` |
-| `PublishEffects::blob_exists`, `upload_blob` | `ProviderRoot::exists`, `put_blob` |
+| `tree_of(slot)` | `InstallArea::hash_slot` + `core::hash::tree_hash` |
+| `observe(slot)` | `InstallArea::snapshot_slot` → `SlotObs{fingerprint, recently_modified = newest mtime within window}` |
+| `rename` | `InstallArea::rename(Slot, Slot)` |
+| `write_recovery_point`, `list_recovery`, `remove_recovery`, `discard_staging` | `InstallArea::{write_recovery_meta, list_recovery, remove_recovery, remove_staging}` |
+| `PublishEffects::stat_object`, `hash_object` | `ProviderRoot::check_object` (stat part / hash part) |
+| `put_object` | `ProviderRoot::put_object` (blob from AddOns file) or `put_object_bytes` (tree record) |
+| `observe_source` | `fs_scan::snapshot_folder` on the live AddOns folder |
 | `write_record`, `remove_own_record` | `ProviderRoot::write_atomic`, `remove_file` |
+| `MemberObs` | `ProviderRoot::list` + `read` (member record, then only `newest_state_name`) |
+| `AdmissionWatermarks`, `VerifiedObjects` | `LocalState::read` / `write_atomic` (`admission.json`, `verified-objects.json`) |
 | clock / ids | `sysinfo` |
 | local records, audit | `LocalState` |

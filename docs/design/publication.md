@@ -55,11 +55,13 @@ used for ordering or freshness decisions.
   "schema": "wowsync.code-state/1",
   "group_id": "…", "computer_id": "…", "enrollment_id": "…", "seq": 12,
   "product": "wowf", "app_version": "0.0.0", "written_unix_ms": 1767225600000,
+  "client": { "build_version": "1.15.8.12345", "toc_mapping": "profile:wowf/1" },
   "inventory_complete": true,
   "folders": [
     { "name": "DBM-Core", "key": "dbm-core", "status": "ok",
       "tree": "<sha256>", "files": 211, "bytes": 1048576,
-      "toc": { "kind": "selected", "file": "DBM-Core_Vanilla.toc", "version": "12.1.23",
+      "toc": { "kind": "selected", "file": "DBM-Core_Forever.toc", "suffix": "Forever",
+               "version": "12.1.23", "interface": [11507],
                "hard_deps": [], "ids": [{ "kind": "curse", "value": "3358" }] } }
   ],
   "apply_report": {
@@ -69,26 +71,38 @@ used for ordering or freshness decisions.
 }
 ```
 
+- `client.build_version` is the `Version` of the variant's active
+  `.build.info` row (absent → `null`); `client.toc_mapping` names the `.toc`
+  selection rule used: `profile:<product>/<n>` for a known profile, or
+  `validated-plain/1` for a guided unfamiliar client ([domain.md](domain.md)
+  §2–§3). Both are compatibility evidence for the target (M-03); they are
+  not identity.
 - `status` ∈ `ok | unreadable | unsafe | unsupported | unstable`; `tree` only
-  for `ok`. `toc.kind` ∈ `selected | none | ambiguous | error`.
-- `seq` strictly increases per `(computer, enrollment)`; the reader takes the
-  highest valid `seq` file for the member's **current** enrollment id (from
-  `member.json`). A state file whose body disagrees with its file name, group,
-  computer, enrollment or product is invalid.
+  for `ok`. `toc.kind` ∈ `selected | none | ambiguous | error`; `suffix` is
+  `null` for a plain `.toc`.
+- `seq` strictly increases per `(computer, enrollment)`. Which state is used
+  is decided by core admission (§6), **not** "highest valid": an unusable
+  newest file never falls back to an older one (M-05). A state file whose
+  body disagrees with its file name, group, computer, enrollment or product
+  is invalid.
 - `inventory_complete` is `false` if any folder could not be read; the record
   is still published (other computers can use the readable folders) but the
   absent/unreadable folders never imply removal.
 - `apply_report` is optional; present after an apply on that computer. Results
-  ∈ `applied | skipped | rolled_back | needs_help | failed`.
+  ∈ `applied | skipped | replanned | interrupted | rolled_back | needs_help |
+  failed`; only `applied` (= verified and finalized, [apply.md](apply.md)
+  §2.2) counts toward confirmation.
 
 Local-only records (under `<variant>\.wowsync` or local state, never uploaded):
 
 | Schema | Fields | Limit |
 |---|---|---|
-| `wowsync.apply-journal/1` | `op`, `group_id`, `started_unix_ms`, `packages: [{package, phase, folders: [{name, action, target_tree, had_live}]}]`; `phase` ∈ `staging \| committing \| committed \| finalized \| rolled_back` | 1 MiB |
-| `wowsync.recovery-point/1` | `op`, `package`, `created_unix_ms`, `replaced: [{name, tree?}]`, `installed: [{name, tree}]`, `reason` | 64 KiB |
+| `wowsync.apply-journal/1` | `op`, `group_id`, `started_unix_ms`, `packages: [{package, phase, reason?, target_hash, folders: [{name, key, action, target_tree, expected_live, state}]}]`; package `phase` ∈ `staging \| committing \| committed \| verified \| needs_help \| finalized \| rolled_back`; `expected_live` = `{"kind":"absent"}` or `{"kind":"tree","tree","fingerprint"}`; folder `state` ∈ `pending \| moved_old \| installed_new` ([apply.md](apply.md) §2–§4) | 1 MiB |
+| `wowsync.recovery-point/1` | `op`, `package`, `created_unix_ms`, `replaced: [{name, tree}]`, `installed: [{name, tree}]`, `reason`, `pinned` (bool; true until the apply is verified, and while any journal or needs-help state references it) | 64 KiB |
 | `wowsync.local-computer/1` | `computer_id`, `display_name`, `created_unix_ms` | 64 KiB |
-| `wowsync.local-enrollment/1` | `group_id`, `enrollment_id`, `shared_root`, `install_root`, `variant_folder`, `product`, `confirmed_unfamiliar`, `next_seq` | 64 KiB |
+| `wowsync.local-enrollment/1` | `group_id`, `enrollment_id`, `shared_root`, `install_root`, `variant_folder`, `product`, `validation` (the `VariantValidation` record of [domain.md](domain.md) §2, incl. `kind` known/guided and the evidence shown), `next_seq` | 64 KiB |
+| `wowsync.admission/1` | `group_id`, `members: [{computer_id, enrollment_id, max_seq_seen, admitted_seq?}]` (watermarks, §6) | 1 MiB |
+| `wowsync.verified-objects/1` | `entries: [{rel, size, mtime_ns, sha256}]` objects this computer wrote or hash-verified in the provider folder (§4) | 16 MiB |
 | `wowsync.audit/1` (one JSON object per line) | `at_unix_ms`, `event`, `package`?, `detail` | line ≤ 16 KiB |
 
 ## 3. Hashes
@@ -107,20 +121,37 @@ Changing either format is a schema major change.
 
 `plan_publish` + `run_publish` order:
 
-1. Refuse if the inventory is unstable, the variant is not confirmed, or the
-   member record is missing/retired.
-2. Upload every missing blob referenced by `ok` folders (write-if-absent with
-   hash verification of the temp file before rename).
-3. Write every missing tree record.
-4. Write the state record `…/state/<enrollment>-<seq>.json` (temp + rename);
+1. Refuse if the AddOns listing is unstable, the variant is not confirmed, or
+   the member record is missing/retired. Folders that are `unstable` are
+   published with that status and no tree (never as absent).
+2. For every blob and tree the state will reference, obtain an
+   `ObjectCheck` (core `exec::check_object`, built on `PublishEffects::stat_object`/`hash_object`): `VerifiedOk` only if the
+   object's `(size, mtime)` matches a `verified-objects` entry with the same
+   hash, or it is `Local` and hashing it now gives the expected hash;
+   `Missing`; `Corrupt` (local, wrong hash/size); `Unverifiable` (cloud-only).
+   Existence alone is never trusted (M-05).
+3. Upload every blob not `VerifiedOk`: copy the **source file** to a temp
+   file in the provider folder, hash the temp file, and only if it equals the
+   expected hash rename it over the object path (`put_object`) (content-addressed, so
+   replacing a corrupt or unverifiable object with verified bytes is always
+   safe). Record it in `verified-objects`.
+4. Same for tree records (encoded bytes are hashed in memory first).
+5. **Source revalidation (B-02):** re-observe the metadata fingerprint of
+   every published folder (`observe_source`); any change since the scan → abort, no state record,
+   `Waiting(unstable)`, next cycle rescans. (Uploaded blobs stay; they are
+   verified content.)
+6. Write the state record `…/state/<enrollment>-<seq>.json` (temp + rename);
    increment and persist `next_seq` locally **before** writing (a crash may
    skip a number, never reuse one).
-5. Remove own state files older than the newest three (own member dir only).
+7. Remove own state files older than the newest three (own member dir only).
 
-A state record is only written after everything it references exists in the
-local copy of the provider folder. Peers may still see it before the blobs
+A state record is only written after every object it references was verified
+in the local copy of the provider folder. Peers may still see it before the blobs
 arrive (provider replication order is unknown); readers therefore treat
 missing or cloud-only trees/blobs as `NotAvailableYet`, never as absence.
+Readers recompute the hash of every tree record they use (must equal its
+name and its `tree` field) and every staged blob; a mismatch is `Corrupt`
+and makes only that package unavailable.
 Publish runs when the inventory changed (different set of folder hashes) or
 after an apply; otherwise nothing is written.
 
@@ -136,7 +167,7 @@ D-14 context; S-addon). Consequences for the slice:
   live in tree records that are shared and write-if-absent. A state record
   for ~100 folders is a few tens of KiB.
 - First publish of a large install is a long operation: it is resumable
-  (blobs already present are skipped) and shows progress; the state record
+  (objects already `VerifiedOk` are skipped) and shows progress; the state record
   is written only at the end.
 - Old blobs/trees are never deleted in the slice (no GC). This is unbounded
   growth with addon churn and must be resolved before release (Q-7, R-14).
@@ -147,9 +178,23 @@ D-14 context; S-addon). Consequences for the slice:
 
 - Members = `members\*\member.json` valid for the group. Others are shown as
   invalid with the reason.
-- Latest state per member: highest-`seq` valid file of the current
-  enrollment; a cloud-only or oversized file makes that member `Unavailable`
-  (shown "waiting for files to arrive").
+- **Admission (core `admit::admit_member_states`, M-05/M-07).** Runtime only
+  supplies raw observations: for each member, the state-file names present
+  (with cloud state and size) and, for the highest-numbered name of the
+  current enrollment, its bytes if readable. Core decides:
+
+  | Observation for member X (current enrollment) | Result |
+  |---|---|
+  | newest name `N` readable, decodes, validates for group/member/name | `Valid(N)`; watermark `max_seq_seen = max(old, N)`, `admitted_seq = N` |
+  | newest `N` cloud-only, oversized, malformed, unknown major, body mismatch | `Unusable(N, reason)`; **no fallback** to `N-1` or older; X contributes no candidates (shown "waiting for usable data from X"). The target is computed from the other members, which can delay X's newer versions but never selects X's superseded data |
+  | highest name present `< max_seq_seen` (files disappeared or replication regressed) | `Regressed(max_seq_seen)`; no fallback; shown as "data from X went backwards" |
+  | no state files and `max_seq_seen` unset | `NoState` |
+  | member's enrollment id changed | watermark for the old enrollment kept for audit; new enrollment starts unset |
+
+  Watermarks are persisted in local state (`wowsync.admission/1`) by the
+  runtime as returned by core. An `Unusable` or `Regressed` member is
+  **not** absence: nothing it previously offered is treated as removed, and
+  nothing it offered earlier is used either.
 - **Confirmed** for package P on peer X means: X's latest state contains an
   `apply_report` whose `results` include P with `applied` and the target
   `package_hash`, **and** X's inventory in that same record shows the target
