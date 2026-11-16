@@ -3,7 +3,7 @@
 Part of the [slice design](README.md). Decisions are in core (`admit`,
 `plan`, `exec`, `status`); effects are adapter calls through the core port
 traits ([core-api.md](core-api.md) §7). Revised in design retry 1 for review
-findings B-01..B-03, M-02..M-06 (see
+findings B-01..B-03, M-02..M-06 and in retry 2 for N-01/N-03 (see
 [R2-design-fix evidence](../runs/run-002/evidence/R2-design-fix.md)).
 
 ## 1. Sync cycle (runtime, R2-slice)
@@ -11,8 +11,8 @@ findings B-01..B-03, M-02..M-06 (see
 Single background loop, every 3 s (a change is noticed well within the
 10-second start requirement, A-30), plus on demand from the GUI:
 
-1. If any journal exists: `recover_interrupted` (§4). If it leaves any
-   package unresolved, no new apply starts this cycle (publish still may).
+1. If any journal exists: `recover_interrupted` (§4). If any journal
+   remains afterwards, no new apply starts this cycle (publish still may; Q-25).
 2. Read local enrollment; open provider root; read group, members and the
    state-file listing; `admit_member_states` with the persisted watermarks
    ([publication.md](publication.md) §6). Persist the returned watermarks.
@@ -36,11 +36,17 @@ outside the variant folder does not block).
 
 ## 2. Apply algorithm (`run_apply`)
 
-Preconditions checked by `plan_apply`: `ConfirmedVariant`, the package's
-folders stable in the current scan, every plan precondition derivable
-(§2.1), `Activity::NotRunning`, no unresolved journal. Then `fx.lock()`
-(app install lock; it excludes other WoW Sync instances only, not
-CurseForge or other writers — those are handled by §2.1/§2.3).
+Revised in design retry 2 (N-01, N-03): **one package per operation**
+(`OpId`), and recovery decides from **observed slot contents**, not from a
+per-folder progress field. This removes all multi-package journal,
+staging and cleanup coupling and makes every step re-entrant.
+
+Preconditions checked by `plan_apply`: `ConfirmedVariant` (synthetic install
+in the slice, [domain.md](domain.md) §2.1), the package's folders stable in
+the current scan, every plan precondition derivable (§2.1),
+`Activity::NotRunning`, **no journal of any operation present** (Q-25).
+Then `fx.lock()` (app install lock; it excludes other WoW Sync instances
+only, not CurseForge or other writers — those are handled by §2.1/§2.2).
 
 ### 2.1 Plan preconditions (B-02)
 
@@ -57,134 +63,224 @@ change of membership (added/removed file or directory), size or mtime
 changes it. The fingerprint is cheap (metadata only); the tree hash is the
 content proof. Both are recorded in the journal.
 
-### 2.2 Per package
+### 2.2 One operation = one package
 
-For each `PackageApply` in key order (`G(x)` = the **gate**: call
-`activity()`; continue only on `NotRunning`):
+`run_apply` processes the plan's `PackageApply` entries in key order; each
+has its **own** `OpId`, journal file, staging directory and recovery
+directory. Nothing in one operation refers to another. `G` = the **gate**:
+call `activity()`; continue only on `NotRunning`.
 
-Shorthand used below, all on `ApplyEffects` ([core-api.md](core-api.md) §7):
-`observe_live(f)` = `observe(Slot::Live{f})`; `hash_live_folder(f)` =
-`tree_of(Slot::Live{f})`; `verify_staged` = `tree_of(Slot::Staging{..})`;
-`move_<a>_to_<b>` = `rename(Slot::<A>, Slot::<B>)`; `prune_recovery` =
-`list_recovery` + core decision + `remove_recovery`; `exists(slot)` =
-`observe(slot).is_some()`. Recovery points are written with
-`write_recovery_point` (`pinned` is a field of the record).
+Shorthand, all on `ApplyEffects` ([core-api.md](core-api.md) §7): for folder
+`f` of op `o` and package `p`: `L` = `Slot::Live{f}`, `S` =
+`Slot::Staging{o,f}`, `R` = `Slot::Recovery{p,o,f}`; `present(X)` =
+`observe(X).is_some()`; `content(X)` = `tree_of(X)`; `move(X→Y)` =
+`rename(X, Y)` (fails if `Y` exists). `O` = the folder's old tree
+(`expected_live`), `N` = the target tree.
 
-1. **Stage.** Journal phase `staging` written. For each folder: `stage_folder`
-   (copy each blob from the provider into `staging\<op>\<folder>`, verify each
-   file hash), then `verify_staged` (tree hash equals target). Missing /
-   cloud-only blob → package `Skipped(NotAvailableYet)`, staging discarded,
-   next package. Hash mismatch → `Failed`, staging discarded.
-2. **Destination revalidation (content).** For every folder:
-   `observe_live(folder)` must match `expected_live` (absent, or same
-   fingerprint **and** `hash_live_folder` equal to the expected tree, and no
-   entry modified within the quiescence window, Q-15). Any difference or
-   read error → package `Replanned(DestinationChanged)`: staging discarded,
-   journal removed, nothing live touched; the next cycle rescans and replans.
-   This is what prevents replacing an update made by CurseForge (or the user)
-   while staging ran.
-3. **Commit.** Journal phase `committing` (written and flushed before any
-   live change). For each folder in name order, each rename separately gated:
-   a. `G`; then `observe_live(folder)` fingerprint must still equal the value
-      from step 2, else stop (b. not executed) → §2.3 interruption.
-   b. If live exists: `move_live_to_recovery`. Journal folder state `moved_old`.
-   c. `G`; then `move_staged_to_live`. Journal folder state `installed_new`.
-   Any rename error → §2.3 with reason `RenameFailed`.
-4. Journal phase `committed` (all folders `installed_new`); write the
-   recovery point record (`pinned: true` until verification).
-5. **Verify.** `G`; then for every folder: `hash_live_folder` equals the
-   target tree, and the recovery copy of each replaced folder hashes to its
-   `expected_live` tree (detects a writer that modified the old folder during
-   the residual window). All equal → journal phase `verified`.
-   Otherwise → journal phase `needs_help` with the reason (`LiveMismatch`,
-   `RecoveryMismatch`); both alternatives kept; the recovery point stays
-   pinned; package result `NeedsHelp`. If `G` fails here the journal stays
-   `committed` (`Waiting(GameRunning)`) and verification resumes in a later
-   cycle (§4).
-6. **Finalize — only from `verified`.** Recovery point `pinned: false`;
-   `prune_recovery` (§2.4); journal removed; staging discarded; package
-   result `Applied`. Only `Applied` packages appear as `applied` in the next
+1. **Journal `staging`** written (temp + flush + rename) **before** creating
+   the staging directory. For each folder: `stage_folder` (copy each blob
+   from the provider, verify each file hash), then `content(S) == N`.
+   Missing / cloud-only blob → `Skipped(NotAvailableYet)`; hash mismatch →
+   `Failed`. Both: journal → `rolled_back` (`from_phase: staging`), then
+   cleanup (§2.5).
+2. **Destination revalidation.** For every folder: `observe(L)` matches
+   `expected_live` (absent, or same fingerprint **and** `content(L) == O`,
+   no entry newer than the quiescence window, Q-15). Any difference →
+   `Replanned(DestinationChanged)`: journal → `rolled_back`
+   (`from_phase: staging`), cleanup (§2.5);
+   nothing live touched.
+3. **Recovery point record** written with `pinned: true`
+   (`write_recovery_point`), then **journal `committing`**. Both are written
+   before any live change.
+4. **Commit.** For each folder in name order:
+   a. If `O` is a tree: `G`; `observe(L).fingerprint` still equals the step-2
+      value (else stop, §2.3); `move(L→R)`.
+   b. `G`; `move(S→L)`.
+   Any `G` failure, fingerprint mismatch or rename error → §2.3.
+5. **Journal `committed`.**
+6. **Verify.** `G`; then for every folder the configuration is `Done` (§3.1)
+   with `content(L) == N` and, if `O` is a tree, `content(R) == O`. All true →
+   **journal `verified`** → step 7. Otherwise → journal `needs_help` with the
+   reason (`LiveMismatch` / `RecoveryMismatch`); nothing moved; package
+   result `NeedsHelp`. If `G` fails the journal stays `committed`
+   (`Waiting`); verification resumes in a later cycle (§4).
+7. **Finalize** (only from `verified`, §2.5): recovery point `pinned: false`;
+   prune; `discard_staging(o)` (empty); `remove_journal(o)`. Result
+   `Applied`. Only `Applied` packages appear as `applied` in the next
    `apply_report`.
 
-A package never changes live folders without a journal that records which
-folder is in which slot. Folders of the package present locally but absent
-from the target cannot occur in a plan: such a package is `NeedsDecision`
-(no mixing, [domain.md](domain.md) §6). Nothing in `AddOns` is deleted;
-replaced folders move to recovery by same-volume rename.
+Folders of the package present locally but absent from the target cannot
+occur in a plan (complete-package rule, [domain.md](domain.md) §6). Nothing
+in `AddOns` is deleted; replaced folders move to recovery by same-volume
+rename.
 
 ### 2.3 Interruption (B-01)
 
-If `G` returns `Running` or `Unknown` (or a rename fails) after the
-`committing` journal was written:
+If `G` returns `Running`/`Unknown`, a fingerprint check fails, or a rename
+fails after the `committing` journal was written:
 
-- **No further live mutation of any kind** in this run — no rollback, no
-  completion. `run_apply` returns immediately with
-  `stopped = GameRunning | ActivityUnknown | RenameFailed` and the package
-  result `Interrupted`.
-- The journal (phase `committing`, per-folder states) and all three slots
-  (live, staging, recovery) are left as they are. Recovery points stay pinned.
-- Status: `NeedsHelp` headline only if the rename failed; for game activity
-  `Waiting`: "WoW started while <addon> was being updated; it will be
-  restored to its previous version after WoW exits." The mixed live state of
-  that one package while WoW runs is the reported residual race (PLAN §6.7).
+- **No further live mutation** in this run — no rollback, no completion.
+  `run_apply` returns immediately with `stopped = GameRunning |
+  ActivityUnknown | DestinationChanged | RenameFailed` and the package result
+  `Interrupted`; later packages of the plan are not started.
+- The journal (phase `committing`) and all slots are left as they are.
+- Status `Waiting` for game activity ("WoW started while <addon> was being
+  updated; it will be restored to its previous version after WoW exits"),
+  `NeedsHelp` only if the next recovery cannot classify the slots (§3.1).
 - Recovery happens in a later cycle via §4 after a fresh `NotRunning`.
 
-The residual window that remains (honestly reported, PLAN §6.7): WoW (or an
-external writer) may start between a `NotRunning` observation and the very
-next rename; an external writer may modify a folder between its fingerprint
-check and its rename. Step 5 detects the latter for replaced folders.
+Residual window (honestly reported, PLAN §6.7): WoW (or an external writer)
+may start between a `NotRunning` observation and the very next rename; an
+external writer may modify a folder between its fingerprint check and its
+rename. Step 6 detects the latter for replaced folders.
 
 ### 2.4 Retention (B-03, SPEC three states)
 
-- Normal pruning (only in step 6): per package keep the newest **2** unpinned
-  recovery points (current live + two previous states).
-- Never pruned: any recovery point with `pinned: true`, and any point
-  referenced by an existing journal. These are visible temporary exceptions
-  in status ("kept for recovery: N extra copies", A-17), so more than two can
-  exist.
+- Normal pruning (only in finalize): per package keep the newest **2**
+  unpinned recovery points (current live + two previous states).
+- Never pruned: any recovery point with `pinned: true`, and any point whose
+  op has a journal. These are visible temporary exceptions in status ("kept
+  for recovery: N extra copies", A-17), so more than two can exist.
 
-## 3. Rolling a package back (used only by §4)
+### 2.5 Cleanup is per operation and idempotent (N-03)
 
-Requires a fresh `NotRunning` before **each** rename (`G`). Using the journal
-entry, for each folder in reverse name order:
+Cleanup touches only the op's own directories and only from a terminal
+phase, journal last:
 
-| Journal folder state + observation (`exists` per slot) | Action |
+| From phase | Steps, each skipped if already done |
 |---|---|
-| `pending`, live = expected | nothing |
-| `moved_old`: live absent, recovery has old | `move_recovery_to_live` |
-| `installed_new`: live = new, recovery has old | `move_live_to_staging`, then `move_recovery_to_live` |
-| `installed_new` for an install (no old): live = new | `move_live_to_staging` |
-| anything else (both missing, unexpected content) | stop: `needs_help(UnknownInterruptedState)` |
+| `verified` (finalize) | set recovery point `pinned: false` (rewrite is idempotent); prune other unpinned points of the package beyond 2; `discard_staging(o)`; `remove_journal(o)` |
+| `rolled_back` with `from_phase: staging` | `discard_staging(o)` unconditionally (no live folder was ever moved into `S`; it holds only provider copies, possibly partial); `remove_recovery(p, o)` (holds at most the record); `remove_journal(o)` |
+| `rolled_back` with `from_phase: committing` | `discard_staging(o)` **only if** every `S` is absent or `content(S) == N` (provider-reproducible bytes); else journal → `needs_help(UnexpectedStaging)`; `remove_recovery(p, o)` **only if** no `R` of the op is present (it then holds only the record); `remove_journal(o)` |
 
-After rollback, each restored folder is hashed and must equal its
-`expected_live` tree; otherwise `needs_help(RestoreMismatch)`. A restore
-rename failure → `needs_help(RestoreFailed)` with journal and all slots kept.
-Successful rollback → journal phase `rolled_back`, recovery point record of
-the op deleted (its folder moved back), staging discarded, journal removed.
+`needs_help` has no cleanup: the journal, staging and recovery of that op
+are kept as evidence until a later GUI resolution (out of slice, Q-25).
+The journal is written before the op's staging or recovery directory is
+created, so neither exists without a journal; any such directory found
+(external interference) is reported in diagnostics and left in place.
+
+## 3. Slot reconciliation (N-01)
+
+### 3.1 Configurations
+
+Atomic same-volume renames move a whole folder; the slice never edits a
+folder in place. For one folder, the only moves WoW Sync makes are
+`L→R`, `S→L` (commit) and `L→S`, `R→L` (rollback). Classify by presence
+`(L, S, R)`:
+
+Replace (`O` is a tree):
+
+| Config | `L` | `S` | `R` | Meaning |
+|---|---|---|---|---|
+| `Untouched` | any | present | absent | we have not moved this folder (or rolled it back fully); `L` is whatever is there |
+| `Half` | absent | present | present | old moved out, new not yet in (commit step 4a done, or rollback step b pending) |
+| `Done` | present | absent | present | new in, old in recovery |
+| `Unknown` | any other combination | | | e.g. both `S` and `R` absent, or all three present |
+
+Install (`O` absent; `R` is never used):
+
+| Config | `L` | `S` | Meaning |
+|---|---|---|---|
+| `Untouched` | any | present | not moved |
+| `Done` | present | absent | new in |
+| `Unknown` | absent | absent | — |
+
+Content checks are applied where the next move would **remove** something
+from live: before `L→S` in rollback, `content(L) == N` (otherwise an
+external writer changed the new folder → `needs_help(LiveChanged)`, nothing
+moved). After a restoring `R→L`, `content(L) == O` (else
+`needs_help(RestoreMismatch)`; the bytes are live, the journal is kept).
+
+### 3.2 Rollback (phase `committing`)
+
+For each folder in **reverse** name order, re-observing every time:
+
+| Config | Action |
+|---|---|
+| `Untouched` | none |
+| `Half` | `G`; `move(R→L)`; check `content(L) == O` |
+| `Done` (replace) | check `content(L) == N`; `G`; `move(L→S)` → now `Half`; `G`; `move(R→L)`; check |
+| `Done` (install) | check `content(L) == N`; `G`; `move(L→S)` → `Untouched` |
+| `Unknown` | journal → `needs_help(UnknownInterruptedState)`; stop this op |
+
+When every folder is `Untouched`: journal → `rolled_back`
+(`from_phase: committing`), then cleanup
+(§2.5). Any `G` failure → stop, journal unchanged (`Waiting`).
+
+### 3.3 Completion check (phase `committed`)
+
+Every folder must be `Done` with the content checks of §2.2 step 6;
+otherwise `needs_help`. No rename is made in this phase.
 
 ## 4. Crash and interruption recovery (`recover_interrupted`)
 
-The journal holds one `phase` **per package** ([publication.md](publication.md)
-§2). `recover_interrupted` loads every journal, and for each package in key
-order applies the rule for its phase independently (one package's
-`needs_help` does not stop recovery of the others, but no new apply starts
-while any package is unresolved):
+Runs at the start of every cycle, for each journal (one op = one package)
+in op order, independently. It re-observes the slots every time and holds
+no state between calls.
 
-| Package phase | Action |
+| Journal phase | Action |
 |---|---|
-| `staging` | discard staging for the op; mark package done |
-| `committing` | `G`; if not `NotRunning` → `Waiting`, retry next cycle. Else roll back per §3 |
-| `committed` | `G`; if not `NotRunning` → `Waiting`. Else run verification (§2.2 step 5) — **never** finalize without it. Success → `verified`, then finalize (step 6); failure → `needs_help` |
-| `verified` | finalize (step 6) |
-| `needs_help` | leave as is; report; recovery points stay pinned. Resolution is GUI work outside the slice; the state is shown and preserved |
-| `finalized` / `rolled_back` | nothing |
+| unparseable | `needs_help(UnknownInterruptedState)` shown; nothing touched |
+| `staging` | journal → `rolled_back`; cleanup (§2.5). No live slot was touched in this phase |
+| `committing` | `G`; if not `NotRunning` → `Waiting`. Else rollback §3.2 |
+| `committed` | `G`; if not `NotRunning` → `Waiting`. Else §3.3 → `verified` → finalize, or `needs_help` |
+| `verified` | finalize (§2.5) |
+| `rolled_back` | cleanup (§2.5) |
+| `needs_help` | leave as is; report; recovery point stays pinned |
 
-When every package of a journal is `finalized` or `rolled_back`, the journal
-is removed (`remove_journal`). An unparseable journal → whole op
-`NeedsHelp(UnknownInterruptedState)`, no apply until resolved. Each phase
-transition is written (temp + flush + rename) **before** the effects it
-announces, so a crash at any point leaves a journal that §3/§4 can interpret.
+While any journal exists, no new apply is planned (Q-25); publish still runs.
 
+### 4.1 Idempotency argument (N-01)
+
+Write order per op, with the crash points between effects (`†`):
+
+```text
+J:staging † stage S(f1) † … † [revalidate, reads only] † RP(pinned) † J:committing
+† f1: L→R † S→L † f2: L→R † S→L † … † J:committed † [verify, reads only]
+† J:verified † RP(unpinned) † prune † discard S † remove J
+```
+
+Journal and record writes are temp + flush + rename, so each is atomic:
+after a crash the journal shows the old or the new phase, never a partial
+file. Each rename is atomic. Hence after any crash:
+
+1. **Before `J:staging` lands**: no journal, no staging directory
+   (it is created only after), nothing to do.
+2. **Phase `staging`** (crash anywhere up to and including the recovery
+   point write): live untouched (all live writes come after `J:committing`).
+   Recovery: journal → `rolled_back` with `from_phase: staging` →
+   cleanup, which discards staging unconditionally (it may be partial, and
+   in this phase no live folder was ever moved into `S`). `from_phase` is
+   in the journal so a crash during cleanup keeps the distinction.
+3. **Phase `committing`** (crash after `J:committing`, at any rename
+   boundary): every folder is in `Untouched`, `Half` or `Done` by
+   construction (the sequence `Untouched →(L→R) Half →(S→L) Done` for
+   replace, `Untouched →(S→L) Done` for install). Rollback (§3.2) moves
+   each folder along the same chain backwards (`Done →(L→S) Half →(R→L)
+   Untouched`), so a crash **during rollback** also leaves only these
+   configurations, and the next run applies §3.2 again from whatever it
+   observes. Each rollback action is chosen from the observation, not from
+   memory, so re-running it after a crash or after a `G` stop never repeats
+   a completed move and never skips one.
+4. **Crash between the last `S→L` and `J:committed`**: phase `committing`,
+   all folders `Done` → rolled back (safe; the update is retried next
+   cycle). Accepted cost.
+5. **Phase `committed`**: all folders `Done` (or an external change →
+   `needs_help`). §3.3 makes no moves, so it can run any number of times.
+6. **Phase `verified`**: finalize steps are each "skip if done": rewriting
+   `pinned:false`; pruning removes only unpinned points beyond 2 (repeatable);
+   discarding an absent staging dir is a no-op; journal removal is last, so
+   a crash before it re-runs finalize.
+7. **Phase `rolled_back`**: cleanup steps are each "skip if done"; journal
+   removal last.
+8. **Phase `needs_help`**: no action; repeatable trivially.
+
+Game activity: every live rename in §2.2/§3.2 is preceded by `G`; a stop
+leaves one of the configurations above, so pausing is equivalent to a crash
+at that point. The required tests sweep a crash after every effect of
+apply **and** after every effect of recovery (including a second crash
+during recovery), with both fakes and real adapters ([tests.md](tests.md)
+§3, §5).
 ## 5. Activity and quiescence
 
 - Activity per [adapters-api.md](adapters-api.md) §6. `Unknown` blocks all

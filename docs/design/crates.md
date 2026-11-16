@@ -76,9 +76,9 @@ background thread), per S-mem option 1. Not a final decision.
 | Module | Contents |
 |---|---|
 | `lib.rs` | module declarations; `FsError` |
-| `fs_safe` | `Root` (authorized directory), containment, reparse classification (cloud-file tags allowed only for provider roots), link refusal |
+| `fs_safe` | `Root` (authorized directory), containment, reparse classification (cloud-file tags allowed only for provider roots), link refusal, recall/offline refusal from enumeration attributes for files and directories |
 | `fs_scan` | AddOns scan with hashing and stability check; variant metadata reads |
-| `fs_install` | `InstallArea`: lock, staging, slot renames, journals, recovery records |
+| `fs_install` | `InstallArea`: lock, staging, slot renames, journals, recovery records — all scoped to one op (= one package) |
 | `provider` | `ProviderRoot`: bounded reads, atomic writes, listings with cloud state, blob put/copy |
 | `winproc` | WoW client observation by image path plus possible-client names for uninspectable processes; pure `classify`/`image_is_under`; `Unknown` on non-Windows |
 | `sysinfo` | `now_unix_ms`, `random_id_hex` |

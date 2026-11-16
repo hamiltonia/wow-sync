@@ -40,6 +40,7 @@ pub struct VariantObservation {
     pub flavor_info: FileObs,
     pub build_info: FileObs,
     pub addons_dir: DirObs,          // Missing | PlainDir | NotPlain
+    pub synthetic_marker: FileObs,   // <install root>/.wowsync-synthetic (slice gate, domain.md §2.1)
 }
 pub struct VariantIdentity { pub product: ProductCode, pub folder: String,
                              pub build_version: Option<String>, pub profile: Option<&'static Profile> }
@@ -53,7 +54,7 @@ pub enum TocMapping { Profile(&'static Profile), ValidatedPlain /* "validated-pl
 pub struct OtherVariants { pub same_product_folders: Vec<String>, pub enrolled_elsewhere: bool }
 pub enum LayoutAssessment {
     Supported { mapping: TocMapping, eligible: Vec<FolderKey>, blocked: Vec<(FolderKey, BlockReason)>, digest: Sha256 },
-    Unsupported(LayoutReason),       // AddOnsLayout | DuplicateProductFolder | AlreadyEnrolled
+    Unsupported(LayoutReason),       // AddOnsLayout | DuplicateProductFolder | AlreadyEnrolled | NotSyntheticInstall (slice, Q-24)
 }
 pub fn assess_layout(id: &VariantIdentity, unfamiliar: bool, addons: &[FolderScan], others: &OtherVariants) -> LayoutAssessment;
 pub struct GuidedConfirmation { pub identity: bool, pub scope: bool, pub digest: Sha256 }
@@ -128,7 +129,7 @@ pub fn compare_package(a: &PackageVersion, b: &PackageVersion) -> PackageOrder;
 Rust structs mirroring every schema in [publication.md](publication.md) §2
 (`RootFormat`, `GroupRecord`, `MemberRecord`, `CodeState`, `FolderTreeRecord`,
 `ApplyJournal`, `RecoveryPoint`, `AuditEntry`, `LocalComputer`,
-`LocalEnrollment`, `AdmissionWatermarks`, `VerifiedObjects`).
+`LocalEnrollment`, `AdmissionWatermarks`).
 
 ```rust
 pub fn encode<T: Record>(r: &T) -> Vec<u8>;                     // pretty JSON, LF, trailing newline
@@ -177,29 +178,32 @@ pub fn compute_target(input: &TargetInput) -> GroupTarget;
 
 pub struct PublishContext { pub group: GroupId, pub computer: ComputerId, pub enrollment: EnrollmentId,
                             pub seq: u64, pub client: ClientInfo, pub apply_report: Option<ApplyReport>,
-                            pub verified: VerifiedObjects, pub own_state_files: Vec<String> }
+                            pub own_state_files: Vec<String> }
 pub struct PublishPlan { pub objects: Vec<ObjectRef /* blob or tree, with local source */>,
                          pub state: CodeState, pub state_path: String, pub prune_states: Vec<String>,
                          pub source_fingerprints: Vec<(String /* folder */, Sha256)> }
 pub fn plan_publish(inv: &Inventory, ctx: &PublishContext) -> Result<PublishPlan, PlanBlock>;
 
-pub struct ApplyPlan { pub op: OpId, pub packages: Vec<PackageApply> }   // sorted by package key
-pub struct PackageApply { pub package: FolderKey, pub target_hash: Sha256,
+pub struct ApplyPlan { pub packages: Vec<PackageApply> }   // sorted by package key
+/// One package = one operation (apply.md §2.2): own OpId, journal, staging, recovery dir.
+pub struct PackageApply { pub op: OpId, pub package: FolderKey, pub target_hash: Sha256,
                           pub folders: Vec<FolderApply>, pub explanation: Explanation }
 pub struct FolderApply { pub name: String, pub key: FolderKey, pub action: FolderAction,
                          pub tree: FolderTreeRecord, pub expected_live: ExpectedLive }
 pub enum ExpectedLive { Absent, Tree { tree: Sha256, fingerprint: Sha256 } }   // apply.md §2.1
 pub enum FolderAction { Install /* absent locally */, Replace /* present, different tree */ }
-pub fn plan_apply(target: &GroupTarget, local: &Inventory, op: OpId, gate: &ApplyGate) -> Result<ApplyPlan, PlanBlock>;
-pub struct ApplyGate { pub activity: Activity, pub variant: ConfirmedVariant, pub unresolved_journal: bool }
+/// 
+ew_op is called once per planned package (ids come from the runtime's RNG).
+pub fn plan_apply(target: &GroupTarget, local: &Inventory, new_op: &mut dyn FnMut() -> OpId, gate: &ApplyGate) -> Result<ApplyPlan, PlanBlock>;
+pub struct ApplyGate { pub activity: Activity, pub variant: ConfirmedVariant, pub any_journal: bool /* Q-25 */ }
 pub enum Activity { NotRunning, Running { pids: Vec<u32> }, Unknown(String) }
 pub enum PlanBlock { GameRunning, ActivityUnknown(String), Unstable, UnresolvedJournal, NothingToDo, Invalid(String) }
 ```
 
 `plan_apply` includes only `Chosen` packages whose local folders are all
 `Ok` with a fingerprint (stable this scan); `expected_live` comes from that
-scan. It never plans a package whose target lacks a local folder of the
-package (domain.md §6 `PartialCandidate`). `plan_publish` refuses when
+scan. It never plans a package whose target is not complete against the
+group-wide membership (domain.md §6 `PartialCandidate`). `plan_publish` refuses when
 `listing_stable` is false; unstable folders are published with status
 `unstable` and no tree.
 
@@ -238,22 +242,24 @@ pub trait ApplyEffects {
 pub struct EffectError { pub kind: EffectErrorKind /* NotFound | Exists | InUse | CloudOnly | HashMismatch | Unsafe | Io | Crashed */,
                          pub detail: String }
 pub enum ObjectCheck { VerifiedOk, Missing, Corrupt, Unverifiable }
-/// stat; Local with (size, mtime) equal to a VerifiedObjects entry of the same hash -> VerifiedOk;
-/// else Local -> hash_object (== expected ? VerifiedOk : Corrupt); CloudOnly -> Unverifiable.
-pub fn check_object(fx: &mut impl PublishEffects, rel: &str, expect: &Sha256, cache: &VerifiedObjects) -> Result<ObjectCheck, EffectError>;
+/// stat; Local -> hash_object now (== expected ? VerifiedOk : Corrupt); CloudOnly -> Unverifiable;
+/// Missing -> Missing. No metadata cache (retry 2, M-05).
+pub fn check_object(fx: &mut impl PublishEffects, rel: &str, expect: &Sha256) -> Result<ObjectCheck, EffectError>;
 pub fn run_publish(plan: &PublishPlan, ctx: &mut PublishContext, fx: &mut impl PublishEffects) -> PublishOutcome; // publication.md §4
 pub fn run_apply(plan: &ApplyPlan, fx: &mut impl ApplyEffects) -> ApplyOutcome;      // apply.md §2
 pub fn recover_interrupted(fx: &mut impl ApplyEffects) -> RecoveryOutcome;            // apply.md §4
 pub struct ApplyOutcome { pub packages: Vec<(FolderKey, PackageResult)>, pub stopped: Option<PlanBlock> }
 pub enum PackageResult { Applied { recovery: OpId }, Skipped(Explanation), Replanned(Explanation),
                          Interrupted(Explanation), RolledBack(Explanation), NeedsHelp(Explanation), Failed(Explanation) }
-pub struct RecoveryOutcome { pub packages: Vec<(OpId, FolderKey, PackageResult)>, pub unresolved: bool }
+pub struct RecoveryOutcome { pub ops: Vec<(OpId, FolderKey, PackageResult)>, pub journals_remaining: bool }
+/// Pure slot classification used by rollback/verify (apply.md §3.1).
+pub enum SlotConfig { Untouched, Half, Done, Unknown }
+pub fn classify_slots(install: bool, live: bool, staging: bool, recovery: bool) -> SlotConfig;
 ```
 
 Every port method maps to exactly one adapter call or a fixed short
 sequence ([adapters-api.md](adapters-api.md) §9); none needs private storage
-access. `PublishOutcome` returns the updated `VerifiedObjects` for the
-runtime to persist.
+access.
 
 ## 8. `status`, `explain`
 
@@ -273,7 +279,7 @@ pub fn confirmations(target: &GroupTarget, members: &[MemberView]) -> BTreeMap<F
 pub enum Explanation { /* closed set, each with structured fields, e.g. */
     NewerVersion { folder: String, from: String, to: String, source: ComputerId },
     Installed { source: ComputerId }, AmbiguousVersions { evidence: Vec<FolderEvidence> },
-    PartialCandidate { missing_here: Vec<String> }, NoCompatibleToc { folder: String },
+    PartialCandidate { missing: Vec<String> /* membership folders absent from the candidate */ }, NoCompatibleToc { folder: String },
     DifferentClientBuild { here: Option<String>, there: Option<String> }, UnvalidatedTocMapping { folder: String },
     GameRunning, ActivityUnknown(String), Unstable, NotAvailableYet { missing: Vec<Sha256> },
     MemberUnusable { computer: ComputerId, seq: u64, reason: String }, MemberRegressed { computer: ComputerId },

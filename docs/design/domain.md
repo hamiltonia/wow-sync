@@ -94,14 +94,19 @@ LayoutAssessment` (core, pure). Checks, all required:
 | AddOns is a plain directory at exactly `<variant>\Interface\AddOns` | `Unsupported(AddOnsLayout)` |
 | no other folder under the same install root reports the same product code | `Unsupported(DuplicateProductFolder)` |
 | this variant folder is not enrolled in another group on this computer | `Unsupported(AlreadyEnrolled)` |
-| `.toc` mapping for the client is known: a profile's suffix list (Recognized), or `validated-plain/1` (Unfamiliar, below) | — |
+| **slice only:** the install root contains the marker file `.wowsync-synthetic` (first line `wowsync-synthetic/1`), written by `testkit::SyntheticInstall` and never present in a real WoW install | `Unsupported(NotSyntheticInstall)` (Q-24) |
+| `.toc` mapping: `validated-plain/1` for **every** client in the slice, recognized or not (retry 2, R-M03; below) | — |
 
-For `validated-plain/1` (unfamiliar clients) a folder is **eligible** for
-transfer only if it has a plain `F.toc` and **no** suffixed candidate
-(`F_<S>.toc` / `F-<S>.toc`) at all; we do not know which suffix such a
-client loads, so every folder with suffixed tocs is `Blocked
+For `validated-plain/1` a folder is **eligible** for transfer only if it
+has a plain `F.toc` and **no** suffixed candidate (`F_<S>.toc` /
+`F-<S>.toc`) at all. No client's suffix order has been validated (Q-3 for
+`wowf`), so every folder with suffixed tocs is `Blocked
 (UnvalidatedTocMapping)` — an addon-scoped decision, never installed or
-replaced automatically (Q-20). The result is
+replaced automatically (Q-20). With a single plain toc there is exactly one
+file list the client can load, so equal summary fields cannot hide
+different loaded content (R-M03). The assumption that a client loads `F.toc`
+when no flavor toc exists is standard WoW behavior but unverified for
+Forever; the slice applies it only to synthetic installs (Q-24). The result is
 `Supported { mapping, eligible: Vec<FolderKey>, blocked: Vec<(FolderKey, reason)>, digest: Sha256 }`
 where `digest` hashes the identity, mapping and both lists.
 
@@ -162,7 +167,12 @@ Everything else (including `SavedVariables`, file lists, Lua/XML) is ignored
 in the slice. A candidate that cannot be read or parsed makes the selection an
 `Error` (not empty).
 
-**Select** `select_toc(folder, candidates, profile) -> TocSelection`:
+**Select** `select_toc(folder, candidates, mapping) -> TocSelection`.
+In the slice the mapping is always `validated-plain/1`: if any suffixed
+candidate exists → `Unvalidated { files }`; else the plain `F.toc` →
+`Selected`; else `None`. The profile rule below is **specified for a
+later run** (after Q-3 is validated) and is not reachable in the slice;
+R2-core implements only the plain rule:
 
 1. For each suffix in `profile.toc_suffixes` order, collect candidates with
    that suffix (either separator, case-insensitive).
@@ -174,11 +184,9 @@ in the slice. A candidate that cannot be read or parsed makes the selection an
 4. Else (only other suffixes, e.g. only `_Vanilla`) → `None { reason:
    "no toc for this variant" }`.
 
-For an unfamiliar variant (mapping `validated-plain/1`, §2.1): if any
-suffixed candidate exists → `Unvalidated { files }`; else the plain `F.toc`
-→ `Selected`; else `None`. The `wowf` order and the treatment of `_Camelot`
-are the stated uncertainty (Q-3): owner-run client check needed; the rule
-fails closed on disagreement instead of guessing.
+The `wowf` order and the treatment of `_Camelot` are the stated
+uncertainty (Q-3): owner-run client check needed before the profile rule is
+enabled.
 
 **Compatibility gate (M-03).** Only `Selected` is evidence that the client
 would load the folder. A folder whose selection is `None`, `Ambiguous`,
@@ -217,7 +225,10 @@ come from other predicates in §6 (same variant group, same client build,
 `Selected` toc under a known mapping, complete package). Manual edits that
 keep the label but change content show up as equal labels with different
 content → `Ambiguous`; a manual edit that also changes the label to a larger
-one is indistinguishable from a release (stated limitation, Q-22). Real
+one is indistinguishable from a release. The slice therefore does **not**
+claim release provenance: it runs only on synthetic installs whose fixtures
+are releases by construction (§2.1 marker gate, Q-24), and real-data use
+waits for a validated provenance rule (Q-22). Real
 release-pair ordering has not been measured (S-addon: recognition only);
 tests use real labels for recognition and synthetic pairs for ordering,
 and the pairs are labeled as such.
@@ -316,12 +327,17 @@ candidate `c` can be chosen automatically only if all hold:
 | the source member's `client.toc_mapping` equals the local mapping | `DifferentTocMapping` |
 | the source member's `client.build_version` equals the local one (both present) | `DifferentClientBuild` (Q-21) |
 | no member folder is `Blocked(UnvalidatedTocMapping)` locally (§2.1) | `UnvalidatedTocMapping` |
-| `c` contains every folder of the package present **locally** (local set ⊆ `c`'s set) — applying `c` must not leave old local parts beside new ones | `PartialCandidate` |
+| `c` is **complete**: its folder set equals the package's full membership `Package.members` as established by grouping over **all** admitted observations and the local inventory (§5) — so neither leftover old parts here nor a missing part on an empty peer is possible (retry 2, R-M04) | `PartialCandidate` |
 
 A local candidate is always "eligible" for the purpose of staying as it is
-(nothing is written). Eligibility is evaluated per local computer, so two
-computers may reach different results for the same package (e.g. one has an
-extra folder); each explains its own.
+(nothing is written). Completeness is checked against the group-wide
+membership, not the local folder set; other predicates (build, mapping) are
+per local computer, so two computers may reach different results and each
+explains its own. Slice limitation (Q-2): if an author legitimately drops a
+folder from a suite, the new version stays a `PartialCandidate` everywhere
+until membership evidence changes (e.g. the old folder is removed by the
+user on every computer); the slice has no removal or membership-retirement
+rule.
 
 **Choice:**
 
@@ -335,10 +351,15 @@ extra folder); each explains its own.
 - Otherwise → `NeedsDecision { candidates, evidence }` for that package only;
   other packages proceed (R-06).
 
-Example (review M-04): A has `Suite-Core` v1 + `Suite_Data` v1, B has only
-`Suite-Core` v2. On A, B's candidate dominates by Core but A's `Suite_Data`
-is not in it → `NeedsDecision(PartialCandidate)`; nothing changes on A. On
-B, B's own candidate dominates → `InSync`. After a successful apply, the
+Example (review M-04, recheck R-M04): A has `Suite-Core` v1 + `Suite_Data`
+v1, B has only `Suite-Core` v2, C has neither. Membership is
+`{suite-core, suite_data}`. B's candidate dominates by Core but lacks
+`Suite_Data` → `NeedsDecision(PartialCandidate)` on A **and** on C (the empty
+peer does not receive an incomplete suite). On B the dominating candidate is
+its own, so nothing is written (`InSync`, with a note that the package is
+incomplete relative to the group membership). A's complete v1 does not
+dominate (B is `Greater`), so it is not installed on C either — no
+fallback. After a successful apply, the
 local effective package hash must equal the chosen hash exactly
 ([apply.md](apply.md) §2.2 step 5 verifies every folder; the package hash
 follows).
