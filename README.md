@@ -1,11 +1,12 @@
 # WoW Sync: intent specification seed
 
 Status: specification approved by the owner at `7a2ccdf` on 2026-11-14.
-Run-001 (bootstrap and feasibility) is complete pending owner decisions; there
-is a pinned Rust workspace skeleton, verification tooling, CI and feasibility
-spikes (`spikes/`, not product code), but no product features. Report:
-[docs/runs/run-001/REPORT.md](docs/runs/run-001/REPORT.md). Current state:
-[docs/runs/run-001/HANDOFF.md](docs/runs/run-001/HANDOFF.md).
+Run-001 (bootstrap and feasibility) is complete pending owner decisions.
+Run-002 (design and a synthetic-data-only Windows vertical slice: enroll,
+inventory, publish, apply addon code, recover, GPUI tray app) is closed at
+budget review; it is not usable on real WoW data and not a release. Report:
+[docs/runs/run-002/REPORT.md](docs/runs/run-002/REPORT.md). Current state:
+[docs/runs/run-002/HANDOFF.md](docs/runs/run-002/HANDOFF.md).
 Decisions: [docs/OWNER-DECISIONS.md](docs/OWNER-DECISIONS.md).
 Repository layout: [docs/REPO-MAP.md](docs/REPO-MAP.md).
 

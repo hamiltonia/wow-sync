@@ -1,7 +1,8 @@
 # Run 002: Design and first vertical slice
 
-Status: **active under D-17** (owner: continue until the credit budget is
-used, then review remaining work). Budget: the remaining D-16 allowance,
+Status: **closed at budget review** under D-17 (see [REPORT.md](REPORT.md)).
+Owner: continue until the credit budget is
+used, then review remaining work. Budget: the remaining D-16 allowance,
 shared with run-001 (stop launching at ≥9,500 AIU cumulative across run-001
 and run-002; settle up to 11,000). Prerequisite decisions in §6 are
 **provisional orchestrator defaults** pending owner review (D-17).
@@ -75,4 +76,4 @@ memory or lifecycle re-check (R2-pin) and report options.
 | 6 | Memory gate method | Sum "Working Set - Private" over all app-owned processes; trimming never passes | Provisional |
 | 7 | R-11 residual launch race | Design minimizes (staging, atomic rename, re-check, recovery); residual window reported, not hidden | Provisional |
 | 8 | `git gc --prune=now` | — | **Held** |
-| 9 | Run-002 plan | This plan | Active under D-17 |
+| 9 | Run-002 plan | This plan | Closed at budget review (D-17) |

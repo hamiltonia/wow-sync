@@ -28,6 +28,7 @@ Integration review verdict: **accept with follow-ups**
 | `wow-sync-adapters` | Safe fs roots, scan/hash, install staging/journal, provider folder with cloud-flag refusal, process observation | [R2-adapters](evidence/R2-adapters.md) |
 | `wow-sync-runtime` / `wow-sync-app` | `SliceService`, e2e two-install tests, GPUI shell with G1–G9 screens, developer mode | [R2-slice](evidence/R2-slice.md), [R2-fix](evidence/R2-fix.md) |
 | Verification | Clean clone, 24 negative controls caught, G1–G9 independently driven; M1–M5 found and resolved | [R2-check](evidence/R2-check.md), [R2-recheck](evidence/R2-recheck.md) |
+| Hardening | MJ-1 consent reset, plain-English provider errors, changed variant → needs help, durable apply report across crash, consent/status policy in core, no duplicate report after failed clear (R3-M1); A-38 controls recorded per fix | [R2-fix2](evidence/R2-fix2.md), [R2-fix3](evidence/R2-fix3.md), [R2-recheck3](evidence/R2-recheck3.md), [R2-fix4](evidence/R2-fix4.md), [R2-recheck4](evidence/R2-recheck4.md) (PASS) |
 
 CI (`ci`, `spike-gpui`) green on Windows and macOS after the slice merge
 (macOS clippy fix `ea9692d`).

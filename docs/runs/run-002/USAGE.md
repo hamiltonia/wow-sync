@@ -18,7 +18,10 @@ Cumulative D-16 budget is shared with run-001 (close ≈3,140 AIU, see
 | 7 | R2-check (+recheck) | gpt-6.1-sol / gpt-6.1-sol | `1ca392cb` | 280.4 | FAIL M1–M5; recheck PASS WITH FINDINGS; merged `5f20fb4` |
 | 8 | R2-fix (+fix2 retry) | sonnet-5.5 / sonnet-5.5 | `1a8cf6c8` | 274.4 | M1–M5, MJ-1, m4, mi-3, A-38 controls; merged `de6ffc9`, `569a8b6` |
 | 9 | R2-review | opus-5.5 / opus-5.5 | `60c26adc` | 246.3 | Accept with follow-ups; merged `7b39d6d` |
-| 10 | R2-fix3 | sonnet-5.5 / pending | `164309ef` | pending | Follow-ups #6, #9 |
+| 10 | R2-fix3 | sonnet-5.5 / sonnet-5.5 | `164309ef` | 618.3 | Follow-ups #6, #9; core 171, runtime 25; merged `7da6d0f` |
+| 11 | R2-recheck3 (R2-check agent reused) | gpt-6.1-sol / gpt-6.1-sol | `1ca392cb` | in row 7 | FAIL R3-M1; merged `b73b60e` |
+| 12 | R2-fix4 (R2-fix3 agent reused) | sonnet-5.5 / sonnet-5.5 | `164309ef` | in row 10 | R3-M1 fixed; core 172, runtime 26; merged `63e0f54` |
+| 13 | R2-recheck4 (R2-check agent reused) | gpt-6.1-sol / gpt-6.1-sol | `1ca392cb` | in row 7 | PASS: R3-M1 resolved, mutation caught |
 
 ## Checkpoints
 
@@ -27,3 +30,11 @@ Cumulative D-16 budget is shared with run-001 (close ≈3,140 AIU, see
 | Run-002 start | ≈3,370 | 1,371.5 |
 | R2-slice launch | ≈5,984 | 1,794.0 |
 | R2-fix3 launch (after `569a8b6`) | 7,933.7 | 3,035.8 (all sessions, NULL agent) |
+| R2-recheck3 launch (after `7da6d0f`) | 8,613.7 | — |
+| R2-recheck4 launch (after `63e0f54`), last launch | 8,887.0 | — |
+| **Run-002 close** (after recheck4 merge) | **≈8,940** (+ closing commit) | 3,237.1 (NULL agent, both sessions) |
+
+Final per-agent: R2-check/recheck×3 `1ca392cb` 357.3; R2-fix3/fix4
+`164309ef` 727.5. Run-002 share ≈ 8,940 − 3,370 ≈ 5,570 AIU. Remaining before
+the 9,500 stop line ≈ 560 AIU (not used: too small for another
+fix-and-independent-check cycle).

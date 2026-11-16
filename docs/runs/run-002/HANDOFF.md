@@ -7,8 +7,10 @@ Resume point. Repository records are authoritative; prior chat is not.
 - Checkout `D:\GitHub\wow-sync`, branch `main`.
 - Run-001 complete except owner review of the S-forever report (see
   [../run-001/HANDOFF.md](../run-001/HANDOFF.md)).
-- Run-002 active under D-17 with provisional defaults ([PLAN.md](PLAN.md) §6).
-- Budget: shared D-16 allowance; ledger [USAGE.md](USAGE.md).
+- Run-002 **closed at budget review** (D-17); provisional defaults in
+  [PLAN.md](PLAN.md) §6 still need owner confirmation. No worker running.
+- Budget: shared D-16 allowance; ledger [USAGE.md](USAGE.md). No new run
+  without a new owner-approved plan and ceiling.
 
 | Phase | Workers | Status |
 |---|---|---|
@@ -17,7 +19,7 @@ Resume point. Repository records are authoritative; prior chat is not.
 | C | R2-core, R2-adapters (sonnet) | Merged (`85fdc73`, `ddf8c4d`) |
 | D | R2-slice (sonnet) | Merged; G1–G9 PASS (author), 12.4 MiB idle |
 | E | R2-check/recheck (sol), R2-fix/fix2 (sonnet), R2-review (opus) | Merged through `569a8b6`; review accept with follow-ups; recheck PASS WITH FINDINGS; MJ-1, m4, mi-3, A-38 controls fixed |
-| F | R2-fix3 (sonnet) + bounded re-check | Running: follow-ups #6 (core policy/consent predicate), #9 (report after recovery) |
+| F | R2-fix3 (sonnet), R2-recheck3 (sol), R2-fix4 (sonnet) | R2-fix3 merged `7da6d0f` (durable apply report after crash, consent/status policy in core); recheck3 **FAIL** R3-M1 (duplicate report after failed clear), merged `b73b60e`; R2-fix4 merged `63e0f54` (publish gated on durable reconcile; locked report file stalls publishing visibly until cleared); recheck4 **PASS** ([R2-recheck4](evidence/R2-recheck4.md)). Run closed at budget review. |
 
 Report: [REPORT.md](REPORT.md).
 
@@ -54,7 +56,7 @@ Report: [REPORT.md](REPORT.md).
 
 ## Remaining work (for owner discussion)
 
-Rough sizing in run-002 terms (run-002 ≈4,600 AIU built design + slice).
+Rough sizing in run-002 terms (run-002 ≈5,600 AIU built design + slice).
 
 | Item | Needs owner? | Rough size |
 |---|---|---|
