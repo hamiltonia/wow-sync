@@ -10,7 +10,7 @@ use gpui::{
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
-use wow_sync_runtime::{EnrollRequest, JoinChoice, PreviewKind};
+use wow_sync_runtime::{EnrollRequest, JoinChoice, PreviewKind, ReconfirmRequest};
 
 actions!(wow_sync, [FocusNextStop, FocusPrevStop]);
 
@@ -91,6 +91,28 @@ impl Root {
         if let Some(tx) = &self.tx {
             let _ = tx.send(c);
         }
+    }
+
+    fn reconfirm(&mut self) {
+        let digest = {
+            let g = lock(&self.shared);
+            match &g.status.reconfirm {
+                Some(p) => p.digest,
+                None => return,
+            }
+        };
+        if !(self.identity_ok && self.scope_ok) {
+            self.note = "Confirm both the game version and the add-on scope to continue. \
+                         Nothing has been changed."
+                .into();
+            return;
+        }
+        self.note.clear();
+        self.send(Cmd::Reconfirm(ReconfirmRequest {
+            identity_confirmed: true,
+            scope_confirmed: true,
+            digest,
+        }));
     }
 
     fn enroll(&mut self, join: JoinChoice) {
@@ -233,6 +255,13 @@ impl Render for Root {
                         Role::Paragraph,
                         "Only add-on code (Interface/AddOns) is synced. Game settings, saved variables and accounts are excluded.",
                     ));
+                    if !p.disclosures.is_empty() {
+                        body = body.child(section(
+                            "disclosures",
+                            "What setting this up does",
+                            p.disclosures.clone(),
+                        ));
+                    }
                     if let Some(prob) = &p.problem {
                         body = body.child(
                             text("problem", Role::Paragraph, prob.clone())
@@ -318,14 +347,54 @@ impl Render for Root {
                 }
             } else {
                 body = body.child(heading("status-heading", &status.headline));
-                body = body.child(text(
-                    "who",
-                    Role::Paragraph,
-                    format!(
-                        "{} on {} ({})",
-                        status.group_name, status.computer_name, status.identity_line
-                    ),
-                ));
+                if let Some(who) = status.who_line() {
+                    body = body.child(text("who", Role::Paragraph, who));
+                }
+                if let Some(p) = &status.reconfirm {
+                    body = body.child(heading("reconfirm-heading", "Confirm the game version"));
+                    body = body.child(text("identity", Role::Paragraph, p.identity_line.clone()));
+                    if !p.scope_line.is_empty() {
+                        body = body.child(text("scope", Role::Paragraph, p.scope_line.clone()));
+                    }
+                    body = body.child(section(
+                        "disclosures",
+                        "What syncing does",
+                        p.disclosures.clone(),
+                    ));
+                    let h = self.handle("identity-ok", cx);
+                    first.get_or_insert(h.clone());
+                    body = body.child(checkbox(
+                        "identity-ok",
+                        "I confirm this is the game version shown above",
+                        self.identity_ok,
+                        &h,
+                        next(),
+                        window,
+                        cx,
+                        |t| t.identity_ok = !t.identity_ok,
+                    ));
+                    let h = self.handle("scope-ok", cx);
+                    body = body.child(checkbox(
+                        "scope-ok",
+                        "I agree to sync the add-on code listed above",
+                        self.scope_ok,
+                        &h,
+                        next(),
+                        window,
+                        cx,
+                        |t| t.scope_ok = !t.scope_ok,
+                    ));
+                    let h = self.handle("reconfirm", cx);
+                    body = body.child(button(
+                        "reconfirm",
+                        "Confirm and continue",
+                        &h,
+                        next(),
+                        window,
+                        cx,
+                        |t| t.reconfirm(),
+                    ));
+                }
                 body = body.child(
                     text(
                         "activity",

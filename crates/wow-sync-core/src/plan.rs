@@ -102,7 +102,7 @@ pub fn plan_publish(inv: &Inventory, ctx: &PublishContext) -> Result<PublishPlan
     let mut blobs: BTreeMap<String, ObjectRef> = BTreeMap::new();
     let mut trees: BTreeMap<String, ObjectRef> = BTreeMap::new();
     let mut fingerprints = Vec::new();
-    for f in inv.folders.iter().filter(|f| f.status == FolderStatus::Ok) {
+    for f in inv.folders.iter().filter(|f| f.transfer_eligible()) {
         let Some(tree) = f.tree else { continue };
         for e in &f.file_entries {
             let rel = blob(&ctx.group, &e.sha256);
@@ -140,7 +140,7 @@ pub fn plan_publish(inv: &Inventory, ctx: &PublishContext) -> Result<PublishPlan
         app_version: ctx.app_version.clone(),
         written_unix_ms: ctx.now_unix_ms,
         client: ctx.client.clone(),
-        inventory_complete: inv.folders.iter().all(|f| f.status == FolderStatus::Ok),
+        inventory_complete: inv.folders.iter().all(|f| f.transfer_eligible()),
         folders: inv.folders.clone(),
         apply_report: ctx.apply_report.clone(),
     };
@@ -159,6 +159,26 @@ pub fn plan_publish(inv: &Inventory, ctx: &PublishContext) -> Result<PublishPlan
         prune_states,
         source_fingerprints: fingerprints,
     })
+}
+
+/// Whether a new state must be published (M3): there is an apply report to carry, no previous
+/// state of this enrollment is readable, or the previous state differs from the inventory in any
+/// folder, status, tree, toc outcome or completeness.
+pub fn publish_needed(
+    previous: Option<&CodeState>,
+    inv: &Inventory,
+    has_apply_report: bool,
+) -> bool {
+    if has_apply_report {
+        return true;
+    }
+    let Some(st) = previous else { return true };
+    let same = st.folders.len() == inv.folders.len()
+        && st.folders.iter().zip(&inv.folders).all(|(a, b)| {
+            a.key == b.key && a.status == b.status && a.tree == b.tree && a.toc.kind == b.toc.kind
+        })
+        && st.inventory_complete == inv.folders.iter().all(|f| f.transfer_eligible());
+    !same
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -462,6 +482,61 @@ mod tests {
         let plan2 = plan_publish(&sc.local, &ctx2).unwrap();
         run_publish(&plan2, &mut ctx2, &mut fx);
         assert_eq!(fx.count(Step::PutObject), before);
+    }
+
+    #[test]
+    fn blocked_folders_are_never_published() {
+        let scans = vec![
+            addon("Good", Some("1.0"), "g"),
+            crate::testkit::addon_unvalidated("Blocked", "9.9", "secret"),
+        ];
+        let sc = Scenario::new(scans);
+        let p = plan_publish(&sc.local, &sc.publish_ctx(1, &[])).unwrap();
+        let blocked = sc
+            .local
+            .folders
+            .iter()
+            .find(|f| f.name == "Blocked")
+            .unwrap();
+        assert_eq!(blocked.status, FolderStatus::Ok);
+        assert!(!blocked.transfer_eligible());
+        let good = sc.local.folders.iter().find(|f| f.name == "Good").unwrap();
+        assert!(good
+            .file_entries
+            .iter()
+            .all(|e| p.objects.iter().any(|o| o.expect == e.sha256)));
+        assert!(
+            !blocked
+                .file_entries
+                .iter()
+                .any(|e| p.objects.iter().any(|o| o.expect == e.sha256)),
+            "blocked folder content must not be uploaded"
+        );
+        assert!(!p.objects.iter().any(|o| Some(o.expect) == blocked.tree));
+        // Still listed in the state, visibly not complete.
+        assert!(p.state.folders.iter().any(|f| f.name == "Blocked"));
+        assert!(!p.state.inventory_complete);
+    }
+
+    #[test]
+    fn publish_needed_decisions() {
+        let sc = Scenario::new(suite("1.0", "a"));
+        let p = plan_publish(&sc.local, &sc.publish_ctx(1, &[])).unwrap();
+        assert!(publish_needed(None, &sc.local, false));
+        assert!(!publish_needed(Some(&p.state), &sc.local, false));
+        assert!(publish_needed(Some(&p.state), &sc.local, true));
+        let changed = Scenario::new(suite("1.1", "b"));
+        assert!(publish_needed(Some(&p.state), &changed.local, false));
+        let more = Scenario::new(vec![
+            addon("Suite", Some("1.0"), "a"),
+            addon("Other", Some("1.0"), "o"),
+            addon("Third", Some("1.0"), "t"),
+        ]);
+        assert!(publish_needed(Some(&p.state), &more.local, false));
+        // Completeness flips without a tree change.
+        let mut unstable = Scenario::new(suite("1.0", "a"));
+        unstable.local.folders[1].status = FolderStatus::Unstable;
+        assert!(publish_needed(Some(&p.state), &unstable.local, false));
     }
 
     #[test]

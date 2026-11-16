@@ -376,6 +376,119 @@ mod tests {
     }
 
     #[test]
+    fn enrolled_unfamiliar_client_keeps_syncing_after_new_folder() {
+        let lab = Lab::new();
+        let mut t = lab.pc_with("t", "_test_", "wow_test");
+        t.addon("Alpha", "alpha-v1");
+        t.create();
+        synced(&mut t);
+        t.addon("Beta", "beta-v1");
+        let r = t
+            .svc
+            .sync_once()
+            .expect("later folder must not stale the enrollment");
+        assert!(r.published.is_some(), "{r:?}");
+        assert!(t.svc.status().reconfirm.is_none());
+    }
+
+    #[test]
+    fn blocked_folder_is_not_published_and_shows_not_synced() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        a.addon("Good", "good-v1");
+        a.install.add_addon(
+            "Blocked",
+            "Blocked_Foreign.toc",
+            "## Interface: 11508\n## Version: 9.0\n",
+            &[("main.lua", b"blocked-secret")],
+        );
+        a.install.set_old_mtimes();
+        let g = a.create();
+        let r = synced(&mut a);
+        assert!(r.published.is_some(), "{r:?}");
+        let rel = layout::blob(&g, &sha256(b"blocked-secret"));
+        let p: PathBuf = rel
+            .split('/')
+            .fold(lab.shared.join("WoWSync"), |x, s| x.join(s));
+        assert!(!p.exists(), "blocked folder content must not be uploaded");
+        let line = r
+            .status
+            .packages
+            .iter()
+            .find(|p| p.key == "blocked")
+            .map(|p| p.text.clone())
+            .unwrap_or_default();
+        assert!(line.contains("not synced"), "{line} / {}", texts(&r));
+        assert!(!line.contains("up to date"), "{line}");
+    }
+
+    #[test]
+    fn enrollment_preview_discloses_scope_and_uses_canonical_label() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let p = a.svc.inspect();
+        let all = p.disclosures.join("\n");
+        assert!(all.contains("AddOns"), "{all}");
+        assert!(all.contains("recovery"), "{all}");
+        assert!(all.contains(&*a.install.root.to_string_lossy()), "{all}");
+        assert!(p.identity_line.contains("Forever"), "{}", p.identity_line);
+        assert!(
+            !p.identity_line.contains("Classic Era"),
+            "{}",
+            p.identity_line
+        );
+        assert!(a.svc.status().who_line().is_none());
+    }
+
+    #[test]
+    fn ambiguity_status_names_versions_and_computers() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Amb", "from-a");
+        b.addon("Amb", "from-b");
+        let g = a.create();
+        b.join(&g);
+        let mut last = SyncReport::default();
+        for _ in 0..3 {
+            synced(&mut a);
+            last = synced(&mut b);
+        }
+        let t = texts(&last);
+        assert!(
+            t.contains("on this computer") && t.contains("computer a"),
+            "{t}"
+        );
+    }
+
+    #[test]
+    fn running_game_headline_and_applied_line_name_source() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        b.act.set(Activity::Running { pids: vec![4242] });
+        let r = synced(&mut b);
+        assert!(
+            r.status.headline.contains("Waiting") && r.status.headline.contains("WoW is running"),
+            "{}",
+            r.status.headline
+        );
+        b.act.set(Activity::NotRunning);
+        let r = synced(&mut b);
+        let line = r
+            .status
+            .packages
+            .iter()
+            .map(|p| p.text.clone())
+            .collect::<String>();
+        assert!(line.contains("from computer"), "{line}");
+    }
+
+    #[test]
     fn install_without_marker_refused() {
         let lab = Lab::new();
         let mut a = lab.pc("a");

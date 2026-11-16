@@ -79,6 +79,16 @@ pub struct VariantIdentity {
     pub profile: Option<&'static Profile>,
 }
 
+impl VariantIdentity {
+    /// Canonical product label, e.g. "World of Warcraft: Forever (wowf)".
+    pub fn display_label(&self) -> String {
+        match self.profile {
+            Some(p) => format!("World of Warcraft: {} ({})", p.label, self.product.as_str()),
+            None => format!("Unfamiliar game version ({})", self.product.as_str()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefuseReason {
     FlavorMissing,
@@ -96,6 +106,8 @@ pub enum RefuseReason {
     Layout(LayoutReason),
     ConfirmationRequired,
     StaleConfirmation,
+    /// Reconfirmation offered for a different product or folder than the enrolled one.
+    VariantChanged,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -453,6 +465,119 @@ pub fn confirm_variant(
             scope_confirmed,
         },
     })
+}
+
+/// Per-cycle re-derivation for an already enrolled variant (M1). The scope confirmation covers
+/// the mapping rule, not a frozen folder list (domain.md §2.1), so folders added later never
+/// invalidate it. Only a different product, folder, mapping or recognition class does; the
+/// caller then offers guided reconfirmation.
+pub fn confirm_enrolled(
+    v: &VariantVerdict,
+    a: &LayoutAssessment,
+    stored: &VariantValidation,
+) -> Result<ConfirmedVariant, RefuseReason> {
+    let (identity, unfamiliar) = match v {
+        VariantVerdict::Refused(r) => return Err(r.clone()),
+        VariantVerdict::Recognized(i) => (i, false),
+        VariantVerdict::Unfamiliar(i) => (i, true),
+    };
+    let LayoutAssessment::Supported { mapping, .. } = a else {
+        let LayoutAssessment::Unsupported(r) = a else {
+            unreachable!()
+        };
+        return Err(RefuseReason::Layout(r.clone()));
+    };
+    if unfamiliar != (stored.kind == "guided")
+        || stored.product != identity.product.as_str()
+        || stored.folder != identity.folder
+        || stored.mapping_id != mapping.id()
+    {
+        return Err(RefuseReason::StaleConfirmation);
+    }
+    if unfamiliar && !(stored.identity_confirmed && stored.scope_confirmed) {
+        return Err(RefuseReason::ConfirmationRequired);
+    }
+    Ok(ConfirmedVariant {
+        identity: identity.clone(),
+        mapping: mapping.clone(),
+        validation: stored.clone(),
+    })
+}
+
+/// Guided reconfirmation of an enrolled variant whose stored confirmation went stale. The
+/// product and folder must still be the enrolled ones; consent never changes which client this is.
+pub fn reconfirm_variant(
+    v: &VariantVerdict,
+    a: &LayoutAssessment,
+    c: &GuidedConfirmation,
+    stored: &VariantValidation,
+) -> Result<ConfirmedVariant, RefuseReason> {
+    if let VariantVerdict::Recognized(i) | VariantVerdict::Unfamiliar(i) = v {
+        if stored.product != i.product.as_str() || stored.folder != i.folder {
+            return Err(RefuseReason::VariantChanged);
+        }
+    }
+    confirm_variant(v, a, Some(c))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JoinRefusal {
+    pub group_product: String,
+    pub local_product: String,
+}
+
+impl std::fmt::Display for JoinRefusal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "that group syncs {}, this installation is {}",
+            self.group_product, self.local_product
+        )
+    }
+}
+
+/// Join is allowed only when the group's product code equals the validated local one (domain.md §1 step 4).
+pub fn check_join(v: &ConfirmedVariant, group_product: &str) -> Result<(), JoinRefusal> {
+    if group_product == v.product() {
+        Ok(())
+    } else {
+        Err(JoinRefusal {
+            group_product: group_product.to_string(),
+            local_product: v.product().to_string(),
+        })
+    }
+}
+
+pub struct ConsentContext<'a> {
+    pub identity: &'a VariantIdentity,
+    pub mapping_id: &'a str,
+    pub install_root: &'a str,
+    pub addons_path: &'a str,
+}
+
+/// Disclosures shown before any enrollment write (domain.md §1 step 5 and §2.1).
+pub fn consent_disclosures(c: &ConsentContext) -> Vec<String> {
+    let label = c.identity.display_label();
+    vec![
+        format!(
+            "This computer will share its installed add-ons for {label} with other computers in this group, and will install newer versions found on them."
+        ),
+        format!(
+            "Chosen install location: {}. Add-ons are read from and changed only in {}.",
+            c.install_root, c.addons_path
+        ),
+        format!(
+            "Folder rule {}: an add-on folder is synced only if it has a plain <Name>.toc and no client-specific variants of it. Other folders are listed as blocked and are never changed.",
+            c.mapping_id
+        ),
+        "Newer add-on versions found on other computers are installed, replacing the folder here, automatically.".to_string(),
+        "Add-ons missing on this computer are installed, never treated as removed; an add-on missing elsewhere is never deleted here.".to_string(),
+        format!(
+            "Folders it replaces are kept on this computer for recovery under {}\\{}\\.wowsync\\recovery.",
+            c.install_root, c.identity.folder
+        ),
+        "Settings (WTF) are not synchronized in this version; their layout for this client has not been validated.".to_string(),
+    ]
 }
 
 #[cfg(test)]
@@ -844,5 +969,179 @@ mod tests {
         assert_eq!(enrolled.product(), "wowf");
         o.synthetic_marker = FileObs::Missing;
         assert_eq!(refused(&o), RefuseReason::NotSyntheticInstall);
+    }
+
+    fn guided_unfamiliar(addons: &[FolderScan]) -> (VariantVerdict, LayoutAssessment) {
+        let v = validate_variant(&obs("wow_test", "_test_"));
+        let VariantVerdict::Unfamiliar(id) = &v else {
+            panic!()
+        };
+        let a = assess_layout(id, true, addons, &OtherVariants::default());
+        (v, a)
+    }
+
+    fn confirm_guided(v: &VariantVerdict, a: &LayoutAssessment) -> ConfirmedVariant {
+        let LayoutAssessment::Supported { digest, .. } = a else {
+            panic!()
+        };
+        let c = GuidedConfirmation {
+            identity: true,
+            scope: true,
+            digest: *digest,
+        };
+        confirm_variant(v, a, Some(&c)).unwrap()
+    }
+
+    #[test]
+    fn later_folders_do_not_invalidate_enrollment() {
+        let (v, a) = guided_unfamiliar(&[scan("Good", &["Good.toc"])]);
+        let stored = confirm_guided(&v, &a).validation().clone();
+        // A new eligible folder and a new blocked folder appear; the digest differs.
+        let (v2, a2) = guided_unfamiliar(&[
+            scan("Good", &["Good.toc"]),
+            scan("Extra", &["Extra.toc"]),
+            scan("Mixed", &["Mixed.toc", "Mixed_Mists.toc"]),
+        ]);
+        let LayoutAssessment::Supported { digest, .. } = &a2 else {
+            panic!()
+        };
+        assert_ne!(*digest, stored.digest);
+        let again = confirm_enrolled(&v2, &a2, &stored).expect("additions keep enrollment valid");
+        assert_eq!(again.validation(), &stored);
+        assert_eq!(again.mapping().id(), PLAIN_MAPPING_ID);
+    }
+
+    #[test]
+    fn enrollment_goes_stale_only_for_product_folder_or_class_change() {
+        let (v, a) = guided_unfamiliar(&[scan("Good", &["Good.toc"])]);
+        let stored = confirm_guided(&v, &a).validation().clone();
+        let other = validate_variant(&obs("wow_other", "_test_"));
+        let VariantVerdict::Unfamiliar(oid) = &other else {
+            panic!()
+        };
+        let oa = assess_layout(oid, true, &[], &OtherVariants::default());
+        assert_eq!(
+            confirm_enrolled(&other, &oa, &stored),
+            Err(RefuseReason::StaleConfirmation)
+        );
+        // Recognized now but enrolled as guided: stale.
+        let known = validate_variant(&testkit::variant_obs_forever());
+        let VariantVerdict::Recognized(kid) = &known else {
+            panic!()
+        };
+        let ka = assess_layout(kid, false, &[], &OtherVariants::default());
+        assert_eq!(
+            confirm_enrolled(&known, &ka, &stored),
+            Err(RefuseReason::StaleConfirmation)
+        );
+        let mut unconfirmed = stored.clone();
+        unconfirmed.scope_confirmed = false;
+        assert_eq!(
+            confirm_enrolled(&v, &a, &unconfirmed),
+            Err(RefuseReason::ConfirmationRequired)
+        );
+        let bad = LayoutAssessment::Unsupported(LayoutReason::DuplicateProductFolder);
+        assert!(matches!(
+            confirm_enrolled(&v, &bad, &stored),
+            Err(RefuseReason::Layout(_))
+        ));
+        let refused = VariantVerdict::Refused(RefuseReason::NotSyntheticInstall);
+        assert_eq!(
+            confirm_enrolled(&refused, &a, &stored),
+            Err(RefuseReason::NotSyntheticInstall)
+        );
+    }
+
+    #[test]
+    fn reconfirmation_needs_same_client_and_both_confirmations() {
+        let (v, a) = guided_unfamiliar(&[scan("Good", &["Good.toc"])]);
+        let stored = confirm_guided(&v, &a).validation().clone();
+        let LayoutAssessment::Supported { digest, .. } = &a else {
+            panic!()
+        };
+        let full = GuidedConfirmation {
+            identity: true,
+            scope: true,
+            digest: *digest,
+        };
+        assert!(reconfirm_variant(&v, &a, &full, &stored).is_ok());
+        let scope_only = GuidedConfirmation {
+            identity: false,
+            ..full.clone()
+        };
+        assert_eq!(
+            reconfirm_variant(&v, &a, &scope_only, &stored),
+            Err(RefuseReason::ConfirmationRequired)
+        );
+        let (ov, oa) = {
+            let v = validate_variant(&obs("wow_other", "_test_"));
+            let VariantVerdict::Unfamiliar(id) = &v else {
+                panic!()
+            };
+            let a = assess_layout(id, true, &[], &OtherVariants::default());
+            (v, a)
+        };
+        let LayoutAssessment::Supported { digest: od, .. } = &oa else {
+            panic!()
+        };
+        let c = GuidedConfirmation {
+            identity: true,
+            scope: true,
+            digest: *od,
+        };
+        assert_eq!(
+            reconfirm_variant(&ov, &oa, &c, &stored),
+            Err(RefuseReason::VariantChanged)
+        );
+    }
+
+    #[test]
+    fn join_requires_equal_product() {
+        let k = testkit::confirmed_forever();
+        assert!(check_join(&k, "wowf").is_ok());
+        let e = check_join(&k, "wow_classic_era").unwrap_err();
+        assert_eq!(e.group_product, "wow_classic_era");
+        assert_eq!(e.local_product, "wowf");
+        assert!(e.to_string().contains("wow_classic_era"));
+        assert!(check_join(&k, "WOWF").is_err());
+    }
+
+    #[test]
+    fn identity_label_is_canonical_not_classic_era() {
+        let VariantVerdict::Recognized(id) = validate_variant(&testkit::variant_obs_forever())
+        else {
+            panic!()
+        };
+        assert_eq!(id.display_label(), "World of Warcraft: Forever (wowf)");
+        let VariantVerdict::Unfamiliar(u) = validate_variant(&obs("wow_test", "_test_")) else {
+            panic!()
+        };
+        assert_eq!(u.display_label(), "Unfamiliar game version (wow_test)");
+    }
+
+    #[test]
+    fn consent_disclosures_cover_scope_mapping_replacement_removal_and_recovery() {
+        let VariantVerdict::Unfamiliar(id) = validate_variant(&obs("wow_test", "_test_")) else {
+            panic!()
+        };
+        let text = consent_disclosures(&ConsentContext {
+            identity: &id,
+            mapping_id: PLAIN_MAPPING_ID,
+            install_root: "C:\\Synthetic\\Root",
+            addons_path: "C:\\Synthetic\\Root\\_test_\\Interface\\AddOns",
+        })
+        .join("\n");
+        for needle in [
+            "C:\\Synthetic\\Root\\_test_\\Interface\\AddOns",
+            "validated-plain/1",
+            "install newer versions",
+            "replacing the folder here, automatically",
+            "never treated as removed",
+            "C:\\Synthetic\\Root\\_test_\\.wowsync\\recovery",
+            "Settings (WTF) are not synchronized",
+            "Unfamiliar game version (wow_test)",
+        ] {
+            assert!(text.contains(needle), "missing {needle:?} in:\n{text}");
+        }
     }
 }

@@ -825,6 +825,7 @@ fn pinned_recovery_points_exceed_two_visibly() {
         members: &sc.members,
         applied_here: &[],
         interrupted: &[],
+        game_running: false,
         needs_help: &[],
         blocks: &[],
         retained: &retained,

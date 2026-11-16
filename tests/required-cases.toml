@@ -436,3 +436,32 @@ tier = "offline"
 tests = [
     "e2e::tests::peer_confirmation_only_after_apply",
 ]
+
+# R2-fix (run-002): findings M1-M5, m1-m5 from docs/runs/run-002/evidence/R2-check.md.
+[[case]]
+id = "R2-fix:core"
+tier = "offline"
+tests = [
+    "variant::tests::later_folders_do_not_invalidate_enrollment",
+    "variant::tests::enrollment_goes_stale_only_for_product_folder_or_class_change",
+    "variant::tests::reconfirmation_needs_same_client_and_both_confirmations",
+    "variant::tests::join_requires_equal_product",
+    "variant::tests::identity_label_is_canonical_not_classic_era",
+    "variant::tests::consent_disclosures_cover_scope_mapping_replacement_removal_and_recovery",
+    "plan::tests::blocked_folders_are_never_published",
+    "plan::tests::publish_needed_decisions",
+    "status::tests::interruption_blames_the_game_only_when_it_is_running",
+    "status::tests::headline_names_running_game_while_waiting",
+    "status::tests::blocked_local_folder_is_not_synced_not_up_to_date",
+]
+
+[[case]]
+id = "R2-fix:slice"
+tier = "offline"
+tests = [
+    "e2e::tests::enrolled_unfamiliar_client_keeps_syncing_after_new_folder",
+    "e2e::tests::blocked_folder_is_not_published_and_shows_not_synced",
+    "e2e::tests::enrollment_preview_discloses_scope_and_uses_canonical_label",
+    "e2e::tests::ambiguity_status_names_versions_and_computers",
+    "e2e::tests::running_game_headline_and_applied_line_name_source",
+]
