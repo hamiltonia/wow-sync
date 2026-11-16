@@ -11,11 +11,14 @@ Cumulative D-16 budget is shared with run-001 (close ≈3,140 AIU, see
 |---|---|---|---|---|---|
 | 1 | R2-pin | sonnet-5.5 / sonnet-5.5 | `5e25641f` | 199.4 | Done `dd77530`; merged |
 | 2 | R2-design (+fix, fix2 retries) | opus-5.5 / opus-5.5 | `95df4a3b` | 1,119.5 | Merged `d35706e`, `b80c685`, `f114912` |
-| 3 | R2-design-review (+recheck, recheck2) | gpt-6.1-sol / gpt-6.1-sol | `175188c4` | running | Not ready ×2; recheck2 running |
+| 3 | R2-design-review (+recheck, recheck2) | gpt-6.1-sol / gpt-6.1-sol | `175188c4` | 160.4 | Not ready ×2, then ready with fixes; merged |
+| 4 | R2-core | sonnet-5.5 / sonnet-5.5 | `deace31c` | 519.0 | 152 tests; merged `85fdc73` |
+| 5 | R2-adapters | sonnet-5.5 / sonnet-5.5 | `650a13c2` | 208.5 | 45 tests (+3 ignored provider); merged `ddf8c4d` |
+| 6 | R2-slice | sonnet-5.5 / sonnet-5.5 | `5285fbcf` | see close | 16 e2e; G1–G9 author PASS; merged `ccd3c65` |
 
 ## Checkpoints
 
-| When | Cumulative AIU | Orchestrator |
+| When | Cumulative AIU | Orchestrator (session `961f3baa`) |
 |---|---|---|
-| Run-002 start | ≈3,370 | — |
-| After design retry 2 / R2-pin merge | ≈5,400 (est.) | 2,149 |
+| Run-002 start | ≈3,370 | 1,371.5 |
+| R2-slice launch | ≈5,984 | 1,794.0 |

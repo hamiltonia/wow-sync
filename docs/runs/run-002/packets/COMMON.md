@@ -12,7 +12,8 @@ first. Each `R2-*` packet plus this file is the full work packet (E-05).
   `docs/runs/run-002/evidence/<ID>.md` (and `evidence/<ID>/` for small raw
   data, < 1 MB). Root `Cargo.toml`/`Cargo.lock` only if the packet says so.
 - `cargo xtask verify --tier offline` from the worktree root must pass before
-  you commit. New product tests that are required must be listed in
+you commit. Never run `git gc`, `git prune`, reflog expiry or any history
+rewrite of pushed commits (shared `.git`; owner-held, PLAN §6 #8). New product tests that are required must be listed in
   `tests/required-cases.toml` (see docs/VERIFY.md) by the packet that owns them.
 
 ## Environment
