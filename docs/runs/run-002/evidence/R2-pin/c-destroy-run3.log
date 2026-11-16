@@ -1,0 +1,83 @@
+[     0 ms] pid=21220 start mode=cycles n=20 sw_hide=false
+[   279 ms] pid=21220 tray icon created
+[   314 ms] pid=21220 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[   315 ms] pid=21220 window opened hwnd=0x2c050c
+[   315 ms] pid=21220 shown, visible=true
+[  3329 ms] pid=21220 MARK 1794801669705 cycle 1
+[  3341 ms] pid=21220 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[  3341 ms] pid=21220 window opened hwnd=0x2d050c
+[  3341 ms] pid=21220 shown, visible=true
+[  6359 ms] pid=21220 MARK 1794801672735 cycle 2
+[  6395 ms] pid=21220 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[  6402 ms] pid=21220 window opened hwnd=0x2e050c
+[  6402 ms] pid=21220 shown, visible=true
+[  9423 ms] pid=21220 MARK 1794801675799 cycle 3
+[  9432 ms] pid=21220 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[  9432 ms] pid=21220 window opened hwnd=0x2f050c
+[  9432 ms] pid=21220 shown, visible=true
+[ 12448 ms] pid=21220 MARK 1794801678825 cycle 4
+[ 12462 ms] pid=21220 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[ 12462 ms] pid=21220 window opened hwnd=0x1f03d0
+[ 12462 ms] pid=21220 shown, visible=true
+[ 15465 ms] pid=21220 MARK 1794801681841 cycle 5
+[ 15477 ms] pid=21220 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[ 15477 ms] pid=21220 window opened hwnd=0x2003d0
+[ 15477 ms] pid=21220 shown, visible=true
+[ 18486 ms] pid=21220 MARK 1794801684862 cycle 6
+[ 18496 ms] pid=21220 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[ 18496 ms] pid=21220 window opened hwnd=0x2103d0
+[ 18496 ms] pid=21220 shown, visible=true
+[ 21512 ms] pid=21220 MARK 1794801687888 cycle 7
+[ 21526 ms] pid=21220 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[ 21526 ms] pid=21220 window opened hwnd=0x2203d0
+[ 21526 ms] pid=21220 shown, visible=true
+[ 24541 ms] pid=21220 MARK 1794801690917 cycle 8
+[ 24550 ms] pid=21220 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[ 24550 ms] pid=21220 window opened hwnd=0x2303d0
+[ 24551 ms] pid=21220 shown, visible=true
+[ 27568 ms] pid=21220 MARK 1794801693945 cycle 9
+[ 27580 ms] pid=21220 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[ 27580 ms] pid=21220 window opened hwnd=0x2403d0
+[ 27580 ms] pid=21220 shown, visible=true
+[ 30593 ms] pid=21220 MARK 1794801696969 cycle 10
+[ 30606 ms] pid=21220 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[ 30607 ms] pid=21220 window opened hwnd=0x2503d0
+[ 30607 ms] pid=21220 shown, visible=true
+[ 33614 ms] pid=21220 MARK 1794801699990 cycle 11
+[ 33628 ms] pid=21220 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[ 33629 ms] pid=21220 window opened hwnd=0x2603d0
+[ 33629 ms] pid=21220 shown, visible=true
+[ 36639 ms] pid=21220 MARK 1794801703015 cycle 12
+[ 36659 ms] pid=21220 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[ 36659 ms] pid=21220 window opened hwnd=0x2703d0
+[ 36659 ms] pid=21220 shown, visible=true
+[ 39667 ms] pid=21220 MARK 1794801706043 cycle 13
+[ 39685 ms] pid=21220 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[ 39685 ms] pid=21220 window opened hwnd=0x2803d0
+[ 39685 ms] pid=21220 shown, visible=true
+[ 42699 ms] pid=21220 MARK 1794801709075 cycle 14
+[ 42711 ms] pid=21220 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[ 42711 ms] pid=21220 window opened hwnd=0x2903d0
+[ 42711 ms] pid=21220 shown, visible=true
+[ 45733 ms] pid=21220 MARK 1794801712110 cycle 15
+[ 45746 ms] pid=21220 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[ 45746 ms] pid=21220 window opened hwnd=0x2a03d0
+[ 45746 ms] pid=21220 shown, visible=true
+[ 48766 ms] pid=21220 MARK 1794801715143 cycle 16
+[ 48780 ms] pid=21220 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[ 48780 ms] pid=21220 window opened hwnd=0x2b03d0
+[ 48780 ms] pid=21220 shown, visible=true
+[ 51797 ms] pid=21220 MARK 1794801718174 cycle 17
+[ 51808 ms] pid=21220 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[ 51808 ms] pid=21220 window opened hwnd=0x2c03d0
+[ 51808 ms] pid=21220 shown, visible=true
+[ 54829 ms] pid=21220 MARK 1794801721205 cycle 18
+[ 54843 ms] pid=21220 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[ 54843 ms] pid=21220 window opened hwnd=0x2d03d0
+[ 54843 ms] pid=21220 shown, visible=true
+[ 57872 ms] pid=21220 MARK 1794801724248 cycle 19
+[ 57888 ms] pid=21220 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[ 57888 ms] pid=21220 window opened hwnd=0x2e03d0
+[ 57888 ms] pid=21220 shown, visible=true
+[ 60897 ms] pid=21220 MARK 1794801727273 cycle 20
+[ 60897 ms] pid=21220 MARK 1794801727273 hidden-idle

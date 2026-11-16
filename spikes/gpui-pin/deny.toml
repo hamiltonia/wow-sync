@@ -1,0 +1,33 @@
+# Candidate cargo-deny policy for a product that pins GPUI to a Zed release tag (R2-pin).
+# Not the root policy; see docs/runs/run-002/evidence/R2-pin.md for the proposal rationale.
+[graph]
+targets = [
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+
+[advisories]
+# Unmaintained advisories on transitive crates (rustybuzz, ttf-parser) are not
+# actionable by the product; direct dependencies are still checked.
+unmaintained = "workspace"
+ignore = []
+
+[licenses]
+allow = [
+    "MIT", "Apache-2.0", "Unicode-3.0", "BSD-3-Clause",
+    "BSD-2-Clause", "Zlib", "MPL-2.0",
+]
+confidence-threshold = 0.9
+private = { ignore = true }
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = ["https://github.com/zed-industries/zed"]

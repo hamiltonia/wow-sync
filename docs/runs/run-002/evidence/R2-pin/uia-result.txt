@@ -1,0 +1,36 @@
+main window handle: 1705198
+=== UIA raw tree ===
+[Window] name='WoW Sync Pin Spike' class='Zed::Window' focusable=False enabled=True patterns=[WindowPattern,TransformPattern]
+  [Text] name='WoW Sync Pin Heading' class='' focusable=False enabled=True patterns=[]
+  [Button] name='Sync now (0)' class='' focusable=True enabled=True patterns=[InvokePattern]
+  [Button] name='Settings (0)' class='' focusable=True enabled=True patterns=[InvokePattern]
+  [CheckBox] name='Enable sync' class='' focusable=True enabled=True patterns=[TogglePattern]
+  [List] name='Items' class='' focusable=False enabled=True patterns=[]
+    [ListItem] name='List item 1' class='' focusable=True enabled=True patterns=[]
+    [ListItem] name='List item 2' class='' focusable=True enabled=True patterns=[]
+    [ListItem] name='List item 3' class='' focusable=True enabled=True patterns=[]
+    [ListItem] name='List item 4' class='' focusable=True enabled=True patterns=[]
+    [ListItem] name='List item 5' class='' focusable=True enabled=True patterns=[]
+    [ListItem] name='List item 6' class='' focusable=True enabled=True patterns=[]
+    [ListItem] name='List item 7' class='' focusable=True enabled=True patterns=[]
+    [ListItem] name='List item 8' class='' focusable=True enabled=True patterns=[]
+    [ListItem] name='List item 9' class='' focusable=True enabled=True patterns=[]
+    [ListItem] name='List item 10' class='' focusable=True enabled=True patterns=[]
+descendant count: 15
+=== Labelled controls ===
+PASS: heading found type=Text (expect Text)
+PASS: button Sync now found type=Button (expect Button)
+PASS: button Settings found type=Button (expect Button)
+PASS: toggle found type=CheckBox (expect CheckBox)
+PASS: list found type=List (expect List)
+PASS: list items found 10/10
+=== Patterns ===
+Invoke Sync now -> label now present: Sync now (1)
+Toggle state before -> Off
+Toggle() -> state after: On
+SetFocus List item 5 -> focused: List item 5
+=== Focus after Tab presses (UIA FocusedElement) ===
+tab#1: focused type=ListItem name='List item 6' pid=32740
+tab#2: focused type=ListItem name='List item 7' pid=32740
+tab#3: focused type=ListItem name='List item 8' pid=32740
+tab#4: focused type=ListItem name='List item 9' pid=32740

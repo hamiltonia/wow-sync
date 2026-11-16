@@ -1,0 +1,15 @@
+a-none-run1        n=121 exited=0 nproc_max=1 | whole min=11.6 med=11.7 max=14.4 | last60 min=11.7 med=11.7 max=11.7 | privBytes=57 WS=44 gpuDed=7.8 gpuShr=0.7
+a-none-run2        n=121 exited=0 nproc_max=1 | whole min=12.1 med=12.1 max=15.0 | last60 min=12.1 med=12.1 max=12.1 | privBytes=56 WS=46 gpuDed=7.8 gpuShr=0.7
+a-none-run3        n=121 exited=0 nproc_max=1 | whole min=12.1 med=12.1 max=15.0 | last60 min=12.1 med=12.1 max=12.1 | privBytes=57 WS=46 gpuDed=7.8 gpuShr=0.7
+b-destroy-run1     n=181 exited=0 nproc_max=1 | whole min=17.2 med=17.2 max=19.8 | last60 min=17.2 med=17.2 max=17.2 | privBytes=73 WS=63 gpuDed=14.3 gpuShr=0.5
+b-destroy-run2     n=181 exited=0 nproc_max=1 | whole min=17.3 med=17.3 max=20.1 | last60 min=17.3 med=17.3 max=17.3 | privBytes=74 WS=60 gpuDed=14.2 gpuShr=1.1
+b-destroy-run3     n=181 exited=0 nproc_max=1 | whole min=17.1 med=17.2 max=20.5 | last60 min=17.1 med=17.1 max=17.2 | privBytes=74 WS=59 gpuDed=13.1 gpuShr=0.4
+b-sw-run1          n=181 exited=0 nproc_max=1 | whole min=17.6 med=17.6 max=20.0 | last60 min=17.6 med=17.6 max=17.6 | privBytes=74 WS=59 gpuDed=14.2 gpuShr=1.1
+b-sw-run2          n=181 exited=0 nproc_max=1 | whole min=17.6 med=17.6 max=20.4 | last60 min=17.6 med=17.6 max=17.6 | privBytes=74 WS=60 gpuDed=14.2 gpuShr=1.1
+b-sw-run3          n=181 exited=0 nproc_max=1 | whole min=17.0 med=17.0 max=19.7 | last60 min=17.0 med=17.0 max=17.0 | privBytes=73 WS=59 gpuDed=13.1 gpuShr=0.4
+c-destroy-run1     n=361 exited=0 nproc_max=1 | whole min=17.3 med=19.2 max=22.0 | last60 min=19.3 med=19.3 max=19.3 | privBytes=92 WS=62 gpuDed=22.3 gpuShr=0.4
+c-destroy-run2     n=361 exited=0 nproc_max=1 | whole min=17.3 med=19.1 max=22.6 | last60 min=19.1 med=19.1 max=19.1 | privBytes=93 WS=62 gpuDed=22.3 gpuShr=0.4
+c-destroy-run3     n=361 exited=0 nproc_max=1 | whole min=17.3 med=19.1 max=21.6 | last60 min=19.1 med=19.1 max=19.1 | privBytes=92 WS=62 gpuDed=22.3 gpuShr=0.4
+c-sw-run1          n=361 exited=0 nproc_max=1 | whole min=17.6 med=17.7 max=20.2 | last60 min=17.6 med=17.6 max=17.6 | privBytes=73 WS=60 gpuDed=15.4 gpuShr=0.2
+c-sw-run2          n=361 exited=0 nproc_max=1 | whole min=17.6 med=17.7 max=20.0 | last60 min=17.7 med=17.7 max=17.7 | privBytes=73 WS=60 gpuDed=15.4 gpuShr=0.2
+c-sw-run3          n=361 exited=0 nproc_max=1 | whole min=17.6 med=17.7 max=20.1 | last60 min=17.7 med=17.7 max=17.7 | privBytes=73 WS=60 gpuDed=15.4 gpuShr=0.2

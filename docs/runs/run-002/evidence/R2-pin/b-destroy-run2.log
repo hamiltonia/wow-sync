@@ -1,0 +1,6 @@
+[     0 ms] pid=14608 start mode=show-hide n=60 sw_hide=false
+[   264 ms] pid=14608 tray icon created
+[   312 ms] pid=14608 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[   312 ms] pid=14608 window opened hwnd=0x670bd6
+[   312 ms] pid=14608 MARK 1794800810809 shown
+[ 60319 ms] pid=14608 MARK 1794800870816 hidden-idle

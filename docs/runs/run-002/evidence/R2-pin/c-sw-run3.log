@@ -1,0 +1,45 @@
+[     0 ms] pid=36736 start mode=cycles n=20 sw_hide=true
+[   292 ms] pid=36736 tray icon created
+[   330 ms] pid=36736 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[   330 ms] pid=36736 window opened hwnd=0x2105e6
+[   330 ms] pid=36736 shown, visible=true
+[  3346 ms] pid=36736 MARK 1794801297829 cycle 1
+[  3354 ms] pid=36736 shown, visible=true
+[  6383 ms] pid=36736 MARK 1794801300866 cycle 2
+[  6394 ms] pid=36736 shown, visible=true
+[  9418 ms] pid=36736 MARK 1794801303901 cycle 3
+[  9426 ms] pid=36736 shown, visible=true
+[ 12453 ms] pid=36736 MARK 1794801306936 cycle 4
+[ 12463 ms] pid=36736 shown, visible=true
+[ 15480 ms] pid=36736 MARK 1794801309963 cycle 5
+[ 15495 ms] pid=36736 shown, visible=true
+[ 18512 ms] pid=36736 MARK 1794801312995 cycle 6
+[ 18520 ms] pid=36736 shown, visible=true
+[ 21533 ms] pid=36736 MARK 1794801316016 cycle 7
+[ 21545 ms] pid=36736 shown, visible=true
+[ 24562 ms] pid=36736 MARK 1794801319045 cycle 8
+[ 24572 ms] pid=36736 shown, visible=true
+[ 27598 ms] pid=36736 MARK 1794801322081 cycle 9
+[ 27608 ms] pid=36736 shown, visible=true
+[ 30620 ms] pid=36736 MARK 1794801325103 cycle 10
+[ 30628 ms] pid=36736 shown, visible=true
+[ 33637 ms] pid=36736 MARK 1794801328120 cycle 11
+[ 33641 ms] pid=36736 shown, visible=true
+[ 36657 ms] pid=36736 MARK 1794801331141 cycle 12
+[ 36667 ms] pid=36736 shown, visible=true
+[ 39691 ms] pid=36736 MARK 1794801334174 cycle 13
+[ 39702 ms] pid=36736 shown, visible=true
+[ 42709 ms] pid=36736 MARK 1794801337192 cycle 14
+[ 42723 ms] pid=36736 shown, visible=true
+[ 45746 ms] pid=36736 MARK 1794801340229 cycle 15
+[ 45756 ms] pid=36736 shown, visible=true
+[ 48772 ms] pid=36736 MARK 1794801343255 cycle 16
+[ 48780 ms] pid=36736 shown, visible=true
+[ 51789 ms] pid=36736 MARK 1794801346272 cycle 17
+[ 51798 ms] pid=36736 shown, visible=true
+[ 54810 ms] pid=36736 MARK 1794801349294 cycle 18
+[ 54820 ms] pid=36736 shown, visible=true
+[ 57844 ms] pid=36736 MARK 1794801352327 cycle 19
+[ 57852 ms] pid=36736 shown, visible=true
+[ 60865 ms] pid=36736 MARK 1794801355348 cycle 20
+[ 60865 ms] pid=36736 MARK 1794801355348 hidden-idle
