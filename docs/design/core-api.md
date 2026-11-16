@@ -43,17 +43,31 @@ pub struct VariantObservation {
 }
 pub struct VariantIdentity { pub product: ProductCode, pub folder: String,
                              pub build_version: Option<String>, pub profile: Option<&'static Profile> }
-pub struct Profile { pub product: &'static str, pub folder: &'static str,
-                     pub label: &'static str, pub toc_suffixes: &'static [&'static str] }
+pub struct Profile { pub product: &'static str, pub folder: &'static str, pub label: &'static str,
+                     pub toc_suffixes: &'static [&'static str], pub mapping_id: &'static str /* "profile:wowf/1" */ }
 pub const KNOWN_PROFILES: &[Profile];   // only wowf in the slice (domain.md §2)
 pub enum VariantVerdict { Recognized(VariantIdentity), Unfamiliar(VariantIdentity), Refused(RefuseReason) }
 pub fn validate_variant(obs: &VariantObservation) -> VariantVerdict;
-/// Ok only for Recognized, or Unfamiliar with user_confirmed == true.
-pub fn confirm_variant(v: &VariantVerdict, user_confirmed: bool) -> Result<ConfirmedVariant, RefuseReason>;
+
+pub enum TocMapping { Profile(&'static Profile), ValidatedPlain /* "validated-plain/1" */ }
+pub struct OtherVariants { pub same_product_folders: Vec<String>, pub enrolled_elsewhere: bool }
+pub enum LayoutAssessment {
+    Supported { mapping: TocMapping, eligible: Vec<FolderKey>, blocked: Vec<(FolderKey, BlockReason)>, digest: Sha256 },
+    Unsupported(LayoutReason),       // AddOnsLayout | DuplicateProductFolder | AlreadyEnrolled
+}
+pub fn assess_layout(id: &VariantIdentity, unfamiliar: bool, addons: &[FolderScan], others: &OtherVariants) -> LayoutAssessment;
+pub struct GuidedConfirmation { pub identity: bool, pub scope: bool, pub digest: Sha256 }
+/// Recognized + Supported: Ok (consent text still shown by the GUI).
+/// Unfamiliar + Supported: Ok only if identity && scope && digest == assessment digest.
+/// Anything else: Err. Consent alone (no Supported assessment) never succeeds (M-02).
+pub fn confirm_variant(v: &VariantVerdict, a: &LayoutAssessment, c: Option<&GuidedConfirmation>)
+    -> Result<ConfirmedVariant, RefuseReason>;
+pub struct VariantValidation { /* serializable evidence stored in local-enrollment: kind, identity, mapping id, digest, counts */ }
 ```
 
-`ConfirmedVariant` is the only value accepted by enrollment and planning
-functions; it can only be constructed by `confirm_variant` (private field).
+`ConfirmedVariant` (identity + mapping) is the only value accepted by
+enrollment and planning functions; it can only be constructed by
+`confirm_variant` (private fields).
 
 ## 3. `toc`, `version`
 
@@ -64,18 +78,19 @@ pub struct ExternalId { pub kind: IdKind /* Curse | Wago | WoWI */, pub value: S
 pub fn parse_toc(bytes: &[u8]) -> Result<TocInfo, TocError>;  // TooLarge | NotUtf8
 pub struct TocCandidate { pub file_name: String, pub contents: FileObs }
 pub enum TocSelection {
-    Selected { file_name: String, info: TocInfo },
+    Selected { file_name: String, suffix: Option<String>, info: TocInfo },
     None { reason: String },
     Ambiguous { files: Vec<String> },
+    Unvalidated { files: Vec<String> },   // unfamiliar client with suffixed tocs (domain.md §2.1)
     Error { file_name: String, reason: String },
 }
-pub fn select_toc(folder: &str, candidates: &[TocCandidate], profile: Option<&Profile>) -> TocSelection;
+pub fn select_toc(folder: &str, candidates: &[TocCandidate], mapping: &TocMapping) -> TocSelection;
 
 pub enum Version { DottedNumeric{..}, Integer(u64), Revision(u64), Date(u32,u32,u32),
                    Tagged{ tag: String, v: Box<Version> }, Missing, Token(String), GitHash(String), Other(String) }
 pub enum VersionOrder { Less, Equal, Greater, Ambiguous(String) }
 pub fn classify(raw: Option<&str>) -> Version;
-pub fn compare(a: &Version, b: &Version) -> VersionOrder;
+pub fn compare(a: &Version, b: &Version) -> VersionOrder;   // channels and describe rules: domain.md §4
 ```
 
 ## 4. `inventory`, `package`
@@ -83,41 +98,44 @@ pub fn compare(a: &Version, b: &Version) -> VersionOrder;
 ```rust
 /// What adapters report for one AddOns top-level entry (mirrors adapters::fs_scan::ScannedFolder).
 pub struct FolderScan { pub name: String, pub status: ScanStatus, pub files: Vec<ScannedFile>,
-                        pub tocs: Vec<TocCandidate> }
+                        pub tocs: Vec<TocCandidate>, pub fingerprint: Option<Sha256> }
 pub enum ScanStatus { Ok, Unreadable(String), Unsafe(String) /* reparse/link */, Unstable(String) /* changed while read */ }
 pub struct ScannedFile { pub rel_path: String, pub size: u64, pub sha256: Sha256 }
 
 pub enum FolderStatus { Ok, Unreadable, Unsafe, Unsupported, Unstable }
 pub struct FileEntry { pub path: RelPath, pub size: u64, pub sha256: Sha256 }
 pub struct FolderState { pub name: String, pub key: FolderKey, pub status: FolderStatus,
-                         pub tree: Option<Sha256>, pub files: u32, pub bytes: u64,
-                         pub toc: TocSummary /* from TocSelection, without full info */ ,
+                         pub tree: Option<Sha256>, pub fingerprint: Option<Sha256>, pub files: u32, pub bytes: u64,
+                         pub toc: TocSummary /* kind, file, suffix, version, interface, deps, ids */,
                          pub file_entries: Vec<FileEntry> }
-pub struct Inventory { pub folders: Vec<FolderState> } // sorted by key
-pub fn build_inventory(scans: Vec<FolderScan>, v: &ConfirmedVariant) -> Inventory;
-pub fn inventory_is_stable(inv: &Inventory) -> bool; // false if any Unstable -> no publish/apply this cycle
+pub struct Inventory { pub folders: Vec<FolderState>, pub listing_stable: bool } // sorted by key
+pub fn build_inventory(scans: Vec<FolderScan>, listing_stable: bool, v: &ConfirmedVariant) -> Inventory;
 
 pub struct Package { pub key: FolderKey, pub display: FolderKey, pub members: Vec<FolderKey>,
-                     pub edges: Vec<(FolderKey, FolderKey, EdgeKind)> }
+                     pub edges: Vec<(FolderKey, FolderKey, EdgeKind /* SharedId|Dependency|NamePrefix|Family */)> }
 pub fn group_packages(observations: &[&Inventory]) -> Vec<Package>;   // domain.md §5
-pub struct PackageVersion { pub package: FolderKey, pub hash: Sha256, pub folders: Vec<FolderState> }
-pub fn package_version(pkg: &Package, inv: &Inventory) -> Option<PackageVersion>; // None if no member present
-pub enum PackageOrder { Same, Greater, Less, Ambiguous { reason: AmbiguityReason, evidence: Vec<FolderEvidence> } }
+pub struct PackageVersion { pub package: FolderKey, pub hash: Sha256, pub folders: Vec<FolderState>,
+                            pub client: ClientInfo /* build_version, toc mapping id of the holder */ }
+pub fn package_version(pkg: &Package, inv: &Inventory, client: &ClientInfo) -> Option<PackageVersion>;
+pub enum SetRelation { Equal, AHasMore, BHasMore, Different }
+pub enum PackageOrder { Same, Greater { set: SetRelation }, Less { set: SetRelation },
+                        Ambiguous { reason: AmbiguityReason, set: SetRelation, evidence: Vec<FolderEvidence> } }
 pub fn compare_package(a: &PackageVersion, b: &PackageVersion) -> PackageOrder;
 ```
 
-## 5. `records`, `layout`
+## 5. `records`, `layout`, `admit`
 
 Rust structs mirroring every schema in [publication.md](publication.md) §2
 (`RootFormat`, `GroupRecord`, `MemberRecord`, `CodeState`, `FolderTreeRecord`,
-`ApplyJournal`, `RecoveryPoint`, `AuditEntry`, `LocalComputer`, `LocalEnrollment`).
+`ApplyJournal`, `RecoveryPoint`, `AuditEntry`, `LocalComputer`,
+`LocalEnrollment`, `AdmissionWatermarks`, `VerifiedObjects`).
 
 ```rust
 pub fn encode<T: Record>(r: &T) -> Vec<u8>;                     // pretty JSON, LF, trailing newline
 pub fn decode<T: Record>(bytes: &[u8], limit: usize) -> Result<T, RecordError>;
 // RecordError: TooLarge | Json(String) | SchemaMissing | UnknownSchema(String) | UnsupportedMajor(u32) | Invalid(String)
 pub trait Record: Serialize + DeserializeOwned { const SCHEMA: &'static str; const MAJOR: u32; const LIMIT: usize; fn validate(&self) -> Result<(), String>; }
-pub fn validate_state_for_group(s: &CodeState, g: &GroupRecord, member: &MemberRecord) -> Result<(), RecordError>;
+pub fn decode_tree(bytes: &[u8], name_hash: &Sha256) -> Result<FolderTreeRecord, RecordError>; // recomputes tree hash, validates paths
 
 // layout: all return '/'-separated paths relative to <shared>/WoWSync or <variant>/.wowsync
 pub fn group_record(g: &GroupId) -> String;            // "groups/<g>/group.json"
@@ -128,6 +146,14 @@ pub fn tree_record(g: &GroupId, h: &Sha256) -> String;
 pub fn blob(g: &GroupId, h: &Sha256) -> String;
 pub fn staging_dir(op: &OpId) -> String;  pub fn recovery_dir(pkg: &FolderKey, op: &OpId) -> String;
 pub fn journal(op: &OpId) -> String;
+
+// admit (publication.md §6): the only place that decides which member state is used.
+pub struct StateFileObs { pub name: String, pub size: u64, pub cloud_only: bool }
+pub struct MemberObs { pub member: Result<MemberRecord, RecordError>, pub files: Vec<StateFileObs>,
+                       pub newest_bytes: Option<Result<Vec<u8>, String>> /* bytes of the highest-seq name, if read */ }
+pub fn newest_state_name(m: &MemberObs) -> Option<String>; // runtime reads exactly this file
+pub fn admit_member_states(group: &GroupRecord, obs: &[MemberObs], marks: &AdmissionWatermarks)
+    -> (Vec<MemberView>, AdmissionWatermarks);
 ```
 
 ## 6. `target`, `plan`
@@ -135,93 +161,125 @@ pub fn journal(op: &OpId) -> String;
 ```rust
 pub struct MemberView { pub computer: ComputerId, pub enrollment: EnrollmentId, pub display_name: String,
                         pub latest: MemberLatest }
-pub enum MemberLatest { Valid { seq: u64, state: CodeState }, Unavailable(String), Invalid(String), None }
-pub struct TargetInput<'a> { pub group: &'a GroupRecord, pub local: &'a Inventory,
-                             pub local_id: &'a ComputerId, pub members: &'a [MemberView] }
-pub enum PackageTarget { Chosen { version: PackageVersion, sources: Vec<ComputerId> },
-                         NeedsDecision { candidates: Vec<(PackageVersion, Vec<ComputerId>)>, why: Explanation } }
+pub enum MemberLatest { Valid { seq: u64, state: CodeState }, Unusable { seq: u64, reason: String },
+                        Regressed { max_seq_seen: u64 }, InvalidMember(String), NoState }
+pub struct TargetInput<'a> { pub group: &'a GroupRecord, pub variant: &'a ConfirmedVariant,
+                             pub local: &'a Inventory, pub local_client: &'a ClientInfo,
+                             pub local_id: &'a ComputerId, pub members: &'a [MemberView],
+                             pub trees: &'a BTreeMap<Sha256, TreeAvail> /* Ok(record) | Missing | CloudOnly | Corrupt */ }
+pub enum PackageTarget { InSync, Chosen { version: PackageVersion, sources: Vec<ComputerId>, why: Explanation },
+                         NeedsDecision { reason: DecisionReason, candidates: Vec<(PackageVersion, Vec<ComputerId>)>, why: Explanation },
+                         Unavailable { why: Explanation } }
+// DecisionReason: Ambiguous | NoCompatibleToc | DifferentTocMapping | DifferentClientBuild
+//               | UnvalidatedTocMapping | PartialCandidate          (domain.md §6)
 pub struct GroupTarget { pub packages: BTreeMap<FolderKey, PackageTarget> }
 pub fn compute_target(input: &TargetInput) -> GroupTarget;
 
-pub struct PublishPlan { pub blobs: Vec<BlobUpload>, pub trees: Vec<(Sha256, FolderTreeRecord)>,
-                         pub state: CodeState, pub state_path: String, pub prune_states: Vec<String> }
-pub struct BlobUpload { pub sha256: Sha256, pub local: LocalFileRef /* folder + RelPath */, pub size: u64 }
-pub fn plan_publish(inv: &Inventory, ctx: &PublishContext, existing_blobs: &BTreeSet<Sha256>,
-                    existing_trees: &BTreeSet<Sha256>, own_state_files: &[String]) -> Result<PublishPlan, PlanBlock>;
+pub struct PublishContext { pub group: GroupId, pub computer: ComputerId, pub enrollment: EnrollmentId,
+                            pub seq: u64, pub client: ClientInfo, pub apply_report: Option<ApplyReport>,
+                            pub verified: VerifiedObjects, pub own_state_files: Vec<String> }
+pub struct PublishPlan { pub objects: Vec<ObjectRef /* blob or tree, with local source */>,
+                         pub state: CodeState, pub state_path: String, pub prune_states: Vec<String>,
+                         pub source_fingerprints: Vec<(String /* folder */, Sha256)> }
+pub fn plan_publish(inv: &Inventory, ctx: &PublishContext) -> Result<PublishPlan, PlanBlock>;
 
 pub struct ApplyPlan { pub op: OpId, pub packages: Vec<PackageApply> }   // sorted by package key
 pub struct PackageApply { pub package: FolderKey, pub target_hash: Sha256,
                           pub folders: Vec<FolderApply>, pub explanation: Explanation }
 pub struct FolderApply { pub name: String, pub key: FolderKey, pub action: FolderAction,
-                         pub tree: FolderTreeRecord }
+                         pub tree: FolderTreeRecord, pub expected_live: ExpectedLive }
+pub enum ExpectedLive { Absent, Tree { tree: Sha256, fingerprint: Sha256 } }   // apply.md §2.1
 pub enum FolderAction { Install /* absent locally */, Replace /* present, different tree */ }
 pub fn plan_apply(target: &GroupTarget, local: &Inventory, op: OpId, gate: &ApplyGate) -> Result<ApplyPlan, PlanBlock>;
-pub struct ApplyGate { pub activity: Activity, pub inventory_stable: bool, pub variant: ConfirmedVariant }
+pub struct ApplyGate { pub activity: Activity, pub variant: ConfirmedVariant, pub unresolved_journal: bool }
 pub enum Activity { NotRunning, Running { pids: Vec<u32> }, Unknown(String) }
-pub enum PlanBlock { GameRunning, ActivityUnknown(String), Unstable, NothingToDo, Invalid(String) }
+pub enum PlanBlock { GameRunning, ActivityUnknown(String), Unstable, UnresolvedJournal, NothingToDo, Invalid(String) }
 ```
 
-`plan_apply` skips packages whose local version is `Same` or `Greater` than
-the target (no downgrade) and folders whose tree already equals the target;
-local folders of the package that are absent from the target are left alone
-(Q-2). `plan_publish` refuses when the inventory is unstable.
+`plan_apply` includes only `Chosen` packages whose local folders are all
+`Ok` with a fingerprint (stable this scan); `expected_live` comes from that
+scan. It never plans a package whose target lacks a local folder of the
+package (domain.md §6 `PartialCandidate`). `plan_publish` refuses when
+`listing_stable` is false; unstable folders are published with status
+`unstable` and no tree.
 
 ## 7. `exec` (port traits and executor)
 
 ```rust
+pub enum Slot { Live { folder: String }, Staging { op: OpId, folder: String },
+                Recovery { pkg: FolderKey, op: OpId, folder: String } }
+pub struct SlotObs { pub fingerprint: Sha256, pub recently_modified: bool /* adapter: newest mtime within window */ }
+pub enum ObjectStat { Missing, CloudOnly, Local { size: u64, mtime_ns: i128 } }
+
 pub trait PublishEffects {
-    fn blob_exists(&mut self, h: &Sha256) -> Result<bool, EffectError>;
-    fn upload_blob(&mut self, src: &LocalFileRef, h: &Sha256, size: u64) -> Result<(), EffectError>; // verifies hash
-    fn write_record(&mut self, rel: &str, bytes: &[u8]) -> Result<(), EffectError>;               // temp + rename
-    fn remove_own_record(&mut self, rel: &str) -> Result<(), EffectError>;                         // own member dir only
+    fn stat_object(&mut self, rel: &str) -> Result<ObjectStat, EffectError>;
+    fn hash_object(&mut self, rel: &str) -> Result<Sha256, EffectError>;            // Local objects only
+    /// Copy source to temp in the provider, verify hash, rename over `rel`; returns (size, mtime_ns).
+    fn put_object(&mut self, obj: &ObjectRef) -> Result<(u64, i128), EffectError>;
+    fn observe_source(&mut self, folder: &str) -> Result<Option<SlotObs>, EffectError>;  // live AddOns folder
+    fn write_record(&mut self, rel: &str, bytes: &[u8]) -> Result<(), EffectError>;   // temp + rename
+    fn remove_own_record(&mut self, rel: &str) -> Result<(), EffectError>;             // own member dir only
 }
 pub trait ApplyEffects {
     fn activity(&mut self) -> Activity;
     fn lock(&mut self) -> Result<(), EffectError>;
-    fn write_journal(&mut self, j: &ApplyJournal) -> Result<(), EffectError>;
+    fn write_journal(&mut self, j: &ApplyJournal) -> Result<(), EffectError>;   // temp + flush + rename
+    fn read_journals(&mut self) -> Result<Vec<(String, Vec<u8>)>, EffectError>; // core decodes
+    fn remove_journal(&mut self, op: &OpId) -> Result<(), EffectError>;
     fn stage_folder(&mut self, op: &OpId, f: &FolderApply) -> Result<(), EffectError>; // copy blobs, verify each hash
-    fn verify_staged(&mut self, op: &OpId, f: &FolderApply) -> Result<bool, EffectError>;
-    fn move_live_to_recovery(&mut self, op: &OpId, pkg: &FolderKey, folder: &str) -> Result<(), EffectError>;
-    fn move_staged_to_live(&mut self, op: &OpId, folder: &str) -> Result<(), EffectError>;
-    fn move_recovery_to_live(&mut self, op: &OpId, pkg: &FolderKey, folder: &str) -> Result<(), EffectError>;
-    fn move_live_to_staging(&mut self, op: &OpId, folder: &str) -> Result<(), EffectError>;
-    fn hash_live_folder(&mut self, folder: &str) -> Result<Option<Sha256>, EffectError>; // None = absent
-    fn exists(&mut self, area: Area, op: &OpId, folder: &str) -> Result<bool, EffectError>;
+    fn tree_of(&mut self, slot: &Slot) -> Result<Option<Sha256>, EffectError>;   // content hash; None = absent
+    fn observe(&mut self, slot: &Slot) -> Result<Option<SlotObs>, EffectError>;  // metadata; None = absent
+    fn rename(&mut self, from: &Slot, to: &Slot) -> Result<(), EffectError>;     // fails if `to` exists
     fn write_recovery_point(&mut self, rp: &RecoveryPoint) -> Result<(), EffectError>;
-    fn prune_recovery(&mut self, pkg: &FolderKey, keep: &[OpId]) -> Result<(), EffectError>;
-    fn list_recovery(&mut self, pkg: &FolderKey) -> Result<Vec<RecoveryPoint>, EffectError>;
-    fn read_journals(&mut self) -> Result<Vec<ApplyJournal>, EffectError>;
+    fn list_recovery(&mut self, pkg: &FolderKey) -> Result<Vec<(String, Vec<u8>)>, EffectError>; // core decodes
+    fn remove_recovery(&mut self, pkg: &FolderKey, op: &OpId) -> Result<(), EffectError>;
     fn discard_staging(&mut self, op: &OpId) -> Result<(), EffectError>;
 }
-pub enum Area { Live, Staging, Recovery }
-pub struct EffectError { pub kind: EffectErrorKind, pub detail: String }
-pub fn run_publish(plan: &PublishPlan, fx: &mut impl PublishEffects) -> PublishOutcome;
-pub fn run_apply(plan: &ApplyPlan, fx: &mut impl ApplyEffects) -> ApplyOutcome;   // apply.md §2
-pub fn recover_interrupted(fx: &mut impl ApplyEffects) -> RecoveryOutcome;         // apply.md §4
+pub struct EffectError { pub kind: EffectErrorKind /* NotFound | Exists | InUse | CloudOnly | HashMismatch | Unsafe | Io | Crashed */,
+                         pub detail: String }
+pub enum ObjectCheck { VerifiedOk, Missing, Corrupt, Unverifiable }
+/// stat; Local with (size, mtime) equal to a VerifiedObjects entry of the same hash -> VerifiedOk;
+/// else Local -> hash_object (== expected ? VerifiedOk : Corrupt); CloudOnly -> Unverifiable.
+pub fn check_object(fx: &mut impl PublishEffects, rel: &str, expect: &Sha256, cache: &VerifiedObjects) -> Result<ObjectCheck, EffectError>;
+pub fn run_publish(plan: &PublishPlan, ctx: &mut PublishContext, fx: &mut impl PublishEffects) -> PublishOutcome; // publication.md §4
+pub fn run_apply(plan: &ApplyPlan, fx: &mut impl ApplyEffects) -> ApplyOutcome;      // apply.md §2
+pub fn recover_interrupted(fx: &mut impl ApplyEffects) -> RecoveryOutcome;            // apply.md §4
 pub struct ApplyOutcome { pub packages: Vec<(FolderKey, PackageResult)>, pub stopped: Option<PlanBlock> }
-pub enum PackageResult { Applied { recovery: OpId }, Skipped(Explanation), RolledBack(Explanation),
-                         NeedsHelp(Explanation), Failed(Explanation) }
+pub enum PackageResult { Applied { recovery: OpId }, Skipped(Explanation), Replanned(Explanation),
+                         Interrupted(Explanation), RolledBack(Explanation), NeedsHelp(Explanation), Failed(Explanation) }
+pub struct RecoveryOutcome { pub packages: Vec<(OpId, FolderKey, PackageResult)>, pub unresolved: bool }
 ```
+
+Every port method maps to exactly one adapter call or a fixed short
+sequence ([adapters-api.md](adapters-api.md) §9); none needs private storage
+access. `PublishOutcome` returns the updated `VerifiedObjects` for the
+runtime to persist.
 
 ## 8. `status`, `explain`
 
 ```rust
 pub enum Headline { Ok, Working, Waiting, NeedsHelp, Error }
-pub enum PackageStatus { InSync, Available /* target newer, not yet applied */, AppliedHere,
-                         ConfirmedBy(Vec<ComputerId>), NeedsDecision, Unavailable, Blocked(PlanBlock) }
+pub enum PackageStatus { InSync, Available, AppliedHere, ConfirmedBy(Vec<ComputerId>),
+                         NeedsDecision(DecisionReason), Unavailable, Interrupted, NeedsHelp(String), Blocked(PlanBlock) }
 pub struct MemberStatus { pub computer: ComputerId, pub display_name: String, pub last_seq: Option<u64>,
                           pub reported_at_peer_clock: Option<i64>, pub seen_locally_at: Option<i64>,
                           pub state: MemberLatest /* summarized */ }
 pub struct StatusView { pub headline: Headline, pub packages: Vec<(FolderKey, PackageStatus, Explanation)>,
-                        pub members: Vec<MemberStatus>, pub last_publish: Option<i64>, pub blocks: Vec<PlanBlock> }
+                        pub members: Vec<MemberStatus>, pub last_publish: Option<i64>, pub blocks: Vec<PlanBlock>,
+                        pub retained_extra_recovery: u32 /* pinned points beyond the normal two */ }
 pub fn derive_status(input: &StatusInput) -> StatusView;
 pub fn confirmations(target: &GroupTarget, members: &[MemberView]) -> BTreeMap<FolderKey, Vec<ComputerId>>;
 
 pub enum Explanation { /* closed set, each with structured fields, e.g. */
     NewerVersion { folder: String, from: String, to: String, source: ComputerId },
     Installed { source: ComputerId }, AmbiguousVersions { evidence: Vec<FolderEvidence> },
-    GameRunning, ActivityUnknown, Unstable, NotAvailableYet { missing: Vec<Sha256> },
-    RolledBackLaunch, HashMismatch { folder: String }, AlreadyNewerHere, Unsupported { folder: String, why: String },
+    PartialCandidate { missing_here: Vec<String> }, NoCompatibleToc { folder: String },
+    DifferentClientBuild { here: Option<String>, there: Option<String> }, UnvalidatedTocMapping { folder: String },
+    GameRunning, ActivityUnknown(String), Unstable, NotAvailableYet { missing: Vec<Sha256> },
+    MemberUnusable { computer: ComputerId, seq: u64, reason: String }, MemberRegressed { computer: ComputerId },
+    DestinationChanged { folder: String }, InterruptedByGame { package: String },
+    LiveMismatch { folder: String }, RecoveryMismatch { folder: String }, RestoreFailed { folder: String },
+    AlreadyNewerHere, Unsupported { folder: String, why: String }, GroupedBy { edges: Vec<String> },
     /* … */ }
 pub fn render(e: &Explanation) -> String;   // plain English, single line; no peer clock as "current"
 ```
