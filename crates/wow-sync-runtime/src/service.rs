@@ -39,7 +39,7 @@ use wow_sync_core::records::{
     CodeState, GroupRecord, LocalComputer, LocalEnrollment, MemberRecord, PendingReport,
     RecordError, RecoveryPoint, RootFormat,
 };
-use wow_sync_core::report::{outstanding, record_pending};
+use wow_sync_core::report::{outstanding, record_pending, store_needs_reconcile};
 use wow_sync_core::status::{
     applied_here, derive_status, headline_sentence, journal_status, remember_applied, render_block,
     render_headline, render_member, render_package, render_result, Headline, StatusInput,
@@ -1058,7 +1058,8 @@ impl SliceService {
         self.last_blocks.clear();
 
         // Drop results the newest own state already carries (a crash after publishing but
-        // before the store was cleared), so they are never published twice.
+        // before the store was cleared). A failure here is retried: `publish_step` refuses to
+        // publish a newer state until the store is reconciled, so nothing is published twice.
         let stored = load_pending(&self.state);
         let still = outstanding(
             stored.as_ref(),
@@ -1262,6 +1263,25 @@ impl SliceService {
         if !publish_needed(w.own_latest.as_ref(), &w.inventory, apply_rep.is_some()) {
             return;
         }
+        // Deduplication only looks at the newest own state, so the saved store must no longer
+        // hold anything that state carries before a newer state may replace it (R3-M1).
+        let saved = load_pending(state);
+        if store_needs_reconcile(saved.as_ref(), group_id, enrollment, w.own_latest.as_ref()) {
+            let reduced = PendingReport {
+                group_id: group_id.clone(),
+                enrollment_id: enrollment.clone(),
+                report: outstanding(saved.as_ref(), group_id, enrollment, w.own_latest.as_ref()),
+            };
+            if state
+                .write_atomic(PENDING_REPORT, &encode(&reduced))
+                .is_err()
+            {
+                report.publish_note = Some(
+                    "not published: the saved apply report could not be updated; will retry".into(),
+                );
+                return;
+            }
+        }
         let (_, seq) = own_publish_slot(&w.own_states, enrollment, w.enrollment.next_seq);
         let published_report = apply_rep.is_some();
         let mut ctx = PublishContext {
@@ -1295,7 +1315,8 @@ impl SliceService {
                 *last_publish = Some(now_unix_ms());
                 report.published = Some(format!("published seq {seq} ({uploaded} new objects)"));
                 if published_report {
-                    // Published once; if this write is lost, `outstanding` drops it anyway.
+                    // Published once. If this write is lost, `outstanding` drops it while this
+                    // state is the newest, and the next publication first reconciles the store.
                     let _ = state.write_atomic(
                         PENDING_REPORT,
                         &encode(&PendingReport {

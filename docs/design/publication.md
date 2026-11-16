@@ -178,6 +178,14 @@ not be published twice:
   `report::outstanding`), so a crash after the state was written but before the
   store was cleared does not republish them. After `Published`, the store is
   cleared (`report` omitted). A record of another group or enrollment is ignored.
+- Deduplication compares only against the newest own state, so that state must
+  not be displaced while the store still holds a result it carries (R3-M1).
+  Before publishing any newer own state, if the saved store holds such a result
+  (core `report::store_needs_reconcile`), the runtime first durably writes the
+  store reduced to its outstanding results. If that write fails, nothing is
+  published in that cycle ("not published: the saved apply report could not be
+  updated; will retry") and the step is retried on the next sync. A failed clear
+  therefore delays publication; it never causes a result to be published twice.
 - An unreadable or corrupt store counts as empty: losing a confirmation must
   not block applies.
 - Limitation: a result recorded only at finalize/recovery carries an empty

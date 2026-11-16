@@ -499,3 +499,15 @@ tests = [
     "e2e::tests::apply_report_survives_crash_before_publish",
     "e2e::tests::recognized_enroll_without_scope_consent_is_refused",
 ]
+
+# R2-fix4 (run-002): R3-M1 from docs/runs/run-002/evidence/R2-recheck3.md (no duplicate report
+# after a failed pending-report clear followed by an inventory-only publication).
+[[case]]
+id = "R2-fix4:core"
+tier = "offline"
+tests = ["report::tests::store_holding_a_carried_result_must_be_reconciled_first"]
+
+[[case]]
+id = "R2-fix4:slice"
+tier = "offline"
+tests = ["e2e::tests::pending_clear_failure_does_not_duplicate_report"]

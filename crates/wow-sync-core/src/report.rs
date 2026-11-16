@@ -87,6 +87,31 @@ pub fn outstanding(
     (!rep.results.is_empty()).then_some(rep)
 }
 
+/// Whether the store still holds a result that this enrollment's newest published state
+/// carries. Deduplication looks only at the newest own state, so such a store must be durably
+/// reduced to `outstanding` before any newer own state is published; otherwise the stale
+/// result would be published again once the carrying state is no longer the newest.
+pub fn store_needs_reconcile(
+    store: Option<&PendingReport>,
+    group: &GroupId,
+    enrollment: &EnrollmentId,
+    latest_own: Option<&CodeState>,
+) -> bool {
+    let Some(rep) = store
+        .filter(|s| &s.group_id == group && &s.enrollment_id == enrollment)
+        .and_then(|s| s.report.as_ref())
+    else {
+        return false;
+    };
+    let Some(c) = latest_own
+        .filter(|st| &st.group_id == group && &st.enrollment_id == enrollment)
+        .and_then(|st| st.apply_report.as_ref())
+    else {
+        return false;
+    };
+    rep.results.iter().any(|r| c.results.contains(r))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,5 +255,55 @@ mod tests {
         assert_eq!(outstanding(Some(&store), &gid(), &eid(), Some(&st)), None);
         let other = EnrollmentId::parse(&"9".repeat(32)).unwrap();
         assert_eq!(outstanding(Some(&store), &gid(), &other, None), None);
+    }
+
+    #[test]
+    fn store_holding_a_carried_result_must_be_reconciled_first() {
+        let store = PendingReport {
+            group_id: gid(),
+            enrollment_id: eid(),
+            report: Some(report('a', vec![result("alpha", ReportKind::Applied, 1)])),
+        };
+        assert!(!store_needs_reconcile(Some(&store), &gid(), &eid(), None));
+        let mut st = testkit::member_state(&testkit::computer(1), 1, &testkit::inventory(vec![]));
+        st.group_id = gid();
+        st.enrollment_id = eid();
+        assert!(!store_needs_reconcile(
+            Some(&store),
+            &gid(),
+            &eid(),
+            Some(&st)
+        ));
+        st.apply_report = Some(report('b', vec![result("alpha", ReportKind::Applied, 2)]));
+        assert!(!store_needs_reconcile(
+            Some(&store),
+            &gid(),
+            &eid(),
+            Some(&st)
+        ));
+        st.apply_report = store.report.clone();
+        assert!(store_needs_reconcile(
+            Some(&store),
+            &gid(),
+            &eid(),
+            Some(&st)
+        ));
+        let cleared = PendingReport {
+            report: None,
+            ..store.clone()
+        };
+        assert!(!store_needs_reconcile(
+            Some(&cleared),
+            &gid(),
+            &eid(),
+            Some(&st)
+        ));
+        let other = EnrollmentId::parse(&"9".repeat(32)).unwrap();
+        assert!(!store_needs_reconcile(
+            Some(&store),
+            &gid(),
+            &other,
+            Some(&st)
+        ));
     }
 }

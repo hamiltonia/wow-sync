@@ -778,6 +778,97 @@ mod tests {
         wow_sync_core::hash::package_hash(&[(f.key.clone(), f.tree.unwrap())]).to_string()
     }
 
+    /// R3-M1 (R2-recheck3): a pending-report clear that keeps failing (the file is held open
+    /// without write/delete sharing) must not let an inventory-only state displace the state
+    /// that carries the report, so the same `applied` result is never published twice.
+    #[cfg(windows)]
+    #[test]
+    fn pending_clear_failure_does_not_duplicate_report() {
+        use std::os::windows::fs::OpenOptionsExt;
+        use wow_sync_core::records::{decode, encode, CodeState, PendingReport};
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        assert_eq!(published_applied(&lab, &g, &b, "alpha").len(), 1);
+        let states = lab
+            .shared
+            .join("WoWSync")
+            .join("groups")
+            .join(g.as_str())
+            .join("members")
+            .join(computer_id(&b))
+            .join("state");
+        let st: CodeState = std::fs::read_dir(states)
+            .unwrap()
+            .map(|e| {
+                decode::<CodeState>(&std::fs::read(e.unwrap().path()).unwrap(), 16 * 1024 * 1024)
+                    .unwrap()
+            })
+            .find(|st| st.apply_report.is_some())
+            .unwrap();
+        let pending = PendingReport {
+            group_id: g.clone(),
+            enrollment_id: st.enrollment_id,
+            report: st.apply_report,
+        };
+        let bytes = encode(&pending);
+        let path = b.cfg.state_dir.join("pending-report.json");
+        std::fs::write(&path, &bytes).unwrap();
+        b.restart();
+        // FILE_SHARE_READ only: the store stays readable but cannot be replaced.
+        let hold = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&path)
+            .unwrap();
+        assert!(LocalState::open_at(&b.cfg.state_dir)
+            .unwrap()
+            .write_atomic("pending-report.json", &bytes)
+            .is_err());
+        b.addon("Beta", "beta-v1");
+        let first = synced(&mut b);
+        assert_eq!(
+            published_applied(&lab, &g, &b, "alpha").len(),
+            1,
+            "{first:?}"
+        );
+        let second = synced(&mut b);
+        assert_eq!(
+            published_applied(&lab, &g, &b, "alpha").len(),
+            1,
+            "duplicate Alpha applied report after inventory-only publication: {second:?}"
+        );
+        // Once the store can be reconciled, publication resumes without a duplicate.
+        drop(hold);
+        let third = synced(&mut b);
+        let fourth = synced(&mut b);
+        assert_eq!(
+            published_applied(&lab, &g, &b, "alpha").len(),
+            1,
+            "{third:?} {fourth:?}"
+        );
+        let beta_seen = std::fs::read_dir(
+            lab.shared
+                .join("WoWSync")
+                .join("groups")
+                .join(g.as_str())
+                .join("members")
+                .join(computer_id(&b))
+                .join("state"),
+        )
+        .unwrap()
+        .filter_map(|e| {
+            decode::<CodeState>(&std::fs::read(e.unwrap().path()).unwrap(), 16 * 1024 * 1024).ok()
+        })
+        .any(|st| st.folders.iter().any(|f| f.key.as_str() == "beta"));
+        assert!(beta_seen, "Beta was never published: {third:?} {fourth:?}");
+    }
+
     /// mi-1: scope consent is required for a recognized client too, at the service boundary.
     #[test]
     fn recognized_enroll_without_scope_consent_is_refused() {
