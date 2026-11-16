@@ -105,3 +105,5 @@ parent; the harness uses `Start-Fake` in `gkit.ps1` instead.
   `unmaintained = "workspace"`). Path deps carry `version = "0.0.0"` to satisfy the wildcard ban.
 - No tray-menu Quit/Show or tray left-click driven here beyond what R2-pin covered; only
   window close/second-instance re-show were driven.
+
+Follow-up (R2-slice-fix): cfg-gated Windows-only imports (`RawWindowHandle`, `PathBuf` in devkit) so `wow-sync-app` passes clippy -D warnings on macOS; macOS cross-clippy could not be run locally (gpui_apple needs the Metal toolchain), so this is reasoned and confirmed by CI only.

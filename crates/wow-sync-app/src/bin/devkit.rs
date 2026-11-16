@@ -5,7 +5,7 @@
 //!   devkit add-addon <root> <folder> <Name> <tag> [<version>] [--depends X]
 //!   devkit fake-client <variant_dir>      (Windows; prints the PID, leaves it running)
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 fn fail(msg: &str) -> ! {
     eprintln!("devkit: {msg}");
@@ -56,7 +56,9 @@ fn add_addon(root: &Path, folder: &str, name: &str, tag: &str, version: &str, de
 #[cfg(windows)]
 fn fake_client(variant: &Path) {
     let system = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
-    let ping: PathBuf = PathBuf::from(system).join("System32").join("PING.EXE");
+    let ping = std::path::PathBuf::from(system)
+        .join("System32")
+        .join("PING.EXE");
     let exe = variant.join("Wow.exe");
     if !variant.join("Interface").is_dir() {
         fail("not a variant folder created by make-install");
