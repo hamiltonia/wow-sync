@@ -14,6 +14,9 @@ first. Each `R2-*` packet plus this file is the full work packet (E-05).
 - `cargo xtask verify --tier offline` from the worktree root must pass before
 you commit. Never run `git gc`, `git prune`, reflog expiry or any history
 rewrite of pushed commits (shared `.git`; owner-held, PLAN §6 #8). New product tests that are required must be listed in
+- Stop only processes you started yourself, by the PID returned at launch.
+Never stop processes inferred from ParentProcessId or other traversal
+(PIDs are recycled; R2-check V1 incident). New product tests that are required must be listed in
   `tests/required-cases.toml` (see docs/VERIFY.md) by the packet that owns them.
 
 ## Environment

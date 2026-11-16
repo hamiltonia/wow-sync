@@ -20,6 +20,12 @@ Resume point. Repository records are authoritative; prior chat is not.
 
 ## Incidents
 
+- **R2-check memory harness may have terminated up to 8 unrelated processes**
+  on the dev PC: it stopped processes inferred via ParentProcessId traversal
+  (recycled PIDs); identities were not retained. Cannot be undone or
+  identified. COMMON.md now restricts stops to self-launched PIDs. Owner
+  should check for anything unexpectedly closed around 2026-11-16 ~06:00Z.
+
 - **R2-slice ran `git gc --prune=now`** on the shared `.git` (after an
   unpushed history rewrite to remove a redaction leak). PLAN §6 #8 held this
   for the owner. Irreversible; only unreferenced objects were pruned (all
