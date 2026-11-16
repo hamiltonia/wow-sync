@@ -16,7 +16,10 @@ Resume point. Repository records are authoritative; prior chat is not.
 | B | R2-design-review (sol) | Done after 2 design retries: ready with fixes F-01/F-02 |
 | C | R2-core, R2-adapters (sonnet) | Merged (`85fdc73`, `ddf8c4d`) |
 | D | R2-slice (sonnet) | Merged; G1–G9 PASS (author), 12.4 MiB idle |
-| E | R2-check (sol), R2-review (opus), report | Packets written; pending |
+| E | R2-check/recheck (sol), R2-fix/fix2 (sonnet), R2-review (opus) | Merged through `569a8b6`; review accept with follow-ups; recheck PASS WITH FINDINGS; MJ-1, m4, mi-3, A-38 controls fixed |
+| F | R2-fix3 (sonnet) + bounded re-check | Running: follow-ups #6 (core policy/consent predicate), #9 (report after recovery) |
+
+Report: [REPORT.md](REPORT.md).
 
 ## Incidents
 
@@ -40,9 +43,32 @@ Resume point. Repository records are authoritative; prior chat is not.
   before merge (`git status` clean, verified).
 - R2-adapters BLOCKED provider tests returned early (libtest PASS); changed to
   panic before merge.
+- Dependabot alert count on `main` rose from 4 to 6 (moderate) during run-002;
+  not triaged (PLAN §6 #5 held for owner).
 
 ## Next actions
 
 1. Merge each worker after orchestrator rerun of offline verify; push; record
    usage. Stop launching at ≥9,500 AIU cumulative.
-2. When budget ends, write a remaining-work summary here for the owner.
+2. Owner review: incidents above, decisions in REPORT.md §5.
+
+## Remaining work (for owner discussion)
+
+Rough sizing in run-002 terms (run-002 ≈4,600 AIU built design + slice).
+
+| Item | Needs owner? | Rough size |
+|---|---|---|
+| Memory gate re-measure with creation-time-validated harness (A-29) | V1 review, method #6 | Small |
+| Provider tier: online-only/hydration Dropbox tests (Q-23) | Prepared files | Small |
+| Native verify tier wired in xtask (Q-17) | No | Small |
+| Real-data enrollment: remove synthetic marker, client `.toc` check (Q-3, Q-24) | Yes, on real PC | Medium |
+| `s_addon` real metadata, version ordering/addon decisions | Q-answers | Medium |
+| Removal/uninstall propagation + recovery | Design review | Medium |
+| Settings sync: master, exceptions, peer push, yield/recovery | Design + Q-answers | Large |
+| Rollback/rejected releases, retire/re-enroll computers | Design | Medium–large |
+| Three-state history and needs-help GUI | No | Medium |
+| macOS + ARM64 runtime verification, Narrator (D-12) | Hardware/D-12 | Medium |
+| Packaging, autostart, updater; release acceptance pass | Publishing approval | Medium–large |
+
+Ballpark: several more runs of run-002 size (on the order of 3–5×) before a
+release-candidate acceptance pass; settings sync and rollback dominate.
