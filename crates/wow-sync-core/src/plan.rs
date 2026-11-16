@@ -161,6 +161,27 @@ pub fn plan_publish(inv: &Inventory, ctx: &PublishContext) -> Result<PublishPlan
     })
 }
 
+/// Which own state is the newest of this enrollment (compared against the inventory) and the
+/// sequence number of the next one: above the persisted counter and above every own state
+/// file of any enrollment, so a number is never reused (publication.md §4 step 6).
+pub fn own_publish_slot(
+    own_state_files: &[String],
+    enrollment: &EnrollmentId,
+    stored_next_seq: u64,
+) -> (Option<String>, u64) {
+    let parsed: Vec<(EnrollmentId, u64, &String)> = own_state_files
+        .iter()
+        .filter_map(|n| parse_state_name(n).map(|(e, s)| (e, s, n)))
+        .collect();
+    let newest = parsed
+        .iter()
+        .filter(|(e, _, _)| e == enrollment)
+        .max_by_key(|(_, s, _)| *s)
+        .map(|(_, _, n)| (*n).clone());
+    let highest = parsed.iter().map(|(_, s, _)| *s).max();
+    (newest, stored_next_seq.max(highest.map_or(1, |s| s + 1)))
+}
+
 /// Whether a new state must be published (M3): there is an apply report to carry, no previous
 /// state of this enrollment is readable, or the previous state differs from the inventory in any
 /// folder, status, tree, toc outcome or completeness.
@@ -566,5 +587,24 @@ mod tests {
         assert!(plan_publish(&sc.local, &sc.publish_ctx(4, &[&name])).is_err());
         assert!(plan_publish(&sc.local, &sc.publish_ctx(6, &[&name])).is_ok());
         let _ = Sha256([0; 32]);
+    }
+
+    #[test]
+    fn own_publish_slot_never_reuses_a_number() {
+        use crate::layout::state_file_name;
+        use crate::testkit::enrollment;
+        let (mine, old) = (enrollment(1), enrollment(2));
+        let files = vec![
+            state_file_name(&mine, 3),
+            state_file_name(&mine, 5),
+            state_file_name(&old, 9),
+            "notes.txt".to_string(),
+        ];
+        let (newest, seq) = own_publish_slot(&files, &mine, 2);
+        assert_eq!(newest, Some(state_file_name(&mine, 5)));
+        assert_eq!(seq, 10, "above every own state file of any enrollment");
+        assert_eq!(own_publish_slot(&files, &mine, 12).1, 12);
+        assert_eq!(own_publish_slot(&[], &mine, 1), (None, 1));
+        assert_eq!(own_publish_slot(&[], &mine, 0), (None, 1));
     }
 }

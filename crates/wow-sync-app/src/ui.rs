@@ -11,6 +11,8 @@ use gpui::{
 use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
+use wow_sync_runtime::core::ids::Sha256;
+use wow_sync_runtime::core::variant::{consent_gap, ConsentAction, ConsentGap, GuidedConfirmation};
 use wow_sync_runtime::{EnrollRequest, JoinChoice, PreviewKind, ReconfirmRequest};
 
 actions!(wow_sync, [FocusNextStop, FocusPrevStop]);
@@ -92,6 +94,15 @@ impl Root {
         }
     }
 
+    /// The consent ticked in the window, for the preview it was shown with.
+    fn given(&self, digest: Option<Sha256>) -> GuidedConfirmation {
+        GuidedConfirmation {
+            identity: self.consent.identity,
+            scope: self.consent.scope,
+            digest: digest.unwrap_or(Sha256([0; 32])),
+        }
+    }
+
     fn reconfirm(&mut self) {
         let digest = {
             let g = lock(&self.shared);
@@ -100,7 +111,8 @@ impl Root {
                 None => return,
             }
         };
-        if !(self.consent.identity && self.consent.scope) {
+        let gap = consent_gap(ConsentAction::Reconfirm, false, &self.given(digest), None);
+        if gap.is_some() {
             self.note = "Confirm both the game version and the add-on scope to continue. \
                          Nothing has been changed."
                 .into();
@@ -123,15 +135,23 @@ impl Root {
                 None => return,
             }
         };
-        if !self.consent.scope {
-            self.note = "Tick the agreement box first. Nothing has been written yet.".into();
-            return;
-        }
-        if needs && !self.consent.identity {
-            self.note = "This game version is unfamiliar: confirm the identity too. \
-                         Agreeing to the scope alone is not enough."
-                .into();
-            return;
+        match consent_gap(
+            ConsentAction::Enroll,
+            needs,
+            &self.given(digest),
+            digest.as_ref(),
+        ) {
+            None => {}
+            Some(ConsentGap::Scope) => {
+                self.note = "Tick the agreement box first. Nothing has been written yet.".into();
+                return;
+            }
+            Some(ConsentGap::Identity | ConsentGap::Stale) => {
+                self.note = "This game version is unfamiliar: confirm the identity too. \
+                             Agreeing to the scope alone is not enough."
+                    .into();
+                return;
+            }
         }
         self.note.clear();
         let display_name = self.banner.clone();

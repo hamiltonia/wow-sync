@@ -1,12 +1,15 @@
 //! Status derivation (core-api.md §8, R-12, A-24). A published record is never confirmation.
 
 use crate::admit::{MemberLatest, MemberView};
+use crate::exec::{ApplyOutcome, PackageResult};
 use crate::explain::{render, Explanation};
 use crate::ids::ComputerId;
 use crate::inventory::FolderStatus;
 use crate::paths::FolderKey;
-use crate::plan::PlanBlock;
-use crate::records::{CodeState, RecoveryPoint, ReportKind};
+use crate::plan::{ApplyPlan, PlanBlock};
+use crate::records::{
+    ApplyJournal, ApplyReport, CodeState, JournalPhase, RecoveryPoint, ReportKind,
+};
 use crate::target::{DecisionReason, GroupTarget, PackageTarget};
 use std::collections::BTreeMap;
 
@@ -305,6 +308,102 @@ pub fn render_package(p: &(FolderKey, PackageStatus, Explanation)) -> String {
     format!("{}: {}", p.0.as_str(), render(&p.2))
 }
 
+/// Plain sentence for a headline outside a full status view (e.g. enrollment needs attention).
+pub fn headline_sentence(h: Headline) -> String {
+    render_headline(&StatusView {
+        headline: h,
+        packages: Vec::new(),
+        members: Vec::new(),
+        last_publish: None,
+        blocks: Vec::new(),
+        retained_extra_recovery: 0,
+    })
+}
+
+pub fn render_block(b: &PlanBlock) -> String {
+    match b {
+        PlanBlock::GameRunning => "WoW is running; nothing was changed".into(),
+        PlanBlock::ActivityUnknown(w) => {
+            format!("Cannot tell whether the game is running ({w}); nothing was changed")
+        }
+        PlanBlock::Unstable => "Add-on files are still changing; waiting".into(),
+        PlanBlock::UnresolvedJournal => "An earlier update is unresolved".into(),
+        PlanBlock::NothingToDo => "Nothing to do".into(),
+        PlanBlock::DestinationChanged => "An add-on changed while updating; will retry".into(),
+        PlanBlock::RenameFailed(w) => format!("An add-on folder could not be replaced: {w}"),
+        PlanBlock::Invalid(w) => format!("Invalid plan: {w}"),
+    }
+}
+
+pub fn render_result(r: &PackageResult) -> String {
+    match r {
+        PackageResult::Applied { .. } => "applied".into(),
+        PackageResult::Skipped(e) => format!("skipped - {}", render(e)),
+        PackageResult::Replanned(e) => format!("will retry - {}", render(e)),
+        PackageResult::Interrupted(e) => format!("interrupted - {}", render(e)),
+        PackageResult::RolledBack(e) => format!("rolled back - {}", render(e)),
+        PackageResult::NeedsHelp(e) => format!("needs help - {}", render(e)),
+        PackageResult::Failed(e) => format!("failed - {}", render(e)),
+    }
+}
+
+/// Journals present on disk split into interrupted packages and packages needing help
+/// (apply.md §4: a `needs_help` journal waits for the user; any other phase is resumable).
+pub type JournalSplit = (Vec<FolderKey>, Vec<(FolderKey, String)>);
+
+pub fn journal_status(journals: &[ApplyJournal]) -> JournalSplit {
+    let mut interrupted = Vec::new();
+    let mut needs_help = Vec::new();
+    for j in journals {
+        if j.phase == JournalPhase::NeedsHelp {
+            needs_help.push((j.package.clone(), j.reason.clone().unwrap_or_default()));
+        } else {
+            interrupted.push(j.package.clone());
+        }
+    }
+    (interrupted, needs_help)
+}
+
+/// Remember the plan explanation of every package this outcome applied (newest wins).
+pub fn remember_applied(
+    remembered: &mut Vec<(FolderKey, Explanation)>,
+    plan: &ApplyPlan,
+    outcome: &ApplyOutcome,
+) {
+    for (k, r) in &outcome.packages {
+        if matches!(r, PackageResult::Applied { .. }) {
+            remembered.retain(|(a, _)| a != k);
+            if let Some(p) = plan.packages.iter().find(|p| &p.package == k) {
+                remembered.push((k.clone(), p.explanation.clone()));
+            }
+        }
+    }
+}
+
+/// Packages shown as applied here (apply.md §6): those remembered this session with their
+/// plan explanation, plus the `applied` results of this computer's own reports (latest
+/// published or still pending) for the current target content, so a restart keeps them.
+pub fn applied_here(
+    remembered: &[(FolderKey, Explanation)],
+    reports: &[&ApplyReport],
+    target: &GroupTarget,
+) -> Vec<(FolderKey, Explanation)> {
+    let mut out = remembered.to_vec();
+    for rep in reports {
+        for r in &rep.results {
+            let current = target.effective.get(&r.package).map(|e| e.hash);
+            if r.result == ReportKind::Applied
+                && r.package_hash.is_some()
+                && r.package_hash == current
+                && !out.iter().any(|(k, _)| k == &r.package)
+            {
+                out.push((r.package.clone(), Explanation::AppliedHere));
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -596,5 +695,60 @@ mod tests {
         i.needs_help = &nh;
         assert_eq!(derive_status(&i).headline, Headline::NeedsHelp);
         let _ = (ExpectedLive::Absent, FolderAction::Install);
+    }
+
+    #[test]
+    fn applied_here_is_rebuilt_from_own_report_after_restart() {
+        let sc = base();
+        let t = sc.target();
+        let hash = t.effective.get(&pk()).unwrap().hash;
+        let rep = |kind, h| ApplyReport {
+            op: op(1),
+            basis: vec![],
+            results: vec![ReportResult {
+                package: pk(),
+                result: kind,
+                package_hash: Some(h),
+            }],
+        };
+        let ok = rep(ReportKind::Applied, hash);
+        let derived = applied_here(&[], &[&ok], &t);
+        assert_eq!(derived, vec![(pk(), Explanation::AppliedHere)]);
+        let seen = BTreeMap::new();
+        let v = derive_status(&StatusInput {
+            applied_here: &derived,
+            ..input(&t, &sc.members, &seen)
+        });
+        assert_eq!(v.packages[0].1, PackageStatus::AppliedHere);
+        // Other content, or anything but `applied`, is not applied here.
+        let other = rep(ReportKind::Applied, crate::hash::sha256(b"other"));
+        let rolled = rep(ReportKind::RolledBack, hash);
+        assert!(applied_here(&[], &[&other, &rolled], &t).is_empty());
+        // A remembered explanation is kept and not duplicated.
+        let remembered = [(pk(), Explanation::InSync)];
+        assert_eq!(applied_here(&remembered, &[&ok], &t), remembered.to_vec());
+    }
+
+    #[test]
+    fn needs_help_journal_is_not_reported_as_interrupted() {
+        let mut nh = crate::testkit::sample_journal(JournalPhase::NeedsHelp);
+        nh.package = FolderKey::lossy("broken");
+        nh.reason = Some("live_mismatch:Broken".into());
+        let mut j = vec![nh];
+        for p in [
+            JournalPhase::Staging,
+            JournalPhase::Committing,
+            JournalPhase::Committed,
+            JournalPhase::Verified,
+            JournalPhase::RolledBack,
+        ] {
+            j.push(crate::testkit::sample_journal(p));
+        }
+        let (interrupted, needs_help) = journal_status(&j);
+        assert_eq!(
+            needs_help,
+            vec![(FolderKey::lossy("broken"), "live_mismatch:Broken".into())]
+        );
+        assert_eq!(interrupted, vec![pk(); 5]);
     }
 }

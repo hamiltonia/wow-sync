@@ -145,8 +145,9 @@ for the written files/dir to carry a cloud reparse tag (observed in S-dropbox)
 and asserts they are listed `Local` and readable. `dropbox_online_only_entry_refused`
 needs an owner-prepared online-only file named in
 `WOWSYNC_PROVIDER_ONLINE_ONLY`; if unset or the file is not online-only, it
-prints `BLOCKED: no online-only entry` and returns without passing a claim
-(R2-check records it as BLOCKED, Q-23). These prove local provider-folder
+panics with `BLOCKED: …` (the test fails rather than passing without a claim;
+R2-check records it as BLOCKED, Q-23). Likewise the hydrated-tag test panics
+with `BLOCKED: …` if no cloud reparse tag appears within 30 s. These prove local provider-folder
 semantics only, **not** cross-computer transfer (A-34 stays NOT RUN).
 
 ## 5. R2-slice (`wow-sync-runtime`, mostly `offline`)
@@ -168,6 +169,12 @@ the **real** adapters (no fake effects):
 | `A-20:slice` / B-02 | `e2e::tests::publish_aborts_when_source_changes` |
 | `A-24:slice` | `e2e::tests::peer_confirmation_only_after_apply` |
 | `A-21:slice-native` | `e2e::tests::fake_client_blocks_real_apply` (`native`, uses `FakeClient`) |
+| `R2-fix3:slice` (follow-up #9, mi-1) | `e2e::tests::apply_report_survives_crash_before_publish` (crash at every effect k of B's first apply+publish cycle, restart, three syncs: B's published states carry exactly one `applied` result for the package with the source's package hash, the last sync publishes nothing, and A shows "applied and reported by"; asserts a crash point after the apply and before publication was exercised), `e2e::tests::recognized_enroll_without_scope_consent_is_refused` (no provider writes) |
+
+Core unit tests for the same run-002 fix are listed as `R2-fix3:core` in
+`tests/required-cases.toml` (`report::tests::*`, `variant::tests::consent_predicate_requires_scope_and_guided_identity`,
+`plan::tests::own_publish_slot_never_reuses_a_number`, `status::tests::applied_here_is_rebuilt_from_own_report_after_restart`,
+`status::tests::needs_help_journal_is_not_reported_as_interrupted`).
 
 ## 5b. GUI verification (M-08; A-25, A-26)
 

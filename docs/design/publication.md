@@ -85,13 +85,16 @@ used for ordering or freshness decisions.
   newest file never falls back to an older one (M-05). A state file whose
   body disagrees with its file name, group, computer, enrollment or product
   is invalid.
-- `inventory_complete` is `false` if any folder could not be read; the record
-  is still published (other computers can use the readable folders) but the
-  absent/unreadable folders never imply removal.
+- `inventory_complete` is `false` if any folder is not transfer-eligible:
+  unreadable, unstable, or blocked by the variant's layout/TOC rules
+  (blocked folders are listed without a tree and never published as content).
+  The record is still published (other computers can use the eligible
+  folders) but the absent/unreadable/blocked folders never imply removal.
 - `apply_report` is optional; present after an apply on that computer. Results
   ∈ `applied | skipped | replanned | interrupted | rolled_back | needs_help |
   failed`; only `applied` (= verified and finalized, [apply.md](apply.md)
-  §2.2) counts toward confirmation.
+  §2.2) counts toward confirmation. The report is made durable locally
+  (`wowsync.pending-report/1`, below) and published exactly once (§4).
 
 Local-only records (under `<variant>\.wowsync` or local state, never uploaded):
 
@@ -102,6 +105,7 @@ Local-only records (under `<variant>\.wowsync` or local state, never uploaded):
 | `wowsync.local-computer/1` | `computer_id`, `display_name`, `created_unix_ms` | 64 KiB |
 | `wowsync.local-enrollment/1` | `group_id`, `enrollment_id`, `shared_root`, `install_root`, `variant_folder`, `product`, `validation` (the `VariantValidation` record of [domain.md](domain.md) §2, incl. `kind` known/guided and the evidence shown), `next_seq` | 64 KiB |
 | `wowsync.admission/1` | `group_id`, `members: [{computer_id, enrollment_id, max_seq_seen, admitted_seq?}]` (watermarks, §6) | 1 MiB |
+| `wowsync.pending-report/1` (`pending-report.json` in local state) | `group_id`, `enrollment_id`, `report?` (an `apply_report` not yet published; omitted once published) | 1 MiB |
 | `wowsync.audit/1` (one JSON object per line) | `at_unix_ms`, `event`, `package`?, `detail` | line ≤ 16 KiB |
 
 ## 3. Hashes
@@ -154,7 +158,30 @@ Readers recompute the hash of every tree record they use (must equal its
 name and its `tree` field) and every staged blob; a mismatch is `Corrupt`
 and makes only that package unavailable.
 Publish runs when the inventory changed (different set of folder hashes) or
-after an apply; otherwise nothing is written.
+when an apply report is outstanding; otherwise nothing is written.
+
+**Apply report durability (R2-fix3, follow-up #9).** A crash between an apply
+and the publish that reports it must not lose the report, and a report must
+not be published twice:
+
+- When finalize removes a `verified` journal (also when recovery finishes an
+  interrupted apply), the runtime first records an `applied` result for that
+  package (`package_hash` = the journal's `target_hash`, empty basis) in
+  `wowsync.pending-report/1`, then removes the journal. If that write fails
+  the journal stays and finalize is retried. No other journal phase records
+  `applied` (core `report::finalized_result`).
+- After an uninterrupted apply cycle, its full results (with basis) are merged
+  in: a newer result for a package replaces an older one (a later failure
+  withdraws an earlier `applied` claim).
+- Publish attaches the outstanding report: the stored results minus any that
+  this enrollment's newest own state already carries (core
+  `report::outstanding`), so a crash after the state was written but before the
+  store was cleared does not republish them. After `Published`, the store is
+  cleared (`report` omitted). A record of another group or enrollment is ignored.
+- An unreadable or corrupt store counts as empty: losing a confirmation must
+  not block applies.
+- Limitation: a result recorded only at finalize/recovery carries an empty
+  basis, because the journal does not record the plan basis.
 
 ## 5. Size considerations
 

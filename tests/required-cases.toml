@@ -475,3 +475,27 @@ tests = [
     "consent::tests::boxes_reset_when_the_panel_is_reshown_or_changes",
     "consent::tests::clear_is_single_use",
 ]
+
+# R2-fix3 (run-002): follow-up #9 (durable apply report) and #6 / mi-1, mi-2 (policy in core),
+# from docs/runs/run-002/evidence/R2-review.md.
+[[case]]
+id = "R2-fix3:core"
+tier = "offline"
+tests = [
+    "report::tests::only_a_verified_journal_claims_applied",
+    "report::tests::newer_result_replaces_older_for_same_package",
+    "report::tests::record_discards_other_enrollment",
+    "report::tests::outstanding_drops_what_the_newest_state_already_carries",
+    "variant::tests::consent_predicate_requires_scope_and_guided_identity",
+    "plan::tests::own_publish_slot_never_reuses_a_number",
+    "status::tests::applied_here_is_rebuilt_from_own_report_after_restart",
+    "status::tests::needs_help_journal_is_not_reported_as_interrupted",
+]
+
+[[case]]
+id = "R2-fix3:slice"
+tier = "offline"
+tests = [
+    "e2e::tests::apply_report_survives_crash_before_publish",
+    "e2e::tests::recognized_enroll_without_scope_consent_is_refused",
+]
