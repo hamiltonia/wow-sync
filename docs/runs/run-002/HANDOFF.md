@@ -47,6 +47,11 @@ Report: [REPORT.md](REPORT.md).
   panic before merge.
 - Dependabot alert count on `main` rose from 4 to 6 (moderate) during run-002;
   not triaged (PLAN §6 #5 held for owner).
+- CI on `50e5029`: macOS `offline/required-cases` FAIL because the Windows-only
+  R3-M1 test was listed for all OSes (R2-fix5 assigned). Earlier, Windows CI on
+  `7da6d0f` failed once in `wow-sync-adapters` tests with no test name in the
+  log; it passed on the next run with adapters unchanged. Treat it as a
+  suspected flaky test that needs investigating.
 
 ## Next actions
 
