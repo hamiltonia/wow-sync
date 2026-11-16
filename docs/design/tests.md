@@ -176,6 +176,15 @@ Core unit tests for the same run-002 fix are listed as `R2-fix3:core` in
 `plan::tests::own_publish_slot_never_reuses_a_number`, `status::tests::applied_here_is_rebuilt_from_own_report_after_restart`,
 `status::tests::needs_help_journal_is_not_reported_as_interrupted`).
 
+`R2-fix4:slice` (R3-M1) is `e2e::tests::pending_clear_failure_does_not_duplicate_report`
+(Windows only). After B has published its report, the test restores that
+report to B's pending store and restarts B. It then holds the store open with
+`FILE_SHARE_READ` only, so the store is readable but cannot be replaced, adds
+Beta and syncs twice. The test asserts exactly one Alpha `applied` result.
+After the handle is released, publication resumes: Beta is published, and
+there is still exactly one Alpha result. The core predicate test is listed as
+`R2-fix4:core`.
+
 ## 5b. GUI verification (M-08; A-25, A-26)
 
 Headless tests are **not** GUI evidence. GUI checks are manual/observed
