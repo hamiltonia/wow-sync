@@ -55,7 +55,7 @@ used for ordering or freshness decisions.
   "schema": "wowsync.code-state/1",
   "group_id": "…", "computer_id": "…", "enrollment_id": "…", "seq": 12,
   "product": "wowf", "app_version": "0.0.0", "written_unix_ms": 1767225600000,
-  "client": { "build_version": "1.15.8.12345", "toc_mapping": "profile:wowf/1" },
+  "client": { "build_version": "1.15.8.12345", "toc_mapping": "validated-plain/1" },
   "inventory_complete": true,
   "folders": [
     { "name": "DBM-Core", "key": "dbm-core", "status": "ok",
@@ -97,12 +97,11 @@ Local-only records (under `<variant>\.wowsync` or local state, never uploaded):
 
 | Schema | Fields | Limit |
 |---|---|---|
-| `wowsync.apply-journal/1` | `op`, `group_id`, `started_unix_ms`, `packages: [{package, phase, reason?, target_hash, folders: [{name, key, action, target_tree, expected_live, state}]}]`; package `phase` ∈ `staging \| committing \| committed \| verified \| needs_help \| finalized \| rolled_back`; `expected_live` = `{"kind":"absent"}` or `{"kind":"tree","tree","fingerprint"}`; folder `state` ∈ `pending \| moved_old \| installed_new` ([apply.md](apply.md) §2–§4) | 1 MiB |
+| `wowsync.apply-journal/1` | `op`, `group_id`, `started_unix_ms`, `package`, `target_hash`, `phase` ∈ `staging \| committing \| committed \| verified \| needs_help \| rolled_back`, `from_phase?` (for `rolled_back`: `staging \| committing`), `reason?`, `folders: [{name, key, action, target_tree, expected_live}]`; `expected_live` = `{"kind":"absent"}` or `{"kind":"tree","tree","fingerprint"}`. One package per op; no per-folder progress field — recovery classifies observed slots ([apply.md](apply.md) §2–§4) | 1 MiB |
 | `wowsync.recovery-point/1` | `op`, `package`, `created_unix_ms`, `replaced: [{name, tree}]`, `installed: [{name, tree}]`, `reason`, `pinned` (bool; true until the apply is verified, and while any journal or needs-help state references it) | 64 KiB |
 | `wowsync.local-computer/1` | `computer_id`, `display_name`, `created_unix_ms` | 64 KiB |
 | `wowsync.local-enrollment/1` | `group_id`, `enrollment_id`, `shared_root`, `install_root`, `variant_folder`, `product`, `validation` (the `VariantValidation` record of [domain.md](domain.md) §2, incl. `kind` known/guided and the evidence shown), `next_seq` | 64 KiB |
 | `wowsync.admission/1` | `group_id`, `members: [{computer_id, enrollment_id, max_seq_seen, admitted_seq?}]` (watermarks, §6) | 1 MiB |
-| `wowsync.verified-objects/1` | `entries: [{rel, size, mtime_ns, sha256}]` objects this computer wrote or hash-verified in the provider folder (§4) | 16 MiB |
 | `wowsync.audit/1` (one JSON object per line) | `at_unix_ms`, `event`, `package`?, `detail` | line ≤ 16 KiB |
 
 ## 3. Hashes
@@ -125,16 +124,18 @@ Changing either format is a schema major change.
    the member record is missing/retired. Folders that are `unstable` are
    published with that status and no tree (never as absent).
 2. For every blob and tree the state will reference, obtain an
-   `ObjectCheck` (core `exec::check_object`, built on `PublishEffects::stat_object`/`hash_object`): `VerifiedOk` only if the
-   object's `(size, mtime)` matches a `verified-objects` entry with the same
-   hash, or it is `Local` and hashing it now gives the expected hash;
-   `Missing`; `Corrupt` (local, wrong hash/size); `Unverifiable` (cloud-only).
-   Existence alone is never trusted (M-05).
+   `ObjectCheck` (core `exec::check_object`, built on
+   `PublishEffects::stat_object`/`hash_object`): `VerifiedOk` only if it is
+   `Local` and hashing its bytes **now** gives the expected hash; `Missing`;
+   `Corrupt` (local, wrong hash/size); `Unverifiable` (cloud-only).
+   Neither existence nor cached metadata is trusted (M-05, retry 2): every
+   referenced existing object is re-hashed on every publish. Slice cost
+   limitation: a full re-read of referenced provider objects per publish (Q-7).
 3. Upload every blob not `VerifiedOk`: copy the **source file** to a temp
    file in the provider folder, hash the temp file, and only if it equals the
    expected hash rename it over the object path (`put_object`) (content-addressed, so
    replacing a corrupt or unverifiable object with verified bytes is always
-   safe). Record it in `verified-objects`.
+   safe).
 4. Same for tree records (encoded bytes are hashed in memory first).
 5. **Source revalidation (B-02):** re-observe the metadata fingerprint of
    every published folder (`observe_source`); any change since the scan → abort, no state record,

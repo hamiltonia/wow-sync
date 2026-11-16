@@ -3,7 +3,8 @@
 Status: **design for the run-002 vertical slice**, written by R2-design
 (packet [R2-design](../runs/run-002/packets/R2-design.md)), revised in design
 retry 1 for the findings in [R2-design-review](../runs/run-002/evidence/R2-design-review.md)
-(disposition: [R2-design-fix](../runs/run-002/evidence/R2-design-fix.md)). Product meaning lives in [SPEC.md](../../SPEC.md)
+and in retry 2 for [R2-design-recheck](../runs/run-002/evidence/R2-design-recheck.md)
+(disposition, including the slice limitations: [R2-design-fix](../runs/run-002/evidence/R2-design-fix.md)). Product meaning lives in [SPEC.md](../../SPEC.md)
 and [ACCEPTANCE.md](../../ACCEPTANCE.md); this design only says how the slice
 enforces it. Where the design needed a choice outside approved intent, it is
 listed in [questions.md](questions.md) with a recommended default and is marked
