@@ -739,8 +739,7 @@ mod tests {
             p.write_atomic("tagged/f.json", b"{\"x\":1}", C).unwrap();
             let dir = sub.join("WoWSync").join("tagged");
             let Some(tag) = wait_for_cloud_tag(&dir.join("f.json")) else {
-                println!("BLOCKED: Dropbox applied no cloud reparse tag within 30 s");
-                return;
+                panic!("BLOCKED: Dropbox applied no cloud reparse tag within 30 s");
             };
             println!(
                 "file tag 0x{tag:x}; dir tag {:?}",
@@ -766,8 +765,7 @@ mod tests {
     #[ignore = "provider tier: needs an owner-prepared online-only file"]
     fn dropbox_online_only_entry_refused() {
         let Ok(v) = std::env::var("WOWSYNC_PROVIDER_ONLINE_ONLY") else {
-            println!("BLOCKED: no online-only entry");
-            return;
+            panic!("BLOCKED: no online-only entry (WOWSYNC_PROVIDER_ONLINE_ONLY unset)");
         };
         let path = std::path::PathBuf::from(v);
         assert!(
@@ -775,10 +773,11 @@ mod tests {
             "refusing online-only path outside {ALLOWED}"
         );
         let meta = stat_entry(&path).unwrap();
-        if !is_unavailable(meta.attrs) {
-            println!("BLOCKED: no online-only entry");
-            return;
-        }
+        assert!(
+            is_unavailable(meta.attrs),
+            "BLOCKED: {} is not an online-only entry",
+            path.display()
+        );
         let parent = path.parent().unwrap();
         let root = Root::open(parent, ReparsePolicy::AllowCloudFiles).unwrap();
         let name = path.file_name().unwrap().to_string_lossy().into_owned();

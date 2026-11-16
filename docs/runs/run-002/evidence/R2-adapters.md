@@ -39,8 +39,10 @@ Provider tier (`D:\Dropbox\Gaming Sync\WoW Sync Test`, synthetic data, one run):
 | Test | Result |
 | --- | --- |
 | dropbox_test_root_round_trip | PASS (158 synthetic objects; listed Local; cleaned up) |
-| dropbox_hydrated_tagged_entries_accepted | FAILED in the run (strict form required a cloud reparse tag within 30 s; Dropbox applied none). The test was then changed to print `BLOCKED` and return when no tag appears; that revised form was NOT re-run (one-run limit). Treat as BLOCKED. |
-| dropbox_online_only_entry_refused | BLOCKED: no owner-prepared online-only file (`WOWSYNC_PROVIDER_ONLINE_ONLY` unset) |
+| dropbox_hydrated_tagged_entries_accepted | FAILED in the run (strict form required a cloud reparse tag within 30 s; Dropbox applied none). Post-merge change: the no-tag path now `panic!("BLOCKED: ...")`, so libtest reports failure, never PASS. Not re-run (one-run limit). Remains BLOCKED. |
+| dropbox_online_only_entry_refused | BLOCKED: no owner-prepared online-only file (`WOWSYNC_PROVIDER_ONLINE_ONLY` unset). Post-merge change: the unset and not-online-only paths now `panic!("BLOCKED: ...")` instead of printing and returning (which would have reported PASS). Not re-run. Remains BLOCKED. |
+
+Change record: per docs/VERIFY.md a tier that cannot run is BLOCKED, never PASS; no early-return-as-pass paths remain in the crate's tests.
 
 Cleanup: the Dropbox test folder was verified empty afterward.
 Not run: macOS; native/provider tiers inside xtask; Dropbox cloud-only/hydration semantics (Q-23).
