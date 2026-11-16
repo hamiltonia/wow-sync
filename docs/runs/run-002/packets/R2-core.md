@@ -23,7 +23,12 @@ root `Cargo.toml` (exact §3 text); `Cargo.lock` (own dependencies);
    each listed in `tests/required-cases.toml`. Include every negative/failure
    case listed; use `testkit::FakeEffects` with failure injection.
 3. The `arch` check (crates.md §6).
-4. Where the design is ambiguous or contradictory, choose the safer reading,
+4. Apply the implementer fixes F-01 (enforce the synthetic marker in core
+   validation) and F-02 (verify restored live content before terminal
+   rollback, including after crashes) from
+   [R2-design-recheck2](../evidence/R2-design-recheck2.md), each with a
+   required test.
+5. Where the design is ambiguous or contradictory, choose the safer reading,
    note it in evidence under "design gaps"; do not change design docs.
 
 ## Done when
