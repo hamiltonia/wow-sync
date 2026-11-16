@@ -1,7 +1,7 @@
 //! Group target computation (domain.md §6, R-05, R-06).
 
 use crate::admit::{MemberLatest, MemberView};
-use crate::explain::Explanation;
+use crate::explain::{AmbiguousCandidate, Explanation};
 use crate::hash::package_hash;
 use crate::ids::{ComputerId, GroupId, Sha256};
 use crate::inventory::{FileEntry, FolderState, FolderStatus, Inventory, TocKind};
@@ -56,6 +56,10 @@ pub enum PackageTarget {
         why: Explanation,
     },
     Unavailable {
+        why: Explanation,
+    },
+    /// A folder of this package is blocked for this client: never published or replaced.
+    NotSynced {
         why: Explanation,
     },
 }
@@ -278,8 +282,20 @@ pub fn compute_target(input: &TargetInput) -> GroupTarget {
         });
         let target = match dominator {
             Some(c) if holds_local(c) => {
-                out.effective.insert(pkg.key.clone(), effective(&c.pv));
-                PackageTarget::InSync
+                match c
+                    .pv
+                    .folders
+                    .iter()
+                    .filter(|f| f.status == FolderStatus::Ok)
+                    .find_map(folder_problem)
+                {
+                    // A blocked local folder is never published or replaced: say so (M2).
+                    Some((_, why)) => PackageTarget::NotSynced { why },
+                    None => {
+                        out.effective.insert(pkg.key.clone(), effective(&c.pv));
+                        PackageTarget::InSync
+                    }
+                }
             }
             Some(c) => match eligible_holders(c, &pkg, input) {
                 Err((reason, why)) => PackageTarget::NeedsDecision {
@@ -304,7 +320,22 @@ pub fn compute_target(input: &TargetInput) -> GroupTarget {
                 PackageTarget::NeedsDecision {
                     reason: DecisionReason::Ambiguous,
                     candidates: decision_candidates(&list),
-                    why: Explanation::AmbiguousVersions { evidence },
+                    why: Explanation::AmbiguousVersions {
+                        evidence,
+                        candidates: list
+                            .iter()
+                            .map(|c| AmbiguousCandidate {
+                                label: label(&c.pv, &pkg),
+                                sources: c
+                                    .holders
+                                    .iter()
+                                    .filter(|(id, _)| id != input.local_id)
+                                    .map(|(id, _)| id.clone())
+                                    .collect(),
+                                here: holds_local(c),
+                            })
+                            .collect(),
+                    },
                 }
             }
         };

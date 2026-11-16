@@ -14,7 +14,7 @@ pub use activity::{ActivityHandle, ActivitySource, ScriptedActivity, WinprocActi
 pub use effects::{FaultPlan, Faulty, Hooks, RealEffects};
 pub use service::{
     AppliedLine, EnrollPreview, EnrollRequest, GroupInfo, JoinChoice, PackageLine, PreviewKind,
-    ServiceConfig, ServiceError, SliceService, StatusSnapshot, SyncReport,
+    ReconfirmRequest, ServiceConfig, ServiceError, SliceService, StatusSnapshot, SyncReport,
 };
 
 pub use wow_sync_core as core;

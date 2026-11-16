@@ -4,12 +4,14 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use wow_sync_runtime::{
-    EnrollPreview, EnrollRequest, ServiceConfig, SliceService, StatusSnapshot, SyncReport,
+    EnrollPreview, EnrollRequest, ReconfirmRequest, ServiceConfig, SliceService, StatusSnapshot,
+    SyncReport,
 };
 
 pub enum Cmd {
     SyncNow,
     Enroll(EnrollRequest),
+    Reconfirm(ReconfirmRequest),
     Quit,
 }
 
@@ -114,6 +116,16 @@ fn run(
                 });
                 paused = false;
             }
+            Some(Cmd::Reconfirm(req)) => {
+                let res = svc.reconfirm(&req);
+                publish(&shared, &wake, |g| {
+                    g.message = match res {
+                        Ok(()) => "Game version confirmed again. Syncing will resume.".into(),
+                        Err(e) => e.to_string(),
+                    }
+                });
+                paused = false;
+            }
             Some(Cmd::SyncNow) => {
                 manual = true;
                 paused = false;
@@ -156,8 +168,13 @@ fn run(
                 let st = svc.status();
                 publish(&shared, &wake, |g| {
                     g.busy = false;
+                    // The status already carries the same text as its problem line.
+                    g.message = if st.provider_error.is_some() {
+                        String::new()
+                    } else {
+                        e.to_string()
+                    };
                     g.status = st;
-                    g.message = e.to_string();
                 });
             }
         }

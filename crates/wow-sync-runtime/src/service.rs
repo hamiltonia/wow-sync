@@ -25,26 +25,28 @@ use wow_sync_core::exec::{
 };
 use wow_sync_core::explain;
 use wow_sync_core::ids::{ComputerId, EnrollmentId, GroupId, OpId, Sha256};
-use wow_sync_core::inventory::{
-    build_inventory, FolderScan, FolderStatus, Inventory, ScanStatus, ScannedFile,
-};
+use wow_sync_core::inventory::{build_inventory, FolderScan, Inventory, ScanStatus, ScannedFile};
 use wow_sync_core::layout;
 use wow_sync_core::package::ClientInfo;
 use wow_sync_core::paths::FolderKey;
-use wow_sync_core::plan::{plan_apply, plan_publish, ApplyGate, PlanBlock, PublishContext};
+use wow_sync_core::plan::{
+    plan_apply, plan_publish, publish_needed, ApplyGate, PlanBlock, PublishContext,
+};
 use wow_sync_core::records::{
     decode, decode_tree, encode, AdmissionWatermarks, ApplyJournal, BasisEntry, CodeState,
     GroupRecord, JournalPhase, LocalComputer, LocalEnrollment, MemberRecord, RecordError,
     RecoveryPoint, RootFormat,
 };
 use wow_sync_core::status::{
-    derive_status, render_member, render_package, Headline, StatusInput, StatusView,
+    derive_status, render_headline, render_member, render_package, StatusInput, StatusView,
 };
 use wow_sync_core::target::{compute_target, GroupTarget, TargetInput, TreeAvail};
 use wow_sync_core::toc::TocCandidate;
 use wow_sync_core::variant::{
-    assess_layout, confirm_variant, validate_variant, ConfirmedVariant, DirObs, FileObs,
-    GuidedConfirmation, LayoutAssessment, OtherVariants, VariantObservation, VariantVerdict,
+    assess_layout, check_join, confirm_enrolled, confirm_variant, consent_disclosures,
+    reconfirm_variant, validate_variant, ConfirmedVariant, ConsentContext, DirObs, FileObs,
+    GuidedConfirmation, LayoutAssessment, OtherVariants, RefuseReason, VariantObservation,
+    VariantVerdict,
 };
 
 const SMALL: u64 = 64 * 1024;
@@ -68,6 +70,8 @@ pub enum ServiceError {
     NotEnrolled,
     AlreadyEnrolled,
     Refused(String),
+    /// The enrolled client no longer matches its confirmation; guided reconfirmation is offered.
+    NeedsReconfirmation,
     Provider(String),
     Local(String),
 }
@@ -78,6 +82,10 @@ impl std::fmt::Display for ServiceError {
             Self::NotEnrolled => write!(f, "this installation is not enrolled"),
             Self::AlreadyEnrolled => write!(f, "this installation is already enrolled"),
             Self::Refused(s) => write!(f, "refused: {s}"),
+            Self::NeedsReconfirmation => write!(
+                f,
+                "this game version changed since it was confirmed; confirm it again to continue"
+            ),
             Self::Provider(s) => write!(f, "shared folder problem: {s}"),
             Self::Local(s) => write!(f, "local problem: {s}"),
         }
@@ -120,6 +128,15 @@ pub struct EnrollPreview {
     pub needs_guided_confirmation: bool,
     pub groups: Vec<GroupInfo>,
     pub problem: Option<String>,
+    /// Consent text shown before anything is written (domain.md §1 step 5, §2.1).
+    pub disclosures: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReconfirmRequest {
+    pub identity_confirmed: bool,
+    pub scope_confirmed: bool,
+    pub digest: Option<Sha256>,
 }
 
 #[derive(Debug, Clone)]
@@ -164,6 +181,22 @@ pub struct StatusSnapshot {
     pub provider_error: Option<String>,
     pub activity: String,
     pub retained_extra_recovery: u32,
+    /// Set when the enrolled client needs guided reconfirmation (shown by the GUI).
+    pub reconfirm: Option<EnrollPreview>,
+}
+
+impl StatusSnapshot {
+    /// "Group on Computer (identity)", only when the parts are known.
+    pub fn who_line(&self) -> Option<String> {
+        if self.group_name.is_empty() && self.computer_name.is_empty() {
+            return None;
+        }
+        let mut s = format!("{} on {}", self.group_name, self.computer_name);
+        if !self.identity_line.is_empty() {
+            s.push_str(&format!(" ({})", self.identity_line));
+        }
+        Some(s)
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -197,7 +230,7 @@ pub struct SliceService {
     seen_locally: BTreeMap<ComputerId, i64>,
     seen_seq: BTreeMap<ComputerId, u64>,
     last_publish: Option<i64>,
-    applied_here: Vec<FolderKey>,
+    applied_here: Vec<(FolderKey, wow_sync_core::explain::Explanation)>,
     last_blocks: Vec<PlanBlock>,
     provider_error: Option<String>,
 }
@@ -405,6 +438,14 @@ impl SliceService {
     /// Read-only: writes nothing locally or in the shared folder.
     pub fn inspect(&self) -> EnrollPreview {
         let enrolled = self.read_enrollment().ok().flatten().is_some();
+        let mut p = self.preview();
+        if enrolled {
+            p.problem = Some(ServiceError::AlreadyEnrolled.to_string());
+        }
+        p
+    }
+
+    fn preview(&self) -> EnrollPreview {
         let (verdict, assessment, _scans, _stable) = match self.judge(false) {
             Ok(x) => x,
             Err(e) => {
@@ -418,6 +459,7 @@ impl SliceService {
                     needs_guided_confirmation: false,
                     groups: vec![],
                     problem: Some(e.to_string()),
+                    disclosures: vec![],
                 }
             }
         };
@@ -431,10 +473,8 @@ impl SliceService {
             needs_guided_confirmation: false,
             groups: self.existing_groups(),
             problem: None,
+            disclosures: vec![],
         };
-        if enrolled {
-            p.problem = Some(ServiceError::AlreadyEnrolled.to_string());
-        }
         let (id, kind) = match &verdict {
             VariantVerdict::Recognized(i) => (i, PreviewKind::Recognized),
             VariantVerdict::Unfamiliar(i) => (i, PreviewKind::Unfamiliar),
@@ -445,13 +485,9 @@ impl SliceService {
         };
         p.kind = kind.clone();
         p.needs_guided_confirmation = kind == PreviewKind::Unfamiliar;
-        let label = id
-            .profile
-            .map(|x| x.label)
-            .unwrap_or("Unfamiliar game version");
         p.identity_line = format!(
-            "{label} - product {} in folder {} (build {})",
-            id.product.as_str(),
+            "{} - folder {}, build {}",
+            id.display_label(),
             id.folder,
             id.build_version.as_deref().unwrap_or("unknown")
         );
@@ -460,7 +496,7 @@ impl SliceService {
                 eligible,
                 blocked,
                 digest,
-                ..
+                mapping,
             } => {
                 p.scope_line = format!(
                     "{} add-on folder(s) in {}/Interface/AddOns would sync; {} blocked",
@@ -471,12 +507,38 @@ impl SliceService {
                 p.eligible = eligible.iter().map(|k| k.to_string()).collect();
                 p.blocked = blocked.iter().map(|(k, r)| format!("{k}: {r:?}")).collect();
                 p.digest = Some(digest);
+                p.disclosures = consent_disclosures(&ConsentContext {
+                    identity: id,
+                    mapping_id: mapping.id(),
+                    install_root: &self.cfg.install_root.to_string_lossy(),
+                    addons_path: &self.addons_path().to_string_lossy(),
+                });
             }
             LayoutAssessment::Unsupported(r) => {
                 p.problem = Some(format!("Unsupported layout: {r:?}"));
             }
         }
         p
+    }
+
+    /// Guided reconfirmation after the stored confirmation went stale (M1). Writes only the
+    /// local enrollment record, and only for the same product and folder.
+    pub fn reconfirm(&mut self, req: &ReconfirmRequest) -> Result<(), ServiceError> {
+        let mut le = self.read_enrollment()?.ok_or(ServiceError::NotEnrolled)?;
+        let (verdict, assessment, _s, _st) = self.judge(false)?;
+        let guided = GuidedConfirmation {
+            identity: req.identity_confirmed,
+            scope: req.scope_confirmed,
+            digest: req.digest.unwrap_or(Sha256([0; 32])),
+        };
+        let confirmed = reconfirm_variant(&verdict, &assessment, &guided, &le.validation)
+            .map_err(|r| ServiceError::Refused(format!("{r:?}")))?;
+        le.validation = confirmed.validation().clone();
+        self.state
+            .write_atomic("enrollment.json", &encode(&le))
+            .map_err(local)?;
+        let _ = self.state.append_audit("reconfirmed game version");
+        Ok(())
     }
 
     fn read_enrollment(&self) -> Result<Option<LocalEnrollment>, ServiceError> {
@@ -526,14 +588,8 @@ impl SliceService {
                     .map_err(prov)?;
                 let rec: GroupRecord = decode(&bytes, SMALL as usize)
                     .map_err(|e| ServiceError::Provider(format!("group record: {e}")))?;
-                // Thin product guard; the core owns variant rules, this only compares two strings.
-                if rec.product != confirmed.product() {
-                    return Err(ServiceError::Refused(format!(
-                        "that group syncs {}, this installation is {}",
-                        rec.product,
-                        confirmed.product()
-                    )));
-                }
+                check_join(&confirmed, &rec.product)
+                    .map_err(|e| ServiceError::Refused(e.to_string()))?;
                 rec
             }
             JoinChoice::New { name } => GroupRecord {
@@ -614,13 +670,10 @@ impl SliceService {
 
     fn rederive_variant(&self, e: &LocalEnrollment) -> Result<ConfirmedVariant, ServiceError> {
         let (verdict, assessment, _s, _st) = self.judge(false)?;
-        let guided = GuidedConfirmation {
-            identity: e.validation.identity_confirmed,
-            scope: e.validation.scope_confirmed,
-            digest: e.validation.digest,
-        };
-        confirm_variant(&verdict, &assessment, Some(&guided))
-            .map_err(|r| ServiceError::Refused(format!("{r:?}")))
+        confirm_enrolled(&verdict, &assessment, &e.validation).map_err(|r| match r {
+            RefuseReason::StaleConfirmation => ServiceError::NeedsReconfirmation,
+            r => ServiceError::Refused(format!("{r:?}")),
+        })
     }
 
     fn read_members(
@@ -807,11 +860,15 @@ impl SliceService {
             .filter(|b| **b != PlanBlock::NothingToDo)
             .cloned()
             .collect();
+        let now = now_unix_ms();
+        let observed = self.activity.observe(&self.variant_dir());
+        let activity = format!("{observed:?}");
         let sv: StatusView = derive_status(&StatusInput {
             target: &w.target,
             members: &w.views,
             applied_here: &self.applied_here,
             interrupted: &interrupted,
+            game_running: matches!(observed, wow_sync_core::plan::Activity::Running { .. }),
             needs_help: &needs_help,
             blocks: &blocks,
             retained: &retained,
@@ -820,14 +877,16 @@ impl SliceService {
             last_publish_unix_ms: self.last_publish,
             seen_locally: &self.seen_locally,
         });
-        let now = now_unix_ms();
-        let activity = format!("{:?}", self.activity.observe(&self.variant_dir()));
         StatusSnapshot {
             enrolled: true,
-            headline: headline_text(sv.headline),
+            headline: render_headline(&sv),
             group_name: w.group.display_name.clone(),
             computer_name: w.computer.display_name.clone(),
-            identity_line: format!("{} / {}", w.variant.label(), w.enrollment.variant_folder),
+            identity_line: format!(
+                "{} / {}",
+                w.variant.identity().display_label(),
+                w.enrollment.variant_folder
+            ),
             packages: sv
                 .packages
                 .iter()
@@ -851,6 +910,7 @@ impl SliceService {
             provider_error: self.provider_error.clone(),
             activity,
             retained_extra_recovery: sv.retained_extra_recovery,
+            reconfirm: None,
         }
     }
 
@@ -862,6 +922,18 @@ impl SliceService {
                 w
             }
             Err(ServiceError::NotEnrolled) => return StatusSnapshot::default(),
+            Err(ServiceError::NeedsReconfirmation) => {
+                self.provider_error = None;
+                let mut preview = self.preview();
+                preview.groups.clear();
+                return StatusSnapshot {
+                    enrolled: true,
+                    headline: "Something needs your help".into(),
+                    provider_error: Some(ServiceError::NeedsReconfirmation.to_string()),
+                    reconfirm: Some(preview),
+                    ..Default::default()
+                };
+            }
             Err(e) => {
                 self.provider_error = Some(e.to_string());
                 return StatusSnapshot {
@@ -966,7 +1038,10 @@ impl SliceService {
                                 text: package_result_text(r),
                             });
                             if matches!(r, PackageResult::Applied { .. }) {
-                                self.applied_here.push(k.clone());
+                                self.applied_here.retain(|(a, _)| a != k);
+                                if let Some(p) = plan.packages.iter().find(|p| &p.package == k) {
+                                    self.applied_here.push((k.clone(), p.explanation.clone()));
+                                }
                             }
                         }
                         if let Some(b) = &outcome.stopped {
@@ -1076,15 +1151,14 @@ impl SliceService {
             .filter_map(|n| layout::parse_state_name(n).map(|(e, s)| (s, e, n.clone())))
             .filter(|(_, e, _)| *e == w.enrollment.enrollment_id)
             .max_by_key(|(s, _, _)| *s);
-        let unchanged = newest.as_ref().is_some_and(|(_, _, name)| {
+        let unchanged = newest.as_ref().and_then(|(_, _, name)| {
             let rel = format!("{}/{name}", layout::state_dir(group_id, me));
             provider
                 .read(&rel, STATE_LIMIT)
                 .ok()
                 .and_then(|b| decode::<CodeState>(&b, STATE_LIMIT as usize).ok())
-                .is_some_and(|st| same_folders(&st, &w.inventory))
         });
-        if unchanged && apply_rep.is_none() {
+        if !publish_needed(unchanged.as_ref(), &w.inventory, apply_rep.is_some()) {
             return;
         }
         let seq = w
@@ -1144,16 +1218,6 @@ fn name_peers(mut text: String, views: &[MemberView]) -> String {
     text
 }
 
-fn same_folders(st: &CodeState, inv: &Inventory) -> bool {
-    st.folders.len() == inv.folders.len()
-        && st
-            .folders
-            .iter()
-            .zip(&inv.folders)
-            .all(|(a, b)| a.key == b.key && a.status == b.status && a.tree == b.tree)
-        && st.inventory_complete == inv.folders.iter().all(|f| f.status == FolderStatus::Ok)
-}
-
 fn dummy_identity() -> wow_sync_core::variant::VariantIdentity {
     wow_sync_core::variant::VariantIdentity {
         product: wow_sync_core::variant::ProductCode::parse("wowf").expect("valid code"),
@@ -1163,20 +1227,9 @@ fn dummy_identity() -> wow_sync_core::variant::VariantIdentity {
     }
 }
 
-fn headline_text(h: Headline) -> String {
-    match h {
-        Headline::Ok => "Everything is up to date",
-        Headline::Working => "Working",
-        Headline::Waiting => "Waiting",
-        Headline::NeedsHelp => "Something needs your help",
-        Headline::Error => "Something needs attention",
-    }
-    .to_string()
-}
-
 fn block_text(b: &PlanBlock) -> String {
     match b {
-        PlanBlock::GameRunning => "World of Warcraft is running; nothing was changed".into(),
+        PlanBlock::GameRunning => "WoW is running; nothing was changed".into(),
         PlanBlock::ActivityUnknown(w) => {
             format!("Cannot tell whether the game is running ({w}); nothing was changed")
         }

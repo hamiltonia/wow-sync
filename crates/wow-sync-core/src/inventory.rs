@@ -104,6 +104,14 @@ pub struct FolderState {
     pub file_entries: Vec<FileEntry>,
 }
 
+impl FolderState {
+    /// Only these folders are published or installed (R-03, A-46): readable, safe, and with a
+    /// toc selected under the confirmed mapping. Everything else stays visibly "not synced".
+    pub fn transfer_eligible(&self) -> bool {
+        self.status == FolderStatus::Ok && self.toc.kind == TocKind::Selected
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Inventory {
     pub folders: Vec<FolderState>,

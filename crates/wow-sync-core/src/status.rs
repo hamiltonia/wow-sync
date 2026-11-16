@@ -27,6 +27,8 @@ pub enum PackageStatus {
     ConfirmedBy(Vec<ComputerId>),
     NeedsDecision(DecisionReason),
     Unavailable,
+    /// A folder of the package is blocked for this client and is not synchronized.
+    NotSynced,
     Interrupted,
     NeedsHelp(String),
     Blocked(PlanBlock),
@@ -66,9 +68,11 @@ pub struct StatusInput<'a> {
     pub target: &'a GroupTarget,
     /// Members other than this computer.
     pub members: &'a [MemberView],
-    /// Packages applied here and verified, not yet confirmed by a peer.
-    pub applied_here: &'a [FolderKey],
+    /// Packages applied here and verified, not yet confirmed by a peer, with their plan explanation.
+    pub applied_here: &'a [(FolderKey, Explanation)],
     pub interrupted: &'a [FolderKey],
+    /// The game is observed running now; an interruption is blamed on it only then.
+    pub game_running: bool,
     pub needs_help: &'a [(FolderKey, String)],
     pub blocks: &'a [PlanBlock],
     pub retained: &'a [RecoveryPoint],
@@ -152,8 +156,14 @@ pub fn derive_status(input: &StatusInput) -> StatusView {
             } else if input.interrupted.contains(key) {
                 (
                     PackageStatus::Interrupted,
-                    Explanation::InterruptedByGame {
-                        package: key.as_str().to_string(),
+                    if input.game_running {
+                        Explanation::InterruptedByGame {
+                            package: key.as_str().to_string(),
+                        }
+                    } else {
+                        Explanation::Interrupted {
+                            package: key.as_str().to_string(),
+                        }
                     },
                 )
             } else {
@@ -162,6 +172,7 @@ pub fn derive_status(input: &StatusInput) -> StatusView {
                         (PackageStatus::NeedsDecision(*reason), why.clone())
                     }
                     PackageTarget::Unavailable { why } => (PackageStatus::Unavailable, why.clone()),
+                    PackageTarget::NotSynced { why } => (PackageStatus::NotSynced, why.clone()),
                     PackageTarget::Chosen { why, .. } => match input.blocks.first() {
                         Some(b) => (PackageStatus::Blocked(b.clone()), why.clone()),
                         None => (PackageStatus::Available, why.clone()),
@@ -173,10 +184,12 @@ pub fn derive_status(input: &StatusInput) -> StatusView {
                                 computers: c.clone(),
                             },
                         ),
-                        _ if input.applied_here.contains(key) => {
-                            (PackageStatus::AppliedHere, Explanation::AppliedHere)
-                        }
-                        _ => (PackageStatus::InSync, Explanation::InSync),
+                        _ => match input.applied_here.iter().find(|(k, _)| k == key) {
+                            Some((k, plan_why)) => {
+                                (PackageStatus::AppliedHere, applied_explanation(k, plan_why))
+                            }
+                            None => (PackageStatus::InSync, Explanation::InSync),
+                        },
                     },
                 }
             };
@@ -189,18 +202,15 @@ pub fn derive_status(input: &StatusInput) -> StatusView {
         Headline::Error
     } else if input.working {
         Headline::Working
-    } else if any(|s| {
-        matches!(
-            s,
-            PackageStatus::InSync | PackageStatus::AppliedHere | PackageStatus::ConfirmedBy(_)
-        )
-    }) && !any(|s| {
+    } else if !any(|s| {
         !matches!(
             s,
-            PackageStatus::InSync | PackageStatus::AppliedHere | PackageStatus::ConfirmedBy(_)
+            PackageStatus::InSync
+                | PackageStatus::AppliedHere
+                | PackageStatus::ConfirmedBy(_)
+                | PackageStatus::NotSynced
         )
-    }) || packages.is_empty()
-    {
+    }) {
         Headline::Ok
     } else {
         Headline::Waiting
@@ -231,6 +241,44 @@ pub fn derive_status(input: &StatusInput) -> StatusView {
         last_publish: input.last_publish_unix_ms,
         blocks: input.blocks.to_vec(),
         retained_extra_recovery: per_pkg.values().map(|n| n.saturating_sub(2)).sum(),
+    }
+}
+
+/// Source and versions of a package this computer has just applied (G3), from its plan explanation.
+pub fn applied_explanation(key: &FolderKey, plan: &Explanation) -> Explanation {
+    match plan {
+        Explanation::NewerVersion {
+            folder,
+            from,
+            to,
+            source,
+        } => Explanation::AppliedFrom {
+            package: folder.clone(),
+            from: Some(from.clone()),
+            to: Some(to.clone()),
+            source: source.clone(),
+        },
+        Explanation::Installed { source } => Explanation::AppliedFrom {
+            package: key.as_str().to_string(),
+            from: None,
+            to: None,
+            source: source.clone(),
+        },
+        _ => Explanation::AppliedHere,
+    }
+}
+
+/// The headline sentence (G4: "Waiting — WoW is running" while the game blocks changes).
+pub fn render_headline(v: &StatusView) -> String {
+    match v.headline {
+        Headline::Ok => "Everything is up to date".to_string(),
+        Headline::Working => "Working".to_string(),
+        Headline::Waiting if v.blocks.contains(&PlanBlock::GameRunning) => {
+            "Waiting \u{2014} WoW is running".to_string()
+        }
+        Headline::Waiting => "Waiting".to_string(),
+        Headline::NeedsHelp => "Something needs your help".to_string(),
+        Headline::Error => "Something needs attention".to_string(),
     }
 }
 
@@ -283,6 +331,7 @@ mod tests {
             members,
             applied_here: &[],
             interrupted: &[],
+            game_running: false,
             needs_help: &[],
             blocks: &[],
             retained: &[],
@@ -322,10 +371,25 @@ mod tests {
         let t = sc.target();
         let seen = BTreeMap::new();
         let v = derive_status(&StatusInput {
-            applied_here: &[pk()],
+            applied_here: &[(
+                pk(),
+                Explanation::NewerVersion {
+                    folder: "Suite".into(),
+                    from: "1.0".into(),
+                    to: "2.0".into(),
+                    source: sc.members[0].computer.clone(),
+                },
+            )],
             ..input(&t, &sc.members, &seen)
         });
         assert_eq!(v.packages[0].1, PackageStatus::AppliedHere);
+        let text = render_package(&v.packages[0]);
+        assert!(
+            text.contains("1.0")
+                && text.contains("2.0")
+                && text.contains(sc.members[0].computer.as_str()),
+            "post-apply status keeps source and versions: {text}"
+        );
         assert!(confirmations(&t, &sc.members).is_empty());
     }
 
@@ -431,12 +495,90 @@ mod tests {
             (
                 _,
                 PackageStatus::NeedsDecision(DecisionReason::Ambiguous),
-                Explanation::AmbiguousVersions { evidence },
-            ) => assert!(!evidence.is_empty()),
+                Explanation::AmbiguousVersions {
+                    evidence,
+                    candidates,
+                },
+            ) => {
+                assert!(!evidence.is_empty());
+                assert_eq!(candidates.len(), 2);
+                assert!(candidates.iter().any(|c| c.here && c.sources.is_empty()));
+                assert!(candidates
+                    .iter()
+                    .any(|c| !c.here && c.sources == vec![sc.members[0].computer.clone()]));
+            }
             other => panic!("{other:?}"),
         }
         assert_eq!(v.headline, Headline::Waiting);
-        assert!(render_package(&v.packages[0]).contains("cannot tell which version is newer"));
+        let text = render_package(&v.packages[0]);
+        assert!(
+            text.contains("cannot tell which version is newer"),
+            "{text}"
+        );
+        assert!(
+            text.contains("this computer") && text.contains(sc.members[0].computer.as_str()),
+            "each candidate's holder is named: {text}"
+        );
+        assert!(text.contains("version 1.0 on"), "{text}");
+    }
+
+    #[test]
+    fn interruption_blames_the_game_only_when_it_is_running() {
+        let sc = base();
+        let t = sc.target();
+        let seen = BTreeMap::new();
+        let ints = [pk()];
+        let text = |game_running| {
+            let v = derive_status(&StatusInput {
+                interrupted: &ints,
+                game_running,
+                ..input(&t, &sc.members, &seen)
+            });
+            render_package(&v.packages[0])
+        };
+        assert!(text(true).contains("WoW started"));
+        let calm = text(false);
+        assert!(!calm.contains("WoW"), "{calm}");
+        assert!(calm.contains("interrupted"));
+    }
+
+    #[test]
+    fn headline_names_running_game_while_waiting() {
+        let sc = Scenario::new(vec![addon("Suite", Some("1.0"), "a")])
+            .peer(2, vec![addon("Suite", Some("2.0"), "b")]);
+        let t = sc.target();
+        let seen = BTreeMap::new();
+        let blocks = [PlanBlock::GameRunning];
+        let v = derive_status(&StatusInput {
+            blocks: &blocks,
+            ..input(&t, &sc.members, &seen)
+        });
+        assert_eq!(v.headline, Headline::Waiting);
+        assert_eq!(render_headline(&v), "Waiting \u{2014} WoW is running");
+        let v = derive_status(&input(&t, &sc.members, &seen));
+        assert_eq!(render_headline(&v), "Waiting");
+    }
+
+    #[test]
+    fn blocked_local_folder_is_not_synced_not_up_to_date() {
+        let sc = Scenario::new(vec![
+            addon("Good", Some("1.0"), "g"),
+            crate::testkit::addon_unvalidated("Odd", "1.0", "o"),
+        ]);
+        let t = sc.target();
+        let seen = BTreeMap::new();
+        let v = derive_status(&input(&t, &sc.members, &seen));
+        let odd = v.packages.iter().find(|p| p.0.as_str() == "odd").unwrap();
+        assert_eq!(odd.1, PackageStatus::NotSynced);
+        let text = render_package(odd);
+        assert!(
+            text.contains("not synced") && !text.contains("up to date"),
+            "{text}"
+        );
+        let good = v.packages.iter().find(|p| p.0.as_str() == "good").unwrap();
+        assert_eq!(good.1, PackageStatus::InSync);
+        assert!(!t.effective.contains_key(&FolderKey::lossy("odd")));
+        assert_eq!(v.headline, Headline::Ok);
     }
 
     #[test]
