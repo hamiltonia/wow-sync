@@ -1,0 +1,19 @@
+
+running 1 test
+test exec::tests::publish_failure_leaves_no_state_record ... FAILED
+
+failures:
+
+failures:
+    exec::tests::publish_failure_leaves_no_state_record
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 151 filtered out; finished in 0.00s
+
+   Compiling wow-sync-core v0.0.0 (D:\GitHub\wow-sync.worktrees\R2-check\docs\runs\run-002\evidence\R2-check\clean\crates\wow-sync-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.85s
+     Running unittests src\lib.rs (target\debug\build\wow-sync-core/77511e3dde9d5048\out\wow_sync_core-77511e3dde9d5048.exe)
+
+thread 'exec::tests::publish_failure_leaves_no_state_record' (20952) panicked at crates\wow-sync-core\src\exec_tests.rs:937:9:
+StatObject
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `-p wow-sync-core --lib`

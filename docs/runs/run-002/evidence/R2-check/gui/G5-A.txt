@@ -1,0 +1,17 @@
+Equal labels, different content; a4/b4 unchanged.
+ControlType.Text: WoW Sync
+ControlType.Group: Developer build - synthetic installs only. This computer: Check-A
+ControlType.Text: Waiting
+ControlType.Group: Add-on sync group on Check-A (Forever / _forever_)
+ControlType.Group: Game activity: NotRunning
+ControlType.Button: Sync now
+ControlType.Text: Add-ons
+ControlType.List: Add-ons
+ControlType.ListItem: alpha: cannot tell which version is newer: alpha (4.0 vs 4.0: same label, different content)
+ControlType.Text: Other computers
+ControlType.List: Other computers
+ControlType.ListItem: Check-B: data received; reported at 1794807987520 by its own clock (peer clock); last seen here at 1794807988182
+ControlType.Group: Published 6 s ago
+ControlType.Text: Last sync
+ControlType.List: Last sync
+ControlType.ListItem: published seq 4 (3 new objects)

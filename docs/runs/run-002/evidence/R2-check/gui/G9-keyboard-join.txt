@@ -1,0 +1,18 @@
+Tab order after two checkboxes: Create a new sync group -> Join group "Add-on sync group" (wowf) -> Join group "Add-on sync group" (wow_test); Enter joined wow_test group.
+ControlType.Text: WoW Sync
+ControlType.Group: Developer build - synthetic installs only. This computer: Check-D
+ControlType.Text: Waiting
+ControlType.Group: Add-on sync group on Check-D (wow_test / _test_)
+ControlType.Group: Game activity: NotRunning
+ControlType.Button: Sync now
+ControlType.Text: Add-ons
+ControlType.List: Add-ons
+ControlType.ListItem: blocked: cannot tell which version is newer: blocked (none vs none: no selected toc)
+ControlType.ListItem: good: cannot tell which version is newer: good (1.0 vs 1.0: same label, different content)
+ControlType.Text: Other computers
+ControlType.List: Other computers
+ControlType.ListItem: Check-C: data received; reported at 1794808018222 by its own clock (peer clock); last seen here at 1794808163832
+ControlType.Group: Published 3 s ago
+ControlType.Text: Last sync
+ControlType.List: Last sync
+ControlType.ListItem: published seq 1 (4 new objects)

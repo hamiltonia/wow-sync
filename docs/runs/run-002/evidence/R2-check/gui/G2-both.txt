@@ -1,0 +1,17 @@
+Both identity and scope accepted. Correction to initial harness assumption: Blocked did NOT remain excluded from publication; see blocked-publication.txt.
+ControlType.Text: WoW Sync
+ControlType.Group: Developer build - synthetic installs only. This computer: Check-C
+ControlType.Text: Everything is up to date
+ControlType.Group: Add-on sync group on Check-C (wow_test / _test_)
+ControlType.Group: Game activity: NotRunning
+ControlType.Button: Sync now
+ControlType.Text: Add-ons
+ControlType.List: Add-ons
+ControlType.ListItem: blocked: up to date with the versions this computer can see
+ControlType.ListItem: good: up to date with the versions this computer can see
+ControlType.Text: Other computers
+ControlType.List: Other computers
+ControlType.Group: Published 3 s ago
+ControlType.Text: Last sync
+ControlType.List: Last sync
+ControlType.ListItem: published seq 1 (5 new objects)

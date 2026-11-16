@@ -1,0 +1,13 @@
+Restarted after adding Extra, then activated Sync now: still StaleConfirmation; no reconfirmation control.
+ControlType.Text: WoW Sync
+ControlType.Group: Developer build - synthetic installs only. This computer: Check-C
+ControlType.Group: refused: StaleConfirmation
+ControlType.Text: Something needs attention
+ControlType.Group:  on  ()
+ControlType.Group: Game activity:
+ControlType.Group: Problem: refused: StaleConfirmation
+ControlType.Button: Sync now
+ControlType.Text: Add-ons
+ControlType.List: Add-ons
+ControlType.Text: Other computers
+ControlType.List: Other computers

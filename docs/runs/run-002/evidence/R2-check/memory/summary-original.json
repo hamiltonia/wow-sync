@@ -1,0 +1,29 @@
+[
+  {
+    "run": 1,
+    "samples": 61,
+    "visible_windows": 0,
+    "max_processes": 1.0,
+    "max_private_mib": 16.602,
+    "average_private_mib": 15.872,
+    "pass": true
+  },
+  {
+    "run": 2,
+    "samples": 61,
+    "visible_windows": 0,
+    "max_processes": 1.0,
+    "max_private_mib": 16.645,
+    "average_private_mib": 16.388,
+    "pass": true
+  },
+  {
+    "run": 3,
+    "samples": 61,
+    "visible_windows": 0,
+    "max_processes": 9.0,
+    "max_private_mib": 763.305,
+    "average_private_mib": 763.121,
+    "pass": false
+  }
+]

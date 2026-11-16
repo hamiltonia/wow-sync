@@ -1,0 +1,9 @@
+{
+  "run": 3,
+  "samples": 61,
+  "visible_windows": 0,
+  "max_processes": 1.0,
+  "max_private_mib": 16.207,
+  "average_private_mib": 15.948,
+  "pass": true
+}
