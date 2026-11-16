@@ -15,6 +15,7 @@ pub mod package;
 pub mod paths;
 pub mod plan;
 pub mod records;
+pub mod report;
 pub mod status;
 pub mod target;
 pub mod toc;

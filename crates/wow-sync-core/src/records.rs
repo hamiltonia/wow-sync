@@ -400,6 +400,24 @@ impl AdmissionWatermarks {
     }
 }
 
+/// Local-only: the apply report not yet carried by a published state of this enrollment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingReport {
+    pub group_id: GroupId,
+    pub enrollment_id: EnrollmentId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report: Option<ApplyReport>,
+}
+record!(PendingReport, "wowsync.pending-report", MIB, |self| {
+    if let Some(r) = &self.report {
+        let mut seen = std::collections::BTreeSet::new();
+        if !r.results.iter().all(|x| seen.insert(x.package.clone())) {
+            return Err("duplicate package in pending report".into());
+        }
+    }
+    Ok(())
+});
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuditEntry {
     pub at_unix_ms: u64,

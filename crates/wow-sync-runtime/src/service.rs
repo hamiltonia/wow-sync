@@ -3,7 +3,9 @@
 //! through the adapters, calls core, and runs the resulting plans through the effects.
 
 use crate::activity::{ActivitySource, WinprocActivity};
-use crate::effects::{FaultPlan, Faulty, Hooks, RealEffects};
+use crate::effects::{
+    load_pending, FaultPlan, Faulty, Hooks, PendingSink, RealEffects, PENDING_REPORT,
+};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use wow_sync_adapters::fs_install::InstallArea;
@@ -20,8 +22,7 @@ use wow_sync_core::admit::{
     admit_member_states, newest_state_name, MemberLatest, MemberObs, MemberView, StateFileObs,
 };
 use wow_sync_core::exec::{
-    apply_report, recover_interrupted, run_apply, run_publish, ApplyEffects, PackageResult,
-    PublishOutcome,
+    apply_report, recover_interrupted, run_apply, run_publish, ApplyEffects, PublishOutcome,
 };
 use wow_sync_core::explain;
 use wow_sync_core::ids::{ComputerId, EnrollmentId, GroupId, OpId, Sha256};
@@ -30,22 +31,26 @@ use wow_sync_core::layout;
 use wow_sync_core::package::ClientInfo;
 use wow_sync_core::paths::FolderKey;
 use wow_sync_core::plan::{
-    plan_apply, plan_publish, publish_needed, ApplyGate, PlanBlock, PublishContext,
+    own_publish_slot, plan_apply, plan_publish, publish_needed, ApplyGate, PlanBlock,
+    PublishContext,
 };
 use wow_sync_core::records::{
-    decode, decode_tree, encode, AdmissionWatermarks, ApplyJournal, BasisEntry, CodeState,
-    GroupRecord, JournalPhase, LocalComputer, LocalEnrollment, MemberRecord, RecordError,
-    RecoveryPoint, RootFormat,
+    decode, decode_tree, encode, AdmissionWatermarks, ApplyJournal, ApplyReport, BasisEntry,
+    CodeState, GroupRecord, LocalComputer, LocalEnrollment, MemberRecord, PendingReport,
+    RecordError, RecoveryPoint, RootFormat,
 };
+use wow_sync_core::report::{outstanding, record_pending};
 use wow_sync_core::status::{
-    derive_status, render_headline, render_member, render_package, StatusInput, StatusView,
+    applied_here, derive_status, headline_sentence, journal_status, remember_applied, render_block,
+    render_headline, render_member, render_package, render_result, Headline, StatusInput,
+    StatusView,
 };
 use wow_sync_core::target::{compute_target, GroupTarget, TargetInput, TreeAvail};
 use wow_sync_core::toc::TocCandidate;
 use wow_sync_core::variant::{
-    assess_layout, check_join, confirm_enrolled, confirm_variant, consent_disclosures,
-    reconfirm_variant, validate_variant, ConfirmedVariant, ConsentContext, DirObs, FileObs,
-    GuidedConfirmation, LayoutAssessment, OtherVariants, RefuseReason, VariantObservation,
+    assess_layout, check_join, confirm_enrolled, confirm_variant, consent_disclosures, consent_gap,
+    reconfirm_variant, validate_variant, ConfirmedVariant, ConsentAction, ConsentContext, DirObs,
+    FileObs, GuidedConfirmation, LayoutAssessment, OtherVariants, RefuseReason, VariantObservation,
     VariantVerdict,
 };
 
@@ -239,6 +244,8 @@ struct World {
     views: Vec<MemberView>,
     target: GroupTarget,
     own_states: Vec<String>,
+    /// This enrollment's newest published state, if readable.
+    own_latest: Option<CodeState>,
 }
 
 pub struct SliceService {
@@ -553,12 +560,34 @@ impl SliceService {
         };
         let confirmed = reconfirm_variant(&verdict, &assessment, &guided, &le.validation)
             .map_err(|r| ServiceError::Refused(format!("{r:?}")))?;
+        Self::check_consent(ConsentAction::Reconfirm, &verdict, &assessment, &guided)?;
         le.validation = confirmed.validation().clone();
         self.state
             .write_atomic("enrollment.json", &encode(&le))
             .map_err(local)?;
         let _ = self.state.append_audit("reconfirmed game version");
         Ok(())
+    }
+
+    /// Consent decided by core (mi-1): the shell enforces the same rule as the window.
+    fn check_consent(
+        action: ConsentAction,
+        verdict: &VariantVerdict,
+        assessment: &LayoutAssessment,
+        guided: &GuidedConfirmation,
+    ) -> Result<(), ServiceError> {
+        let digest = match assessment {
+            LayoutAssessment::Supported { digest, .. } => Some(digest),
+            LayoutAssessment::Unsupported(_) => None,
+        };
+        let unfamiliar = matches!(verdict, VariantVerdict::Unfamiliar(_));
+        match consent_gap(action, unfamiliar, guided, digest) {
+            None => Ok(()),
+            Some(g) => Err(ServiceError::Refused(format!(
+                "{:?}",
+                RefuseReason::from(g)
+            ))),
+        }
     }
 
     fn read_enrollment(&self) -> Result<Option<LocalEnrollment>, ServiceError> {
@@ -591,6 +620,7 @@ impl SliceService {
         };
         let confirmed = confirm_variant(&verdict, &assessment, Some(&guided))
             .map_err(|r| ServiceError::Refused(format!("{r:?}")))?;
+        Self::check_consent(ConsentAction::Enroll, &verdict, &assessment, &guided)?;
         let provider = self.open_provider()?;
         let now = now_unix_ms() as u64;
         let computer = match self.read_computer()? {
@@ -834,6 +864,18 @@ impl SliceService {
                     .collect(),
                 Err(_) => vec![],
             };
+        let own_latest = own_publish_slot(&own_states, &enrollment.enrollment_id, 0)
+            .0
+            .and_then(|name| {
+                let rel = format!(
+                    "{}/{name}",
+                    layout::state_dir(&group.group_id, &computer.computer_id)
+                );
+                provider
+                    .read(&rel, STATE_LIMIT)
+                    .ok()
+                    .and_then(|b| decode::<CodeState>(&b, STATE_LIMIT as usize).ok())
+            });
         Ok(World {
             enrollment,
             computer,
@@ -843,6 +885,7 @@ impl SliceService {
             views,
             target,
             own_states,
+            own_latest,
         })
     }
 
@@ -856,16 +899,7 @@ impl SliceService {
 
     fn snapshot(&mut self, w: &World, area: &InstallArea) -> StatusSnapshot {
         let journals = self.journals(area);
-        let needs_help: Vec<(FolderKey, String)> = journals
-            .iter()
-            .filter(|j| j.phase == JournalPhase::NeedsHelp)
-            .map(|j| (j.package.clone(), j.reason.clone().unwrap_or_default()))
-            .collect();
-        let interrupted: Vec<FolderKey> = journals
-            .iter()
-            .filter(|j| j.phase != JournalPhase::NeedsHelp)
-            .map(|j| j.package.clone())
-            .collect();
+        let (interrupted, needs_help) = journal_status(&journals);
         let mut retained: Vec<RecoveryPoint> = Vec::new();
         let keys: Vec<FolderKey> = w.target.packages.keys().cloned().collect();
         for k in &keys {
@@ -884,10 +918,24 @@ impl SliceService {
         let now = now_unix_ms();
         let observed = self.activity.observe(&self.variant_dir());
         let activity = format!("{observed:?}");
+        let pending = outstanding(
+            load_pending(&self.state).as_ref(),
+            &w.group.group_id,
+            &w.enrollment.enrollment_id,
+            None,
+        );
+        let reports: Vec<&ApplyReport> = w
+            .own_latest
+            .as_ref()
+            .and_then(|s| s.apply_report.as_ref())
+            .into_iter()
+            .chain(pending.as_ref())
+            .collect();
+        let here = applied_here(&self.applied_here, &reports, &w.target);
         let sv: StatusView = derive_status(&StatusInput {
             target: &w.target,
             members: &w.views,
-            applied_here: &self.applied_here,
+            applied_here: &here,
             interrupted: &interrupted,
             game_running: matches!(observed, wow_sync_core::plan::Activity::Running { .. }),
             needs_help: &needs_help,
@@ -917,7 +965,7 @@ impl SliceService {
                 })
                 .collect(),
             members: sv.members.iter().map(render_member).collect(),
-            blocks: sv.blocks.iter().map(block_text).collect(),
+            blocks: sv.blocks.iter().map(render_block).collect(),
             recovery_note: (!retained.is_empty() || !interrupted.is_empty()).then(|| {
                 format!(
                     "{} recovery point(s) kept, {} interrupted update(s)",
@@ -947,7 +995,7 @@ impl SliceService {
                 self.provider_error = None;
                 return StatusSnapshot {
                     enrolled: true,
-                    headline: "Something needs your help".into(),
+                    headline: headline_sentence(Headline::NeedsHelp),
                     provider_error: Some(ServiceError::VariantChanged.to_string()),
                     ..Default::default()
                 };
@@ -958,7 +1006,7 @@ impl SliceService {
                 preview.groups.clear();
                 return StatusSnapshot {
                     enrolled: true,
-                    headline: "Something needs your help".into(),
+                    headline: headline_sentence(Headline::NeedsHelp),
                     provider_error: Some(ServiceError::NeedsReconfirmation.to_string()),
                     reconfirm: Some(preview),
                     ..Default::default()
@@ -968,7 +1016,7 @@ impl SliceService {
                 self.provider_error = Some(e.to_string());
                 return StatusSnapshot {
                     enrolled: true,
-                    headline: "Something needs attention".into(),
+                    headline: headline_sentence(Headline::Error),
                     provider_error: Some(e.to_string()),
                     ..Default::default()
                 };
@@ -978,7 +1026,7 @@ impl SliceService {
             Ok(area) => self.snapshot(&w, &area),
             Err(e) => StatusSnapshot {
                 enrolled: true,
-                headline: "Something needs attention".into(),
+                headline: headline_sentence(Headline::Error),
                 provider_error: Some(e.to_string()),
                 ..Default::default()
             },
@@ -1004,9 +1052,30 @@ impl SliceService {
         let area = InstallArea::open(&variant_dir).map_err(local)?;
         let group_id = w.group.group_id.clone();
         let me = w.computer.computer_id.as_str().to_string();
-        let mut pending_report = None;
+        let enrollment_id = w.enrollment.enrollment_id.clone();
+        let mut new_report = None;
         let mut journals_remaining = false;
         self.last_blocks.clear();
+
+        // Drop results the newest own state already carries (a crash after publishing but
+        // before the store was cleared), so they are never published twice.
+        let stored = load_pending(&self.state);
+        let still = outstanding(
+            stored.as_ref(),
+            &group_id,
+            &enrollment_id,
+            w.own_latest.as_ref(),
+        );
+        if stored.as_ref().and_then(|s| s.report.as_ref()) != still.as_ref() {
+            let _ = self.state.write_atomic(
+                PENDING_REPORT,
+                &encode(&PendingReport {
+                    group_id: group_id.clone(),
+                    enrollment_id: enrollment_id.clone(),
+                    report: still,
+                }),
+            );
+        }
 
         {
             let real = RealEffects::new(
@@ -1018,7 +1087,12 @@ impl SliceService {
                 me.clone(),
                 &mut *self.activity,
                 self.cfg.recent_ms,
-            );
+            )
+            .recording_into(PendingSink {
+                state: &self.state,
+                group: group_id.clone(),
+                enrollment: enrollment_id.clone(),
+            });
             let mut fx = Faulty::new(real, self.fault, &mut self.hooks);
 
             if let Err(e) = fx.lock() {
@@ -1035,7 +1109,7 @@ impl SliceService {
             for (op, key, res) in &rec.ops {
                 report
                     .recovered
-                    .push(format!("{key} ({op}): {}", package_result_text(res)));
+                    .push(format!("{key} ({op}): {}", render_result(res)));
             }
 
             let mut applied_plan = None;
@@ -1051,7 +1125,7 @@ impl SliceService {
                 match plan_apply(&w.target, &w.inventory, &mut gen, &gate) {
                     Err(PlanBlock::NothingToDo) => {}
                     Err(b) => {
-                        report.apply_note = Some(block_text(&b));
+                        report.apply_note = Some(render_block(&b));
                         self.last_blocks.push(b);
                     }
                     Ok(plan) => {
@@ -1065,17 +1139,12 @@ impl SliceService {
                         for (k, r) in &outcome.packages {
                             report.applied.push(AppliedLine {
                                 package: k.to_string(),
-                                text: package_result_text(r),
+                                text: render_result(r),
                             });
-                            if matches!(r, PackageResult::Applied { .. }) {
-                                self.applied_here.retain(|(a, _)| a != k);
-                                if let Some(p) = plan.packages.iter().find(|p| &p.package == k) {
-                                    self.applied_here.push((k.clone(), p.explanation.clone()));
-                                }
-                            }
                         }
+                        remember_applied(&mut self.applied_here, &plan, &outcome);
                         if let Some(b) = &outcome.stopped {
-                            report.apply_note = Some(block_text(b));
+                            report.apply_note = Some(render_block(b));
                             self.last_blocks.push(b.clone());
                         }
                         applied_plan = Some(plan);
@@ -1097,16 +1166,38 @@ impl SliceService {
                         _ => None,
                     })
                     .collect();
-                pending_report = apply_report(plan, outcome, basis);
+                new_report = apply_report(plan, outcome, basis);
                 std::thread::sleep(std::time::Duration::from_millis(self.cfg.recent_ms + 25));
             }
 
             if !report.crashed {
+                // Finalize already recorded each applied package; add this cycle's full
+                // results (with basis) so failures and rollbacks withdraw earlier claims.
+                if let Some(rep) = new_report.take() {
+                    let merged =
+                        record_pending(load_pending(&self.state), &group_id, &enrollment_id, rep);
+                    if self
+                        .state
+                        .write_atomic(PENDING_REPORT, &encode(&merged))
+                        .is_err()
+                    {
+                        new_report = merged.report;
+                    }
+                }
                 // Re-observe: an apply changed the folders, and a peer may have moved.
                 let used = fx.effects_run();
                 drop(fx);
                 let fresh = self.observe_world(true)?;
                 w = fresh;
+                let store = match new_report.take() {
+                    // Not saved locally: still publish it from memory this cycle.
+                    Some(r) => Some(PendingReport {
+                        group_id: group_id.clone(),
+                        enrollment_id: enrollment_id.clone(),
+                        report: Some(r),
+                    }),
+                    None => load_pending(&self.state),
+                };
                 let real = RealEffects::new(
                     &provider,
                     &addons,
@@ -1125,8 +1216,7 @@ impl SliceService {
                     &self.state,
                     &mut last_publish,
                     &w,
-                    &provider,
-                    pending_report.take(),
+                    store,
                     journals_remaining,
                     &mut fx,
                     &mut report,
@@ -1155,8 +1245,7 @@ impl SliceService {
         state: &LocalState,
         last_publish: &mut Option<i64>,
         w: &World,
-        provider: &ProviderRoot,
-        apply_rep: Option<wow_sync_core::records::ApplyReport>,
+        store: Option<PendingReport>,
         journals_remaining: bool,
         fx: &mut E,
         report: &mut SyncReport,
@@ -1168,33 +1257,13 @@ impl SliceService {
         }
         let group_id = &w.group.group_id;
         let me = &w.computer.computer_id;
-        let mut own_seqs: Vec<u64> = w
-            .own_states
-            .iter()
-            .filter_map(|n| layout::parse_state_name(n))
-            .map(|(_, s)| s)
-            .collect();
-        own_seqs.sort_unstable();
-        let newest = w
-            .own_states
-            .iter()
-            .filter_map(|n| layout::parse_state_name(n).map(|(e, s)| (s, e, n.clone())))
-            .filter(|(_, e, _)| *e == w.enrollment.enrollment_id)
-            .max_by_key(|(s, _, _)| *s);
-        let unchanged = newest.as_ref().and_then(|(_, _, name)| {
-            let rel = format!("{}/{name}", layout::state_dir(group_id, me));
-            provider
-                .read(&rel, STATE_LIMIT)
-                .ok()
-                .and_then(|b| decode::<CodeState>(&b, STATE_LIMIT as usize).ok())
-        });
-        if !publish_needed(unchanged.as_ref(), &w.inventory, apply_rep.is_some()) {
+        let enrollment = &w.enrollment.enrollment_id;
+        let apply_rep = outstanding(store.as_ref(), group_id, enrollment, w.own_latest.as_ref());
+        if !publish_needed(w.own_latest.as_ref(), &w.inventory, apply_rep.is_some()) {
             return;
         }
-        let seq = w
-            .enrollment
-            .next_seq
-            .max(own_seqs.last().map_or(1, |s| s + 1));
+        let (_, seq) = own_publish_slot(&w.own_states, enrollment, w.enrollment.next_seq);
+        let published_report = apply_rep.is_some();
         let mut ctx = PublishContext {
             group: group_id.clone(),
             computer: me.clone(),
@@ -1210,7 +1279,7 @@ impl SliceService {
         let plan = match plan_publish(&w.inventory, &ctx) {
             Ok(p) => p,
             Err(b) => {
-                report.publish_note = Some(format!("not published: {}", block_text(&b)));
+                report.publish_note = Some(format!("not published: {}", render_block(&b)));
                 return;
             }
         };
@@ -1225,9 +1294,20 @@ impl SliceService {
             PublishOutcome::Published { uploaded, .. } => {
                 *last_publish = Some(now_unix_ms());
                 report.published = Some(format!("published seq {seq} ({uploaded} new objects)"));
+                if published_report {
+                    // Published once; if this write is lost, `outstanding` drops it anyway.
+                    let _ = state.write_atomic(
+                        PENDING_REPORT,
+                        &encode(&PendingReport {
+                            group_id: group_id.clone(),
+                            enrollment_id: enrollment.clone(),
+                            report: None,
+                        }),
+                    );
+                }
             }
             PublishOutcome::Aborted(b) => {
-                report.publish_note = Some(format!("not published: {}", block_text(&b)));
+                report.publish_note = Some(format!("not published: {}", render_block(&b)));
             }
             PublishOutcome::Failed(why) => {
                 report.publish_note = Some(format!("publish failed: {why}"));
@@ -1254,32 +1334,5 @@ fn dummy_identity() -> wow_sync_core::variant::VariantIdentity {
         folder: String::new(),
         build_version: None,
         profile: None,
-    }
-}
-
-fn block_text(b: &PlanBlock) -> String {
-    match b {
-        PlanBlock::GameRunning => "WoW is running; nothing was changed".into(),
-        PlanBlock::ActivityUnknown(w) => {
-            format!("Cannot tell whether the game is running ({w}); nothing was changed")
-        }
-        PlanBlock::Unstable => "Add-on files are still changing; waiting".into(),
-        PlanBlock::UnresolvedJournal => "An earlier update is unresolved".into(),
-        PlanBlock::NothingToDo => "Nothing to do".into(),
-        PlanBlock::DestinationChanged => "An add-on changed while updating; will retry".into(),
-        PlanBlock::RenameFailed(w) => format!("An add-on folder could not be replaced: {w}"),
-        PlanBlock::Invalid(w) => format!("Invalid plan: {w}"),
-    }
-}
-
-fn package_result_text(r: &PackageResult) -> String {
-    match r {
-        PackageResult::Applied { .. } => "applied".into(),
-        PackageResult::Skipped(e) => format!("skipped - {}", explain::render(e)),
-        PackageResult::Replanned(e) => format!("will retry - {}", explain::render(e)),
-        PackageResult::Interrupted(e) => format!("interrupted - {}", explain::render(e)),
-        PackageResult::RolledBack(e) => format!("rolled back - {}", explain::render(e)),
-        PackageResult::NeedsHelp(e) => format!("needs help - {}", explain::render(e)),
-        PackageResult::Failed(e) => format!("failed - {}", explain::render(e)),
     }
 }

@@ -519,6 +519,55 @@ pub fn reconfirm_variant(
     confirm_variant(v, a, Some(c))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConsentAction {
+    Enroll,
+    Reconfirm,
+}
+
+/// Why the consent given does not let an enroll or reconfirm proceed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConsentGap {
+    /// The add-on scope was not agreed to.
+    Scope,
+    /// The game version was not confirmed where that is required.
+    Identity,
+    /// The consent was given for a different preview than the current assessment.
+    Stale,
+}
+
+impl From<ConsentGap> for RefuseReason {
+    fn from(g: ConsentGap) -> Self {
+        match g {
+            ConsentGap::Scope | ConsentGap::Identity => RefuseReason::ConfirmationRequired,
+            ConsentGap::Stale => RefuseReason::StaleConfirmation,
+        }
+    }
+}
+
+/// Whether an enroll or reconfirm may proceed on this consent (R-03, A-46; mi-1). Scope
+/// consent is always required. Identity confirmation is required for an unfamiliar (guided)
+/// client and for every reconfirmation. For a guided client the consent must be for the
+/// current assessment digest (`None` = no supported assessment; `confirm_variant` refuses).
+/// This is checked in addition to `confirm_variant`, which decides the variant itself.
+pub fn consent_gap(
+    action: ConsentAction,
+    guided: bool,
+    c: &GuidedConfirmation,
+    current_digest: Option<&Sha256>,
+) -> Option<ConsentGap> {
+    if !c.scope {
+        return Some(ConsentGap::Scope);
+    }
+    if (guided || action == ConsentAction::Reconfirm) && !c.identity {
+        return Some(ConsentGap::Identity);
+    }
+    match current_digest {
+        Some(d) if guided && *d != c.digest => Some(ConsentGap::Stale),
+        _ => None,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JoinRefusal {
     pub group_product: String,
@@ -1149,5 +1198,52 @@ mod tests {
         ] {
             assert!(text.contains(needle), "missing {needle:?} in:\n{text}");
         }
+    }
+
+    #[test]
+    fn consent_predicate_requires_scope_and_guided_identity() {
+        use ConsentAction::{Enroll, Reconfirm};
+        let d = Sha256([1; 32]);
+        let c = |identity, scope, digest| GuidedConfirmation {
+            identity,
+            scope,
+            digest,
+        };
+        // Recognized client: scope consent is required even though identity is not (mi-1).
+        assert_eq!(
+            consent_gap(Enroll, false, &c(true, false, d), Some(&d)),
+            Some(ConsentGap::Scope)
+        );
+        assert_eq!(
+            consent_gap(Enroll, false, &c(false, true, d), Some(&d)),
+            None
+        );
+        // Unfamiliar client: both, bound to the current preview.
+        assert_eq!(
+            consent_gap(Enroll, true, &c(false, true, d), Some(&d)),
+            Some(ConsentGap::Identity)
+        );
+        assert_eq!(
+            consent_gap(Enroll, true, &c(true, true, Sha256([2; 32])), Some(&d)),
+            Some(ConsentGap::Stale)
+        );
+        assert_eq!(consent_gap(Enroll, true, &c(true, true, d), Some(&d)), None);
+        // Reconfirmation always needs both boxes, also for a recognized client.
+        assert_eq!(
+            consent_gap(Reconfirm, false, &c(false, true, d), Some(&d)),
+            Some(ConsentGap::Identity)
+        );
+        assert_eq!(
+            consent_gap(Reconfirm, false, &c(true, false, d), Some(&d)),
+            Some(ConsentGap::Scope)
+        );
+        assert_eq!(
+            consent_gap(Reconfirm, false, &c(true, true, d), Some(&d)),
+            None
+        );
+        assert_eq!(
+            RefuseReason::from(ConsentGap::Stale),
+            RefuseReason::StaleConfirmation
+        );
     }
 }

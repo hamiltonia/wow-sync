@@ -4,20 +4,43 @@ use crate::activity::ActivitySource;
 use wow_sync_adapters::fs_install::{InstallArea, InstallLock, Slot as AdSlot};
 use wow_sync_adapters::fs_safe::Root;
 use wow_sync_adapters::fs_scan::{snapshot_folder, ScannedFile, Snapshot};
+use wow_sync_adapters::localstate::LocalState;
 use wow_sync_adapters::provider::{ObjectObs, ProviderRoot};
 use wow_sync_adapters::{FsError, FsErrorKind};
 use wow_sync_core::exec::{
     ApplyEffects, EffectError, EffectErrorKind, ObjectStat, PublishEffects, Slot, SlotObs,
 };
 use wow_sync_core::hash::tree_hash;
+use wow_sync_core::ids::EnrollmentId;
 use wow_sync_core::ids::{GroupId, OpId, Sha256};
 use wow_sync_core::inventory::FileEntry;
 use wow_sync_core::layout::blob;
 use wow_sync_core::paths::{validate_rel_path, FolderKey};
 use wow_sync_core::plan::{Activity, FolderApply, ObjectRef, ObjectSource};
-use wow_sync_core::records::{encode, ApplyJournal, RecoveryPoint};
+use wow_sync_core::records::{decode, encode, ApplyJournal, PendingReport, RecoveryPoint};
+use wow_sync_core::report::{finalized_result, record_pending};
 
 const OBJECT_LIMIT: u64 = 512 * 1024 * 1024;
+const JOURNAL_LIMIT: usize = 1024 * 1024;
+pub(crate) const PENDING_REPORT: &str = "pending-report.json";
+const PENDING_LIMIT: u64 = 1024 * 1024;
+
+/// The durable apply report (publication.md §4). An unreadable or corrupt store counts as
+/// empty: losing a confirmation must not block applies, and the next apply rewrites it.
+pub(crate) fn load_pending(state: &LocalState) -> Option<PendingReport> {
+    state
+        .read(PENDING_REPORT, PENDING_LIMIT)
+        .ok()
+        .flatten()
+        .and_then(|b| decode(&b, PENDING_LIMIT as usize).ok())
+}
+
+/// Where a finalized apply is recorded before its journal is removed.
+pub(crate) struct PendingSink<'a> {
+    pub state: &'a LocalState,
+    pub group: GroupId,
+    pub enrollment: EnrollmentId,
+}
 
 pub(crate) fn map_err(e: FsError) -> EffectError {
     let kind = match e.kind {
@@ -70,6 +93,7 @@ pub struct RealEffects<'a> {
     lock: Option<InstallLock>,
     // The hash computed by the immediately preceding `stat_object`; never reused later.
     just_hashed: Option<(String, Sha256)>,
+    pending: Option<PendingSink<'a>>,
 }
 
 impl<'a> RealEffects<'a> {
@@ -95,7 +119,36 @@ impl<'a> RealEffects<'a> {
             recent_ms,
             lock: None,
             just_hashed: None,
+            pending: None,
         }
+    }
+
+    /// Record every finalized (`verified`) apply in the durable report store before its
+    /// journal is removed, also when recovery finishes an interrupted apply.
+    pub(crate) fn recording_into(mut self, sink: PendingSink<'a>) -> Self {
+        self.pending = Some(sink);
+        self
+    }
+
+    fn record_finalized(&self, op: &OpId) -> Result<(), EffectError> {
+        let Some(sink) = &self.pending else {
+            return Ok(());
+        };
+        let journals = self.area.read_journals().map_err(map_err)?;
+        let Some((_, bytes)) = journals.iter().find(|(o, _)| o == op.as_str()) else {
+            return Ok(());
+        };
+        let Some(rep) = decode::<ApplyJournal>(bytes, JOURNAL_LIMIT)
+            .ok()
+            .as_ref()
+            .and_then(finalized_result)
+        else {
+            return Ok(());
+        };
+        let rec = record_pending(load_pending(sink.state), &sink.group, &sink.enrollment, rep);
+        sink.state
+            .write_atomic(PENDING_REPORT, &encode(&rec))
+            .map_err(map_err)
     }
 
     pub(crate) fn hold_lock(&mut self) -> Result<(), EffectError> {
@@ -214,6 +267,8 @@ impl ApplyEffects for RealEffects<'_> {
     }
 
     fn remove_journal(&mut self, op: &OpId) -> Result<(), EffectError> {
+        // If recording fails the journal stays, so finalize is retried later.
+        self.record_finalized(op)?;
         self.area.remove_journal(op.as_str()).map_err(map_err)
     }
 

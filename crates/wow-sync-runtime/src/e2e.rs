@@ -668,6 +668,136 @@ mod tests {
         assert!(j >= 1, "recovery itself must have had effects to interrupt");
     }
 
+    /// `applied` results for `pkg` across every state file B has published.
+    fn published_applied(lab: &Lab, g: &GroupId, pc: &Pc, pkg: &str) -> Vec<String> {
+        use wow_sync_core::records::{decode, CodeState, ReportKind};
+        let dir = lab
+            .shared
+            .join("WoWSync")
+            .join(format!("groups/{g}/members/{}/state", computer_id(pc)));
+        let mut out = Vec::new();
+        for e in std::fs::read_dir(dir).into_iter().flatten() {
+            let bytes = std::fs::read(e.unwrap().path()).unwrap();
+            let st: CodeState = decode(&bytes, 16 * 1024 * 1024).unwrap();
+            for r in st.apply_report.iter().flat_map(|a| &a.results) {
+                if r.package.as_str() == pkg && r.result == ReportKind::Applied {
+                    out.push(format!("{}@{}", st.seq, r.package_hash.unwrap()));
+                }
+            }
+        }
+        out
+    }
+
+    /// Follow-up #9: a crash after the apply finished but before the report was published
+    /// must not lose the report; it is published exactly once after restart.
+    #[test]
+    fn apply_report_survives_crash_before_publish() {
+        let mut window_hit = false;
+        let mut k = 0;
+        loop {
+            let lab = Lab::new();
+            let mut a = lab.pc("a");
+            let mut b = lab.pc("b");
+            a.addon("Alpha", "alpha-v1");
+            let g = a.create();
+            synced(&mut a);
+            b.join(&g);
+            b.svc.inject_crash_after(Some(k));
+            let r = synced(&mut b);
+            let done = !r.crashed;
+            let applied = r.applied.iter().any(|l| l.text == "applied");
+            let pending_file = b.cfg.state_dir.join("pending-report.json");
+            let mut uncleared = None;
+            if r.crashed && applied {
+                assert!(
+                    published_applied(&lab, &g, &b, "alpha").is_empty(),
+                    "k={k}: crashed before the report was published"
+                );
+                uncleared = Some(std::fs::read(&pending_file).expect("report kept locally"));
+                window_hit = true;
+            }
+            b.restart();
+            let mut last = None;
+            for _ in 0..3 {
+                last = Some(synced(&mut b));
+            }
+            assert_eq!(b.journals(), 0, "k={k}");
+            assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+            let reported = published_applied(&lab, &g, &b, "alpha");
+            assert_eq!(
+                reported.len(),
+                1,
+                "k={k}: exactly one report, got {reported:?}"
+            );
+            let target = alpha_package_hash(&lab, &g, &a);
+            assert!(
+                reported[0].ends_with(&target),
+                "k={k}: {reported:?} vs {target}"
+            );
+            let last = last.unwrap();
+            assert!(last.published.is_none(), "k={k}: republished {last:?}");
+            if let Some(bytes) = uncleared {
+                // A crash after the state was written but before the store was cleared:
+                // the next start must not publish the same report again.
+                std::fs::write(&pending_file, bytes).unwrap();
+                b.restart();
+                for _ in 0..2 {
+                    let r = synced(&mut b);
+                    assert!(r.published.is_none(), "k={k}: republished {r:?}");
+                }
+                assert_eq!(published_applied(&lab, &g, &b, "alpha").len(), 1, "k={k}");
+            }
+            let t = texts(&synced(&mut a));
+            assert!(t.contains("applied and reported by"), "k={k}: {t}");
+            if done {
+                break;
+            }
+            k += 1;
+            assert!(k < 200, "the cycle never completed");
+        }
+        assert!(
+            window_hit,
+            "no crash point between apply and publish was exercised"
+        );
+    }
+
+    /// The package hash of A's only add-on (a single-folder package).
+    fn alpha_package_hash(lab: &Lab, g: &GroupId, pc: &Pc) -> String {
+        use wow_sync_core::records::{decode, CodeState};
+        let dir = lab
+            .shared
+            .join("WoWSync")
+            .join(format!("groups/{g}/members/{}/state", computer_id(pc)));
+        let e = std::fs::read_dir(dir).unwrap().next().unwrap().unwrap();
+        let st: CodeState = decode(&std::fs::read(e.path()).unwrap(), 16 * 1024 * 1024).unwrap();
+        let f = st
+            .folders
+            .iter()
+            .find(|f| f.key.as_str() == "alpha")
+            .unwrap();
+        wow_sync_core::hash::package_hash(&[(f.key.clone(), f.tree.unwrap())]).to_string()
+    }
+
+    /// mi-1: scope consent is required for a recognized client too, at the service boundary.
+    #[test]
+    fn recognized_enroll_without_scope_consent_is_refused() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut req = a.confirm_request(JoinChoice::New {
+            name: "Slice".into(),
+        });
+        req.identity_confirmed = false;
+        req.scope_confirmed = false;
+        assert!(
+            matches!(a.svc.enroll(&req), Err(ServiceError::Refused(_))),
+            "enrolled without scope consent"
+        );
+        assert!(!lab.shared.join("WoWSync").exists());
+        assert!(!a.svc.status().enrolled);
+        req.scope_confirmed = true;
+        a.svc.enroll(&req).unwrap();
+    }
+
     #[test]
     fn destination_updated_during_staging_is_not_replaced() {
         let lab = Lab::new();
