@@ -487,11 +487,10 @@ pub fn confirm_enrolled(
         };
         return Err(RefuseReason::Layout(r.clone()));
     };
-    if unfamiliar != (stored.kind == "guided")
-        || stored.product != identity.product.as_str()
-        || stored.folder != identity.folder
-        || stored.mapping_id != mapping.id()
-    {
+    if stored.product != identity.product.as_str() || stored.folder != identity.folder {
+        return Err(RefuseReason::VariantChanged);
+    }
+    if unfamiliar != (stored.kind == "guided") || stored.mapping_id != mapping.id() {
         return Err(RefuseReason::StaleConfirmation);
     }
     if unfamiliar && !(stored.identity_confirmed && stored.scope_confirmed) {
@@ -1022,9 +1021,9 @@ mod tests {
         let oa = assess_layout(oid, true, &[], &OtherVariants::default());
         assert_eq!(
             confirm_enrolled(&other, &oa, &stored),
-            Err(RefuseReason::StaleConfirmation)
+            Err(RefuseReason::VariantChanged)
         );
-        // Recognized now but enrolled as guided: stale.
+        // Recognized now but enrolled as guided, and a different product and folder: needs help.
         let known = validate_variant(&testkit::variant_obs_forever());
         let VariantVerdict::Recognized(kid) = &known else {
             panic!()
@@ -1032,6 +1031,13 @@ mod tests {
         let ka = assess_layout(kid, false, &[], &OtherVariants::default());
         assert_eq!(
             confirm_enrolled(&known, &ka, &stored),
+            Err(RefuseReason::VariantChanged)
+        );
+        // Same product and folder but a different recognition class: reconfirmation can help.
+        let mut as_known = stored.clone();
+        as_known.kind = "known".into();
+        assert_eq!(
+            confirm_enrolled(&v, &a, &as_known),
             Err(RefuseReason::StaleConfirmation)
         );
         let mut unconfirmed = stored.clone();
