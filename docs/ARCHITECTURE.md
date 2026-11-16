@@ -1,11 +1,14 @@
-# Architecture (PROPOSAL)
+# Architecture
 
-> **Status: PROPOSAL, not approved.** Written in run-001 packet P1-map to set
-> boundaries for the Phase 2 feasibility spikes (SPEC §7). It prescribes no
-> protocol, storage format or library (see §5).
-> Spike evidence may change it. Product meaning lives in [SPEC.md](../SPEC.md)
-> and [ACCEPTANCE.md](../ACCEPTANCE.md); this file only proposes where that
-> meaning is enforced.
+> **Status: slice design (run-002), pending independent review.**
+> History: written as a PROPOSAL in run-001 packet P1-map to bound the
+> feasibility spikes; updated in run-002 packet R2-design from spike evidence
+> into the design for the first vertical slice. Implementable detail is in
+> [design/](design/README.md); this file is the overview and invariant map.
+> Product meaning lives in [SPEC.md](../SPEC.md) and
+> [ACCEPTANCE.md](../ACCEPTANCE.md); this file only says where that meaning is
+> enforced. Choices outside approved intent are open questions in
+> [design/questions.md](design/questions.md).
 
 ## 1. Drivers
 
@@ -21,49 +24,50 @@
 
 ```text
           observations (typed facts)             user decisions / consent
- adapters ───────────────────────────►  ┌──────────────────────┐ ◄──── GUI / CLI
-          ◄─────────────────────────── │  Domain core (pure)  │ ────► status, explanations,
-             plans (intended operations)│  single policy       │       audit records
-                                        │  authority           │
- shell: runs plans step by step via     └──────────────────────┘
- adapters, revalidates safety, reports outcomes back as observations
+ adapters ───────────────────────────►  ┌──────────────────────┐ ◄──── GUI
+          ◄─────────────────────────── │  wow-sync-core        │ ────► status, explanations,
+             effects via port traits    │  policy + executor    │       audit records
+                                        └──────────────────────┘
+ wow-sync-runtime: implements the port traits with wow-sync-adapters,
+ runs the sync cycle, exposes a service API to wow-sync-app (GPUI)
 ```
+
+Crates ([design/crates.md](design/crates.md)): `wow-sync-core` (platform-free
+policy, plans and the step executor over port traits, R2-core),
+`wow-sync-adapters` (Windows filesystem/process, provider folder, local state;
+no dependency on core, R2-adapters), `wow-sync-runtime` (glue and service,
+R2-slice), `wow-sync-app` (GPUI shell, R2-slice). One process for the slice
+(S-mem option 1, Q-19).
 
 ### 2.1 Domain core (platform-free)
 
-Proposed home: [crates/wow-sync-core/](../crates/wow-sync-core/) (currently an
-empty skeleton).
+Home: [crates/wow-sync-core/](../crates/wow-sync-core/).
 
-- **Owns all policy** for R-04 (membership, absence is not deletion), R-05
-  (code ordering), R-06 (conflict scope, determinism, late/duplicate arrivals),
-  R-07 (settings authority/master/exceptions), R-08 (pushes, pause, routine
-  yield-to-master), R-09 (no settings merge), R-10 (retention, rejection,
-  paired/code-only recovery). It also owns the policy parts of R-02 (isolation
-  keys), R-03 (enrollment, retirement, re-enrollment) and R-12 (deriving
-  published/available/applied/confirmed status).
-- **Inputs:** typed observations from adapters, decoded group records, user
-  decisions. Times arrive as data for display/observation limits (R-12), never
-  as release-ordering proof (R-05, R-09).
-- **Outputs:** plans (intended operations with their preconditions), decisions
-  needing the user (scoped to an addon or inseparable package, R-06), status,
-  and audit/explanation records (R-05, R-12).
-- **Must not:** perform I/O, read clocks, spawn processes, depend on GPUI or a
-  provider, or parse executable content. Deterministic for identical inputs.
-- **Testability (A-43):** exercised with in-memory inputs, including multiple
-  replicas with controlled delivery order (ACCEPTANCE "Deterministic offline
-  layer", A-20). Real temporary filesystem tests (A-22) apply to the shell and
-  filesystem adapter, not as a substitute for them.
+- **Owns all policy.** In the slice: variant validation (R-02), enrollment
+  rules (R-03), absence-is-not-deletion (R-04), `.toc` selection, version
+  ordering and package grouping (R-05), deterministic group target and
+  addon-scoped ambiguity (R-06), apply/publish plans and their safety gates
+  (R-11), status/confirmation derivation (R-12). Later: settings authority,
+  pushes, pauses, rejection, retention, retirement (R-07..R-10).
+- **Executor.** `exec` sequences plans through port traits
+  (`PublishEffects`, `ApplyEffects`), revalidates activity before every commit
+  rename, writes journals first and recovers interrupted applies. It performs
+  no I/O itself, so step ordering and crash recovery are tested with
+  in-memory fakes and failure injection (A-22, A-43).
+- **Inputs:** bytes and observations from adapters, decoded records, user
+  decisions. Times arrive as data for display only, never as ordering proof
+  (R-05, R-09).
+- **Must not:** perform I/O, read clocks or RNG, spawn processes, depend on
+  GPUI or a provider, or execute content. Enforced by
+  `arch::tests::core_sources_use_no_os_io_or_clock` and `#![forbid(unsafe_code)]`.
 
-### 2.2 Shell (effect runner)
+### 2.2 Runtime (effect wiring)
 
-Sequences the core's plans through adapters, feeds outcomes back as
-observations, and owns crash-safe step ordering (R-11, A-22). It makes no
-policy choices: when a precondition no longer holds it reports back to the core
-rather than choosing an alternative. It revalidates quiescence and scope
-immediately before each consequential mutation, not only before staging (R-11).
-Whether the shell is a separate crate or process is unchosen.
-
-### 2.3 Adapters
+`wow-sync-runtime` maps core port traits onto adapter calls one to one
+([design/adapters-api.md](design/adapters-api.md) §9) and runs the sync cycle
+([design/apply.md](design/apply.md) §1). It makes no policy choices: when an
+adapter reports a changed precondition it returns the observation to core.
+### 2.3 Adapters (responsibilities, unchanged from the proposal)
 
 Every adapter treats file, provider and log contents as untrusted data (E-06)
 and never executes Lua, saved-variable files, legacy CMD metadata or remote
@@ -81,25 +85,27 @@ payloads (R-11).
 
 ## 3. Invariants and where enforced
 
-| Invariant | Source | Core | Adapter / shell | Evidence |
+| Invariant | Source | Core (slice module) | Adapter / runtime | Evidence |
 |---|---|---|---|---|
-| Variant and account/character isolation; no cross-variant guessing; unfamiliar clients blocked until validated | R-02, R-03 | Every item is scoped by group/variant/identity; plans crossing scopes are not producible; unvalidated enrollment yields no transfer plans | Filesystem adapter enforces per-scope authorized roots | A-02, A-03, A-46 |
-| No execution of imported content | R-11, E-06 | Receives parsed data only | Adapters parse as data; no interpreter path | A-23 |
-| Published ≠ available ≠ applied ≠ confirmed; offline/stale never current | R-12 | Distinct status states; confirmation only from a peer's record issued after its local application | Dropbox adapter reports presence only | A-06, A-24 |
-| WoW running blocks game-file changes; idle updater does not by itself | R-11 | No game-file mutation plan while activity is present or cannot be established (SPEC §2 "Ready") | Shell revalidates just before each mutation; process adapter observes only | A-21, A-30 |
-| Rejected release stays rejected for the group | R-10 | Rejection records are durable group state that version ordering cannot override | Shared-data format must carry them (unchosen) | A-18 |
-| Absence is not deletion authority | R-03, R-04 | Only an intentional removal record removes | Adapters report absence as absence | A-04, A-10, A-20 |
-| No timestamp/clock/machine-preference ordering | R-05, R-09 | Ordering requires demonstrable evidence; otherwise an addon-scoped decision | — | A-08 |
-| Competing intentional settings never merged | R-09 | Produces an addon-level choice, preserving both | — | A-14 |
-| Retired computer cannot publish without re-enrollment; no silent master election | R-03 | Retirement state filters its new changes; absent master surfaces a decision | — | A-45 |
-| Current + two previous per addon, code and settings, with visible temporary exceptions | R-10 | Retention plans never prune data needed for a promised recovery or unresolved decision | Storage pressure reported, not resolved by destruction | A-16, A-17 |
-| Failure leaves recoverable prior data and accurate state | R-11 | Never derives success for a partial collection | Shell step ordering and validation before replacement | A-22 |
+| Variant isolation; no cross-variant guessing; unfamiliar clients blocked until guided confirmation | R-02, R-03 | `variant` (`ConfirmedVariant` only from `confirm_variant`); records rejected when product/group differ; blobs/trees per group | `fs_scan::read_variant_files` reads metadata only | A-02, A-46 |
+| Account/character isolation | R-02, R-07 | Out of slice (no settings) | Never reads/writes `WTF` | A-03 (later) |
+| No execution of imported content | R-11, E-06 | Parses `.toc` headers and JSON as data only | Adapters copy bytes; no interpreter | A-23 |
+| Path safety | R-11, R-15 | `paths` validation of every folder and tree path | `fs_safe::Root` containment, reparse points refused | A-23 |
+| Published ≠ available ≠ applied ≠ confirmed; peer clocks never mean "current" | R-12 | `status`; confirmation only from a peer's own later apply report | Provider reports presence/cloud state only | A-20, A-24 |
+| WoW running blocks game-file changes; idle launcher does not | R-11 | `plan` gate; `exec` re-check before each commit rename; `Unknown` blocks | `winproc` observes image paths under the variant folder | A-21, A-30 |
+| Absence is not deletion authority | R-03, R-04 | `target` and `plan` have no removal output in the slice | Replaced folders are renamed to recovery, never deleted | A-04, A-20 |
+| No timestamp/clock/machine-preference ordering | R-05, R-09 | `version`, `package`, `target` take no time inputs | — | A-08 |
+| Ambiguity is addon-scoped | R-05, R-06 | `target` → `NeedsDecision` for that package only | — | A-07, A-08 |
+| Failure leaves recoverable prior data and accurate state | R-11 | `exec` journal-first commit, package rollback, `recover_interrupted` | `fs_install` same-volume renames, atomic journal writes | A-22 |
+| Current + two previous per addon (code) | R-10 | `exec` prunes to 2 recovery points per package | `fs_install` deletes only inside `.wowsync\recovery` | A-16 (partial) |
+| Rejected release stays rejected | R-10 | Out of slice | — | A-18 (later) |
+| Competing intentional settings never merged | R-09 | Out of slice | — | A-14 (later) |
+| Retired computer cannot publish without re-enrollment | R-03 | Out of slice; `retired` field reserved | — | A-45 (later) |
+## 4. Detailed design
 
-Whether some invariants can also be checked statically (for example, the core
-crate having no I/O dependencies) is a candidate architecture check under E-08
-and A-43; no such check is defined yet.
+See [design/README.md](design/README.md) for the document index, slice scope, out-of-scope list and traceability.
 
-## 4. SPEC §7 questions and run-001 spikes
+## 5. SPEC §7 questions and run-001 spikes (history)
 
 Spike IDs from [PLAN.md](runs/run-001/PLAN.md) §3, Phase 2.
 
@@ -117,16 +123,21 @@ Spike IDs from [PLAN.md](runs/run-001/PLAN.md) §3, Phase 2.
 | Anonymous reporting schema/service | **None** | Telemetry | Deferred (D-11) |
 | Reproducible packages, unsigned install paths | **None** (P1-ci builds only) | Packaging | Gap |
 
-## 5. Explicitly unchosen
+## 6. Chosen for the slice, still unchosen
 
-Per SPEC §2 and §8, none of the following is chosen by this proposal:
+Chosen by this design for the slice (each may change after review; see
+[design/questions.md](design/questions.md)):
 
-- Shared-data protocol, durable decision semantics and compatibility policy (R-16).
-- Recovery-point and local-state storage format, database or archive layout.
-- Where recovery history physically lives (shared folder, local, or both).
-- Process model: single process vs separate background/GUI processes, and IPC (R-14 counts all app-owned background processes).
-- Crate split beyond the existing `wow-sync-core`, and crate names.
-- Libraries other than the SPEC-mandated Rust and GPUI, including filesystem
-  watching, serialization, hashing, tray integration, notifications and telemetry.
-- Scheduling/trigger mechanism and startup integration.
-- Telemetry provider and schema (D-11).
+- Shared-data layout and record schemas `wowsync.*/1`
+  ([design/publication.md](design/publication.md)); compatibility rule: ignore
+  unknown fields within a major, refuse unknown majors (Q-13).
+- Recovery points and journals local to each install under
+  `<variant>\.wowsync\` (Q-9, Q-18).
+- Libraries: `serde`/`serde_json` (records), `sha2` (hashing), `getrandom`
+  (ids), `windows-sys` (process/file attributes); GPUI pin per R2-pin.
+- Single process (Q-19); polling sync cycle every ~3 s.
+
+Still unchosen: settings data model and protocol (R-07..R-09), rejection and
+group-wide rollback, retention/GC of shared blobs (Q-7), retirement and
+re-enrollment flows, macOS adapters, notifications, telemetry (D-11),
+packaging and startup integration, filesystem watching.
