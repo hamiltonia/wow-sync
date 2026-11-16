@@ -3,6 +3,7 @@
 //! stop (G9).
 
 use crate::backend::{lock, Cmd, SharedState};
+use crate::consent::Consent;
 use gpui::accesskit::{Role, Toggled};
 use gpui::{
     actions, div, prelude::*, rgb, App, Context, FocusHandle, Render, SharedString, Window,
@@ -27,8 +28,7 @@ pub struct Root {
     fatal: Option<String>,
     seen: u64,
     handles: HashMap<String, FocusHandle>,
-    identity_ok: bool,
-    scope_ok: bool,
+    consent: Consent,
     note: String,
     banner: String,
     first: Option<FocusHandle>,
@@ -65,8 +65,7 @@ impl Root {
             fatal,
             seen: 0,
             handles: HashMap::new(),
-            identity_ok: false,
-            scope_ok: false,
+            consent: Consent::default(),
             note: String::new(),
             banner,
             first: None,
@@ -101,13 +100,14 @@ impl Root {
                 None => return,
             }
         };
-        if !(self.identity_ok && self.scope_ok) {
+        if !(self.consent.identity && self.consent.scope) {
             self.note = "Confirm both the game version and the add-on scope to continue. \
                          Nothing has been changed."
                 .into();
             return;
         }
         self.note.clear();
+        self.consent.clear();
         self.send(Cmd::Reconfirm(ReconfirmRequest {
             identity_confirmed: true,
             scope_confirmed: true,
@@ -123,11 +123,11 @@ impl Root {
                 None => return,
             }
         };
-        if !self.scope_ok {
+        if !self.consent.scope {
             self.note = "Tick the agreement box first. Nothing has been written yet.".into();
             return;
         }
-        if needs && !self.identity_ok {
+        if needs && !self.consent.identity {
             self.note = "This game version is unfamiliar: confirm the identity too. \
                          Agreeing to the scope alone is not enough."
                 .into();
@@ -135,13 +135,15 @@ impl Root {
         }
         self.note.clear();
         let display_name = self.banner.clone();
-        self.send(Cmd::Enroll(EnrollRequest {
+        let req = EnrollRequest {
             join,
-            identity_confirmed: self.identity_ok || !needs,
-            scope_confirmed: self.scope_ok,
+            identity_confirmed: self.consent.identity || !needs,
+            scope_confirmed: self.consent.scope,
             digest,
             display_name,
-        }));
+        };
+        self.consent.clear();
+        self.send(Cmd::Enroll(req));
     }
 }
 
@@ -234,6 +236,18 @@ impl Render for Root {
                     g.busy,
                 )
             };
+            let panel = match (&status.reconfirm, &preview) {
+                (Some(p), _) => Some(format!(
+                    "reconfirm|{}|{}|{:?}",
+                    p.identity_line, p.scope_line, p.digest
+                )),
+                (None, Some(p)) if !enrolled => Some(format!(
+                    "enroll|{}|{}|{:?}",
+                    p.identity_line, p.scope_line, p.digest
+                )),
+                _ => None,
+            };
+            self.consent.observe(panel);
             if !message.is_empty() {
                 body =
                     body.child(text("message", Role::Paragraph, message).text_color(rgb(0xfca5a5)));
@@ -289,12 +303,12 @@ impl Render for Root {
                             body = body.child(checkbox(
                                 "identity-ok",
                                 "I confirm this is the game version shown above",
-                                self.identity_ok,
+                                self.consent.identity,
                                 &h,
                                 next(),
                                 window,
                                 cx,
-                                |t| t.identity_ok = !t.identity_ok,
+                                |t| t.consent.identity = !t.consent.identity,
                             ));
                         }
                         let h = self.handle("scope-ok", cx);
@@ -302,12 +316,12 @@ impl Render for Root {
                         body = body.child(checkbox(
                             "scope-ok",
                             "I agree to sync the add-on code listed above for this installation",
-                            self.scope_ok,
+                            self.consent.scope,
                             &h,
                             next(),
                             window,
                             cx,
-                            |t| t.scope_ok = !t.scope_ok,
+                            |t| t.consent.scope = !t.consent.scope,
                         ));
                         let h = self.handle("create", cx);
                         body = body.child(button(
@@ -366,23 +380,23 @@ impl Render for Root {
                     body = body.child(checkbox(
                         "identity-ok",
                         "I confirm this is the game version shown above",
-                        self.identity_ok,
+                        self.consent.identity,
                         &h,
                         next(),
                         window,
                         cx,
-                        |t| t.identity_ok = !t.identity_ok,
+                        |t| t.consent.identity = !t.consent.identity,
                     ));
                     let h = self.handle("scope-ok", cx);
                     body = body.child(checkbox(
                         "scope-ok",
                         "I agree to sync the add-on code listed above",
-                        self.scope_ok,
+                        self.consent.scope,
                         &h,
                         next(),
                         window,
                         cx,
-                        |t| t.scope_ok = !t.scope_ok,
+                        |t| t.consent.scope = !t.consent.scope,
                     ));
                     let h = self.handle("reconfirm", cx);
                     body = body.child(button(
@@ -395,14 +409,16 @@ impl Render for Root {
                         |t| t.reconfirm(),
                     ));
                 }
-                body = body.child(
-                    text(
-                        "activity",
-                        Role::Paragraph,
-                        format!("Game activity: {}", status.activity),
-                    )
-                    .text_color(rgb(MUTED)),
-                );
+                if !status.activity.is_empty() {
+                    body = body.child(
+                        text(
+                            "activity",
+                            Role::Paragraph,
+                            format!("Game activity: {}", status.activity),
+                        )
+                        .text_color(rgb(MUTED)),
+                    );
+                }
                 if let Some(e) = &status.provider_error {
                     body = body.child(
                         text("provider-error", Role::Paragraph, format!("Problem: {e}"))

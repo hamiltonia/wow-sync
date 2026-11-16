@@ -489,6 +489,48 @@ mod tests {
     }
 
     #[test]
+    fn changed_product_needs_help_without_a_doomed_reconfirm_offer() {
+        let lab = Lab::new();
+        let mut t = lab.pc_with("t", "_test_", "wow_test");
+        t.addon("Alpha", "alpha-v1");
+        t.create();
+        synced(&mut t);
+        let other = lab.pc_with("o", "_test_", "wow_other");
+        let mut moved = t.cfg.clone();
+        moved.install_root = other.install.root.clone();
+        let mut svc = SliceService::new(moved).unwrap();
+        let st = svc.status();
+        assert!(st.reconfirm.is_none(), "{st:?}");
+        assert_eq!(st.headline, "Something needs your help");
+        assert!(
+            st.provider_error
+                .as_deref()
+                .unwrap_or("")
+                .contains("no longer"),
+            "{st:?}"
+        );
+        assert!(matches!(svc.sync_once(), Err(ServiceError::VariantChanged)));
+    }
+
+    #[test]
+    fn provider_problem_is_plain_english() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        a.addon("Alpha", "alpha-v1");
+        a.create();
+        synced(&mut a);
+        std::fs::remove_dir_all(&lab.shared).unwrap();
+        std::fs::write(&lab.shared, b"not a folder").unwrap();
+        let st = a.svc.status();
+        let msg = st.provider_error.clone().unwrap_or_default();
+        assert!(!msg.is_empty(), "{st:?}");
+        assert!(
+            !msg.contains("NotPlainFile") && !msg.contains("NotFound"),
+            "{msg}"
+        );
+    }
+
+    #[test]
     fn install_without_marker_refused() {
         let lab = Lab::new();
         let mut a = lab.pc("a");

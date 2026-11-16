@@ -72,6 +72,8 @@ pub enum ServiceError {
     Refused(String),
     /// The enrolled client no longer matches its confirmation; guided reconfirmation is offered.
     NeedsReconfirmation,
+    /// The game product or folder is not the enrolled one; reconfirming cannot fix that.
+    VariantChanged,
     Provider(String),
     Local(String),
 }
@@ -86,6 +88,12 @@ impl std::fmt::Display for ServiceError {
                 f,
                 "this game version changed since it was confirmed; confirm it again to continue"
             ),
+            Self::VariantChanged => write!(
+                f,
+                "this installation is no longer the game version that was enrolled (its product \
+                 or folder changed). Syncing is paused; restore the original install or set this \
+                 computer up again"
+            ),
             Self::Provider(s) => write!(f, "shared folder problem: {s}"),
             Self::Local(s) => write!(f, "local problem: {s}"),
         }
@@ -99,7 +107,19 @@ fn local(e: FsError) -> ServiceError {
 }
 
 fn prov(e: FsError) -> ServiceError {
-    ServiceError::Provider(e.to_string())
+    use wow_sync_adapters::FsErrorKind as K;
+    ServiceError::Provider(match e.kind {
+        K::NotPlainFile | K::NotFound => format!(
+            "the shared folder at {} is missing or is not a normal folder. Check that Dropbox \
+             is running and the folder is available, then try again",
+            e.path.display()
+        ),
+        K::CloudOnly => format!(
+            "{} is online-only; make it available offline in Dropbox, then try again",
+            e.path.display()
+        ),
+        _ => e.to_string(),
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -672,6 +692,7 @@ impl SliceService {
         let (verdict, assessment, _s, _st) = self.judge(false)?;
         confirm_enrolled(&verdict, &assessment, &e.validation).map_err(|r| match r {
             RefuseReason::StaleConfirmation => ServiceError::NeedsReconfirmation,
+            RefuseReason::VariantChanged => ServiceError::VariantChanged,
             r => ServiceError::Refused(format!("{r:?}")),
         })
     }
@@ -922,6 +943,15 @@ impl SliceService {
                 w
             }
             Err(ServiceError::NotEnrolled) => return StatusSnapshot::default(),
+            Err(ServiceError::VariantChanged) => {
+                self.provider_error = None;
+                return StatusSnapshot {
+                    enrolled: true,
+                    headline: "Something needs your help".into(),
+                    provider_error: Some(ServiceError::VariantChanged.to_string()),
+                    ..Default::default()
+                };
+            }
             Err(ServiceError::NeedsReconfirmation) => {
                 self.provider_error = None;
                 let mut preview = self.preview();

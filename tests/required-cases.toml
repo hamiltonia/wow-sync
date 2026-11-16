@@ -464,4 +464,14 @@ tests = [
     "e2e::tests::enrollment_preview_discloses_scope_and_uses_canonical_label",
     "e2e::tests::ambiguity_status_names_versions_and_computers",
     "e2e::tests::running_game_headline_and_applied_line_name_source",
+    "e2e::tests::changed_product_needs_help_without_a_doomed_reconfirm_offer",
+    "e2e::tests::provider_problem_is_plain_english",
+]
+
+[[case]]
+id = "R2-fix2:app"
+tier = "offline"
+tests = [
+    "consent::tests::boxes_reset_when_the_panel_is_reshown_or_changes",
+    "consent::tests::clear_is_single_use",
 ]

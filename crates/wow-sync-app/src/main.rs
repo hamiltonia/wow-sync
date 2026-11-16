@@ -8,6 +8,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod backend;
+mod consent;
 mod ui;
 mod win;
 
