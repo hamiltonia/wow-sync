@@ -2,6 +2,249 @@
 # Each [[case]] maps an acceptance/case ID to libtest names (as printed by
 # `cargo test`, e.g. "module::test_name") that must run, not be ignored, and pass.
 
+# R2-core (crates/wow-sync-core), design/tests.md section 3 plus the F-02 re-verification test.
+[[case]]
+id = "R-02:core"
+tier = "offline"
+tests = [
+    "bpsv::tests::parses_header_and_rows",
+    "bpsv::tests::wrong_field_count_is_unparseable",
+    "variant::tests::forever_metadata_is_recognized",
+    "variant::tests::flavor_build_info_disagreement_refused",
+    "variant::tests::missing_flavor_info_refused",
+    "variant::tests::inactive_product_refused",
+    "variant::tests::ambiguous_build_rows_refused",
+    "variant::tests::known_product_in_wrong_folder_refused",
+    "variant::tests::invalid_product_code_refused",
+    "variant::tests::unfamiliar_product_requires_confirmation",
+    "variant::tests::wowf_label_is_forever_not_classic_era",
+]
+
+[[case]]
+id = "A-46:core"
+tier = "offline"
+tests = [
+    "variant::tests::unknown_product_with_agreeing_metadata_blocked_without_layout_validation",
+    "variant::tests::consent_alone_does_not_confirm",
+    "variant::tests::stale_digest_rejected",
+    "variant::tests::suffixed_toc_folders_blocked_for_unfamiliar",
+    "variant::tests::duplicate_product_folder_unsupported",
+    "variant::tests::already_enrolled_variant_unsupported",
+    "variant::tests::install_without_synthetic_marker_refused",
+]
+
+[[case]]
+id = "A-08:core"
+tier = "offline"
+tests = [
+    "version::tests::dotted_numeric_orders_numerically",
+    "version::tests::missing_parts_are_zero_padded",
+    "version::tests::prerelease_orders_below_release_same_channel_only",
+    "version::tests::prerelease_vs_release_is_ambiguous",
+    "version::tests::unknown_prerelease_word_is_ambiguous",
+    "version::tests::git_describe_is_newer_than_its_exact_tag",
+    "version::tests::divergent_describe_branches_ambiguous",
+    "version::tests::integer_revision_date_order_within_scheme",
+    "version::tests::tagged_requires_same_tag",
+    "version::tests::cross_scheme_is_ambiguous",
+    "version::tests::missing_token_hash_other_are_ambiguous",
+    "version::tests::s_addon_labels_classify_as_expected",
+]
+
+[[case]]
+id = "toc:core"
+tier = "offline"
+tests = [
+    "toc::tests::parses_header_keys_with_bom_and_crlf",
+    "toc::tests::non_utf8_toc_is_error_not_empty",
+    "toc::tests::oversized_toc_is_error",
+    "toc::tests::plain_only_folder_selected",
+    "toc::tests::suffixed_tocs_unvalidated_for_recognized_client",
+    "toc::tests::unfamiliar_with_suffixed_tocs_is_unvalidated",
+    "toc::tests::equal_summary_suffixed_tocs_still_unvalidated",
+    "toc::tests::only_foreign_suffix_is_unvalidated",
+    "toc::tests::no_candidate_is_none",
+    "toc::tests::unreadable_candidate_is_error",
+]
+
+[[case]]
+id = "A-23:core"
+tier = "offline"
+tests = [
+    "paths::tests::traversal_and_absolute_paths_rejected",
+    "paths::tests::reserved_device_names_rejected",
+    "paths::tests::trailing_dot_space_and_control_rejected",
+    "paths::tests::non_ascii_is_unsupported",
+    "inventory::tests::case_collision_marks_both_unsupported",
+    "records::tests::tree_with_unsafe_path_rejected",
+]
+
+[[case]]
+id = "A-09:core"
+tier = "offline"
+tests = [
+    "package::tests::shared_curse_id_groups_dbm",
+    "package::tests::dependency_edge_requires_stem_prefix",
+    "package::tests::name_prefix_groups_languages_folder",
+    "package::tests::family_edge_groups_questie",
+    "package::tests::family_edge_needs_five_char_stem",
+    "package::tests::grouping_is_deterministic_under_input_order",
+    "package::tests::membership_change_changes_hash",
+    "package::tests::identical_trees_compare_same",
+    "package::tests::newer_member_makes_package_greater",
+    "package::tests::mixed_member_orders_are_ambiguous",
+    "package::tests::same_labels_different_content_is_ambiguous",
+    "package::tests::modified_content_same_label_ambiguous",
+    "package::tests::unusable_member_is_ambiguous",
+    "package::tests::unversioned_member_follows_versioned_result",
+    "package::tests::set_relation_reported",
+]
+
+[[case]]
+id = "hash:core"
+tier = "offline"
+tests = [
+    "hash::tests::tree_hash_independent_of_input_order",
+    "hash::tests::tree_hash_changes_with_path_size_or_content",
+    "hash::tests::tree_and_package_hash_golden_vectors",
+]
+
+[[case]]
+id = "records:core"
+tier = "offline"
+tests = [
+    "records::tests::round_trip_all_schemas",
+    "records::tests::unknown_major_refused",
+    "records::tests::unknown_fields_ignored_within_major",
+    "records::tests::oversized_record_refused_before_parse",
+    "records::tests::state_for_other_group_or_product_rejected",
+    "records::tests::state_name_must_match_body",
+    "records::tests::tree_record_hash_recomputed_on_read",
+]
+
+[[case]]
+id = "A-20:core-admit"
+tier = "offline"
+tests = [
+    "admit::tests::newest_valid_state_admitted",
+    "admit::tests::newest_malformed_no_fallback",
+    "admit::tests::newest_unsupported_major_no_fallback",
+    "admit::tests::newest_cloud_only_no_fallback",
+    "admit::tests::regression_after_seeing_newer",
+    "admit::tests::enrollment_change_resets_watermark",
+    "admit::tests::only_newest_name_is_read",
+]
+
+[[case]]
+id = "A-07:core"
+tier = "offline"
+tests = [
+    "target::tests::newest_demonstrable_version_chosen",
+    "target::tests::independent_packages_converge",
+    "target::tests::ambiguity_blocks_only_that_package",
+    "target::tests::dominating_candidate_chosen_despite_other_ambiguity",
+    "target::tests::ineligible_dominating_candidate_no_fallback",
+    "target::tests::result_independent_of_input_order_and_duplicates",
+    "target::tests::record_timestamps_cannot_influence_target",
+    "target::tests::other_variant_state_ignored",
+    "target::tests::different_client_build_needs_decision",
+    "target::tests::foreign_suffix_only_candidate_not_installed",
+    "target::tests::unvalidated_mapping_candidate_not_installed",
+    "target::tests::partial_suite_candidate_needs_decision",
+    "target::tests::partial_candidate_not_installed_on_empty_peer",
+    "target::tests::complete_candidate_installed_on_empty_peer",
+    "target::tests::corrupt_tree_makes_package_unavailable",
+]
+
+[[case]]
+id = "A-04:core"
+tier = "offline"
+tests = [
+    "target::tests::absent_package_is_not_removal",
+    "target::tests::unavailable_member_is_not_absence",
+    "plan::tests::extra_local_folders_are_left_alone",
+    "plan::tests::local_newer_or_same_is_not_downgraded",
+]
+
+[[case]]
+id = "A-21:core"
+tier = "offline"
+tests = [
+    "plan::tests::game_running_blocks_apply_plan",
+    "plan::tests::unknown_activity_blocks_apply_plan",
+    "plan::tests::unstable_inventory_blocks_publish_and_apply",
+    "plan::tests::any_journal_blocks_apply_plan",
+    "exec::tests::activity_checked_before_every_live_rename",
+    "exec::tests::launch_before_commit_changes_nothing",
+    "exec::tests::no_live_mutation_after_launch_mid_commit",
+    "exec::tests::interrupted_package_recovers_after_game_exit",
+    "exec::tests::verify_with_game_running_waits",
+    "exec::tests::recovery_waits_while_game_running",
+    "exec::tests::rollback_gates_every_rename",
+    "exec::tests::rollback_refuses_to_move_externally_changed_live",
+]
+
+[[case]]
+id = "A-22:core"
+tier = "offline"
+tests = [
+    "exec::tests::destination_changed_during_staging_replans",
+    "exec::tests::destination_changed_before_rename_interrupts",
+    "exec::tests::rename_failure_interrupts_and_keeps_slots",
+    "exec::tests::staged_hash_mismatch_fails_without_live_change",
+    "exec::tests::missing_blob_skips_package_others_continue",
+    "exec::tests::live_mismatch_needs_help_and_pins",
+    "exec::tests::recovery_copy_modified_needs_help",
+    "exec::tests::crash_before_verify_reverifies_on_restart",
+    "exec::tests::crash_after_verify_before_finalize",
+    "exec::tests::restore_failure_keeps_journal_and_slots",
+    "exec::tests::restore_mismatch_needs_help",
+    "exec::tests::f02_crash_after_restoring_corrupt_copy_is_not_rolled_back",
+    "exec::tests::classify_slots_table",
+    "exec::tests::crash_at_every_effect_recovers_to_old_or_new",
+    "exec::tests::crash_during_recovery_at_every_effect_is_reentrant",
+    "exec::tests::staging_phase_crash_discards_partial_staging",
+    "exec::tests::each_package_has_own_op",
+    "exec::tests::settling_one_op_keeps_other_ops_evidence",
+    "exec::tests::needs_help_op_blocks_new_apply_and_is_kept",
+    "exec::tests::unknown_journal_state_needs_help",
+    "exec::tests::recovery_points_pruned_to_two_per_package",
+    "exec::tests::pinned_recovery_points_exceed_two_visibly",
+]
+
+[[case]]
+id = "A-20:core"
+tier = "offline"
+tests = [
+    "plan::tests::publish_uploads_missing_blobs_and_writes_state_last",
+    "exec::tests::publish_failure_leaves_no_state_record",
+    "exec::tests::corrupt_existing_blob_replaced_before_state",
+    "exec::tests::corrupt_existing_tree_replaced",
+    "exec::tests::same_size_mtime_corrupt_object_rehashed_and_replaced",
+    "exec::tests::publish_aborts_when_source_changes",
+    "plan::tests::publish_prunes_to_three_own_states",
+    "plan::tests::seq_never_reused",
+]
+
+[[case]]
+id = "A-24:core"
+tier = "offline"
+tests = [
+    "status::tests::published_is_not_confirmed",
+    "status::tests::confirmation_requires_peer_apply_report_and_trees",
+    "status::tests::interrupted_or_needs_help_report_not_confirmed",
+    "status::tests::peer_clock_never_makes_member_current",
+    "status::tests::needs_decision_shows_evidence",
+    "status::tests::headline_priority",
+]
+
+[[case]]
+id = "A-43:core"
+tier = "offline"
+tests = [
+    "arch::tests::core_sources_use_no_os_io_or_clock",
+]
+
 # A-39: the verifier itself must detect false greens.
 [[case]]
 id = "A-39"
