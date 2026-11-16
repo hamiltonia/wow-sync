@@ -1,0 +1,3 @@
+Window bounds: 2232,317,656,759
+Create bounds: 2256,1276,608,38
+Create reports offscreen: False

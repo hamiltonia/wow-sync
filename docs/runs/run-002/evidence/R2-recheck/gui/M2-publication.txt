@@ -1,0 +1,2 @@
+After the later Extra publication: unique blocked main.lua object absent=True; blocked folder tree record absent=True.
+Blocked inventory metadata is still present for status; no claim that its metadata was excluded.

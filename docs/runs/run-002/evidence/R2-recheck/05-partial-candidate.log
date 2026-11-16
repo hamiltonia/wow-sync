@@ -1,0 +1,19 @@
+
+running 1 test
+test target::tests::partial_suite_candidate_needs_decision ... FAILED
+
+failures:
+
+failures:
+    target::tests::partial_suite_candidate_needs_decision
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 162 filtered out; finished in 0.00s
+
+   Compiling wow-sync-core v0.0.0 (D:\GitHub\wow-sync.worktrees\R2-recheck\docs\runs\run-002\evidence\R2-recheck\clean\crates\wow-sync-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.57s
+     Running unittests src\lib.rs (target\debug\build\wow-sync-core/77511e3dde9d5048\out\wow_sync_core-77511e3dde9d5048.exe)
+
+thread 'target::tests::partial_suite_candidate_needs_decision' (15636) panicked at crates\wow-sync-core\src\target.rs:444:22:
+expected NeedsDecision, got Chosen { version: PackageVersion { package: FolderKey("suite"), hash: Sha256([76, 243, 141, 86, 161, 26, 187, 137, 192, 71, 1, 216, 250, 71, 173, 103, 27, 157, 150, 98, 178, 114, 119, 160, 214, 129, 112, 224, 7, 172, 13, 19]), folders: [FolderState { name: "Suite", key: FolderKey("suite"), status: Ok, tree: Some(Sha256([39, 58, 190, 13, 33, 41, 152, 134, 24, 7, 162, 236, 46, 41, 15, 249, 177, 97, 208, 160, 254, 66, 227, 78, 149, 119, 197, 35, 114, 151, 158, 82])), fingerprint: None, files: 2, bytes: 38, toc: TocSummary { kind: Selected, file: Some("Suite.toc"), suffix: None, version: Some("2.0"), interface: [11508], hard_deps: [], ids: [] }, file_entries: [FileEntry { path: RelPath("Suite.toc"), size: 36, sha256: Sha256([246, 8, 181, 67, 84, 210, 59, 157, 254, 38, 195, 117, 174, 232, 92, 106, 37, 175, 211, 198, 211, 253, 89, 47, 239, 227, 61, 53, 61, 21, 41, 137]) }, FileEntry { path: RelPath("main.lua"), size: 2, sha256: Sha256([156, 10, 190, 81, 198, 230, 101, 93, 129, 222, 45, 4, 77, 79, 177, 148, 147, 31, 5, 140, 4, 38, 198, 124, 114, 133, 216, 245, 101, 126, 214, 74]) }] }], client: ClientInfo { build_version: Some("1.15.8.12345"), toc_mapping: "validated-plain/1" } }, sources: [ComputerId("02020202020202020202020202020202")], why: NewerVersion { folder: "Suite", from: "1.0", to: "2.0", source: ComputerId("02020202020202020202020202020202") } }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `-p wow-sync-core --lib`

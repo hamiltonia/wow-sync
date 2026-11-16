@@ -1,0 +1,19 @@
+Directly launched FakeClient stopped by its launch PID; B became a3.
+ControlType.Text: WoW Sync
+ControlType.Group: Developer build - synthetic installs only. This computer: Recheck-B
+ControlType.Text: Everything is up to date
+ControlType.Group: Add-on sync group on Recheck-B (World of Warcraft: Forever (wowf) / _forever_)
+ControlType.Group: Game activity: NotRunning
+ControlType.Button: Sync now
+ControlType.Text: Add-ons
+ControlType.List: Add-ons
+ControlType.ListItem: alpha: Alpha: updated from 2.0 to 3.0 from computer Recheck-A and verified on this computer
+ControlType.Group: Recovery: 2 recovery point(s) kept, 0 interrupted update(s)
+ControlType.Text: Other computers
+ControlType.List: Other computers
+ControlType.ListItem: Recheck-A: data received; reported at 1794810473219 by its own clock (peer clock); last seen here at 1794810475576
+ControlType.Group: Published 0 s ago
+ControlType.Text: Last sync
+ControlType.List: Last sync
+ControlType.ListItem: alpha: applied
+ControlType.ListItem: published seq 2 (0 new objects)

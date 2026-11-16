@@ -1,0 +1,49 @@
+{
+  "git_sha": "de6ffc9ac62f2ae03647d9980bcf81a6dcabc85f",
+  "git_dirty": true,
+  "generated_at": "2026-11-16T06:32:59Z",
+  "tiers": [
+    "offline"
+  ],
+  "allow_blocked": false,
+  "overall": "PASS",
+  "exit_ok": true,
+  "checks": [
+    {
+      "tier": "offline",
+      "name": "fmt",
+      "status": "PASS",
+      "detail": "`cargo fmt --all --check` exit 0"
+    },
+    {
+      "tier": "offline",
+      "name": "clippy",
+      "status": "PASS",
+      "detail": "`cargo clippy --workspace --all-targets -- -D warnings` exit 0"
+    },
+    {
+      "tier": "offline",
+      "name": "test",
+      "status": "PASS",
+      "detail": "`cargo test --workspace` exit 0"
+    },
+    {
+      "tier": "offline",
+      "name": "required-cases",
+      "status": "PASS",
+      "detail": "34 listed offline case(s) verified against 256 test result(s)"
+    },
+    {
+      "tier": "offline",
+      "name": "deny",
+      "status": "PASS",
+      "detail": "`cargo deny check` exit 0"
+    },
+    {
+      "tier": "offline",
+      "name": "markdown-links",
+      "status": "PASS",
+      "detail": "80 Markdown file(s), no broken relative links"
+    }
+  ]
+}
