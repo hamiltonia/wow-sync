@@ -778,13 +778,64 @@ mod tests {
         wow_sync_core::hash::package_hash(&[(f.key.clone(), f.tree.unwrap())]).to_string()
     }
 
-    /// R3-M1 (R2-recheck3): a pending-report clear that keeps failing (the file is held open
-    /// without write/delete sharing) must not let an inventory-only state displace the state
+    /// Test-only fault: `path` stays readable but cannot be replaced until dropped.
+    /// Windows: a handle that shares read access only (`FILE_SHARE_READ`).
+    /// macOS: the owner-settable immutable flag (`chflags uchg`). This needs no root, and
+    /// rename onto an immutable target fails with EPERM. The caller asserts the block works,
+    /// so an ineffective block fails the test instead of passing vacuously.
+    #[cfg(any(windows, target_os = "macos"))]
+    struct ReplaceBlock {
+        #[cfg(windows)]
+        _hold: std::fs::File,
+        #[cfg(target_os = "macos")]
+        path: PathBuf,
+    }
+
+    #[cfg(any(windows, target_os = "macos"))]
+    impl ReplaceBlock {
+        #[cfg(windows)]
+        fn new(path: &Path) -> Self {
+            use std::os::windows::fs::OpenOptionsExt;
+            let hold = std::fs::OpenOptions::new()
+                .read(true)
+                .share_mode(1)
+                .open(path)
+                .unwrap();
+            Self { _hold: hold }
+        }
+
+        #[cfg(target_os = "macos")]
+        fn new(path: &Path) -> Self {
+            Self::chflags("uchg", path);
+            Self {
+                path: path.to_path_buf(),
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        fn chflags(flag: &str, path: &Path) {
+            let st = std::process::Command::new("/usr/bin/chflags")
+                .arg(flag)
+                .arg(path)
+                .status()
+                .unwrap();
+            assert!(st.success(), "chflags {flag} failed: {st}");
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    impl Drop for ReplaceBlock {
+        fn drop(&mut self) {
+            Self::chflags("nouchg", &self.path);
+        }
+    }
+
+    /// R3-M1 (R2-recheck3): a pending-report clear that keeps failing (the file stays readable
+    /// but cannot be replaced) must not let an inventory-only state displace the state
     /// that carries the report, so the same `applied` result is never published twice.
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     #[test]
     fn pending_clear_failure_does_not_duplicate_report() {
-        use std::os::windows::fs::OpenOptionsExt;
         use wow_sync_core::records::{decode, encode, CodeState, PendingReport};
         let lab = Lab::new();
         let mut a = lab.pc("a");
@@ -820,12 +871,8 @@ mod tests {
         let path = b.cfg.state_dir.join("pending-report.json");
         std::fs::write(&path, &bytes).unwrap();
         b.restart();
-        // FILE_SHARE_READ only: the store stays readable but cannot be replaced.
-        let hold = std::fs::OpenOptions::new()
-            .read(true)
-            .share_mode(1)
-            .open(&path)
-            .unwrap();
+        // The store stays readable but cannot be replaced.
+        let hold = ReplaceBlock::new(&path);
         assert!(LocalState::open_at(&b.cfg.state_dir)
             .unwrap()
             .write_atomic("pending-report.json", &bytes)
