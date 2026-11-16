@@ -1,40 +1,52 @@
 name: spike-gpui
 
-# Build-only feasibility spike (run-001 S-gpui). Nothing is run or uploaded.
+# Build-only feasibility spikes (run-001 S-gpui on crates.io 0.2.2; run-002 R2-pin on a
+# pinned Zed release tag). Nothing is run or uploaded.
 on:
   workflow_dispatch:
   push:
     paths:
       - "spikes/gpui/**"
+      - "spikes/gpui-pin/**"
       - ".github/workflows/spike-gpui.yml"
 
 permissions:
   contents: read
+
+concurrency:
+  group: spike-gpui-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   build-targets:
-    name: build-only ${{ matrix.target }}
+    name: build-only ${{ matrix.spike }} ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
+        spike: [gpui, gpui-pin]
+        target:
+          - x86_64-pc-windows-msvc
+          - aarch64-pc-windows-msvc
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
         include:
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-          - os: windows-latest
-            target: aarch64-pc-windows-msvc
-          - os: macos-latest
-            target: aarch64-apple-darwin
-          - os: macos-latest
-            target: x86_64-apple-darwin
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+          - target: x86_64-apple-darwin
+            os: macos-latest
     defaults:
       run:
         shell: bash
-        working-directory: spikes/gpui
+        working-directory: spikes/${{ matrix.spike }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

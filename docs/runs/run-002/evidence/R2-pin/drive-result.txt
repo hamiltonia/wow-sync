@@ -1,0 +1,65 @@
+19:21:45.606 === Phase 1: mode normal (close -> hide) ===
+19:21:49.528 launched pid=16240
+19:21:53.582 windows: 1639344|Zed::Window|True ; 4326318|tray_icon_app|False ; 4196888|Zed::PlatformWindow|False ; 1115088|MSCTFIME UI|False ; 984288|IME|False
+19:21:53.586 L1 start: main window class=Zed::Window visible=True (expect True); tray window found=True
+19:21:53.605 L2 WM_CLOSE -> hidden=True; process alive=True
+19:21:53.684 L3 tray click #1 -> shown=True
+19:21:53.759 L4 tray click #2 -> hidden=True
+19:21:53.849 L5 second instance exited=True code=0; first -> shown=True; first alive=True
+19:21:53.857 L6 single instance: spike-gpui-pin process count=1 (expect 1)
+19:21:54.465   WM_COMMAND id=1000 -> exited=False windowVisible=True
+19:21:55.082   WM_COMMAND id=1001 -> exited=True windowVisible=
+19:21:55.082 L7 quit via tray menu command -> process exited=True
+19:21:55.084 === Phase 2: mode destroy (close really destroys; keep-alive with no window) ===
+19:21:59.097 K1 start: visible=True
+19:21:59.909 K2 windows after close: 2098402|tray_icon_app|False ; 1049824|Zed::PlatformWindow|False ; 1180624|IME|False ; 4391854|MSCTFIME UI|False
+19:22:02.926 K2 WM_CLOSE -> window gone=True; process alive after 3 s=True; tray window still present=True
+19:22:02.982 K3 tray click with no window -> new window shown=True
+19:22:03.045 K4 close again -> gone=True
+19:22:03.122 K5 second instance while no window -> first shows window=True; first alive=True
+19:22:03.134 working set MiB=63.5 (informational only)
+19:22:03.143 stopped test process pid=16012
+19:22:05.148 === Phase 3: mode hidden (no window ever, tray only) ===
+19:22:09.168 H1 windows: 2032878|tray_icon_app|False ; 1115360|Zed::PlatformWindow|False ; 2163938|IME|False ; main window=False; alive=True
+19:22:09.302 H2 tray click -> window shown=True
+19:22:09.307 stopped test process pid=9372
+--- app log ---
+[     0 ms] pid=16240 start mode=normal n=0 sw_hide=false
+[   244 ms] pid=16240 tray icon created
+[   288 ms] pid=16240 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[   288 ms] pid=16240 window opened hwnd=0x1903b0
+[  4058 ms] pid=16240 close requested -> intercepted, hiding to tray
+[  4090 ms] pid=16240 tray left-click event
+[  4099 ms] pid=16240 shown, visible=true
+[  4209 ms] pid=16240 tray left-click event
+[  4214 ms] pid=16240 tray click: hid window
+[     0 ms] pid=22640 second instance: signalled first instance to show; exiting
+[  4270 ms] pid=16240 second-instance signal received
+[  4280 ms] pid=16240 shown, visible=true
+[  4333 ms] pid=16240 tray menu: Show
+[  4340 ms] pid=16240 shown, visible=true
+[  4991 ms] pid=16240 tray menu: Quit
+[  4991 ms] pid=16240 quitting via cx.quit()
+[  4992 ms] pid=16240 run() returned; process exiting
+[     0 ms] pid=16012 start mode=destroy n=0 sw_hide=false
+[   246 ms] pid=16012 tray icon created
+[   288 ms] pid=16012 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[   290 ms] pid=16012 window opened hwnd=0x1c04ee
+[  3990 ms] pid=16012 close requested -> window destroyed (keep-alive test)
+[  7843 ms] pid=16012 tray left-click event
+[  7857 ms] pid=16012 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[  7858 ms] pid=16012 window opened hwnd=0x1d04ee
+[  7858 ms] pid=16012 shown, visible=true
+[  7874 ms] pid=16012 close requested -> window destroyed (keep-alive test)
+[     0 ms] pid=6596 second instance: signalled first instance to show; exiting
+[  7979 ms] pid=16012 second-instance signal received
+[  7993 ms] pid=16012 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[  7993 ms] pid=16012 window opened hwnd=0x1e04ee
+[  7994 ms] pid=16012 shown, visible=true
+[     0 ms] pid=9372 start mode=hidden n=0 sw_hide=false
+[   288 ms] pid=9372 tray icon created
+[   288 ms] pid=9372 MARK 1794799325461 hidden-idle
+[  4057 ms] pid=9372 tray left-click event
+[  4117 ms] pid=9372 gpu_specs: device=NVIDIA RTX 2000 Ada Generation Laptop GPU driver=NVIDIA Corporation software_emulated=false
+[  4117 ms] pid=9372 window opened hwnd=0x1303d0
+[  4117 ms] pid=9372 shown, visible=true

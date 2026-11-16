@@ -1,0 +1,19 @@
+[package]
+name = "spike-gpui-pin"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+# Tag v1.28.1 (immutable release), commit e8bc16a. `version` satisfies cargo-deny's wildcard ban.
+gpui = { version = "0.2.2", git = "https://github.com/zed-industries/zed", rev = "e8bc16acee5ae1937600d571d441c4b5d7b0d288" }
+gpui_platform = { version = "0.1.0", git = "https://github.com/zed-industries/zed", rev = "e8bc16acee5ae1937600d571d441c4b5d7b0d288" }
+tray-icon = "=0.26.1"
+raw-window-handle = "0.6"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 16
