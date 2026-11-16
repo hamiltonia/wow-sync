@@ -1,0 +1,1 @@
+Close hides: True; second invocation exits: True; first reappears: True

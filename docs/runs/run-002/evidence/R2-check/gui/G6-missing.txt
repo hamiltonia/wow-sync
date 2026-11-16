@@ -1,0 +1,13 @@
+Provider root does not exist; application displays a reason and does not recreate it.
+ControlType.Text: WoW Sync
+ControlType.Group: Developer build - synthetic installs only. This computer: Check-B
+ControlType.Group: shared folder problem: NotFound at <synthetic-lab>\missing-provider: not found
+ControlType.Text: Something needs attention
+ControlType.Group:  on  ()
+ControlType.Group: Game activity:
+ControlType.Group: Problem: shared folder problem: NotFound at <synthetic-lab>\missing-provider: not found
+ControlType.Button: Sync now
+ControlType.Text: Add-ons
+ControlType.List: Add-ons
+ControlType.Text: Other computers
+ControlType.List: Other computers

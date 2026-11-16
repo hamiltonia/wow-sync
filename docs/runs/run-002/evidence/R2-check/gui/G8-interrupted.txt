@@ -1,0 +1,18 @@
+Injected crash after 2 effects; no FakeClient running.
+ControlType.Text: WoW Sync
+ControlType.Group: Developer build - synthetic installs only. This computer: Check-B
+ControlType.Text: Waiting
+ControlType.Group: Add-on sync group on Check-B (Forever / _forever_)
+ControlType.Group: Game activity: NotRunning
+ControlType.Button: Sync now
+ControlType.Text: Add-ons
+ControlType.List: Add-ons
+ControlType.ListItem: alpha: WoW started while alpha was being updated; it will be restored to its previous version after WoW exits
+ControlType.Group: Recovery: 2 recovery point(s) kept, 1 interrupted update(s)
+ControlType.Text: Other computers
+ControlType.List: Other computers
+ControlType.ListItem: Check-A: data received; reported at 1794807998975 by its own clock (peer clock); last seen here at 1794808002105
+ControlType.Text: Last sync
+ControlType.List: Last sync
+ControlType.ListItem: alpha: failed - could not prepare alpha: Crashed: simulated crash
+ControlType.ListItem: Stopped mid-way (simulated crash for the developer check)

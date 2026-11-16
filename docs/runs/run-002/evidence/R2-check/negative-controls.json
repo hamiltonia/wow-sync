@@ -1,0 +1,218 @@
+[
+  {
+    "mutation": "01-cross-scheme",
+    "test": "version::tests::cross_scheme_is_ambiguous",
+    "exit": 101,
+    "failing_tests": [
+      "version::tests::cross_scheme_is_ambiguous"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "02-channel",
+    "test": "version::tests::prerelease_vs_release_is_ambiguous",
+    "exit": 101,
+    "failing_tests": [
+      "version::tests::prerelease_vs_release_is_ambiguous"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "03-rename-gate",
+    "test": "exec::tests::activity_checked_before_every_live_rename",
+    "exit": 101,
+    "failing_tests": [
+      "exec::tests::activity_checked_before_every_live_rename"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "04-rollback-on-launch",
+    "test": "exec::tests::no_live_mutation_after_launch_mid_commit",
+    "exit": 101,
+    "failing_tests": [
+      "exec::tests::no_live_mutation_after_launch_mid_commit"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "05-unverified-finalize",
+    "test": "exec::tests::crash_before_verify_reverifies_on_restart",
+    "exit": 101,
+    "failing_tests": [
+      "exec::tests::crash_before_verify_reverifies_on_restart"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "06-destination-revalidation",
+    "test": "exec::tests::destination_changed_during_staging_replans",
+    "exit": 101,
+    "failing_tests": [
+      "exec::tests::destination_changed_during_staging_replans"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "07-ignore-pinned",
+    "test": "exec::tests::pinned_recovery_points_exceed_two_visibly",
+    "exit": 101,
+    "failing_tests": [
+      "exec::tests::pinned_recovery_points_exceed_two_visibly"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "08-absence-as-removal",
+    "test": "target::tests::absent_package_is_not_removal",
+    "exit": 101,
+    "failing_tests": [
+      "target::tests::absent_package_is_not_removal"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "09-partial-candidate",
+    "test": "target::tests::partial_suite_candidate_needs_decision",
+    "exit": 101,
+    "failing_tests": [
+      "target::tests::partial_suite_candidate_needs_decision"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "10-timestamp-winner",
+    "test": "target::tests::record_timestamps_cannot_influence_target",
+    "exit": 101,
+    "failing_tests": [
+      "target::tests::record_timestamps_cannot_influence_target"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "11-fallback-selection",
+    "test": "admit::tests::newest_malformed_no_fallback",
+    "exit": 101,
+    "failing_tests": [
+      "admit::tests::newest_malformed_no_fallback"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "12-trust-existing-object",
+    "test": "exec::tests::corrupt_existing_blob_replaced_before_state",
+    "exit": 101,
+    "failing_tests": [
+      "exec::tests::corrupt_existing_blob_replaced_before_state"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "13-suffixed-toc",
+    "test": "toc::tests::suffixed_tocs_unvalidated_for_recognized_client",
+    "exit": 101,
+    "failing_tests": [
+      "toc::tests::suffixed_tocs_unvalidated_for_recognized_client"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "14-local-only-completeness",
+    "test": "target::tests::partial_candidate_not_installed_on_empty_peer",
+    "exit": 101,
+    "failing_tests": [
+      "target::tests::partial_candidate_not_installed_on_empty_peer"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "15-remembered-recovery-state",
+    "test": "exec::tests::crash_during_recovery_at_every_effect_is_reentrant",
+    "exit": 101,
+    "failing_tests": [
+      "exec::tests::crash_during_recovery_at_every_effect_is_reentrant"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "16-cleanup-all-ops",
+    "test": "exec::tests::settling_one_op_keeps_other_ops_evidence",
+    "exit": 101,
+    "failing_tests": [
+      "exec::tests::settling_one_op_keeps_other_ops_evidence"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "17-size-mtime-trust",
+    "test": "exec::tests::same_size_mtime_corrupt_object_rehashed_and_replaced",
+    "exit": 101,
+    "failing_tests": [
+      "exec::tests::same_size_mtime_corrupt_object_rehashed_and_replaced"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "18-recall-on-open",
+    "test": "fs_safe::tests::unavailable_attribute_combinations",
+    "exit": 101,
+    "failing_tests": [
+      "fs_safe::tests::unavailable_attribute_combinations"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "19-synthetic-marker",
+    "test": "variant::tests::install_without_synthetic_marker_refused",
+    "exit": 101,
+    "failing_tests": [
+      "variant::tests::install_without_synthetic_marker_refused"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "20-unsupported-consent",
+    "test": "variant::tests::consent_alone_does_not_confirm",
+    "exit": 101,
+    "failing_tests": [
+      "variant::tests::consent_alone_does_not_confirm"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "21-mount-cloud",
+    "test": "fs_safe::tests::classify_tag_cloud_vs_link_vs_other",
+    "exit": 101,
+    "failing_tests": [
+      "fs_safe::tests::classify_tag_cloud_vs_link_vs_other"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "22-inaccessible-client",
+    "test": "winproc::tests::inaccessible_possible_client_is_unknown",
+    "exit": 101,
+    "failing_tests": [
+      "winproc::tests::inaccessible_possible_client_is_unknown"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "23-member-is-confirmed",
+    "test": "status::tests::published_is_not_confirmed",
+    "exit": 101,
+    "failing_tests": [
+      "status::tests::published_is_not_confirmed"
+    ],
+    "result": "CAUGHT"
+  },
+  {
+    "mutation": "24-state-before-objects",
+    "test": "exec::tests::publish_failure_leaves_no_state_record",
+    "exit": 101,
+    "failing_tests": [
+      "exec::tests::publish_failure_leaves_no_state_record"
+    ],
+    "result": "CAUGHT"
+  }
+]

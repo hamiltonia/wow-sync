@@ -1,0 +1,14 @@
+Focused Sync now via UIA; physical Enter activated it.
+ControlType.Text: WoW Sync
+ControlType.Group: Developer build - synthetic installs only. This computer: Check-B
+ControlType.Text: Everything is up to date
+ControlType.Group: Add-on sync group on Check-B (Forever / _forever_)
+ControlType.Group: Game activity: NotRunning
+ControlType.Button: Sync now
+ControlType.Text: Add-ons
+ControlType.List: Add-ons
+ControlType.ListItem: alpha: up to date with the versions this computer can see
+ControlType.Group: Recovery: 2 recovery point(s) kept, 0 interrupted update(s)
+ControlType.Text: Other computers
+ControlType.List: Other computers
+ControlType.ListItem: Check-A: data received; reported at 1794807998975 by its own clock (peer clock); last seen here at 1794808124652

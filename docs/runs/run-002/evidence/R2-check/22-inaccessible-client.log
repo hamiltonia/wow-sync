@@ -1,0 +1,21 @@
+
+running 1 test
+test winproc::tests::inaccessible_possible_client_is_unknown ... FAILED
+
+failures:
+
+failures:
+    winproc::tests::inaccessible_possible_client_is_unknown
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 47 filtered out; finished in 0.00s
+
+   Compiling wow-sync-adapters v0.0.0 (D:\GitHub\wow-sync.worktrees\R2-check\docs\runs\run-002\evidence\R2-check\clean\crates\wow-sync-adapters)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.06s
+     Running unittests src\lib.rs (target\debug\build\wow-sync-adapters/36fb4bc78519d6b6\out\wow_sync_adapters-36fb4bc78519d6b6.exe)
+
+thread 'winproc::tests::inaccessible_possible_client_is_unknown' (3148) panicked at crates\wow-sync-adapters\src\winproc.rs:297:9:
+assertion `left == right` failed
+  left: NotRunning
+ right: Unknown("possible client WowClassic.exe pid 20 cannot be inspected")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `-p wow-sync-adapters --lib`

@@ -1,0 +1,16 @@
+Provider directory replaced by a file; error observed, then restored.
+ControlType.Text: WoW Sync
+ControlType.Group: Developer build - synthetic installs only. This computer: Check-A
+ControlType.Group: shared folder problem: NotPlainFile at <synthetic-lab>\provider: not a directory
+ControlType.Text: Something needs attention
+ControlType.Group:  on  ()
+ControlType.Group: Game activity:
+ControlType.Group: Problem: shared folder problem: NotPlainFile at <synthetic-lab>\provider: not a directory
+ControlType.Button: Sync now
+ControlType.Text: Add-ons
+ControlType.List: Add-ons
+ControlType.Text: Other computers
+ControlType.List: Other computers
+ControlType.Text: Last sync
+ControlType.List: Last sync
+ControlType.ListItem: published seq 4 (3 new objects)

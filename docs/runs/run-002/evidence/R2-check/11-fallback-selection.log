@@ -1,0 +1,19 @@
+
+running 1 test
+test admit::tests::newest_malformed_no_fallback ... FAILED
+
+failures:
+
+failures:
+    admit::tests::newest_malformed_no_fallback
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 151 filtered out; finished in 0.00s
+
+   Compiling wow-sync-core v0.0.0 (D:\GitHub\wow-sync.worktrees\R2-check\docs\runs\run-002\evidence\R2-check\clean\crates\wow-sync-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.45s
+     Running unittests src\lib.rs (target\debug\build\wow-sync-core/77511e3dde9d5048\out\wow_sync_core-77511e3dde9d5048.exe)
+
+thread 'admit::tests::newest_malformed_no_fallback' (36612) panicked at crates\wow-sync-core\src\admit.rs:228:9:
+MemberView { computer: ComputerId("01010101010101010101010101010101"), enrollment: EnrollmentId("01010101010101010101010101010101"), display_name: "PC1", latest: Unusable { seq: 2, reason: "malformed record: key must be a string at line 1 column 3" } }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `-p wow-sync-core --lib`

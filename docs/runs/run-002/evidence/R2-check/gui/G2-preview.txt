@@ -1,0 +1,18 @@
+Fresh second unfamiliar synthetic install; same product and layout as C before enrollment.
+ControlType.Text: WoW Sync
+ControlType.Group: Developer build - synthetic installs only. This computer: Check-D
+ControlType.Text: Set up this computer
+ControlType.Group: Unfamiliar game version - product wow_test in folder _test_ (build 1.0.0.1)
+ControlType.Group: 1 add-on folder(s) in _test_/Interface/AddOns would sync; 1 blocked
+ControlType.Group: Only add-on code (Interface/AddOns) is synced. Game settings, saved variables and accounts are excluded.
+ControlType.Text: Blocked folders (not synced)
+ControlType.List: Blocked folders (not synced)
+ControlType.ListItem: blocked: UnvalidatedTocMapping
+ControlType.Text: Add-on folders that would sync
+ControlType.List: Add-on folders that would sync
+ControlType.ListItem: good
+ControlType.CheckBox: I confirm this is the game version shown above
+ControlType.CheckBox: I agree to sync the add-on code listed above for this installation
+ControlType.Button: Create a new sync group
+ControlType.Button: Join group "Add-on sync group" (wowf)
+ControlType.Button: Join group "Add-on sync group" (wow_test)

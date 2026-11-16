@@ -1,0 +1,16 @@
+Only A exists; no peer apply report is possible.
+ControlType.Text: WoW Sync
+ControlType.Group: Developer build - synthetic installs only. This computer: Check-A
+ControlType.Text: Everything is up to date
+ControlType.Group: Add-on sync group on Check-A (Forever / _forever_)
+ControlType.Group: Game activity: NotRunning
+ControlType.Button: Sync now
+ControlType.Text: Add-ons
+ControlType.List: Add-ons
+ControlType.ListItem: alpha: up to date with the versions this computer can see
+ControlType.Text: Other computers
+ControlType.List: Other computers
+ControlType.Group: Published 0 s ago
+ControlType.Text: Last sync
+ControlType.List: Last sync
+ControlType.ListItem: published seq 1 (3 new objects)

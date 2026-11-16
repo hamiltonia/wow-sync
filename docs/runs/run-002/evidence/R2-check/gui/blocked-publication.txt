@@ -1,0 +1,1 @@
+Blocked inventory published: status=ok; toc=unvalidated; files=2; blocked main.lua blob present=True

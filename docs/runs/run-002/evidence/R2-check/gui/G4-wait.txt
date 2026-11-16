@@ -1,0 +1,20 @@
+FakeClient running; B main.lua remains a2 while A is a3.
+ControlType.Text: WoW Sync
+ControlType.Group: Developer build - synthetic installs only. This computer: Check-B
+ControlType.Text: Waiting
+ControlType.Group: Add-on sync group on Check-B (Forever / _forever_)
+ControlType.Group: Game activity: Running { pids: [19504] }
+ControlType.Button: Sync now
+ControlType.Text: Waiting
+ControlType.List: Waiting
+ControlType.ListItem: World of Warcraft is running; nothing was changed
+ControlType.Text: Add-ons
+ControlType.List: Add-ons
+ControlType.ListItem: alpha: Alpha: version 3.0 from computer Check-A is newer than 2.0 here
+ControlType.Group: Recovery: 1 recovery point(s) kept, 0 interrupted update(s)
+ControlType.Text: Other computers
+ControlType.List: Other computers
+ControlType.ListItem: Check-A: data received; reported at 1794807972072 by its own clock (peer clock); last seen here at 1794807976471
+ControlType.Text: Last sync
+ControlType.List: Last sync
+ControlType.ListItem: World of Warcraft is running; nothing was changed

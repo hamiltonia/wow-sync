@@ -1,0 +1,19 @@
+Tab focus 1: I agree to sync the add-on code listed above for this installation
+Tab focus 2: Create a new sync group
+Space then Enter enrolled: True
+ControlType.Text: WoW Sync
+ControlType.Group: Developer build - synthetic installs only. This computer: Check-C
+ControlType.Text: Everything is up to date
+ControlType.Group: Add-on sync group on Check-C (wow_test / _test_)
+ControlType.Group: Game activity: NotRunning
+ControlType.Button: Sync now
+ControlType.Text: Add-ons
+ControlType.List: Add-ons
+ControlType.ListItem: blocked: up to date with the versions this computer can see
+ControlType.ListItem: good: up to date with the versions this computer can see
+ControlType.Text: Other computers
+ControlType.List: Other computers
+ControlType.Group: Published 3 s ago
+ControlType.Text: Last sync
+ControlType.List: Last sync
+ControlType.ListItem: published seq 1 (5 new objects)
