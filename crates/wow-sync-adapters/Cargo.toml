@@ -1,0 +1,23 @@
+[package]
+name = "wow-sync-adapters"
+description = "Effect adapters for WoW Sync: safe filesystem, scanning, install staging, provider folder, process observation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+testkit = []
+
+[dependencies]
+sha2 = { workspace = true }
+getrandom = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Threading",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_Storage_FileSystem",
+] }
