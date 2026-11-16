@@ -112,6 +112,19 @@ in a Copilot CLI session on 2026-11-14, against spec revision `7a2ccdf`.
 - D-04 models, D-05 worker limits, D-08/D-09/D-14 data scope and PLAN §7 stops
   other than the credit pause (including owner review of S-forever) still apply.
 
+### D-17: Continue past run-001 within the D-16 budget (2026-11-15)
+
+- Owner: "I want you to continue until you run out of tokens, then we'll
+  discuss how much work is remaining".
+- Run-002 ([runs/run-002/PLAN.md](runs/run-002/PLAN.md)) proceeds under the
+  remaining D-16 allowance (stop launching at ≥9,500 AIU cumulative across
+  run-001 and run-002).
+- Owner was unavailable for the prerequisite questions; the orchestrator's
+  recommendations in run-002 PLAN §6 apply as **provisional, reversible
+  defaults** pending owner review. Held (not done): committing the S-forever
+  report, dismissing Dependabot alerts, `git gc --prune`.
+- D-04 models, D-05 limits, data scope (D-08/D-09/D-14) still apply.
+
 ### D-10: Representative addon dataset
 
 - Resolved by D-14: the dev PC's `_forever_` addons (102 folders, ~3.3 GB as of
@@ -151,4 +164,5 @@ in a Copilot CLI session on 2026-11-14, against spec revision `7a2ccdf`.
 | 2026-11-14 | D-01–D-09 | Initial owner answers recorded; D-10, D-13 open | `7a2ccdf` |
 | 2026-11-14 | D-10, D-14, D-15 | Dev PC WoW data is test data; run-001 plan approved | `baa81e3` |
 | 2026-11-14 | D-13 | Run-001 ceiling 2,500 AIU cumulative approved | `a4d471b` |
-| 2026-11-15 | D-16 | Run-001 ceiling raised to 10,000 AIU; continue in current session | this commit |
+| 2026-11-15 | D-16 | Run-001 ceiling raised to 10,000 AIU; continue in current session | `f2a1323` |
+| 2026-11-15 | D-17 | Continue into run-002 within D-16 budget; provisional defaults | this commit |
