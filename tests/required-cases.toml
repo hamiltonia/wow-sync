@@ -360,3 +360,79 @@ tests = [
     "provider::tests::dropbox_hydrated_tagged_entries_accepted",
     "provider::tests::dropbox_online_only_entry_refused",
 ]
+
+[[case]]
+id = "A-06:slice"
+tier = "offline"
+tests = [
+    "e2e::tests::two_installs_publish_and_apply_through_temp_provider",
+]
+
+[[case]]
+id = "A-07:slice"
+tier = "offline"
+tests = [
+    "e2e::tests::independent_updates_converge",
+]
+
+[[case]]
+id = "A-08:slice"
+tier = "offline"
+tests = [
+    "e2e::tests::ambiguous_addon_stops_only_that_addon",
+]
+
+[[case]]
+id = "A-09:slice"
+tier = "offline"
+tests = [
+    "e2e::tests::partial_suite_on_target_is_not_mixed",
+    "e2e::tests::empty_peer_does_not_receive_partial_suite",
+]
+
+[[case]]
+id = "A-21:slice"
+tier = "offline"
+tests = [
+    "e2e::tests::game_running_on_target_blocks_apply_then_resumes",
+]
+
+[[case]]
+id = "A-21:slice-native"
+tier = "native"
+tests = [
+    "e2e::tests::fake_client_blocks_real_apply",
+]
+
+[[case]]
+id = "A-46:slice"
+tier = "offline"
+tests = [
+    "e2e::tests::unfamiliar_variant_blocked_until_confirmed",
+    "e2e::tests::join_refused_for_other_product",
+    "e2e::tests::install_without_marker_refused",
+]
+
+[[case]]
+id = "A-22:slice"
+tier = "offline"
+tests = [
+    "e2e::tests::crash_mid_apply_recovers_on_restart",
+    "e2e::tests::two_package_crash_at_every_effect_recovers_with_real_adapters",
+    "e2e::tests::destination_updated_during_staging_is_not_replaced",
+    "e2e::tests::crash_during_recovery_with_real_adapters_is_reentrant",
+]
+
+[[case]]
+id = "A-20:slice"
+tier = "offline"
+tests = [
+    "e2e::tests::publish_aborts_when_source_changes",
+]
+
+[[case]]
+id = "A-24:slice"
+tier = "offline"
+tests = [
+    "e2e::tests::peer_confirmation_only_after_apply",
+]

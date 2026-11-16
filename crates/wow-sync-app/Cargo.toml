@@ -1,0 +1,23 @@
+[package]
+name = "wow-sync-app"
+description = "WoW Sync GPUI shell (thin slice): tray, window, developer launch mode on synthetic installs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "wow-sync"
+path = "src/main.rs"
+
+[[bin]]
+name = "devkit"
+path = "src/bin/devkit.rs"
+
+[dependencies]
+wow-sync-runtime = { version = "0.0.0", path = "../wow-sync-runtime" }
+gpui = { workspace = true }
+gpui_platform = { workspace = true }
+tray-icon = { workspace = true }
+raw-window-handle = { workspace = true }

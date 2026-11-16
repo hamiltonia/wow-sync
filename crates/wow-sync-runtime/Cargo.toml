@@ -1,0 +1,15 @@
+[package]
+name = "wow-sync-runtime"
+description = "Glue between wow-sync-core and wow-sync-adapters: SliceService for the thin slice"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+wow-sync-core = { version = "0.0.0", path = "../wow-sync-core" }
+wow-sync-adapters = { version = "0.0.0", path = "../wow-sync-adapters" }
+
+[dev-dependencies]
+wow-sync-adapters = { version = "0.0.0", path = "../wow-sync-adapters", features = ["testkit"] }
