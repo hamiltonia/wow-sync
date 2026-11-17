@@ -15,13 +15,17 @@ chat is not.
 | A | R3-ui-design (opus), R3-infra (sonnet), R3-compat (sonnet), R3-removal-design (opus) | Done, all merged |
 | B | R3-design-review (sol) | Review FAIL, merged `917bc05`. Recheck `09b2673`: **UI PASS**. Q-21: R3D-3 owner decision. Removal: R3D-7 to R3D-10 and R3D-14 to R3D-16 closed; **R3D-13 still open, retries exhausted** (recheck2 `07fe195`). It is a blocker for any run that implements removal |
 | C | R3-proto (sonnet), R3-mem (sonnet) | R3-mem **A-29 PASS** on Windows x64 (worst 19.6 MiB of 100; sync start ≤0.26 s; macOS BLOCKED), merged `8e82673`. R3-proto merged.
-- Screens P1 to P14 and scenarios S1 to S16 run on fake data.
+- Prototype screens P1 to P14 and scenarios S1 to S16 are implemented on
+  fake data. The interaction logs cover only part of the scenario
+  transitions (R3-check RC-2); the evidence is screenshots plus UIA dumps.
 - It added no new dependencies, and both verify tiers pass.
 - Launcher: `D:\WoWSyncDemo\Start-Prototype.cmd`.
 - Unverified: Ctrl shortcuts, OS DPI, live theme toggle, OS toasts, IME, shutdown. See `evidence/R3-proto.md`.
 - The worker once used the forbidden `Set-Content` on source files; it disclosed this and the files were rebuilt. |
 | D | Owner barrier | **Done (D-21, 2026-11-17).** Prototype approved. The owner answered Q-21, the UI defaults and the removal defaults, and asked for a Dropbox API spike |
-| E | R3-check (sol), R3-review (opus), R3-d21 (sonnet), R3-dropbox-api (opus) | R3-d21 merged: gating removed, spikes deleted, negative control recorded. R3-dropbox-api merged: recommends keeping the desktop folder for v1 and a possible read-only API hybrid later; owner questions DA-1 to DA-4 in `docs/design/dropbox-api.md`. R3-check running |
+| E | R3-check (sol), R3-review (opus), R3-d21 (sonnet), R3-dropbox-api (opus) | R3-d21 merged: gating removed, spikes deleted, negative control recorded. R3-dropbox-api merged: recommends keeping the desktop folder for v1 and a possible read-only API hybrid later; owner questions DA-1 to DA-4 in `docs/design/dropbox-api.md`. R3-check merged:
+- **PASS:** D-21 (own negative controls), memory re-run (peak 34.9 MiB on Windows), CI (latest `main` green, including native and macOS).
+- **Prototype FAIL** on RC-1 and RC-3; **records FAIL** on RC-2. All three are moderate or minor; see below. |
 | F | R3-ui-build | Approved by D-21. Must include the Q-26 "close quits" option and drop compatibility-hold UI states that D-21 removes |
 
 ## Incidents
@@ -39,8 +43,8 @@ chat is not.
 
 - None open. D-21 replaced interim rule A: no Interface or build gating. R3-d21
   removes the gating code. R3D-3 is moot.
-- glib alerts 1, 5 and 6 were dismissed per D-21. The grid alerts (2 to 4)
-  close when R3-d21 deletes the spikes.
+- Dependabot: per GitHub, alerts 1 to 4 are fixed (spikes deleted by
+  R3-d21) and 5 and 6 (glib, Linux-only) are dismissed per D-21.
 
 ## Follow-ups found
 
@@ -61,13 +65,16 @@ chat is not.
 - `fake_client_blocks_real_apply` (runtime) can hit the same process
   start/exit race fixed in the adapters by R3-infra. Assign to a runtime
   packet.
-- Dependabot: none of the 6 alerts has a minimal fix. **Owner decision
-  needed** (from R3-infra):
-  - **glib** (3 alerts): comes from `tray-icon` through Linux-only gtk3-rs,
-    which is capped at 0.18. It is not compiled on Windows or macOS.
-  - **grid** (3 alerts): only in the obsolete crates.io GPUI spikes
-    (`spikes/gpui`, `spikes/mem`, `spikes/a11y`). Deleting those spikes
-    would close alerts 1–4.
+- R3-check findings:
+  - **RC-1:** the prototype's S7 still had a fake build hold. Fixed in
+    R3-ui-build `09be75e`, which removes the dead `DifferentClientBuild`
+    and changes the scenario.
+  - **RC-3:** Esc on a sheet restores focus to the window rather than to
+    the control that opened the sheet. The prototype is not fixed; the
+    requirement was passed to R3-ui-build for the real app.
+  - **RC-2:** stale records. Corrected here. `R3-proto.md`'s "see final
+    report" verify row is superseded by R3-check's independent offline and
+    native PASS.
 
 ## Next actions
 
