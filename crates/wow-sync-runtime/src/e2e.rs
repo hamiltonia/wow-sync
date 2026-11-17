@@ -61,6 +61,16 @@ mod tests {
     }
 
     impl Pc {
+        fn set_build(&self, build: &str) {
+            std::fs::write(
+                self.install.root.join(".build.info"),
+                format!(
+                    "Branch!STRING:0|Active!DEC:1|Product!STRING:0|Version!STRING:0\nus|1|wowf|{build}\n"
+                ),
+            )
+            .unwrap();
+        }
+
         /// A tag ending in a digit N is version N+1.0 so later tags are demonstrably newer.
         fn addon(&self, name: &str, tag: &str) {
             let n = tag
@@ -212,6 +222,43 @@ mod tests {
         // Idempotent when nothing changed.
         let r = synced(&mut b);
         assert!(r.applied.is_empty(), "{r:?}");
+    }
+
+    #[test]
+    fn different_build_same_interface_applies() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        b.set_build("1.0.0.2");
+        a.addon("Alpha", "alpha-v1");
+        b.addon("Beta", "beta-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        let r = synced(&mut b);
+        assert_eq!(r.applied.len(), 1, "{}", texts(&r));
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+    }
+
+    #[test]
+    fn different_build_different_interface_needs_decision() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        b.set_build("1.0.0.2");
+        a.addon_with(
+            "Alpha",
+            "alpha-v1",
+            "## Interface: 99999\n## Version: 1.0\n",
+        );
+        b.addon("Beta", "beta-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        let r = synced(&mut b);
+        assert!(r.applied.is_empty(), "{}", texts(&r));
+        assert_eq!(b.read("Alpha/main.lua"), None);
+        assert!(texts(&r).contains("another game build"), "{}", texts(&r));
     }
 
     #[test]

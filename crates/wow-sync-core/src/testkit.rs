@@ -172,6 +172,34 @@ pub fn addon(name: &str, version: Option<&str>, tag: &str) -> FolderScan {
     addon_full(name, version, &[], &[], tag)
 }
 
+/// Like [`addon`] with an explicit `## Interface:` line (`None` omits it).
+pub fn addon_interface(
+    name: &str,
+    version: &str,
+    interface: Option<&str>,
+    tag: &str,
+) -> FolderScan {
+    let mut toc = format!("## Version: {version}\n");
+    if let Some(i) = interface {
+        toc = format!("## Interface: {i}\n{toc}");
+    }
+    let toc = toc.into_bytes();
+    let toc_name = format!("{name}.toc");
+    let mut scan = folder_scan(
+        name,
+        &[
+            ("main.lua", tag.as_bytes()),
+            (toc_name.as_str(), toc.as_slice()),
+        ],
+        &[],
+    );
+    scan.tocs = vec![TocCandidate {
+        file_name: toc_name,
+        contents: FileObs::Bytes(toc),
+    }];
+    scan
+}
+
 /// A folder whose only `.toc` carries a client suffix that no validated mapping covers.
 pub fn addon_unvalidated(name: &str, version: &str, tag: &str) -> FolderScan {
     let toc = toc_bytes(Some(version), &[], &[]);

@@ -188,6 +188,18 @@ After the block is released, publication resumes: Beta is published, and
 there is still exactly one Alpha result. The core predicate test is listed as
 `R2-fix4:core`.
 
+### 5a. Client-build compatibility by interface number (run-003, R3-compat; Q-21, D-18)
+
+Core tests (`target::tests::`): `different_build_same_interface_installs_automatically`,
+`different_build_different_or_missing_interface_needs_decision` (differing number, missing
+number, multi-number list with one unsupported),
+`different_build_without_local_interface_evidence_needs_decision`,
+`multi_folder_package_needs_every_folder_supported`, `same_build_ignores_interface_numbers`,
+`different_mapping_still_needs_decision_with_same_interface`. Runtime e2e: two synthetic
+installs on different builds apply when the interface number is shared
+(`different_build_same_interface_applies`) and produce a decision otherwise
+(`different_build_different_interface_needs_decision`). Cases `Q-21:core` and `Q-21:slice`.
+
 ## 5b. GUI verification (M-08; A-25, A-26)
 
 Headless tests are **not** GUI evidence. GUI checks are manual/observed

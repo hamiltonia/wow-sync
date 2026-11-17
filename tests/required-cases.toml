@@ -511,3 +511,24 @@ tests = ["report::tests::store_holding_a_carried_result_must_be_reconciled_first
 id = "R2-fix4:slice"
 tier = "offline"
 tests = ["e2e::tests::pending_clear_failure_does_not_duplicate_report"]
+
+# R3-compat (run-003): Q-21 / D-18 interface-number compatibility across client builds.
+[[case]]
+id = "Q-21:core"
+tier = "offline"
+tests = [
+    "target::tests::different_build_same_interface_installs_automatically",
+    "target::tests::different_build_different_or_missing_interface_needs_decision",
+    "target::tests::different_build_without_local_interface_evidence_needs_decision",
+    "target::tests::multi_folder_package_needs_every_folder_supported",
+    "target::tests::same_build_ignores_interface_numbers",
+    "target::tests::different_mapping_still_needs_decision_with_same_interface",
+]
+
+[[case]]
+id = "Q-21:slice"
+tier = "offline"
+tests = [
+    "e2e::tests::different_build_same_interface_applies",
+    "e2e::tests::different_build_different_interface_needs_decision",
+]
