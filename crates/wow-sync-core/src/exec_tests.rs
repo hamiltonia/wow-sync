@@ -189,6 +189,26 @@ fn no_live_mutation_after_launch_mid_commit() {
 }
 
 #[test]
+fn recovery_blocked_by_a_running_game_does_not_record_a_cause() {
+    for phase in [JournalPhase::Committing, JournalPhase::Committed] {
+        let (plan, mut fx) = crash_when(|fx, op| fx.journal_phase(op) == Some(phase));
+        let alpha = pkg(&plan, "alpha");
+        assert!(!fx.journal(&alpha.op).unwrap().halted_by_game);
+        fx.activity_script = VecDeque::from([Activity::Running { pids: vec![1] }]);
+        let r = recover_interrupted(&mut fx);
+        assert!(
+            matches!(r.ops[0].2, PackageResult::Interrupted(_)),
+            "{phase:?}: {:?}",
+            r.ops
+        );
+        let journal = fx.journal(&alpha.op).expect("journal kept");
+        assert!(!journal.halted_by_game, "{phase:?}: cause stays unknown");
+        let journals = [journal];
+        assert!(crate::status::game_halted(&journals).is_empty());
+    }
+}
+
+#[test]
 fn a_game_start_halt_is_recorded_and_status_blames_the_game_from_it() {
     let (sc, plan, mut fx) = apply_fixture();
     fx.launch_after_renames = Some(1);

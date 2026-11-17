@@ -626,7 +626,21 @@ fn apply_package(plan: &ApplyPlan, p: &PackageApply, fx: &mut impl ApplyEffects)
             PlanBlock::RenameFailed(e.to_string()),
         );
     }
-    (verify_and_finish(fx, &mut j), None).with_stop()
+    let result = verify_and_finish(fx, &mut j);
+    // The game started during this update; recovery retries never set the cause.
+    if let PackageResult::Interrupted(Explanation::InterruptedByGame { .. }) = &result {
+        record_game_halt(
+            fx,
+            &mut j,
+            &Halt {
+                block: PlanBlock::GameRunning,
+                why: Explanation::InterruptedByGame {
+                    package: name.clone(),
+                },
+            },
+        );
+    }
+    (result, None).with_stop()
 }
 
 trait WithStop {
@@ -686,7 +700,6 @@ fn verify_slots(fx: &mut impl ApplyEffects, j: &ApplyJournal) -> Result<(), Veri
 fn verify_and_finish(fx: &mut impl ApplyEffects, j: &mut ApplyJournal) -> PackageResult {
     let name = j.package.as_str().to_string();
     if let Err(h) = gate(fx, &name) {
-        record_game_halt(fx, j, &h);
         return PackageResult::Interrupted(h.why);
     }
     match verify_slots(fx, j) {
@@ -909,10 +922,7 @@ fn recover_one(fx: &mut impl ApplyEffects, j: &mut ApplyJournal) -> PackageResul
             cleanup(fx, j)
         }
         JournalPhase::Committing => match gate(fx, &name) {
-            Err(h) => {
-                record_game_halt(fx, j, &h);
-                PackageResult::Interrupted(h.why)
-            }
+            Err(h) => PackageResult::Interrupted(h.why),
             Ok(()) => rollback(fx, j),
         },
         JournalPhase::Committed => verify_and_finish(fx, j),
@@ -968,7 +978,6 @@ fn rollback(fx: &mut impl ApplyEffects, j: &mut ApplyJournal) -> PackageResult {
                     Err(e) => return failed(&name, e),
                 }
                 if let Err(h) = gate(fx, &name) {
-                    record_game_halt(fx, j, &h);
                     return PackageResult::Interrupted(h.why);
                 }
                 if let Err(e) = fx.rename(&l, &s) {
@@ -1055,10 +1064,7 @@ fn fail_restore(
     folder: &str,
 ) -> PackageResult {
     match res {
-        RestoreFail::Gate(h) => {
-            record_game_halt(fx, j, &h);
-            PackageResult::Interrupted(h.why)
-        }
+        RestoreFail::Gate(h) => PackageResult::Interrupted(h.why),
         RestoreFail::Rename(e) => PackageResult::Failed(Explanation::RestoreFailed {
             folder: format!("{folder} ({e})"),
         }),
