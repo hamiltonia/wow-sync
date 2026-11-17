@@ -1,7 +1,12 @@
 # Run 003 report: real UI on runtime data
 
-Status: **in progress; final section pending R3-fix2 and the final
-recheck**.
+Status: **closed** (2026-11-17) after the planned phases A to F and the fix
+chain.
+
+- Usage: 17,029.2 AIU cumulative; 7,515.8 for run-003.
+- Workers: 18 of 20 used.
+- The final independent check, R3-check4b, passed.
+- CI is green on Windows and macOS.
 
 - Orchestrator: claude-opus-5.5, session `961f3baa`.
 - Plan: [PLAN.md](PLAN.md) (D-20). Owner barrier: D-21.
@@ -41,7 +46,7 @@ removal rules ("removed means removed everywhere").
 | Memory (A-29) | Windows x64 PASS; app peak about 37 MiB, sync start ≤0.26 s; macOS not run | [R3-mem](evidence/R3-mem.md), [R3-check3](evidence/R3-check3.md) |
 | Real UI | Runtime snapshot, pause, quit, activity and discovery APIs; `core::view` next actions and explanations rendered by the app | [R3-ui-build](evidence/R3-ui-build.md), [R3-fix](evidence/R3-fix.md) |
 | Dropbox API spike | Keep the desktop folder for v1; a read-only API hybrid is a later option; DA-1 to DA-4 for the owner | [R3-dropbox-api](evidence/R3-dropbox-api.md), [dropbox-api.md](../../design/dropbox-api.md) |
-| Verification | R3-check, R3-review (FAIL, 12 findings), R3-check2, R3-check3; findings fixed by R3-fix, R3-macfix and R3-fix2 | evidence folder |
+| Verification | R3-check, R3-review (FAIL, 12 findings), R3-check2, R3-check3, R3-check4, then R3-check4b (PASS). Findings were fixed by R3-fix, R3-macfix, R3-fix2 and R3-fix2b. Interruption wording now follows the recorded cause only | [R3-check4b](evidence/R3-check4b.md) |
 
 ## 3. Not done or blocked
 

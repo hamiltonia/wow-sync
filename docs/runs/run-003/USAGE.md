@@ -29,8 +29,8 @@
 | 14 | R3-fix (+ retry 1) | sonnet-5.5 / claude-sonnet-5.5 | `8544314f` | 319.0 | Merged `042b44c`. RV-1 to RV-9, RV-12, RC2-1 and RC2-4 done. RC2-2 and RC2-3 in code only. No real-app screenshots. Icon goal not done |
 | 15 | R3-check3 | sol / gpt-6.1-sol | `c9623d49` | 207.1 | Merged `d59fafc`. Toggle, second-instance show, pipe capture, tiers and memory (37.34 MiB) PASS. Tray click BLOCKED. FAIL on RC3-1 (medium) and RC3-2 and RC3-3 (low) |
 | 16 | R3-macfix | sonnet-5.5 / claude-sonnet-5.5 | `b2ece888` | 14.5 | Merged `0e86e74`; macOS CI green (PR #1) |
-| 17 | R3-fix2 | sonnet-5.5 / claude-sonnet-5.5 | `d65af3cf` | 99.4 | Merged `8afde5d`; RC3-1 to RC3-3 done, with tests and a negative control. Disclosed edits outside owned paths (core exec, records) |
-| 18 | R3-check4 | sol / gpt-6.1-sol | — | — | Running |
+| 17 | R3-fix2 (+ retry 1 as R3-fix2b) | sonnet-5.5 / claude-sonnet-5.5 | `d65af3cf` | 148.2 | Merged `8afde5d` and `a513fc8`. RC3-1 to RC3-3 and RC4-1 done, with tests and negative controls. Disclosed edits outside owned paths (core exec, records) |
+| 18 | R3-check4 (+ follow-up R3-check4b) | sol / gpt-6.1-sol | `01169862` | 213.8 | Merged `025a1cd` (FAIL on RC4-1) and `00a9837` (RC4-1 closed in the real app, RC3-1 regression PASS) |
 
 The orchestrator's row (agent NULL) covers all sessions since run-001: 5,313.3
 at the R3-review merge.
@@ -51,6 +51,7 @@ at the R3-review merge.
 | R3-fix merged; R3-check3 launched | 16,098.4 | 6,585.0 |
 | R3-check3 and R3-macfix merged; R3-fix2 launched | 16,483.8 | 6,970.4 |
 | R3-fix2 merged; R3-check4 launched | 16,690.8 | 7,177.4 |
+| Run closed (R3-check4b merged) | 17,029.2 | 7,515.8 |
 
 Worker totals at the phase D barrier, in AIU, including retries:
 

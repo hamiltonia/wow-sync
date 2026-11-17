@@ -129,15 +129,19 @@ chat is not.
 
 ## Next actions
 
-1. R3-fix is merged as `042b44c` (retry 1 of 2 used); both verify tiers PASS.
-2. R3-check3 is merged as `d59fafc`. Most checks PASS. It FAILs on RC3-1
-   (medium: the interruption cause is inferred from whether WoW is running
-   now) and on RC3-2 and RC3-3 (low). R3-fix2 is running for these three.
-3. macOS CI was red from `ce15e24` to `0e86e74`: a test used a Windows path
-   separator, and the earlier checks missed it. R3-macfix fixed it, and CI
-   is green via draft PR #1.
-4. The tray left click on the real icon is still BLOCKED, because no
-   environment could target the icon unambiguously. It is an owner-manual
-   check.
-5. Stop launching new work at ≥19,013 AIU cumulative. Then write the
-   run-003 report and stop for the owner.
+Run-003 is **closed** at 17,029.2 AIU cumulative (7,515.8 for run-003),
+18 of 20 workers used. See [REPORT.md](REPORT.md).
+
+- **Fix chain:** R3-fix (`042b44c`), R3-macfix (`0e86e74`, macOS CI red
+  from `ce15e24` until then), R3-fix2 (`8afde5d`) and R3-fix2b (`a513fc8`).
+- **Final independent check:** R3-check4b (`00a9837`) PASS. Every RV, RC2,
+  RC3 and RC4 finding is closed, except the following:
+  - the tray left click on the real icon is BLOCKED. It is an owner-manual
+    check.
+  - goal 12 (the local icon override) was not done; it waits for the
+    OQ-ICON decision.
+- **The next run needs owner input first:**
+  - OQ-ICON, DA-1 to DA-4, UQ-1 and UQ-2;
+  - the Q-3 and Q-23 real-PC checks;
+  - how to re-review R3D-13 before removal;
+  - an approved run-004 plan and credit ceiling.
