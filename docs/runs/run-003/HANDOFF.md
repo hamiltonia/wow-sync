@@ -21,7 +21,6 @@ chat is not.
 - Unverified: Ctrl shortcuts, OS DPI, live theme toggle, OS toasts, IME, shutdown. See `evidence/R3-proto.md`.
 - The worker once used the forbidden `Set-Content` on source files; it disclosed this and the files were rebuilt. |
 | D | Owner barrier | **WAITING for the owner to review the prototype.** Phases E and F do not start until the owner approves |
-| D | Owner prototype review | Pending |
 | E | R3-check (sol), R3-review (opus) | Pending |
 | F | R3-ui-build (conditional) | Pending |
 
