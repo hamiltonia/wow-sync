@@ -26,7 +26,13 @@ chat is not.
 | E | R3-check (sol), R3-review (opus), R3-d21 (sonnet), R3-dropbox-api (opus) | R3-d21 merged: gating removed, spikes deleted, negative control recorded. R3-dropbox-api merged: recommends keeping the desktop folder for v1 and a possible read-only API hybrid later; owner questions DA-1 to DA-4 in `docs/design/dropbox-api.md`. R3-check merged:
 - **PASS:** D-21 (own negative controls), memory re-run (peak 34.9 MiB on Windows), CI (latest `main` green, including native and macOS).
 - **Prototype FAIL** on RC-1 and RC-3; **records FAIL** on RC-2. All three are moderate or minor; see below. |
-| F | R3-ui-build | Approved by D-21. Must include the Q-26 "close quits" option and drop compatibility-hold UI states that D-21 removes |
+| F | R3-ui-build | **Merged `17a360a`** (retry 1).
+- The real UI runs on runtime data, with no fake data.
+- Data gaps closed: UG-1 to UG-7, UG-10, UG-11, UG-14, UG-17, UG-22, UG-24; UG-12 partly. The rest are deferred, with placeholders.
+- A-29 re-run passes: max 37.7 MiB, sync start ≤0.26 s.
+- RC-3 is fixed in the app and verified by UIA.
+- It also made disclosed changes to `tools/mem`.
+- Independent check R3-check2 and integration review R3-review are running. |
 
 ## Incidents
 
