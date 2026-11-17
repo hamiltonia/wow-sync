@@ -13,7 +13,7 @@ chat is not.
 | Phase | Workers | Status |
 |---|---|---|
 | A | R3-ui-design (opus), R3-infra (sonnet), R3-compat (sonnet), R3-removal-design (opus) | Done, all merged |
-| B | R3-design-review (sol) | FAIL (10 major, 2 minor), merged `917bc05`. Retry 1 running: R3-ui-fix, R3-removal-fix, R3-compat-fix |
+| B | R3-design-review (sol) | FAIL (10 major, 2 minor), merged `917bc05`. Fixes merged: compat `76c491b`, ui `3cf482c`; removal-fix running. Recheck part 1 (UI and Q-21) running |
 | C | R3-proto (sonnet), R3-mem (sonnet) | Pending |
 | D | Owner prototype review | Pending |
 | E | R3-check (sol), R3-review (opus) | Pending |
