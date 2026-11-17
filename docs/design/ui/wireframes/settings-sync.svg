@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 720" width="1040" height="720" font-family="Segoe UI, system-ui, sans-serif" font-size="14">
+  <title>Wireframe: Settings sync placeholder, everything "Coming later" (light)</title>
+  <rect width="1040" height="720" fill="#F5F6F8"/>
+  <rect x="0" y="0" width="1040" height="64" fill="#FFFFFF" stroke="#7D8799" stroke-width="0.5"/>
+  <text x="20" y="40" font-size="16" font-weight="600" fill="#1A1F29">WoW Sync</text>
+  <circle cx="232" cy="32" r="11" fill="#17703A"/><path d="M226 32 l4 4 l8 -8" stroke="#FFFFFF" stroke-width="2.5" fill="none"/>
+  <text x="252" y="38" font-size="18" font-weight="600" fill="#1A1F29">This computer is up to date</text>
+  <rect x="0" y="64" width="200" height="656" fill="#EBEEF2"/>
+  <text x="24" y="103" fill="#1A1F29">Overview</text>
+  <text x="24" y="139" fill="#1A1F29">Computers</text>
+  <text x="24" y="175" fill="#1A1F29">Add-ons</text>
+  <text x="24" y="211" fill="#1A1F29">Needs attention</text>
+  <text x="24" y="247" fill="#1A1F29">Activity</text>
+  <line x1="16" y1="270" x2="184" y2="270" stroke="#7D8799" stroke-width="0.5"/>
+  <rect x="8" y="278" width="184" height="46" rx="4" fill="#DCE6F7"/><rect x="8" y="278" width="4" height="46" fill="#1D5BBF"/>
+  <text x="24" y="297" font-weight="600" fill="#1A1F29">Settings sync</text>
+  <text x="24" y="315" font-size="12" fill="#4A5363">Coming later</text>
+  <text x="224" y="100" font-size="18" font-weight="600" fill="#1A1F29">Settings sync</text>
+  <rect x="224" y="114" width="792" height="44" rx="4" fill="#FFFFFF" stroke="#4A5363"/>
+  <text x="240" y="141" fill="#1A1F29">Settings sync is not available yet. Only add-on files are synced now; your add-on settings stay as they are on each computer.</text>
+  <g>
+    <rect x="224" y="172" width="388" height="150" rx="6" fill="#FFFFFF" stroke="#7D8799" stroke-width="0.5"/>
+    <text x="244" y="200" font-weight="600" fill="#1A1F29">Settings master</text>
+    <text x="244" y="224" font-size="13" fill="#1A1F29">Desk PC shares its add-on settings with the</text>
+    <text x="244" y="242" font-size="13" fill="#1A1F29">group automatically, for every add-on.</text>
+    <rect x="244" y="268" width="140" height="32" rx="4" fill="#EBEEF2" stroke="#7D8799"/><text x="314" y="289" text-anchor="middle" fill="#4A5363">Change master…</text>
+    <text x="400" y="289" font-size="12" fill="#4A5363">Coming later</text>
+  </g>
+  <g>
+    <rect x="628" y="172" width="388" height="150" rx="6" fill="#FFFFFF" stroke="#7D8799" stroke-width="0.5"/>
+    <text x="648" y="200" font-weight="600" fill="#1A1F29">Exceptions</text>
+    <text x="648" y="224" font-size="13" fill="#1A1F29">Add-ons whose settings come from a</text>
+    <text x="648" y="242" font-size="13" fill="#1A1F29">different computer. None yet.</text>
+    <text x="648" y="289" font-size="12" fill="#4A5363">Coming later</text>
+  </g>
+  <g>
+    <rect x="224" y="338" width="388" height="150" rx="6" fill="#FFFFFF" stroke="#7D8799" stroke-width="0.5"/>
+    <text x="244" y="366" font-weight="600" fill="#1A1F29">Share my settings</text>
+    <text x="244" y="390" font-size="13" fill="#1A1F29">Send this computer's settings for selected</text>
+    <text x="244" y="408" font-size="13" fill="#1A1F29">add-ons to every computer, including the master.</text>
+    <rect x="244" y="434" width="140" height="32" rx="4" fill="#EBEEF2" stroke="#7D8799"/><text x="314" y="455" text-anchor="middle" fill="#4A5363">Share settings…</text>
+    <text x="400" y="455" font-size="12" fill="#4A5363">Coming later</text>
+  </g>
+  <g>
+    <rect x="628" y="338" width="388" height="150" rx="6" fill="#FFFFFF" stroke="#7D8799" stroke-width="0.5"/>
+    <text x="648" y="366" font-weight="600" fill="#1A1F29">Pause settings</text>
+    <text x="648" y="390" font-size="13" fill="#1A1F29">Protected settings are not shared or replaced.</text>
+    <text x="648" y="408" font-size="13" fill="#1A1F29">When you resume, you'll see differences first.</text>
+    <rect x="648" y="434" width="240" height="32" rx="4" fill="#EBEEF2" stroke="#7D8799"/><text x="768" y="455" text-anchor="middle" fill="#4A5363">Pause all settings on this computer</text>
+    <text x="896" y="455" font-size="12" fill="#4A5363">Coming later</text>
+  </g>
+  <g>
+    <rect x="224" y="504" width="792" height="96" rx="6" fill="#FFFFFF" stroke="#7D8799" stroke-width="0.5"/>
+    <text x="244" y="532" font-weight="600" fill="#1A1F29">Settings choices</text>
+    <text x="244" y="556" font-size="13" fill="#1A1F29">When two computers deliberately changed the same add-on's settings, you choose which to keep. Settings are never merged.</text>
+    <text x="244" y="580" font-size="12" fill="#4A5363">Coming later</text>
+  </g>
+  <text x="224" y="640" font-size="12" fill="#4A5363">All controls disabled but focusable so screen readers announce "Coming later" (R-07, R-08, R-09). "Pause settings" is never called "Pause syncing".</text>
+  <text x="224" y="660" font-size="12" fill="#4A5363">Absent master (A-45): "The settings master Den PC was retired. Choose a new master; WoW Sync does not pick one for you." (UG-20, UG-21)</text>
+</svg>

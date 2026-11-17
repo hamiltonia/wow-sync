@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 720" width="1040" height="720" font-family="Segoe UI, system-ui, sans-serif" font-size="14">
+  <title>Wireframe: Decision page, WeakAuras ambiguous versions (scenario S7, light)</title>
+  <rect width="1040" height="720" fill="#F5F6F8"/>
+  <rect x="0" y="0" width="1040" height="64" fill="#FFFFFF" stroke="#7D8799" stroke-width="0.5"/>
+  <text x="20" y="40" font-size="16" font-weight="600" fill="#1A1F29">WoW Sync</text>
+  <path d="M232 20 l12 22 h-24 z" fill="#A64205"/>
+  <text x="252" y="38" font-size="18" font-weight="600" fill="#1A1F29">3 add-ons need your decision</text>
+  <rect x="0" y="64" width="200" height="656" fill="#EBEEF2"/>
+  <text x="24" y="103" fill="#1A1F29">Overview</text>
+  <text x="24" y="139" fill="#1A1F29">Computers</text>
+  <text x="24" y="175" fill="#1A1F29">Add-ons</text>
+  <rect x="8" y="188" width="184" height="36" rx="4" fill="#DCE6F7"/><rect x="8" y="188" width="4" height="36" fill="#1D5BBF"/>
+  <text x="24" y="211" font-weight="600" fill="#1A1F29">Needs attention</text>
+  <text x="24" y="251" fill="#1A1F29">Activity</text>
+  <text x="224" y="94" fill="#1D5BBF" text-decoration="underline">← Needs attention</text>
+  <text x="224" y="128" font-size="22" font-weight="600" fill="#1A1F29">WeakAuras: choose which copy to keep</text>
+  <text x="224" y="158" fill="#1A1F29">WoW Sync can't tell which copy is newer. Their version labels can't be compared safely (5.18.1 and 5.18.1-beta).</text>
+  <rect x="224" y="174" width="792" height="36" rx="4" fill="#FFFFFF" stroke="#7D8799" stroke-width="0.5"/>
+  <text x="240" y="197" fill="#1A1F29">Only WeakAuras is affected. Other add-ons keep syncing.</text>
+  <!-- card 1 -->
+  <rect x="224" y="226" width="388" height="250" rx="6" fill="#FFFFFF" stroke="#7D8799"/>
+  <text x="244" y="258" font-size="18" font-weight="600" fill="#1A1F29">5.18.1</text>
+  <text x="244" y="284" fill="#1A1F29">This computer and Laptop</text>
+  <text x="244" y="314" fill="#4A5363">Folders: WeakAuras, WeakAurasOptions,</text>
+  <text x="244" y="334" fill="#4A5363">WeakAurasTemplates</text>
+  <text x="244" y="364" fill="#4A5363">Checked: complete and readable</text>
+  <rect x="244" y="420" width="150" height="34" rx="4" fill="#1D5BBF"/>
+  <text x="319" y="442" text-anchor="middle" fill="#FFFFFF">Keep this copy</text>
+  <rect x="242" y="418" width="154" height="38" rx="6" fill="none" stroke="#1D5BBF" stroke-width="2"/>
+  <!-- card 2 -->
+  <rect x="628" y="226" width="388" height="250" rx="6" fill="#FFFFFF" stroke="#7D8799"/>
+  <text x="648" y="258" font-size="18" font-weight="600" fill="#1A1F29">5.18.1-beta</text>
+  <text x="648" y="284" fill="#1A1F29">Den PC</text>
+  <text x="648" y="314" fill="#4A5363">Folders: WeakAuras, WeakAurasOptions,</text>
+  <text x="648" y="334" fill="#4A5363">WeakAurasTemplates</text>
+  <text x="648" y="364" fill="#4A5363">Checked: complete and readable</text>
+  <rect x="648" y="420" width="150" height="34" rx="4" fill="#1D5BBF"/>
+  <text x="723" y="442" text-anchor="middle" fill="#FFFFFF">Keep this copy</text>
+  <!-- consequences -->
+  <text x="224" y="510" font-weight="600" fill="#1A1F29">What happens when you choose</text>
+  <text x="224" y="532" fill="#1A1F29">The chosen copy is installed on every computer in this group. Other copies are kept as recovery copies.</text>
+  <rect x="224" y="556" width="130" height="32" rx="4" fill="#FFFFFF" stroke="#7D8799"/>
+  <text x="289" y="577" text-anchor="middle" fill="#1A1F29">Decide later</text>
+  <text x="380" y="577" font-size="12" fill="#4A5363">▸ Details (hashes, folder keys, computer IDs)</text>
+  <text x="224" y="632" font-size="12" fill="#4A5363">After Keep this copy: "Saving your choice…" → "Your choice is saved. It will be applied on the next sync." → done.</text>
+  <text x="224" y="652" font-size="12" fill="#4A5363">Build-out: buttons disabled with "Choosing is coming later; nothing has been changed" until a decision API exists (Q-25, UG-8).</text>
+  <text x="224" y="672" font-size="12" fill="#4A5363">Reason sentence per DecisionReason in screens.md (Ambiguous, PartialCandidate, DifferentClientBuild, …). Never a whole-profile choice.</text>
+</svg>
