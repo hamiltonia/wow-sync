@@ -3,6 +3,9 @@
 //! through the adapters, calls core, and runs the resulting plans through the effects.
 
 use crate::activity::{ActivitySource, WinprocActivity};
+use crate::detail::{
+    build_package_rows, folder_titles, member_rows, render_with_names, DetailInput, StatusDetail,
+};
 use crate::effects::{
     load_pending, FaultPlan, Faulty, Hooks, PendingSink, RealEffects, PENDING_REPORT,
 };
@@ -42,8 +45,7 @@ use wow_sync_core::records::{
 use wow_sync_core::report::{outstanding, record_pending, store_needs_reconcile};
 use wow_sync_core::status::{
     applied_here, derive_status, headline_sentence, journal_status, remember_applied, render_block,
-    render_headline, render_member, render_package, render_result, Headline, StatusInput,
-    StatusView,
+    render_headline, render_member, render_result, Headline, StatusInput, StatusView,
 };
 use wow_sync_core::target::{compute_target, GroupTarget, TargetInput, TreeAvail};
 use wow_sync_core::toc::TocCandidate;
@@ -208,6 +210,8 @@ pub struct StatusSnapshot {
     pub retained_extra_recovery: u32,
     /// Set when the enrolled client needs guided reconfirmation (shown by the GUI).
     pub reconfirm: Option<EnrollPreview>,
+    /// Typed rows for the GUI; present whenever the shared state could be read.
+    pub detail: Option<StatusDetail>,
 }
 
 impl StatusSnapshot {
@@ -246,6 +250,7 @@ struct World {
     own_states: Vec<String>,
     /// This enrollment's newest published state, if readable.
     own_latest: Option<CodeState>,
+    titles: BTreeMap<String, String>,
 }
 
 pub struct SliceService {
@@ -797,6 +802,7 @@ impl SliceService {
         };
         let variant = self.rederive_variant(&enrollment)?;
         let (scans, stable) = self.scan()?;
+        let titles = folder_titles(&scans);
         let inventory = build_inventory(scans, stable, &variant);
         let marks = match self
             .state
@@ -886,6 +892,7 @@ impl SliceService {
             target,
             own_states,
             own_latest,
+            titles,
         })
     }
 
@@ -946,6 +953,37 @@ impl SliceService {
             last_publish_unix_ms: self.last_publish,
             seen_locally: &self.seen_locally,
         });
+        let di = DetailInput {
+            view: &sv,
+            target: &w.target,
+            inventory: &w.inventory,
+            views: &w.views,
+            titles: &w.titles,
+            this_id: &w.computer.computer_id,
+        };
+        let rows = build_package_rows(&di);
+        let game_build = w.variant.identity().build_version.clone();
+        let members = member_rows(
+            &di,
+            (
+                &w.computer.display_name,
+                &self.cfg.app_version,
+                game_build.clone(),
+            ),
+            &rows,
+        );
+        let detail = StatusDetail {
+            view: sv.clone(),
+            packages: rows,
+            members,
+            game: observed.clone(),
+            group_id: w.group.group_id.to_string(),
+            computer_id: w.computer.computer_id.to_string(),
+            variant_label: w.variant.identity().display_label(),
+            variant_folder: w.enrollment.variant_folder.clone(),
+            app_version: self.cfg.app_version.clone(),
+            game_build,
+        };
         StatusSnapshot {
             enrolled: true,
             headline: render_headline(&sv),
@@ -961,7 +999,11 @@ impl SliceService {
                 .iter()
                 .map(|p| PackageLine {
                     key: p.0.to_string(),
-                    text: name_peers(render_package(p), &w.views),
+                    text: format!(
+                        "{}: {}",
+                        p.0.as_str(),
+                        render_with_names(&p.2, &w.views, &w.computer.computer_id)
+                    ),
                 })
                 .collect(),
             members: sv.members.iter().map(render_member).collect(),
@@ -980,6 +1022,7 @@ impl SliceService {
             activity,
             retained_extra_recovery: sv.retained_extra_recovery,
             reconfirm: None,
+            detail: Some(detail),
         }
     }
 
@@ -1237,6 +1280,7 @@ impl SliceService {
             w = fresh;
         }
         report.status = self.snapshot(&w, &area);
+        self.log_cycle(&report);
         Ok(report)
     }
 
@@ -1339,14 +1383,52 @@ impl SliceService {
     pub fn state_dir(&self) -> &Path {
         &self.cfg.state_dir
     }
-}
 
-/// The core renders peers by computer id; the shell shows the name the peer chose.
-fn name_peers(mut text: String, views: &[MemberView]) -> String {
-    for v in views {
-        text = text.replace(v.computer.as_str(), &v.display_name);
+    /// When syncing was paused on this computer, or `None` (UG-2). Persisted; lasts until resumed.
+    pub fn paused_since(&self) -> Option<i64> {
+        crate::control::paused_since(&self.state)
     }
-    text
+
+    pub fn set_paused(&self, paused: bool) -> Result<(), ServiceError> {
+        crate::control::set_paused(&self.state, paused).map_err(ServiceError::Local)?;
+        crate::control::log_activity(
+            &self.state,
+            if paused { "paused" } else { "resumed" },
+            None,
+            if paused {
+                "Syncing paused on this computer"
+            } else {
+                "Syncing resumed on this computer"
+            },
+        );
+        Ok(())
+    }
+
+    pub fn app_settings(&self) -> crate::control::AppSettings {
+        crate::control::AppSettings::load(&self.state)
+    }
+
+    pub fn save_app_settings(&self, s: &crate::control::AppSettings) -> Result<(), ServiceError> {
+        s.save(&self.state).map_err(ServiceError::Local)
+    }
+
+    /// Newest first (UG-7).
+    pub fn activity_log(&self, limit: usize) -> Vec<crate::control::ActivityEntry> {
+        crate::control::read_activity(&self.state, limit)
+    }
+
+    fn log_cycle(&self, r: &SyncReport) {
+        use crate::control::log_activity as log;
+        for l in &r.recovered {
+            log(&self.state, "recovered", None, l);
+        }
+        for a in &r.applied {
+            log(&self.state, "applied", Some(&a.package), &a.text);
+        }
+        if let Some(p) = &r.published {
+            log(&self.state, "published", None, p);
+        }
+    }
 }
 
 fn dummy_identity() -> wow_sync_core::variant::VariantIdentity {

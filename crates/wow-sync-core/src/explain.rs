@@ -175,7 +175,7 @@ pub fn render_named(e: &Explanation, name_of: &dyn Fn(&ComputerId) -> String) ->
                     if c.here {
                         who.push("this computer".to_string());
                     }
-                    who.extend(c.sources.iter().map(|s| name_of(s)));
+                    who.extend(c.sources.iter().map(name_of));
                     format!("version {} on {}", c.label, who.join(" and "))
                 })
                 .collect();

@@ -4,6 +4,9 @@
 #![forbid(unsafe_code)]
 
 mod activity;
+mod control;
+mod detail;
+mod discover;
 mod effects;
 mod service;
 
@@ -11,6 +14,17 @@ mod service;
 mod e2e;
 
 pub use activity::{ActivityHandle, ActivitySource, ScriptedActivity, WinprocActivity};
+pub use control::{
+    log_activity, paused_since, read_activity, set_paused, ActivityEntry, AppSettings, QuitGate,
+    StopState,
+};
+pub use detail::{
+    strip_colour_codes, CandidateRow, FolderRow, MemberRow, PackageRow, StatusDetail,
+};
+pub use discover::{
+    dropbox_defaults, dropbox_info_files, dropbox_paths_from_info, find_dropbox, find_wow,
+    wow_candidates, DetectedInstall,
+};
 pub use effects::{FaultPlan, Faulty, Hooks, RealEffects};
 pub use service::{
     AppliedLine, EnrollPreview, EnrollRequest, GroupInfo, JoinChoice, PackageLine, PreviewKind,

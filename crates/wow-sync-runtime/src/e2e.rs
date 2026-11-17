@@ -509,8 +509,8 @@ mod tests {
         let t = texts(&last);
         assert!(
             t.contains("on this computer")
-                && t.contains("another computer")
-                && !t.contains("computer a"),
+                && t.contains(" on a")
+                && !t.contains("another computer"),
             "{t}"
         );
     }
@@ -539,8 +539,76 @@ mod tests {
             .iter()
             .map(|p| p.text.clone())
             .collect::<String>();
-        assert!(line.contains("from another computer"), "{line}");
+        assert!(line.contains("from a "), "{line}");
         assert!(!line.contains("from computer"), "{line}");
+    }
+
+    #[test]
+    fn typed_rows_use_titles_and_names_and_never_ids() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon_with(
+            "Alpha",
+            "alpha-v1",
+            "## Interface: 11508\n## Title: |cff00ff00Alpha Bars|r\n## Version: 3.0\n",
+        );
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        b.act.set(Activity::Running { pids: vec![4242] });
+        let r = synced(&mut b);
+        let d = r.status.detail.expect("typed detail");
+        let row = &d.packages[0];
+        assert_eq!(row.title, "Alpha", "not installed yet: folder name");
+        assert_eq!(row.version_target.as_deref(), Some("3.0"));
+        assert_eq!(row.sources, vec!["a".to_string()]);
+        let b_id = computer_id(&b);
+        let a_id = computer_id(&a);
+        assert!(!row.sentence.contains(&a_id) && !row.sentence.contains(&b_id));
+        assert_eq!(d.members.len(), 2);
+        assert!(d.members[0].is_this);
+        assert_eq!(d.members[1].name, "a");
+        assert_eq!(d.members[1].app_version.as_deref(), Some("0.0.0-e2e"));
+        b.act.set(Activity::NotRunning);
+        let r = synced(&mut b);
+        let d = r.status.detail.expect("typed detail");
+        assert_eq!(d.packages[0].title, "Alpha Bars");
+    }
+
+    #[test]
+    fn a_sync_cycle_is_recorded_in_the_activity_log() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        let rb = synced(&mut b);
+        assert_eq!(rb.applied.len(), 1, "{rb:?}");
+        let log = b.svc.activity_log(20);
+        assert!(
+            log.iter()
+                .any(|e| e.kind == "applied" && e.package.as_deref() == Some("alpha")),
+            "{log:?}"
+        );
+        assert!(log.iter().all(|e| !e.text.contains(&computer_id(&a))));
+    }
+
+    #[test]
+    fn pause_is_computer_wide_and_survives_a_restart() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        a.addon("Alpha", "alpha-v1");
+        a.create();
+        assert_eq!(a.svc.paused_since(), None);
+        a.svc.set_paused(true).unwrap();
+        a.restart();
+        assert!(a.svc.paused_since().is_some());
+        a.svc.set_paused(false).unwrap();
+        a.restart();
+        assert_eq!(a.svc.paused_since(), None);
     }
 
     #[test]
