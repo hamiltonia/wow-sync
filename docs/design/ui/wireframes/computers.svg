@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 720" width="1040" height="720" font-family="Segoe UI, system-ui, sans-serif" font-size="14">
+  <title>Wireframe: Computers list with computer detail (scenario S9, silent and late computers, light)</title>
+  <rect width="1040" height="720" fill="#F5F6F8"/>
+  <rect x="0" y="0" width="1040" height="64" fill="#FFFFFF" stroke="#7D8799" stroke-width="0.5"/>
+  <text x="20" y="40" font-size="16" font-weight="600" fill="#1A1F29">WoW Sync</text>
+  <circle cx="232" cy="32" r="11" fill="#17703A"/><path d="M226 32 l4 4 l8 -8" stroke="#FFFFFF" stroke-width="2.5" fill="none"/>
+  <text x="252" y="38" font-size="18" font-weight="600" fill="#1A1F29">This computer is up to date</text>
+  <rect x="0" y="64" width="200" height="656" fill="#EBEEF2"/>
+  <text x="24" y="103" fill="#1A1F29">Overview</text>
+  <rect x="8" y="116" width="184" height="36" rx="4" fill="#DCE6F7"/><rect x="8" y="116" width="4" height="36" fill="#1D5BBF"/>
+  <text x="24" y="139" font-weight="600" fill="#1A1F29">Computers</text>
+  <text x="24" y="179" fill="#1A1F29">Add-ons</text>
+  <text x="24" y="215" fill="#1A1F29">Needs attention</text>
+  <text x="24" y="251" fill="#1A1F29">Activity</text>
+  <!-- list -->
+  <text x="224" y="100" font-size="18" font-weight="600" fill="#1A1F29">Computers in Main add-ons</text>
+  <rect x="224" y="116" width="360" height="380" rx="6" fill="#FFFFFF" stroke="#7D8799" stroke-width="0.5"/>
+  <g>
+    <text x="240" y="146" font-weight="600" fill="#1A1F29">Desk PC (this computer)</text>
+    <text x="240" y="166" font-size="12" fill="#4A5363">Up to date · now</text>
+    <line x1="232" y1="180" x2="576" y2="180" stroke="#7D8799" stroke-width="0.5"/>
+    <circle cx="246" cy="204" r="6" fill="#17703A"/>
+    <text x="260" y="209" fill="#1A1F29">Laptop</text>
+    <text x="568" y="209" text-anchor="end" font-size="12" fill="#4A5363">5 minutes ago</text>
+    <text x="260" y="228" font-size="12" fill="#4A5363">Confirmed 42 of 42</text>
+    <line x1="232" y1="242" x2="576" y2="242" stroke="#7D8799" stroke-width="0.5"/>
+    <rect x="228" y="246" width="352" height="58" rx="4" fill="#DCE6F7"/>
+    <circle cx="246" cy="266" r="7" fill="none" stroke="#4A5363" stroke-width="2"/><path d="M246 261 v5 h4" stroke="#4A5363" stroke-width="1.5" fill="none"/>
+    <text x="260" y="271" font-weight="600" fill="#1A1F29">Den PC</text>
+    <text x="568" y="271" text-anchor="end" font-size="12" font-weight="600" fill="#4A5363">Not heard from for 12 days</text>
+    <text x="260" y="290" font-size="12" fill="#4A5363">Last confirmed 40 of 42</text>
+    <line x1="232" y1="308" x2="576" y2="308" stroke="#7D8799" stroke-width="0.5"/>
+    <circle cx="246" cy="332" r="6" fill="none" stroke="#4A5363" stroke-width="2"/>
+    <text x="260" y="337" fill="#1A1F29">Spare PC</text>
+    <text x="568" y="337" text-anchor="end" font-size="12" fill="#4A5363">Joined, has not shared anything yet</text>
+    <line x1="232" y1="370" x2="576" y2="370" stroke="#7D8799" stroke-width="0.5"/>
+    <path d="M240 400 l6 -12 l6 12 z" fill="#A64205"/>
+    <text x="260" y="399" fill="#1A1F29">Old PC</text>
+    <text x="568" y="399" text-anchor="end" font-size="12"         fill="#A64205">Needs help</text>
+        <text x="260" y="418" font-size="12" fill="#4A5363">Its report went backwards and was ignored</text>
+  </g>
+  <!-- detail -->
+  <rect x="600" y="116" width="416" height="520" rx="6" fill="#FFFFFF" stroke="#7D8799" stroke-width="0.5"/>
+  <text x="620" y="148" font-size="18" font-weight="600" fill="#1A1F29">Den PC</text>
+  <text x="620" y="172" font-weight="600" fill="#4A5363">◷ Not heard from for 12 days</text>
+  <text x="620" y="208" font-weight="600" fill="#1A1F29">Last report</text>
+  <text x="620" y="230" fill="#1A1F29">Received Sat 3 May 19:12 (12 days ago)</text>
+  <text x="620" y="266" font-weight="600" fill="#1A1F29">What it last confirmed</text>
+  <text x="620" y="288" fill="#1A1F29">40 of 42 add-ons at the versions in the group</text>
+  <text x="620" y="308" fill="#4A5363">Not confirmed: Bagnon 3.2.1, Details! 2.7.4</text>
+  <text x="620" y="344" font-weight="600" fill="#1A1F29">What it has now</text>
+  <text x="620" y="366" fill="#1A1F29">Not known. It will be shown when Den PC reports again.</text>
+  <text x="620" y="402" font-weight="600" fill="#1A1F29">Game version</text>
+  <text x="620" y="424" fill="#1A1F29">World of Warcraft Forever</text>
+  <text x="620" y="470" fill="#1D5BBF" text-decoration="underline">Show add-ons waiting for Den PC</text>
+  <rect x="620" y="492" width="200" height="32" rx="4" fill="#EBEEF2" stroke="#7D8799"/>
+  <text x="720" y="513" text-anchor="middle" fill="#4A5363">Retire this computer…</text>
+  <text x="620" y="542" font-size="12" fill="#4A5363">Coming later (A-45)</text>
+  <text x="620" y="596" font-size="12" fill="#4A5363">▸ Details (computer ID, report sequence, peer clock)</text>
+  <text x="224" y="672" font-size="12" fill="#4A5363">Never "all computers are up to date". "Not heard from" emphasis threshold: Q-27; age always shown (A-24, UG-5, UG-6).</text>
+  <text x="224" y="692" font-size="12" fill="#4A5363">Below 900 px the detail replaces the list with a Back control.</text>
+</svg>

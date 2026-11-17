@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 720" width="1040" height="720" font-family="Segoe UI, system-ui, sans-serif" font-size="14">
+  <title>Wireframe: Activity with batches and the prototype notification preview (scenario S5, light)</title>
+  <rect width="1040" height="720" fill="#F5F6F8"/>
+  <rect x="0" y="0" width="1040" height="64" fill="#FFFFFF" stroke="#7D8799" stroke-width="0.5"/>
+  <text x="20" y="40" font-size="16" font-weight="600" fill="#1A1F29">WoW Sync</text>
+  <rect x="223" y="23" width="18" height="18" fill="#8A5300"/>
+  <text x="252" y="38" font-size="18" font-weight="600" fill="#1A1F29">Waiting: WoW is running</text>
+  <rect x="0" y="64" width="200" height="656" fill="#EBEEF2"/>
+  <text x="24" y="103" fill="#1A1F29">Overview</text>
+  <text x="24" y="139" fill="#1A1F29">Computers</text>
+  <text x="24" y="175" fill="#1A1F29">Add-ons</text>
+  <text x="24" y="211" fill="#1A1F29">Needs attention</text>
+  <rect x="8" y="224" width="184" height="36" rx="4" fill="#DCE6F7"/><rect x="8" y="224" width="4" height="36" fill="#1D5BBF"/>
+  <text x="24" y="247" font-weight="600" fill="#1A1F29">Activity</text>
+  <!-- banner -->
+  <rect x="224" y="80" width="792" height="44" rx="4" fill="#FFFFFF" stroke="#8A5300" stroke-width="1.5"/>
+  <text x="240" y="108" fill="#1A1F29">WoW is running. 2 updates will be applied after you close WoW. Nothing is changed while you play.</text>
+  <text x="224" y="156" font-size="18" font-weight="600" fill="#1A1F29">Activity</text>
+  <rect x="224" y="168" width="500" height="460" rx="6" fill="#FFFFFF" stroke="#7D8799" stroke-width="0.5"/>
+  <text x="240" y="194" font-size="12" font-weight="600" fill="#4A5363">TODAY</text>
+  <text x="240" y="222" fill="#1A1F29">▾ 20:41 · 3 add-ons updated from Laptop</text>
+  <text x="264" y="246" font-size="13" fill="#1A1F29">Deadly Boss Mods 11.0.3 → 11.0.4</text>
+  <text x="264" y="266" font-size="13" fill="#1A1F29">Details! 2.7.4 → 2.7.5</text>
+  <text x="264" y="286" font-size="13" fill="#1A1F29">WeakAuras 5.18.0 → 5.18.1</text>
+  <text x="240" y="318" fill="#1A1F29">▸ 20:52 · 2 updates waiting for WoW to close</text>
+  <text x="240" y="350" fill="#1A1F29">▸ 20:53 · Questie update interrupted by WoW starting</text>
+  <text x="240" y="390" font-size="12" font-weight="600" fill="#4A5363">YESTERDAY</text>
+  <text x="240" y="418" fill="#1A1F29">▸ 18:02 · Bagnon added from Laptop</text>
+  <text x="240" y="450" fill="#1A1F29">▸ 09:15 · Den PC reported again after 12 days</text>
+  <text x="240" y="604" font-size="12" fill="#4A5363">Enter expands a batch; Enter on an add-on opens its detail.</text>
+  <!-- notification preview -->
+  <rect x="740" y="168" width="276" height="460" rx="6" fill="#FFFFFF" stroke="#7D8799" stroke-dasharray="6 3"/>
+  <text x="756" y="194" font-weight="600" fill="#1A1F29">Notification preview</text>
+  <text x="756" y="212" font-size="12" fill="#4A5363">Prototype only (Q-30)</text>
+  <text x="756" y="244" font-size="12" font-weight="600" fill="#4A5363">SHOWN</text>
+  <rect x="756" y="254" width="244" height="56" rx="4" fill="#F5F6F8"/>
+  <text x="768" y="276" font-size="13" fill="#1A1F29">3 add-ons updated from Laptop</text>
+  <text x="768" y="296" font-size="12" fill="#4A5363">20:41 · one summary per batch</text>
+  <text x="756" y="340" font-size="12" font-weight="600" fill="#4A5363">HELD WHILE WOW RUNS (2)</text>
+  <rect x="756" y="350" width="244" height="56" rx="4" fill="#F5F6F8"/>
+  <text x="768" y="372" font-size="13" fill="#1A1F29">2 updates waiting for WoW</text>
+  <text x="768" y="392" font-size="12" fill="#4A5363">summary</text>
+  <rect x="756" y="414" width="244" height="56" rx="4" fill="#F5F6F8"/>
+  <text x="768" y="436" font-size="13" fill="#1A1F29">Questie needs help</text>
+  <text x="768" y="456" font-size="12" fill="#4A5363">action</text>
+  <rect x="756" y="530" width="200" height="32" rx="4" fill="#FFFFFF" stroke="#7D8799"/>
+  <text x="856" y="551" text-anchor="middle" fill="#1A1F29">Simulate: WoW closed</text>
+  <text x="756" y="590" font-size="12" fill="#4A5363">On exit: at most one summary</text>
+  <text x="756" y="608" font-size="12" fill="#4A5363">+ one action item. No repeats.</text>
+  <text x="224" y="660" font-size="12" fill="#4A5363">Batch grouping and history need an audit-log reader and batch events (UG-7, UG-19). Rules: interaction.md#notifications.</text>
+</svg>

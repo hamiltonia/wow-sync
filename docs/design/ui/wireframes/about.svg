@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 720" width="1040" height="720" font-family="Segoe UI, system-ui, sans-serif" font-size="14">
+  <title>Wireframe: About and updates, update available (scenario S13, light)</title>
+  <rect width="1040" height="720" fill="#F5F6F8"/>
+  <rect x="0" y="0" width="1040" height="64" fill="#FFFFFF" stroke="#7D8799" stroke-width="0.5"/>
+  <text x="20" y="40" font-size="16" font-weight="600" fill="#1A1F29">WoW Sync</text>
+  <circle cx="232" cy="32" r="11" fill="#17703A"/><path d="M226 32 l4 4 l8 -8" stroke="#FFFFFF" stroke-width="2.5" fill="none"/>
+  <text x="252" y="38" font-size="18" font-weight="600" fill="#1A1F29">This computer is up to date</text>
+  <rect x="0" y="64" width="200" height="656" fill="#EBEEF2"/>
+  <text x="24" y="103" fill="#1A1F29">Overview</text>
+  <text x="24" y="139" fill="#1A1F29">Computers</text>
+  <text x="24" y="175" fill="#1A1F29">Add-ons</text>
+  <text x="24" y="211" fill="#1A1F29">Needs attention</text>
+  <text x="24" y="247" fill="#1A1F29">Activity</text>
+  <line x1="16" y1="270" x2="184" y2="270" stroke="#7D8799" stroke-width="0.5"/>
+  <text x="24" y="295" fill="#1A1F29">Settings sync</text>
+  <text x="24" y="351" fill="#1A1F29">App settings</text>
+  <rect x="8" y="364" width="184" height="36" rx="4" fill="#DCE6F7"/><rect x="8" y="364" width="4" height="36" fill="#1D5BBF"/>
+  <text x="24" y="387" font-weight="600" fill="#1A1F29">About</text>
+  <text x="224" y="100" font-size="18" font-weight="600" fill="#1A1F29">About WoW Sync</text>
+  <rect x="224" y="116" width="792" height="96" rx="6" fill="#FFFFFF" stroke="#7D8799" stroke-width="0.5"/>
+  <text x="244" y="146" font-size="16" font-weight="600" fill="#1A1F29">WoW Sync 0.1.0 (build e8bc16a)</text>
+  <rect x="244" y="162" width="160" height="32" rx="4" fill="#FFFFFF" stroke="#7D8799"/><text x="324" y="183" text-anchor="middle" fill="#1A1F29">Copy version info</text>
+  <text x="420" y="183" font-size="12" fill="#4A5363">MIT licence · Third-party notices</text>
+  <!-- updates -->
+  <rect x="224" y="228" width="792" height="200" rx="6" fill="#FFFFFF" stroke="#1D5BBF" stroke-width="1.5"/>
+  <text x="244" y="258" font-weight="600" fill="#1A1F29">Updates</text>
+  <text x="244" y="284" fill="#1A1F29">Version 0.2.0 is available. You have 0.1.0. (checked 2 minutes ago)</text>
+  <text x="244" y="314" fill="#1A1F29">WoW Sync never replaces itself. To update, download the new version and install it;</text>
+  <text x="244" y="334" fill="#1A1F29">your sync data and recovery copies are kept.</text>
+  <rect x="244" y="360" width="180" height="32" rx="4" fill="#1D5BBF"/><text x="334" y="381" text-anchor="middle" fill="#FFFFFF">Open download page</text>
+  <rect x="436" y="360" width="120" height="32" rx="4" fill="#FFFFFF" stroke="#7D8799"/><text x="496" y="381" text-anchor="middle" fill="#1A1F29">What's new</text>
+  <rect x="568" y="360" width="170" height="32" rx="4" fill="#FFFFFF" stroke="#7D8799"/><text x="653" y="381" text-anchor="middle" fill="#1A1F29">Check for updates</text>
+  <text x="244" y="414" font-size="12" fill="#4A5363">[On] Check for updates automatically. Checking contacts GitHub releases, which sees your IP address (Q-36).</text>
+  <!-- unsigned -->
+  <rect x="224" y="444" width="792" height="100" rx="6" fill="#FFFFFF" stroke="#7D8799" stroke-width="0.5"/>
+  <text x="244" y="472" font-weight="600" fill="#1A1F29">This build is not signed by a publisher</text>
+  <text x="244" y="496" fill="#1A1F29">Your system may warn you when installing it. Do not turn off system protections;</text>
+  <text x="244" y="516" fill="#1A1F29">follow the install guide.</text>
+  <rect x="224" y="560" width="792" height="40" rx="4" fill="#FFFFFF" stroke="#8A5300"/>
+  <text x="240" y="585" fill="#1A1F29">Developer build: synthetic installs only.</text>
+  <text x="224" y="640" font-size="12" fill="#4A5363">Other states: "Not checked yet" · "Checking for updates…" · "You have the newest version." · "Another computer uses a newer WoW Sync. Update this computer to keep syncing." (R-16)</text>
+  <text x="224" y="660" font-size="12" fill="#4A5363">Error: "Could not check for updates: no connection." Update info and build commit need UG-18 (A-28).</text>
+</svg>

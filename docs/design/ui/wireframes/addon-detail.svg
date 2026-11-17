@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 720" width="1040" height="720" font-family="Segoe UI, system-ui, sans-serif" font-size="14">
+  <title>Wireframe: Add-on detail "Why this version" for Deadly Boss Mods (scenario S4 after update, light)</title>
+  <rect width="1040" height="720" fill="#F5F6F8"/>
+  <rect x="0" y="0" width="1040" height="64" fill="#FFFFFF" stroke="#7D8799" stroke-width="0.5"/>
+  <text x="20" y="40" font-size="16" font-weight="600" fill="#1A1F29">WoW Sync</text>
+  <circle cx="232" cy="32" r="11" fill="#17703A"/><path d="M226 32 l4 4 l8 -8" stroke="#FFFFFF" stroke-width="2.5" fill="none"/>
+  <text x="252" y="38" font-size="18" font-weight="600" fill="#1A1F29">This computer is up to date</text>
+  <rect x="0" y="64" width="200" height="656" fill="#EBEEF2"/>
+  <text x="24" y="103" fill="#1A1F29">Overview</text>
+  <text x="24" y="139" fill="#1A1F29">Computers</text>
+  <rect x="8" y="152" width="184" height="36" rx="4" fill="#DCE6F7"/><rect x="8" y="152" width="4" height="36" fill="#1D5BBF"/>
+  <text x="24" y="175" font-weight="600" fill="#1A1F29">Add-ons</text>
+  <text x="24" y="215" fill="#1A1F29">Needs attention</text>
+  <text x="24" y="251" fill="#1A1F29">Activity</text>
+  <!-- 1 title -->
+  <text x="224" y="94" fill="#1D5BBF" text-decoration="underline">← Add-ons</text>
+  <text x="224" y="126" font-size="22" font-weight="600" fill="#1A1F29">Deadly Boss Mods</text>
+  <rect x="430" y="108" width="190" height="24" rx="12" fill="#FFFFFF" stroke="#17703A"/>
+  <text x="525" y="125" text-anchor="middle" font-size="12" fill="#17703A">✓ Applied, not confirmed yet</text>
+  <!-- 2 versions -->
+  <text x="224" y="156" fill="#1A1F29">On this computer: 11.0.4 · Group's chosen version: 11.0.4</text>
+  <!-- left column -->
+  <rect x="224" y="172" width="460" height="460" rx="6" fill="#FFFFFF" stroke="#7D8799" stroke-width="0.5"/>
+  <text x="244" y="200" font-weight="600" fill="#1A1F29">3 · What happened</text>
+  <text x="244" y="222" fill="#1A1F29">Updated from 11.0.3 to 11.0.4, copied from Laptop.</text>
+  <text x="244" y="258" font-weight="600" fill="#1A1F29">4 · Why this version</text>
+  <text x="244" y="280" fill="#1A1F29">Laptop has 11.0.4. This computer had 11.0.3.</text>
+  <text x="244" y="300" fill="#1A1F29">11.0.4 is newer by its version number.</text>
+  <text x="244" y="320" fill="#4A5363">File dates and computer clocks are never used to decide.</text>
+  <text x="244" y="356" font-weight="600" fill="#1A1F29">5 · Next step</text>
+  <text x="244" y="378" fill="#1A1F29">Nothing to do.</text>
+  <text x="244" y="414" font-weight="600" fill="#1A1F29">6 · On each computer</text>
+  <text x="244" y="436" fill="#1A1F29">This computer: updated here 4 minutes ago</text>
+  <text x="244" y="456" fill="#1A1F29">Laptop: confirmed, report received 5 minutes ago</text>
+  <text x="244" y="476" fill="#4A5363">◷ Den PC: not confirmed yet; not heard from for 12 days</text>
+  <text x="244" y="512" font-weight="600" fill="#1A1F29">7 · Folders</text>
+  <text x="244" y="534" fill="#1A1F29">DBM-Core, DBM-StatusBarTimers, DBM-GUI</text>
+  <text x="244" y="554" fill="#4A5363">Grouped because they share a name prefix.</text>
+  <!-- right column -->
+  <rect x="700" y="172" width="316" height="220" rx="6" fill="#FFFFFF" stroke="#7D8799" stroke-width="0.5"/>
+  <text x="720" y="200" font-weight="600" fill="#1A1F29">8 · Recovery copies</text>
+  <text x="720" y="222" fill="#1A1F29">2 earlier copies kept</text>
+  <text x="720" y="244" font-size="12" fill="#4A5363">11.0.3 · replaced today 20:41</text>
+  <text x="720" y="262" font-size="12" fill="#4A5363">11.0.2 · replaced Thu 8 May</text>
+  <rect x="720" y="282" width="140" height="32" rx="4" fill="#EBEEF2" stroke="#7D8799"/>
+  <text x="790" y="303" text-anchor="middle" fill="#4A5363">Restore…</text>
+  <text x="720" y="334" font-size="12" fill="#4A5363">Coming later (UG-13)</text>
+  <rect x="700" y="408" width="316" height="224" rx="6" fill="#FFFFFF" stroke="#7D8799" stroke-width="0.5"/>
+  <text x="720" y="436" font-weight="600" fill="#1A1F29">▸ 9 · Details</text>
+  <text x="720" y="460" font-size="12" fill="#4A5363">Collapsed by default. Contains hashes,</text>
+  <text x="720" y="478" font-size="12" fill="#4A5363">folder keys, computer IDs, package ID.</text>
+  <text x="720" y="496" font-size="12" fill="#4A5363">Only place IDs and hashes appear (A-25).</text>
+  <text x="224" y="672" font-size="12" fill="#4A5363">Section numbers are wireframe labels only. Text from render(Explanation); versions UG-3; per-computer rows UG-4; next action UG-12.</text>
+  <text x="224" y="692" font-size="12" fill="#4A5363">Below 820 px content width the right column moves under the left one.</text>
+</svg>

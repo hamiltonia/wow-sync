@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 720" width="1040" height="720" font-family="Segoe UI, system-ui, sans-serif" font-size="14">
+  <title>Wireframe: Overview dashboard, dark theme (scenario S7, needs your decision)</title>
+  <rect width="1040" height="720" fill="#14171C"/>
+  <!-- header -->
+  <rect x="0" y="0" width="1040" height="64" fill="#1D2128" stroke="#6B7585" stroke-width="0.5"/>
+  <path d="M232 20 l12 22 h-24 z" fill="#FFA463"/>
+  <text x="232" y="39" text-anchor="middle" font-weight="700" fill="#14171C">!</text>
+  <text x="252" y="29" font-size="18" font-weight="600" fill="#E8EAEE">3 add-ons need your decision</text>
+  <text x="252" y="49" fill="#A7AFBB">Other add-ons keep syncing · checked 1 minute ago</text>
+  <rect x="800" y="16" width="100" height="32" rx="4" fill="#8AB8FF"/>
+  <text x="850" y="37" text-anchor="middle" fill="#0E1626">Review</text>
+  <rect x="912" y="16" width="100" height="32" rx="4" fill="#1D2128" stroke="#6B7585"/>
+  <text x="962" y="37" text-anchor="middle" fill="#E8EAEE">Pause</text>
+  <!-- sidebar -->
+  <rect x="0" y="64" width="200" height="656" fill="#191C22"/>
+  <text x="20" y="40" font-size="16" font-weight="600" fill="#E8EAEE">WoW Sync</text>
+  <rect x="8" y="80" width="184" height="36" rx="4" fill="#26344D"/>
+  <rect x="8" y="80" width="4" height="36" fill="#8AB8FF"/>
+  <text x="24" y="103" font-weight="600" fill="#E8EAEE">Overview</text>
+  <text x="24" y="143" fill="#E8EAEE">Computers</text>
+  <text x="24" y="179" fill="#E8EAEE">Add-ons</text>
+  <text x="170" y="179" text-anchor="end" fill="#A7AFBB">42</text>
+  <text x="24" y="215" fill="#E8EAEE">Needs attention</text>
+  <rect x="146" y="200" width="30" height="20" rx="10" fill="#FFA463"/>
+  <text x="161" y="215" text-anchor="middle" font-size="12" font-weight="600" fill="#14171C">4</text>
+  <text x="24" y="251" fill="#E8EAEE">Activity</text>
+  <line x1="16" y1="270" x2="184" y2="270" stroke="#6B7585" stroke-width="0.5"/>
+  <text x="24" y="295" fill="#E8EAEE">Settings sync</text>
+  <text x="24" y="315" font-size="12" fill="#A7AFBB">Coming later</text>
+  <text x="24" y="351" fill="#E8EAEE">App settings</text>
+  <text x="24" y="387" fill="#E8EAEE">About</text>
+  <!-- focus ring example on sidebar -->
+  <rect x="6" y="196" width="188" height="30" rx="5" fill="none" stroke="#FFD166" stroke-width="2"/>
+  <!-- left: this computer -->
+  <rect x="224" y="88" width="388" height="200" rx="6" fill="#1D2128" stroke="#6B7585" stroke-width="0.5"/>
+  <text x="244" y="116" font-size="16" font-weight="600" fill="#E8EAEE">This computer: Desk PC</text>
+  <text x="244" y="144" fill="#E8EAEE">42 add-ons in the group</text>
+  <text x="244" y="168" fill="#5CCB7F">✓ 38 up to date</text>
+  <text x="244" y="192" fill="#FFA463">! 3 need your decision</text>
+  <text x="244" y="216" fill="#FFA463">! 1 needs help</text>
+  <text x="244" y="270" fill="#8AB8FF" text-decoration="underline">View add-ons</text>
+  <!-- left: recent changes -->
+  <rect x="224" y="304" width="388" height="240" rx="6" fill="#1D2128" stroke="#6B7585" stroke-width="0.5"/>
+  <text x="244" y="332" font-size="16" font-weight="600" fill="#E8EAEE">Recent changes</text>
+  <text x="244" y="362" fill="#E8EAEE">Today 20:41 · 2 add-ons updated from Laptop</text>
+  <text x="244" y="382" font-size="12" fill="#A7AFBB">Details!, Bagnon</text>
+  <text x="244" y="414" fill="#E8EAEE">Today 20:40 · WeakAuras needs a decision</text>
+  <text x="244" y="522" fill="#8AB8FF" text-decoration="underline">All activity</text>
+  <!-- right: other computers -->
+  <rect x="628" y="88" width="388" height="200" rx="6" fill="#1D2128" stroke="#6B7585" stroke-width="0.5"/>
+  <text x="648" y="116" font-size="16" font-weight="600" fill="#E8EAEE">Other computers</text>
+  <circle cx="656" cy="146" r="6" fill="#5CCB7F"/>
+  <text x="672" y="151" fill="#E8EAEE">Laptop</text>
+  <text x="996" y="151" text-anchor="end" fill="#A7AFBB">reported 5 minutes ago</text>
+  <text x="672" y="173" font-size="12" fill="#A7AFBB">Last confirmed 38 of 42 add-ons</text>
+  <circle cx="656" cy="200" r="7" fill="none" stroke="#A7AFBB" stroke-width="2"/><path d="M656 195 v5 h4" stroke="#A7AFBB" stroke-width="1.5" fill="none"/>
+  <text x="672" y="205" fill="#E8EAEE">Den PC</text>
+  <text x="996" y="205" text-anchor="end" font-weight="600" fill="#A7AFBB">Not heard from for 12 days</text>
+  <text x="672" y="227" font-size="12" fill="#A7AFBB">Last confirmed 40 of 42 · what it has now is not known</text>
+  <text x="648" y="270" fill="#8AB8FF" text-decoration="underline">View computers</text>
+  <!-- right: needs attention -->
+  <rect x="628" y="304" width="388" height="240" rx="6" fill="#1D2128" stroke="#6B7585" stroke-width="0.5"/>
+  <text x="648" y="332" font-size="16" font-weight="600" fill="#E8EAEE">Needs attention (4)</text>
+  <text x="648" y="364" fill="#E8EAEE">WeakAuras: two different copies of 5.18.1</text>
+  <text x="996" y="364" text-anchor="end" fill="#8AB8FF">Choose…</text>
+  <text x="648" y="396" fill="#E8EAEE">Bagnon: newest copy is incomplete</text>
+  <text x="996" y="396" text-anchor="end" fill="#8AB8FF">Choose…</text>
+  <text x="648" y="428" fill="#E8EAEE">Questie: made for a different game build</text>
+  <text x="996" y="428" text-anchor="end" fill="#8AB8FF">Choose…</text>
+  <text x="648" y="460" fill="#E8EAEE">Deadly Boss Mods: an update was interrupted</text>
+  <text x="996" y="460" text-anchor="end" fill="#8AB8FF">Details…</text>
+  <text x="648" y="520" font-size="12" fill="#A7AFBB">Each decision affects only that add-on.</text>
+  <!-- annotations -->
+  <text x="224" y="600" font-size="12" fill="#A7AFBB">Dark tokens from style.md. Focus ring #FFD166 shown on "Needs attention". Status = shape + word, never colour only.</text>
+  <text x="224" y="620" font-size="12" fill="#A7AFBB">Stale peer emphasis threshold: Q-27. Item wording maps from DecisionReason (screens.md).</text>
+</svg>
