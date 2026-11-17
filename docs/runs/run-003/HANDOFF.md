@@ -12,8 +12,8 @@ chat is not.
 
 | Phase | Workers | Status |
 |---|---|---|
-| A | R3-ui-design (opus), R3-infra (sonnet), R3-compat (sonnet), R3-removal-design (opus) | Launching |
-| B | R3-design-review (sol) | Pending |
+| A | R3-ui-design (opus), R3-infra (sonnet), R3-compat (sonnet), R3-removal-design (opus) | Done, all merged |
+| B | R3-design-review (sol) | Running |
 | C | R3-proto (sonnet), R3-mem (sonnet) | Pending |
 | D | Owner prototype review | Pending |
 | E | R3-check (sol), R3-review (opus) | Pending |
@@ -22,6 +22,19 @@ chat is not.
 ## Incidents
 
 None yet.
+
+## Follow-ups found
+
+- `fake_client_blocks_real_apply` (runtime) can hit the same process
+  start/exit race fixed in the adapters by R3-infra. Assign to a runtime
+  packet.
+- Dependabot: none of the 6 alerts has a minimal fix. **Owner decision
+  needed** (from R3-infra):
+  - **glib** (3 alerts): comes from `tray-icon` through Linux-only gtk3-rs,
+    which is capped at 0.18. It is not compiled on Windows or macOS.
+  - **grid** (3 alerts): only in the obsolete crates.io GPUI spikes
+    (`spikes/gpui`, `spikes/mem`, `spikes/a11y`). Deleting those spikes
+    would close alerts 1–4.
 
 ## Next actions
 
