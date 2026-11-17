@@ -220,7 +220,7 @@ phase D barrier.
   - It is research only. D-08 still applies: no Dropbox API credentials.
   - A live API trial needs a separate approval.
 
-
+### D-20: Run-003 plan approved (2026-11-16)
 
 - The owner approved `docs/runs/run-003/PLAN.md` as written.
 - Ceiling per D-19. Baseline at approval: 9,513.4 AIU cumulative (sessions
@@ -294,4 +294,5 @@ phase D barrier.
 | 2026-11-16 | D-18 | Run-002 owner review: incidents, PLAN §6, D-12, design questions, Q-21 interface rule | `d83fda7` |
 | 2026-11-16 | D-19 | Run-003 scope, UI direction, 10,000 AIU ceiling; plan approval pending | `3d332fd` |
 | 2026-11-16 | D-20 | Run-003 plan approved as written | `b420717` |
-| 2026-11-17 | D-21 | Prototype approved; Q-21 no interface gating; removal wins; UI defaults; Dropbox API spike | this commit |
+| 2026-11-17 | D-21 | Prototype approved; Q-21 no interface gating; removal wins; UI defaults; Dropbox API spike | `f92a61a` |
+| 2026-11-17 | D-20 | Restored the D-20 heading that `f92a61a` accidentally deleted (R3-review RV-10) | this commit |

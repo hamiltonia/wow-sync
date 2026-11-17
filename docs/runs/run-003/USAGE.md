@@ -11,18 +11,24 @@
 
 ## Workers
 
-| # | Packet | Model (policy / actual) | Agent | AIU | Result |
+| # | Packet | Model (policy / actual) | Agent | AIU (incl. retries) | Result |
 |---|---|---|---|---|---|
-| 1 | R3-compat | sonnet-5.5 / claude-sonnet-5.5 | `60ed9f84` | 66.7 | Merged `944141a`; offline verify PASS |
-| 2 | R3-removal-design | opus-5.5 / claude-opus-5.5 | `c77e59a2` | 212.7 | Merged; Q-40–Q-48 raised |
-| 3 | R3-ui-design | opus-5.5 / claude-opus-5.5 | `887e9fa4` | 467.4 | Merged; Q-26–Q-39, gaps UG-1–UG-24 |
-| 4 | R3-infra | sonnet-5.5 / claude-sonnet-5.5 | `94d988ca` | 82.1 | Merged; native tier PASS; 6 alerts need owner decision |
-| 5 | R3-design-review (+ recheck) | sol / gpt-6.1-sol | `af43de1a` | 172.7 | Review FAIL; recheck: UI PASS, Q-21 owner-pending, removal FAIL |
-| 6 | R3-mem | sonnet-5.5 / claude-sonnet-5.5 | `7cbd7f5f` | — | Running |
-| 7 | R3-proto | sonnet-5.5 / claude-sonnet-5.5 | `ca4c82b8` | — | Running |
+| 1 | R3-compat | sonnet-5.5 / claude-sonnet-5.5 | `60ed9f84` | 158.7 | Merged; superseded by D-21 (R3-d21) |
+| 2 | R3-removal-design | opus-5.5 / claude-opus-5.5 | `c77e59a2` | 747.1 | Merged; R3D-13 open, retries exhausted |
+| 3 | R3-ui-design | opus-5.5 / claude-opus-5.5 | `887e9fa4` | 879.5 | Merged; UI PASS on recheck |
+| 4 | R3-infra | sonnet-5.5 / claude-sonnet-5.5 | `94d988ca` | 82.1 | Merged; native tier PASS |
+| 5 | R3-design-review (+ 2 rechecks) | sol / gpt-6.1-sol | `af43de1a` | 210.5 | FAIL, then UI PASS; removal R3D-13 open |
+| 6 | R3-mem | sonnet-5.5 / claude-sonnet-5.5 | `7cbd7f5f` | 116.2 | Merged `8e82673`; A-29 PASS |
+| 7 | R3-proto | sonnet-5.5 / claude-sonnet-5.5 | `ca4c82b8` | 458.8 | Merged; owner-approved (D-21) |
+| 8 | R3-d21 | sonnet-5.5 / claude-sonnet-5.5 | `4f318e51` | 77.7 | Merged; gating removed, spikes deleted |
+| 9 | R3-dropbox-api | opus-5.5 / claude-opus-5.5 | `403a40c2` | 193.6 | Merged; keep desktop folder for v1 |
+| 10 | R3-check | sol / gpt-6.1-sol | `12077eaa` | 164.2 | Merged; RC-1 to RC-3 |
+| 11 | R3-ui-build (+ retry 1) | sonnet-5.5 / claude-sonnet-5.5 | `ec402443` | 863.8 | Merged `17a360a`; A-29 PASS (37.7 MiB) |
+| 12 | R3-review | opus-5.5 / claude-opus-5.5 | `92b95e84` | 273.0 | Merged; FAIL with 7 major and 5 minor findings, no blockers |
+| 13 | R3-check2 | sol / gpt-6.1-sol | `0007206a` | — | Running |
 
-Retries reuse the original agent; their usage is included in that row
-(compat 158.7, ui 879.5, removal 563.0 at this point).
+The orchestrator's row (agent NULL) covers all sessions since run-001: 5,313.3
+at the R3-review merge.
 
 ## Checkpoints
 
@@ -35,6 +41,7 @@ Retries reuse the original agent; their usage is included in that row
 | R3-infra merged | 10,720.8 | 1,207.4 |
 | Recheck merged; proto launched | 12,169.5 | 2,656.1 |
 | Proto merged; phase D barrier | 13,048.6 | 3,535.2 |
+| R3-review merged | 15,442.0 | 5,928.6 |
 
 Worker totals at the phase D barrier, in AIU, including retries:
 
