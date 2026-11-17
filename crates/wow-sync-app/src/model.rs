@@ -1058,7 +1058,7 @@ pub fn tray_shape(w: &World) -> TrayShape {
     }
 }
 
-/// 32x32 RGBA: a base mark plus a status overlay in the lower-right quadrant. The shape (not
+/// 32x32 RGBA: the brand art (D-22) plus a status overlay in the lower-right quadrant. The shape (not
 /// the colour) carries the meaning, with a contrasting outline for light and dark taskbars.
 pub fn tray_rgba(shape: TrayShape) -> Vec<u8> {
     const N: usize = 32;
@@ -1069,26 +1069,12 @@ pub fn tray_rgba(shape: TrayShape) -> Vec<u8> {
             px[i..i + 4].copy_from_slice(&c);
         }
     };
-    let blue = [0x2b, 0x7f, 0xff, 0xff];
     let white = [0xff, 0xff, 0xff, 0xff];
     let dark = [0x10, 0x14, 0x1c, 0xff];
-    for y in 0..N as i32 {
-        for x in 0..N as i32 {
-            let (dx, dy) = ((x - 15).abs().max(0), (y - 15).abs());
-            if dx <= 14 && dy <= 14 && !(dx >= 13 && dy >= 13) {
-                put(x, y, blue);
-            }
-        }
-    }
-    // A stylised "W".
-    let w_pts = [(5, 7), (9, 21), (13, 11), (17, 21), (21, 7)];
-    for pair in w_pts.windows(2) {
-        let ((x0, y0), (x1, y1)) = (pair[0], pair[1]);
-        for t in 0..=40 {
-            let (x, y) = (x0 + (x1 - x0) * t / 40, y0 + (y1 - y0) * t / 40);
-            put(x, y, white);
-            put(x + 1, y, white);
-        }
+    let base = crate::brand::tray_base();
+    for (i, p) in base.as_chunks::<4>().0.iter().enumerate() {
+        let (x, y) = ((i % N) as i32, (i / N) as i32);
+        put(x, y, *p);
     }
     let (cx, cy, r) = (23.0f32, 23.0f32, 8.5f32);
     for y in 0..N as i32 {

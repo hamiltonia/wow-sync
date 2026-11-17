@@ -6167,8 +6167,10 @@ dependencies = [
 name = "wow-sync-app"
 version = "0.0.0"
 dependencies = [
+ "embed-resource",
  "gpui",
  "gpui_platform",
+ "png 0.18.1",
  "raw-window-handle",
  "tray-icon",
  "wow-sync-core",

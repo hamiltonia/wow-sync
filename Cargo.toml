@@ -20,3 +20,6 @@ gpui = { version = "0.2.2", git = "https://github.com/zed-industries/zed", rev =
 gpui_platform = { version = "0.1.0", git = "https://github.com/zed-industries/zed", rev = "e8bc16acee5ae1937600d571d441c4b5d7b0d288" }
 tray-icon = "=0.26.1"
 raw-window-handle = "0.6"
+# Same versions as already in Cargo.lock (png via tray-icon/image; embed-resource via GPUI).
+png = "=0.18.1"
+embed-resource = "=3.0.12"
