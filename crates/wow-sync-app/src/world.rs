@@ -285,8 +285,26 @@ fn kind_of(p: &PackageRow, peers: &[&MemberRow]) -> Kind {
     }
 }
 
+fn plain_text(t: &str) -> String {
+    if t.starts_with("published seq ") {
+        return "Shared this computer's add-on changes".into();
+    }
+    if t.starts_with("enrolled group ") {
+        return "This computer joined the add-on group".into();
+    }
+    t.to_string()
+}
+
 fn activity_items(entries: &[ActivityEntry], now: i64) -> Vec<ActivityItem> {
     let (today, _) = local_parts(now);
+    let entries: Vec<ActivityEntry> = entries
+        .iter()
+        .map(|e| ActivityEntry {
+            text: plain_text(&e.text),
+            ..e.clone()
+        })
+        .collect();
+    let entries = &entries[..];
     let mut out: Vec<ActivityItem> = Vec::new();
     let mut batch_start: Option<i64> = None;
     for e in entries {
@@ -379,6 +397,14 @@ impl World {
         w.busy = i.syncing.then_some(Busy::Syncing { done: 0, total: 0 });
         w.last_check_secs = i.last_check_ms.map(|ms| secs_since(now, ms));
         w.activity = activity_items(i.activity, now);
+        // The service only remembers a publish made in this run; the log remembers older ones.
+        let logged_publish = i
+            .activity
+            .iter()
+            .filter(|e| e.kind == "published")
+            .filter_map(|e| e.unix_ms)
+            .max();
+        w.last_shared_secs = logged_publish.map(|ms| secs_since(now, ms));
         if let Some(d) = &s.detail {
             w.view = d.view.clone();
             w.build = d.game_build.clone().unwrap_or_default();
@@ -386,7 +412,11 @@ impl World {
             w.group_id = d.group_id.clone();
             w.computer_id = d.computer_id.clone();
             w.variant_folder = d.variant_folder.clone();
-            w.last_shared_secs = d.view.last_publish.map(|ms| secs_since(now, ms));
+            w.last_shared_secs = d
+                .view
+                .last_publish
+                .map(|ms| secs_since(now, ms))
+                .or(w.last_shared_secs);
             let others: Vec<&MemberRow> = d.members.iter().filter(|m| !m.is_this).collect();
             w.peers = others
                 .iter()

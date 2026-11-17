@@ -97,6 +97,7 @@ pub enum Act {
     Toggle(String),
     Theme(ThemeChoice),
     SheetHide,
+    SheetCancel,
     SheetQuit,
     SheetKeepRunning,
     SheetQuitWhenSafe,
@@ -459,6 +460,7 @@ impl Shell {
         if enrolled_now && self.setup.working {
             self.setup.working = false;
             self.setup.finished = true;
+            self.pending_focus = Some("@content".into());
         } else if self.setup.working && !self.message.is_empty() {
             self.setup.working = false;
         }
@@ -591,7 +593,11 @@ impl Shell {
         if self.sheet.is_some()
             && !matches!(
                 act,
-                Act::SheetHide | Act::SheetQuit | Act::SheetKeepRunning | Act::SheetQuitWhenSafe
+                Act::SheetHide
+                    | Act::SheetCancel
+                    | Act::SheetQuit
+                    | Act::SheetKeepRunning
+                    | Act::SheetQuitWhenSafe
             )
         {
             return;
@@ -643,6 +649,7 @@ impl Shell {
                 self.close_sheet();
                 self.hide();
             }
+            Act::SheetCancel => self.close_sheet(),
             Act::SheetQuit => {
                 self.first_close_done = true;
                 self.closing_quits = true;
@@ -1352,7 +1359,7 @@ impl Render for Shell {
         self.content_first = None;
         let pal = self.pal();
         let setup_mode = !self.w.enrolled || self.setup.finished;
-        let setup_panel = (setup_mode && self.setup.step == 4).then(|| {
+        let setup_panel = (setup_mode && self.setup.step >= 4).then(|| {
             format!(
                 "setup|{}|{:?}",
                 self.setup.install,
@@ -1514,7 +1521,7 @@ impl Shell {
 
     fn escape(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.sheet.clone() {
-            Some(Sheet::FirstClose) => self.do_act(Act::SheetHide, window, cx),
+            Some(Sheet::FirstClose) => self.do_act(Act::SheetCancel, window, cx),
             Some(Sheet::Quit(_)) => self.do_act(Act::SheetKeepRunning, window, cx),
             None => {
                 if self.detail != Detail::None {
@@ -1893,7 +1900,7 @@ impl Shell {
                 .flex()
                 .items_center()
                 .gap(u(16.))
-                .child(div().flex_1().child(SharedString::from(msg)))
+                .child(div().flex_1().min_w_0().child(SharedString::from(msg)))
                 .child(a)
                 .child(b)
                 .into_any_element(),

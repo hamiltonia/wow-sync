@@ -588,10 +588,17 @@ pub fn banners(w: &World) -> (Vec<Banner>, usize) {
     }
     if w.game_running {
         let n = counts(w).ready + counts(w).waiting;
+        let tail = if n == 0 {
+            "No updates are waiting.".to_string()
+        } else {
+            format!(
+                "{} will be applied after you close WoW.",
+                plural(n, "update", "updates")
+            )
+        };
         all.push(Banner {
             text: format!(
-                "WoW is running. WoW Sync never changes game files while the game runs. {} will be applied after you close WoW.",
-                plural(n, "update", "updates")
+                "WoW is running. WoW Sync never changes game files while the game runs. {tail}"
             ),
             tone: Tone::Waiting,
             action: BannerAction::None,

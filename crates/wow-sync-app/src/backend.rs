@@ -98,6 +98,20 @@ fn save_target(state_dir: &Path, t: &Target) {
     let _ = std::fs::write(state_dir.join(CONFIG_FILE), text);
 }
 
+/// Plain-language text for a refused setup or reconfirmation; never the internal reason name.
+fn humane(e: &wow_sync_runtime::ServiceError) -> String {
+    let raw = e.to_string();
+    if raw.contains("ConfirmationRequired") {
+        "Confirm both the game version and the add-on list to continue. Nothing has been changed."
+            .into()
+    } else if raw.contains("StaleConfirmation") {
+        "The installation changed after you looked at it. Check it again and confirm. Nothing has been changed."
+            .into()
+    } else {
+        raw
+    }
+}
+
 fn config_for(o: &BackendOptions, t: &Target) -> ServiceConfig {
     ServiceConfig {
         install_root: t.install_root.clone(),
@@ -229,7 +243,7 @@ fn run(
                         });
                         force = true;
                     }
-                    Err(e) => publish(&shared, &wake, |g| g.message = e.to_string()),
+                    Err(e) => publish(&shared, &wake, |g| g.message = humane(&e)),
                 }
                 continue;
             }
@@ -239,7 +253,7 @@ fn run(
                     publish(&shared, &wake, |g| {
                         g.message = match res {
                             Ok(()) => String::new(),
-                            Err(e) => e.to_string(),
+                            Err(e) => humane(&e),
                         }
                     });
                     force = true;
@@ -321,6 +335,15 @@ fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn refusals_read_as_plain_language() {
+        use wow_sync_runtime::ServiceError;
+        let t = humane(&ServiceError::Refused("ConfirmationRequired".into()));
+        assert!(t.contains("Confirm both") && !t.contains("ConfirmationRequired"));
+        let s = humane(&ServiceError::Refused("StaleConfirmation".into()));
+        assert!(s.contains("Check it again") && !s.contains("Stale"));
+    }
 
     #[test]
     fn target_round_trips_and_partial_files_are_ignored() {
