@@ -24,6 +24,7 @@ or orchestrator records otherwise.
 | [tests.md](tests.md) | Required behavioral test names per packet, fixtures, end-to-end and provider tests | all, R2-check |
 | [questions.md](questions.md) | Owner and design questions with recommended defaults | owner, orchestrator |
 | [removal.md](removal.md) | Removal/uninstall design (run-003, not yet implemented): tombstones, intent evidence, apply, recovery. **Open major R3D-13** ([recheck2](../runs/run-003/evidence/R3-design-recheck2.md)) must be resolved before implementation | later runs |
+| [dropbox-api.md](dropbox-api.md) | Research spike (run-003, D-21): desktop-client folder vs Dropbox HTTP API vs hybrid; comparison, risks, recommendation (keep the folder; optional read-only hybrid later), owner questions DA-1..DA-4, trial plan needing approval | owner, orchestrator |
 | [ui/README.md](ui/README.md) | GUI design (run-003): information architecture, screens, style, interaction, wireframes, prototype brief | R3-proto, later UI build |
 
 [../ARCHITECTURE.md](../ARCHITECTURE.md) is the short overview and invariant
