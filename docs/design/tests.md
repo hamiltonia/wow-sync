@@ -188,26 +188,22 @@ After the block is released, publication resumes: Beta is published, and
 there is still exactly one Alpha result. The core predicate test is listed as
 `R2-fix4:core`.
 
-### 5a. Client-build compatibility by interface number (run-003, R3-compat and fix; Q-21 rule A)
+### 5a. No client-build or Interface gating (run-003, R3-d21; Q-21 by D-21)
 
-Core tests (`target::tests::`): `different_build_same_interface_installs_automatically`,
-`different_build_different_or_missing_interface_needs_decision`,
-`different_build_without_local_interface_evidence_needs_decision`,
-`multi_folder_package_needs_every_folder_supported`, `same_build_ignores_interface_numbers`,
-`different_mapping_still_needs_decision_with_same_interface`, and the retry-1 cases
-`malformed_interface_tokens_fail_closed` (parser to target: invalid, overflow, empty token,
-conflicting repeated headers, valid repeated headers),
-`missing_builds_apply_the_interface_rule` (both or either build missing),
-`multi_client_local_toc_does_not_authorize`, `stale_unrelated_local_addon_does_not_authorize`,
-`new_addon_or_added_folder_on_other_build_needs_decision`; parser
-`toc::tests::interface_validity_requires_clean_agreeing_headers`. Runtime e2e with two
-synthetic installs on different builds: the same addon with the same Interface set applies
-(`different_build_same_interface_applies`); a differing set, a malformed set and a new
-addon each produce a decision and leave the install untouched
-(`different_build_different_interface_needs_decision`,
-`different_build_malformed_interface_needs_decision`,
-`different_build_new_addon_needs_decision`). Cases `Q-21:core` and `Q-21:slice`.
-
+D-21 replaces the D-18 interface rule and interim rule A: a game update or an
+`## Interface:` declaration never withholds an addon; only the variant and the
+matching account/character boundaries (and the mapping predicate) do. Core
+tests (`target::tests::`): `different_build_syncs_whatever_the_interface_says`
+(same, different, malformed, empty and missing Interface on a different build
+all choose the candidate), `unknown_build_and_new_addon_sync`,
+`multi_folder_package_syncs_across_builds_and_interfaces`,
+`different_toc_mapping_needs_decision` (the mapping predicate is unchanged) and
+`other_variant_state_ignored` (a different variant or group never syncs).
+Runtime e2e with two synthetic installs on different builds:
+`different_build_same_interface_applies`, `different_build_different_interface_applies`,
+`different_build_malformed_interface_applies`, `different_build_missing_interface_applies`
+and `different_build_new_addon_applies` all apply and leave no decision. Cases
+`Q-21:core` and `Q-21:slice`. The A-38 negative control re-introduces a build-based hold.
 ## 5b. GUI verification (M-08; A-25, A-26)
 
 Headless tests are **not** GUI evidence. GUI checks are manual/observed

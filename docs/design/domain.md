@@ -157,7 +157,7 @@ case-insensitively). Recorded keys:
 
 | Key | Field |
 |---|---|
-| `Interface` | `interface: Vec<u32>` (valid tokens) and `interface_valid: bool`: true only if at least one header exists, every comma token of every header is a valid `u32` (an empty, non-numeric or overflowing token invalidates), and repeated headers declare the same set. Invalid evidence is never used for compatibility (Q-21) |
+| `Interface` | `interface: Vec<u32>` (valid numeric tokens; display only, never used to gate sync: Q-21, D-21) |
 | `Version` | `version: Option<String>` |
 | `Title` | `title: Option<String>` (display only; color codes kept as text) |
 | `Dependencies`, `RequiredDeps`, any key starting `Dep` | `hard_deps: Vec<String>` (comma-separated, trimmed, non-empty) |
@@ -325,31 +325,20 @@ candidate `c` can be chosen automatically only if all hold:
 |---|---|
 | every member folder of `c` has status `Ok` and a `Selected` toc under the source member's mapping | `NoCompatibleToc` |
 | the source member's `client.toc_mapping` equals the local mapping | `DifferentTocMapping` |
-| the source member's `client.build_version` equals the local one (**both present** and equal), **or** the interface rule below holds for `c` (Q-21) | `DifferentClientBuild` (Q-21) |
 | no member folder is `Blocked(UnvalidatedTocMapping)` locally (§2.1) | `UnvalidatedTocMapping` |
 | `c` is **complete**: its folder set equals the package's full membership `Package.members` as established by grouping over **all** admitted observations and the local inventory (§5) — so neither leftover old parts here nor a missing part on an empty peer is possible (retry 2, R-M04) | `PartialCandidate` |
 
-**Client-build compatibility by interface number (Q-21, owner decision D-18;
-rule A, orchestrator interim, owner to confirm).** Only two present, equal
-`build_version` values skip this rule; if either build is missing it applies.
-`interface_supported` (`target.rs`, pure) holds only when, for **every** folder
-of the candidate: the candidate folder's selected `.toc` has a valid non-empty
-Interface set (§3), **and** this computer has a usable (`Ok`) copy of that same
-folder whose selected `.toc` has a valid set **exactly equal** to the
-candidate's. Unrelated installed addons are never evidence, and a local
-multi-client declaration authorizes only a candidate declaring the same full
-set (no subsets, ranges or "newer is fine"). A new addon, an added or missing
-local folder, invalid or missing numbers, or a differing set gives
-`NeedsDecision(DifferentClientBuild)`. Ordinary patch-day updates of an
-already-installed addon whose Interface set is unchanged stay automatic.
-`DifferentTocMapping` is unaffected. Wire compatibility: the published summary
-gains `interface_valid`; records written earlier lack it and read as `false`,
-so a cross-build candidate from an old record needs a decision until its
-publisher republishes; older readers ignore the new field.
-
+**No game-build or Interface gating (Q-21, owner decision D-21; replaces the
+D-18 rule and interim rule A).** A game update, a different or unknown client
+`build_version`, and the `## Interface:` declaration (missing, malformed or
+different) never withhold a candidate. Only the variant and the matching
+account/character boundaries (§2, R-05) and the other predicates above limit
+sync; WoW Sync is a sync tool, not addon police. `DifferentTocMapping` is
+unaffected. `DecisionReason::DifferentClientBuild` is no longer produced by
+core.
 A local candidate is always "eligible" for the purpose of staying as it is
 (nothing is written). Completeness is checked against the group-wide
-membership, not the local folder set; other predicates (build, mapping) are
+membership, not the local folder set; the mapping predicate is
 per local computer, so two computers may reach different results and each
 explains its own. Slice limitation (Q-2): if an author legitimately drops a
 folder from a suite, the new version stays a `PartialCandidate` everywhere

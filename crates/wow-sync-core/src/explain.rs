@@ -194,7 +194,7 @@ pub fn render(e: &Explanation) -> String {
             format!("the other computer reads .toc files differently ({there} vs {here})")
         }
         DifferentClientBuild { here, there } => format!(
-            "the other computer runs another game build ({} vs {} here) and this client has not shown that it supports the addon's interface number",
+            "the other computer runs another game build ({} vs {} here)",
             ver(there),
             ver(here)
         ),

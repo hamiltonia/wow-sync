@@ -92,5 +92,7 @@ not here.
 Feasibility spikes (run-001 IDs S-gpui, S-mem, S-a11y, S-forever, S-addon,
 S-state, S-proc, S-dropbox) live in `spikes/<name>/`, outside the product
 workspace, and may be deleted once findings are recorded (PLAN §3, Phase 2).
+`spikes/gpui`, `spikes/mem` and `spikes/a11y` were deleted by D-21; their
+results remain in the run evidence.
 Findings go to the spike's evidence file under `docs/runs/<run-id>/evidence/`.
 [ARCHITECTURE.md](ARCHITECTURE.md) maps SPEC §7 questions to these spike IDs.

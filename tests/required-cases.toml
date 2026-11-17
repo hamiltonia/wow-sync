@@ -147,7 +147,7 @@ tests = [
     "target::tests::result_independent_of_input_order_and_duplicates",
     "target::tests::record_timestamps_cannot_influence_target",
     "target::tests::other_variant_state_ignored",
-    "target::tests::different_client_build_needs_decision",
+    "target::tests::different_toc_mapping_needs_decision",
     "target::tests::foreign_suffix_only_candidate_not_installed",
     "target::tests::unvalidated_mapping_candidate_not_installed",
     "target::tests::partial_suite_candidate_needs_decision",
@@ -512,24 +512,16 @@ id = "R2-fix4:slice"
 tier = "offline"
 tests = ["e2e::tests::pending_clear_failure_does_not_duplicate_report"]
 
-# R3-compat (run-003): Q-21 / D-18 interface-number compatibility across client builds.
+# R3-d21 (run-003): D-21 removes interface/game-build gating; variant and mapping boundaries stay.
 [[case]]
 id = "Q-21:core"
 tier = "offline"
 tests = [
-    "target::tests::different_build_same_interface_installs_automatically",
-    "target::tests::different_build_different_or_missing_interface_needs_decision",
-    "target::tests::different_build_without_local_interface_evidence_needs_decision",
-    "target::tests::multi_folder_package_needs_every_folder_supported",
-    "target::tests::same_build_ignores_interface_numbers",
-    "target::tests::different_mapping_still_needs_decision_with_same_interface",
-    "target::tests::malformed_interface_tokens_fail_closed",
-    "target::tests::missing_builds_apply_the_interface_rule",
-    "target::tests::multi_client_local_toc_does_not_authorize",
-    "target::tests::stale_unrelated_local_addon_does_not_authorize",
-    "target::tests::new_addon_or_added_folder_on_other_build_needs_decision",
-    "toc::tests::interface_validity_requires_clean_agreeing_headers",
-    "inventory::tests::summary_without_interface_valid_reads_as_invalid",
+    "target::tests::different_build_syncs_whatever_the_interface_says",
+    "target::tests::unknown_build_and_new_addon_sync",
+    "target::tests::multi_folder_package_syncs_across_builds_and_interfaces",
+    "target::tests::different_toc_mapping_needs_decision",
+    "target::tests::other_variant_state_ignored",
 ]
 
 [[case]]
@@ -537,9 +529,10 @@ id = "Q-21:slice"
 tier = "offline"
 tests = [
     "e2e::tests::different_build_same_interface_applies",
-    "e2e::tests::different_build_different_interface_needs_decision",
-    "e2e::tests::different_build_malformed_interface_needs_decision",
-    "e2e::tests::different_build_new_addon_needs_decision",
+    "e2e::tests::different_build_different_interface_applies",
+    "e2e::tests::different_build_malformed_interface_applies",
+    "e2e::tests::different_build_missing_interface_applies",
+    "e2e::tests::different_build_new_addon_applies",
 ]
 
 # R3-proto (crates/wow-sync-proto): view-model and notification rules on fake scenario data.

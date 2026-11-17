@@ -1,12 +1,11 @@
 name: spike-gpui
 
-# Build-only feasibility spikes (run-001 S-gpui on crates.io 0.2.2; run-002 R2-pin on a
-# pinned Zed release tag). Nothing is run or uploaded.
+# Build-only feasibility spike (run-002 R2-pin on a pinned Zed release tag; the run-001
+# S-gpui spike on crates.io 0.2.2 was deleted by D-21). Nothing is run or uploaded.
 on:
   workflow_dispatch:
   push:
     paths:
-      - "spikes/gpui/**"
       - "spikes/gpui-pin/**"
       - ".github/workflows/spike-gpui.yml"
 
@@ -28,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        spike: [gpui, gpui-pin]
+        spike: [gpui-pin]
         target:
           - x86_64-pc-windows-msvc
           - aarch64-pc-windows-msvc

@@ -2,7 +2,6 @@
 
 use crate::variant::{FileObs, TocMapping};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -22,9 +21,6 @@ pub struct ExternalId {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TocInfo {
     pub interface: Vec<u32>,
-    /// True only when at least one `## Interface:` header exists, every token of every header
-    /// is a valid `u32`, and repeated headers agree. Anything else is not compatibility evidence.
-    pub interface_valid: bool,
     pub version: Option<String>,
     pub title: Option<String>,
     pub hard_deps: Vec<String>,
@@ -46,9 +42,6 @@ pub fn parse_toc(bytes: &[u8]) -> Result<TocInfo, TocError> {
     let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
     let text = std::str::from_utf8(bytes).map_err(|_| TocError::NotUtf8)?;
     let mut info = TocInfo::default();
-    let mut iface_seen = false;
-    let mut iface_bad = false;
-    let mut iface_first: Option<BTreeSet<u32>> = None;
     for raw in text.lines() {
         let Some(rest) = raw.trim_start().strip_prefix("##") else {
             continue;
@@ -60,18 +53,11 @@ pub fn parse_toc(bytes: &[u8]) -> Result<TocInfo, TocError> {
         let value = value.trim();
         match key.as_str() {
             "interface" => {
-                let parsed: Vec<Option<u32>> = value
-                    .split(',')
-                    .map(|p| p.trim().parse::<u32>().ok())
-                    .collect();
-                info.interface.extend(parsed.iter().flatten().copied());
-                let set: Option<BTreeSet<u32>> = parsed.into_iter().collect();
-                match (set, &iface_first) {
-                    (None, _) => iface_bad = true,
-                    (Some(s), None) => iface_first = Some(s),
-                    (Some(s), Some(first)) => iface_bad |= s != *first,
-                }
-                iface_seen = true;
+                info.interface.extend(
+                    value
+                        .split(',')
+                        .filter_map(|p| p.trim().parse::<u32>().ok()),
+                );
             }
             "version" => {
                 if info.version.is_none() {
@@ -98,7 +84,6 @@ pub fn parse_toc(bytes: &[u8]) -> Result<TocInfo, TocError> {
             _ => {}
         }
     }
-    info.interface_valid = iface_seen && !iface_bad;
     Ok(info)
 }
 
@@ -222,21 +207,6 @@ mod tests {
     }
 
     #[test]
-    fn interface_validity_requires_clean_agreeing_headers() {
-        let valid = |t: &str| parse_toc(t.as_bytes()).unwrap().interface_valid;
-        assert!(valid("## Interface: 11508\n"));
-        assert!(valid("## Interface: 11507, 16001\n"));
-        assert!(valid("## Interface: 11508\n## Interface: 11508\n"));
-        assert!(!valid("## Version: 1\n"));
-        assert!(!valid("## Interface: \n"));
-        assert!(!valid("## Interface: 11508,\n"));
-        assert!(!valid("## Interface: 11508,4294967296\n"));
-        assert!(!valid("## Interface: 11508,garbage\n"));
-        assert!(!valid("## Interface: 11508\n## Interface: 11509\n"));
-        assert!(!valid("## Interface: 11508\n## Interface: bad\n"));
-    }
-
-    #[test]
     fn parses_header_keys_with_bom_and_crlf() {
         let mut bytes = vec![0xEF, 0xBB, 0xBF];
         bytes.extend_from_slice(
@@ -244,10 +214,6 @@ mod tests {
         );
         let i = parse_toc(&bytes).unwrap();
         assert_eq!(i.interface, vec![11507, 16001]);
-        assert!(
-            !i.interface_valid,
-            "the trailing x makes the header invalid"
-        );
         assert_eq!(i.version.as_deref(), Some("12.1.23"));
         assert_eq!(i.title.as_deref(), Some("|cffff0000Core|r"));
         assert_eq!(i.hard_deps, vec!["A", "B", "C", "D"]);
