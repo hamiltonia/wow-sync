@@ -103,7 +103,7 @@ listed limitations.
 |---|---|---|
 | Main window | Window | "<Page> · WoW Sync" |
 | Header | Banner (fallback Group) | "Status" |
-| Headline | Status (fallback Paragraph) | "<headline sentence>. <context line>" e.g. "Waiting, WoW is running. Forever, Main add-ons group, this computer Desk PC" |
+| Headline | Status (fallback Paragraph) | "<headline sentence>. <context line>" e.g. "Waiting, WoW is running. World of Warcraft: Forever (wowf), Main add-ons group, this computer Desk PC" |
 | Sync now / Pause | Button | "Sync now"; "Sync now, unavailable while paused"; "Pause syncing" / "Resume syncing" |
 | Sidebar | Navigation (fallback List) | "Sections" |
 | Sidebar item | Tab in a TabList if `selected` exists, else Button | "Add-ons"; "Needs attention, 2 items"; "Settings sync, coming later"; current page adds ", current page" |
