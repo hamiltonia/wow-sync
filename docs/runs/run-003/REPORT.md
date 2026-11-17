@@ -78,8 +78,8 @@ removal rules ("removed means removed everywhere").
 
 ## 5. Owner decisions pending
 
-- **OQ-ICON:** the provided app art includes third-party logos, and the
-  repo is public. See HANDOFF.
+- **OQ-ICON:** resolved by D-22. The art is committed and is being wired
+  in by R3-icon.
 - **DA-1 to DA-4:** the Dropbox API questions.
 - **UQ-1 and UQ-2:** in `docs/design/ui/questions.md`.
 - **Q-3 and Q-23:** real-PC checks ([OWNER-CHECKS.md](OWNER-CHECKS.md)).

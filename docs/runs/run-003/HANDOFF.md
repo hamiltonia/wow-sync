@@ -121,11 +121,10 @@ chat is not.
 - The owner was not available, so the orchestrator chose the reversible
   option: the art is **not committed**. R3-fix goal 12 optionally lets the app
   use it as a local-only runtime override (gitignored).
-- Owner decision needed:
-  - commit the art as is;
-  - keep it local only;
-  - or provide a version without the third-party logos, which could then be
-    committed and embedded as the exe icon.
+- **Resolved by D-22:** the owner considers the art fair use. It is
+  committed under `assets/brand/` (`8601907`) and is being wired in as the
+  tray, window and exe icon by worker 19, R3-icon. That packet supersedes
+  R3-fix goal 12.
 
 ## Next actions
 
@@ -138,10 +137,9 @@ Run-003 is **closed** at 17,029.2 AIU cumulative (7,515.8 for run-003),
   RC3 and RC4 finding is closed, except the following:
   - the tray left click on the real icon is BLOCKED. It is an owner-manual
     check.
-  - goal 12 (the local icon override) was not done; it waits for the
-    OQ-ICON decision.
+  - goal 12 (the local icon override) is superseded by D-22 and R3-icon.
 - **The next run needs owner input first:**
-  - OQ-ICON, DA-1 to DA-4, UQ-1 and UQ-2;
+  - DA-1 to DA-4, UQ-1 and UQ-2;
   - the Q-3 and Q-23 real-PC checks;
   - how to re-review R3D-13 before removal;
   - an approved run-004 plan and credit ceiling.
