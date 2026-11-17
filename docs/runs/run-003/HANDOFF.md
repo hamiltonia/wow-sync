@@ -130,7 +130,14 @@ chat is not.
 ## Next actions
 
 1. R3-fix is merged as `042b44c` (retry 1 of 2 used); both verify tiers PASS.
-   R3-check3 (sol) is running and independently checks the fixes, including
-   real-app screenshots.
-2. Stop launching new work at ≥19,013 AIU cumulative. Then write the
+2. R3-check3 is merged as `d59fafc`. Most checks PASS. It FAILs on RC3-1
+   (medium: the interruption cause is inferred from whether WoW is running
+   now) and on RC3-2 and RC3-3 (low). R3-fix2 is running for these three.
+3. macOS CI was red from `ce15e24` to `0e86e74`: a test used a Windows path
+   separator, and the earlier checks missed it. R3-macfix fixed it, and CI
+   is green via draft PR #1.
+4. The tray left click on the real icon is still BLOCKED, because no
+   environment could target the icon unambiguously. It is an owner-manual
+   check.
+5. Stop launching new work at ≥19,013 AIU cumulative. Then write the
    run-003 report and stop for the owner.
