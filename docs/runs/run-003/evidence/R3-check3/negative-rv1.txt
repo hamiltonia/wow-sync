@@ -1,0 +1,24 @@
+   Compiling wow-sync-app v0.0.0 (D:\GitHub\wow-sync.worktrees\R3-check3\crates\wow-sync-app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.86s
+     Running unittests src\main.rs (target\debug\build\wow-sync-app/c1aedda0e3b2361a\out\wow_sync-c1aedda0e3b2361a.exe)
+
+running 1 test
+test model::tests::interrupted_text_follows_core_and_differs_by_cause ... FAILED
+
+failures:
+
+---- model::tests::interrupted_text_follows_core_and_differs_by_cause stdout ----
+
+thread 'model::tests::interrupted_text_follows_core_and_differs_by_cause' (21436) panicked at crates\wow-sync-app\src\model.rs:1312:9:
+assertion `left == right` failed
+  left: "An update was interrupted."
+ right: "Updating Demo was interrupted; it will be finished or restored on the next sync."
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    model::tests::interrupted_text_follows_core_and_differs_by_cause
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 18 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p wow-sync-app --bin wow-sync`

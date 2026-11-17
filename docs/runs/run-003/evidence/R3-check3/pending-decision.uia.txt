@@ -1,0 +1,20 @@
+ControlType.Group: Status
+ControlType.StatusBar: Waiting for your decision on 1 add-on. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Sync now
+ControlType.Button: Pause syncing
+ControlType.Group: Sections
+ControlType.Button: Overview
+ControlType.Button: Computers
+ControlType.Button: Add-ons
+ControlType.Button: Needs attention, 1 items, current page
+ControlType.Button: Activity
+ControlType.Button: Settings sync, coming later
+ControlType.Button: App settings
+ControlType.Button: About
+ControlType.Button: Back to Needs attention
+ControlType.Text: LabAlpha: choose which copy to keep
+ControlType.Button: Keep this copy, choosing a copy is not available yet
+ControlType.Button: Details, collapsed
+ControlType.Button: Keep this copy, choosing a copy is not available yet
+ControlType.Button: Details, collapsed
+ControlType.Button: Decide later

@@ -1,0 +1,16 @@
+ControlType.Group: Status
+ControlType.StatusBar: Waiting for your decision on 1 add-on. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Sync now
+ControlType.Button: Pause syncing
+ControlType.Group: Sections
+ControlType.Button: Overview
+ControlType.Button: Computers
+ControlType.Button: Add-ons
+ControlType.Button: Needs attention, 1 items, current page
+ControlType.Button: Activity
+ControlType.Button: Settings sync, coming later
+ControlType.Button: App settings
+ControlType.Button: About
+ControlType.Text: Needs attention
+ControlType.List: Needs attention, 1 items
+ControlType.ListItem: LabAlpha: can't tell which copy is newer, WoW Sync can't tell which copy is newer. Their version labels can't be compared safely (1.0.0 and )., Choose a copy

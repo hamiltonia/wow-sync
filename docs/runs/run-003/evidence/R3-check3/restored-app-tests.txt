@@ -1,0 +1,16 @@
+   Compiling wow-sync-app v0.0.0 (D:\GitHub\wow-sync.worktrees\R3-check3\crates\wow-sync-app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.63s
+     Running unittests src\main.rs (target\debug\build\wow-sync-app/c1aedda0e3b2361a\out\wow_sync-c1aedda0e3b2361a.exe)
+
+running 8 tests
+test model::tests::headline_follows_the_runtime_state ... ok
+test model::tests::last_check_text_uses_the_scheduler_or_says_unavailable ... ok
+test model::tests::nothing_invented_when_there_is_no_data ... ok
+test model::tests::quit_sheet_only_while_applying ... ok
+test model::tests::every_decision_reason_has_its_own_build_free_wording ... ok
+test model::tests::next_step_text_is_core_s_for_other_actions ... ok
+test model::tests::interrupted_text_follows_core_and_differs_by_cause ... ok
+test model::tests::tray_shape_differs_by_state_not_only_colour ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 11 filtered out; finished in 0.01s
+

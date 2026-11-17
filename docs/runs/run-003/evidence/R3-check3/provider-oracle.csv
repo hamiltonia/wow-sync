@@ -1,0 +1,11 @@
+"computer_id","sequence","inventory_complete","folder","status","version","tree"
+"48ce76c0296da948e29446458cccdefc","1","True","LabAlpha","ok","1.0.0","8cb9a63bec1493e5a98efa19c3af904befa1c27c85c9d4c8e581a30b4e04acc0"
+"48ce76c0296da948e29446458cccdefc","1","True","LabBeta","ok","1.0.0","9504b454000abe96bb3330ff70e722294288229eb04dbbba08b89071ee7753eb"
+"48ce76c0296da948e29446458cccdefc","2","True","LabAlpha","ok","1.0.0","8cb9a63bec1493e5a98efa19c3af904befa1c27c85c9d4c8e581a30b4e04acc0"
+"48ce76c0296da948e29446458cccdefc","2","True","LabBeta","ok","3.0.0","a10eb6563612776523fdfc5100e28fb11ddba927eef14844d381c32d2b5315d3"
+"f5ecdd032ae213c9da5cdba8af25c402","4","False","LabAlpha","ok","1.0.0","c43b437c4520ac88a1d8c71b215b836d4a4e3a06fb2865af7ac7e4c7a3cdaa4d"
+"f5ecdd032ae213c9da5cdba8af25c402","4","False","LabBeta","unstable",,
+"f5ecdd032ae213c9da5cdba8af25c402","5","True","LabAlpha","ok","1.0.0","c43b437c4520ac88a1d8c71b215b836d4a4e3a06fb2865af7ac7e4c7a3cdaa4d"
+"f5ecdd032ae213c9da5cdba8af25c402","5","True","LabBeta","ok","2.0.0","6f564715dece84950ecf3039dc7b8a8129054924fc4b4277287b668ef3e8c285"
+"f5ecdd032ae213c9da5cdba8af25c402","6","True","LabAlpha","ok","1.0.0","c43b437c4520ac88a1d8c71b215b836d4a4e3a06fb2865af7ac7e4c7a3cdaa4d"
+"f5ecdd032ae213c9da5cdba8af25c402","6","True","LabBeta","ok","3.0.0","a10eb6563612776523fdfc5100e28fb11ddba927eef14844d381c32d2b5315d3"

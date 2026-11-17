@@ -1,0 +1,18 @@
+LAUNCH A PID=27792
+LAUNCH B PID=22032
+INVOKE Needs attention*
+CAPTURE pending-attention
+ControlType.StatusBar: Waiting for your decision on 1 add-on. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Pause syncing
+ControlType.ListItem: LabAlpha: can't tell which copy is newer, WoW Sync can't tell which copy is newer. Their version labels can't be compared safely (1.0.0 and )., Choose a copy
+INVOKE LabAlpha: can*
+CAPTURE pending-decision
+ControlType.StatusBar: Waiting for your decision on 1 add-on. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Pause syncing
+INVOKE Overview
+INVOKE Sync now
+LAUNCH A PID=31752
+CRASH JOURNAL COUNT=0
+STOP APP 27792=True
+STOP APP 22032=True
+STOP APP 31752=True

@@ -1,0 +1,49 @@
+   Compiling getrandom v0.3.4
+   Compiling wow-sync-core v0.0.0 (D:\GitHub\wow-sync.worktrees\R3-check3\crates\wow-sync-core)
+   Compiling wow-sync-adapters v0.0.0 (D:\GitHub\wow-sync.worktrees\R3-check3\crates\wow-sync-adapters)
+   Compiling wow-sync-runtime v0.0.0 (D:\GitHub\wow-sync.worktrees\R3-check3\crates\wow-sync-runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.75s
+     Running unittests src\lib.rs (target\debug\build\wow-sync-runtime/8224616127ec0945\out\wow_sync_runtime-8224616127ec0945.exe)
+
+running 1 test
+test detail::tests::this_computer_confirms_only_applied_or_in_sync_packages ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 45 filtered out; finished in 0.00s
+
+RV6_EXIT=0
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.45s
+     Running unittests src\lib.rs (target\debug\build\wow-sync-runtime/8224616127ec0945\out\wow_sync_runtime-8224616127ec0945.exe)
+
+running 1 test
+test discover::tests::an_oversized_dropbox_info_file_is_not_read ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 45 filtered out; finished in 0.04s
+
+RV7_BOUND_EXIT=0
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.48s
+     Running unittests src\lib.rs (target\debug\build\wow-sync-runtime/8224616127ec0945\out\wow_sync_runtime-8224616127ec0945.exe)
+
+running 1 test
+test control::tests::a_damaged_pause_file_holds_sync_and_is_an_error_not_a_time ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 45 filtered out; finished in 0.01s
+
+RV7_PAUSE_EXIT=0
+   Compiling windows_x86_64_msvc v0.52.6
+   Compiling windows-targets v0.52.6
+   Compiling windows-sys v0.59.0
+   Compiling winreg v0.56.0
+   Compiling embed-resource v3.0.12
+   Compiling gpui v0.2.2 (https://github.com/zed-industries/zed?rev=e8bc16acee5ae1937600d571d441c4b5d7b0d288#e8bc16ac)
+   Compiling gpui_windows v0.1.0 (https://github.com/zed-industries/zed?rev=e8bc16acee5ae1937600d571d441c4b5d7b0d288#e8bc16ac)
+   Compiling gpui_platform v0.1.0 (https://github.com/zed-industries/zed?rev=e8bc16acee5ae1937600d571d441c4b5d7b0d288#e8bc16ac)
+   Compiling wow-sync-proto v0.0.0 (D:\GitHub\wow-sync.worktrees\R3-check3\crates\wow-sync-proto)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 26.51s
+     Running unittests src\main.rs (target\debug\build\wow-sync-proto/46b1b812a96ff0de\out\wow_sync_proto-46b1b812a96ff0de.exe)
+
+running 1 test
+test model::tests::every_decision_reason_has_distinct_build_free_wording ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.00s
+
+RV2_PROTO_EXIT=0

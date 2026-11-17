@@ -1,0 +1,71 @@
+LAUNCH A PID=28608
+INVOKE Next
+INVOKE Use this folder
+INVOKE Next
+INVOKE Next
+INVOKE This is my*
+INVOKE These are the*
+INVOKE Next
+INVOKE Create a new group
+INVOKE Next
+INVOKE Set up this computer
+INVOKE Finish and open*
+INVOKE Sync now
+CAPTURE dashboard
+ControlType.StatusBar: This computer is up to date. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Pause syncing
+ControlType.Button: Add-ons, 2 up to date, open the list of add-ons that are not up to date
+ControlType.Group: Last check, just now; next check about 12:48
+INVOKE App settings
+TOGGLE BEFORE=Off
+TOGGLE AFTER=On
+SETTINGS DISK=closing_quits=1
+first_close_seen=0
+
+LAUNCH A PID=36200
+INVOKE App settings
+TOGGLE RESTART=On
+CAPTURE close-option
+ControlType.StatusBar: This computer is up to date. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Pause syncing
+ControlType.Button: Pause syncing
+INVOKE Closing the window quits WoW Sync
+INVOKE Hide window
+HIDDEN=True
+LAUNCH A PID=17728
+SECONDARY EXIT=0
+SECOND INSTANCE VISIBLE (0)=True
+LAUNCH A PID=23356
+SECONDARY EXIT=0
+SECOND INSTANCE VISIBLE (1)=True
+LAUNCH A PID=31424
+SECONDARY EXIT=0
+SECOND INSTANCE VISIBLE (2)=True
+HIDDEN AGAIN=True
+LAUNCH A PID=5052
+SECONDARY EXIT=0
+SECOND INSTANCE REOPEN=True
+LAUNCH B PID=34380
+INVOKE Next
+INVOKE Use this folder
+INVOKE Next
+INVOKE Next
+INVOKE This is my*
+INVOKE These are the*
+INVOKE Next
+INVOKE Join My add-ons*
+INVOKE Next
+INVOKE Set up this computer
+INVOKE Finish and open*
+INVOKE Sync now
+INVOKE Sync now
+INVOKE Sync now
+INVOKE Sync now
+INVOKE Needs attention*
+CAPTURE pending-attention
+ControlType.StatusBar: Waiting for your decision on 1 add-on. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Pause syncing
+ControlType.ListItem: LabAlpha: can't tell which copy is newer, WoW Sync can't tell which copy is newer. Their version labels can't be compared safely (1.0.0 and )., Choose a copy
+STOP APP 28608=True
+STOP APP 36200=True
+STOP APP 34380=True

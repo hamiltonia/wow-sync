@@ -1,0 +1,22 @@
+   Compiling wow-sync-app v0.0.0 (D:\GitHub\wow-sync.worktrees\R3-check3\crates\wow-sync-app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.72s
+     Running unittests src\main.rs (target\debug\build\wow-sync-app/c1aedda0e3b2361a\out\wow_sync-c1aedda0e3b2361a.exe)
+
+running 1 test
+test model::tests::every_decision_reason_has_its_own_build_free_wording ... FAILED
+
+failures:
+
+---- model::tests::every_decision_reason_has_its_own_build_free_wording stdout ----
+
+thread 'model::tests::every_decision_reason_has_its_own_build_free_wording' (5312) panicked at crates\wow-sync-app\src\model.rs:1234:17:
+DifferentTocMapping mentions build: the copies are for different game builds The computers that hold this add-on read its .toc files by a different rule than this computer, so WoW Sync can't tell which files apply here.
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    model::tests::every_decision_reason_has_its_own_build_free_wording
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 18 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p wow-sync-app --bin wow-sync`

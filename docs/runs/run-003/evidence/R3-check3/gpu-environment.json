@@ -1,0 +1,10 @@
+[
+  {
+    "Name": "NVIDIA RTX 2000 Ada Generation Laptop GPU",
+    "DriverVersion": "32.0.16.2114"
+  },
+  {
+    "Name": "Intel(R) UHD Graphics",
+    "DriverVersion": "32.0.101.7088"
+  }
+]

@@ -1,0 +1,37 @@
+ControlType.Group: Status
+ControlType.StatusBar: This computer is up to date. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Sync now
+ControlType.Button: Pause syncing
+ControlType.Group: Sections
+ControlType.Button: Overview
+ControlType.Button: Computers
+ControlType.Button: Add-ons
+ControlType.Button: Needs attention
+ControlType.Button: Activity
+ControlType.Button: Settings sync, coming later
+ControlType.Button: App settings, current page
+ControlType.Button: About
+ControlType.Text: App settings
+ControlType.Text: Startup
+ControlType.Button: Start WoW Sync when I sign in, not available yet
+ControlType.Text: Syncing
+ControlType.Button: Pause syncing
+ControlType.Button: Sync now
+ControlType.Text: Appearance
+ControlType.Group: Theme
+ControlType.RadioButton: Theme: Follow system, selected
+ControlType.RadioButton: Theme: Light
+ControlType.RadioButton: Theme: Dark
+ControlType.Text: Notifications
+ControlType.Text: Window
+ControlType.Button: Closing the window quits WoW Sync
+ControlType.Button: Explain close-to-tray again next time
+ControlType.Text: Privacy
+ControlType.Button: Send anonymous crash reports, coming later
+ControlType.Button: What is sent?, coming later
+ControlType.Text: Data
+ControlType.Button: Open shared folder, not available yet
+ControlType.Button: Open data folder, not available yet
+ControlType.Button: Export diagnostics…, coming later
+ControlType.Text: Quit
+ControlType.Button: Quit WoW Sync

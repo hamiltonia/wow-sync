@@ -1,0 +1,25 @@
+ControlType.Group: Status
+ControlType.StatusBar: Paused. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Sync now, unavailable while paused
+ControlType.Button: Resume syncing
+ControlType.Group: Sections
+ControlType.Button: Overview
+ControlType.Button: Computers
+ControlType.Button: Add-ons, current page
+ControlType.Button: Needs attention, 1 items
+ControlType.Button: Activity
+ControlType.Button: Settings sync, coming later
+ControlType.Button: App settings
+ControlType.Button: About
+ControlType.StatusBar: Syncing is paused on this computer. Updates from other computers are not applied here, and changes here are not shared.
+ControlType.Button: Resume syncing
+ControlType.StatusBar: WoW is running. WoW Sync never changes game files while the game runs. 1 update will be applied after you close WoW.
+ControlType.Text: Add-ons
+ControlType.Group: Filter add-ons
+ControlType.Button: All, 2 add-ons, selected
+ControlType.Button: Not up to date, 2 add-ons
+ControlType.Button: Needs you, 1 add-ons
+ControlType.Button: Not synced here, 0 add-ons
+ControlType.List: Add-ons, 2 items, filter All
+ControlType.ListItem: LabAlpha, needs your decision, version 1.0.0, not confirmed yet
+ControlType.ListItem: LabBeta, update interrupted, version 1.0.0, not confirmed yet
