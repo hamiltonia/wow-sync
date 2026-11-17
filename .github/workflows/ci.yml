@@ -42,6 +42,9 @@ jobs:
         run: cargo install cargo-deny --version "$CARGO_DENY_VERSION" --locked
       - name: Offline verification tier
         run: cargo xtask verify --tier offline
+      - name: Native verification tier (Windows only)
+        if: runner.os == 'Windows'
+        run: cargo xtask verify --tier native
       - name: Show verification report
         if: always()
         run: cat target/verify/report.json || true

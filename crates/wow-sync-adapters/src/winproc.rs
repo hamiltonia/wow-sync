@@ -348,14 +348,36 @@ mod tests {
         );
     }
 
+    /// A fake client that is starting or exiting cannot be inspected for a moment, which
+    /// correctly reports Unknown. Tests that observe processes therefore run one at a time.
+    #[cfg(windows)]
+    static PROCESS_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// A process that is starting or exiting briefly cannot be inspected, which correctly
+    /// reports Unknown; wait (bounded) for that to settle. A process that stays
+    /// uninspectable still fails the calling assertion.
+    #[cfg(windows)]
+    fn observe_settled(dir: &Path) -> ProcessActivity {
+        let mut a = observe_variant(dir).0;
+        for _ in 0..50 {
+            if !matches!(a, ProcessActivity::Unknown(_)) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            a = observe_variant(dir).0;
+        }
+        a
+    }
+
     #[cfg(windows)]
     #[test]
     fn fake_client_under_variant_is_running() {
         use crate::testkit::{FakeClient, SyntheticInstall, TempDir};
+        let _serial = PROCESS_TESTS.lock().unwrap_or_else(|e| e.into_inner());
         let t = TempDir::new();
         let inst = SyntheticInstall::new_forever(t.path(), "inst");
         assert_eq!(
-            observe_variant(&inst.variant_dir).0,
+            observe_settled(&inst.variant_dir),
             ProcessActivity::NotRunning
         );
         let client = FakeClient::start(&inst.variant_dir);
@@ -369,7 +391,7 @@ mod tests {
         }
         drop(client);
         assert_eq!(
-            observe_variant(&inst.variant_dir).0,
+            observe_settled(&inst.variant_dir),
             ProcessActivity::NotRunning
         );
     }
@@ -378,6 +400,7 @@ mod tests {
     #[test]
     fn process_outside_variant_is_not_running() {
         use crate::testkit::{SyntheticInstall, TempDir};
+        let _serial = PROCESS_TESTS.lock().unwrap_or_else(|e| e.into_inner());
         let t = TempDir::new();
         let inst = SyntheticInstall::new_forever(t.path(), "inst");
         let launcher = inst.root.join("Launcher.exe");
@@ -388,7 +411,7 @@ mod tests {
             .stdout(std::process::Stdio::null())
             .spawn()
             .unwrap();
-        let (a, _) = observe_variant(&inst.variant_dir);
+        let a = observe_settled(&inst.variant_dir);
         let _ = child.kill();
         let _ = child.wait();
         assert_eq!(a, ProcessActivity::NotRunning);
