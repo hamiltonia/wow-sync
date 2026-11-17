@@ -6171,6 +6171,7 @@ dependencies = [
  "gpui_platform",
  "raw-window-handle",
  "tray-icon",
+ "wow-sync-core",
  "wow-sync-runtime",
 ]
 

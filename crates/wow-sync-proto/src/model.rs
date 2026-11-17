@@ -727,8 +727,8 @@ pub fn decision_reason(_w: &World, a: &Addon, r: DecisionReason) -> String {
         DecisionReason::PartialCandidate => {
             "Laptop's copy is missing folders that other copies have: BagnonOptions.".into()
         }
-        DecisionReason::DifferentClientBuild | DecisionReason::NoCompatibleToc => {
-            "This copy came from a computer with a different game build and does not say it supports this one.".into()
+        DecisionReason::DifferentTocMapping | DecisionReason::NoCompatibleToc => {
+            "This copy came from a computer that reads add-on files by a different rule, or does not say it supports this game version.".into()
         }
         _ => "This add-on has game-version-specific files that WoW Sync does not handle yet.".into(),
     }

@@ -1,0 +1,6 @@
+status | name='' | focusable=False | focused=False | enabled=True
+heading | name='Confirm what to sync' | focusable=False | focused=False | enabled=True
+check box | name='This is my World of Warcraft: Forever (wowf) - folder _forever_, build 1.0.0.1 installation' | focusable=True | focused=True | enabled=True
+check box | name='These are the add-ons I want to sync' | focusable=True | focused=False | enabled=True
+button | name='Back' | focusable=True | focused=False | enabled=True
+button | name='Next, complete this step first' | focusable=True | focused=False | enabled=True

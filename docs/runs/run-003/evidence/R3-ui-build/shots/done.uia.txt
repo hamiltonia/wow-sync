@@ -1,0 +1,2 @@
+heading | name='This computer is set up' | focusable=False | focused=False | enabled=True
+button | name='Finish and open WoW Sync' | focusable=True | focused=False | enabled=True

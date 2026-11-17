@@ -1,0 +1,22 @@
+banner | name='Status' | focusable=False | focused=False | enabled=True
+status | name='This computer is up to date. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: ComputerA' | focusable=False | focused=False | enabled=True
+button | name='Sync now' | focusable=True | focused=False | enabled=True
+button | name='Pause syncing' | focusable=True | focused=False | enabled=True
+navigation | name='Sections' | focusable=False | focused=False | enabled=True
+button | name='Overview' | focusable=True | focused=False | enabled=True
+button | name='Computers' | focusable=True | focused=False | enabled=True
+button | name='Add-ons, current page' | focusable=True | focused=False | enabled=True
+button | name='Needs attention' | focusable=True | focused=False | enabled=True
+button | name='Activity' | focusable=True | focused=False | enabled=True
+button | name='Settings sync, coming later' | focusable=True | focused=False | enabled=True
+button | name='App settings' | focusable=True | focused=False | enabled=True
+button | name='About' | focusable=True | focused=False | enabled=True
+heading | name='Add-ons' | focusable=False | focused=False | enabled=True
+group | name='Filter add-ons' | focusable=False | focused=False | enabled=True
+button | name='All, 2 add-ons, selected' | focusable=True | focused=True | enabled=True
+button | name='Not up to date, 0 add-ons' | focusable=True | focused=False | enabled=True
+button | name='Needs you, 0 add-ons' | focusable=True | focused=False | enabled=True
+button | name='Not synced here, 0 add-ons' | focusable=True | focused=False | enabled=True
+list | name='Add-ons, 2 items, filter All' | focusable=False | focused=False | enabled=True
+list item | name='Alpha, up to date, version 1.2, not confirmed yet' | focusable=True | focused=False | enabled=True
+list item | name='Beta, up to date, version 0.5, not confirmed yet' | focusable=True | focused=False | enabled=True

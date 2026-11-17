@@ -274,7 +274,7 @@ pub fn applied_explanation(key: &FolderKey, plan: &Explanation) -> Explanation {
 /// The headline sentence (G4: "Waiting — WoW is running" while the game blocks changes).
 pub fn render_headline(v: &StatusView) -> String {
     match v.headline {
-        Headline::Ok => "Everything is up to date".to_string(),
+        Headline::Ok => "This computer is up to date".to_string(),
         Headline::Working => "Working".to_string(),
         Headline::Waiting if v.blocks.contains(&PlanBlock::GameRunning) => {
             "Waiting \u{2014} WoW is running".to_string()
@@ -486,8 +486,9 @@ mod tests {
         assert!(
             text.contains("1.0")
                 && text.contains("2.0")
-                && text.contains(sc.members[0].computer.as_str()),
-            "post-apply status keeps source and versions: {text}"
+                && text.contains("another computer")
+                && !text.contains(sc.members[0].computer.as_str()),
+            "post-apply status keeps source and versions without IDs: {text}"
         );
         assert!(confirmations(&t, &sc.members).is_empty());
     }
@@ -615,8 +616,10 @@ mod tests {
             "{text}"
         );
         assert!(
-            text.contains("this computer") && text.contains(sc.members[0].computer.as_str()),
-            "each candidate's holder is named: {text}"
+            text.contains("this computer")
+                && text.contains("another computer")
+                && !text.contains(sc.members[0].computer.as_str()),
+            "each candidate's holder is named without IDs: {text}"
         );
         assert!(text.contains("version 1.0 on"), "{text}");
     }

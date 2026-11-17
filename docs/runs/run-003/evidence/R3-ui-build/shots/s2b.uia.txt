@@ -1,0 +1,5 @@
+status | name='' | focusable=False | focused=False | enabled=True
+heading | name='Shared folder' | focusable=False | focused=False | enabled=True
+button | name='Shared folder chosen' | focusable=True | focused=True | enabled=True
+button | name='Back' | focusable=True | focused=False | enabled=True
+button | name='Next' | focusable=True | focused=False | enabled=True

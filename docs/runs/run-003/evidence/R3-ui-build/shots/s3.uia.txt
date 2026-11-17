@@ -1,0 +1,5 @@
+status | name='' | focusable=False | focused=False | enabled=True
+heading | name='Game installation' | focusable=False | focused=False | enabled=True
+list item | name='World of Warcraft: Forever (wowf) - folder _forever_, build 1.0.0.1, can be synced, selected' | focusable=True | focused=True | enabled=True
+button | name='Back' | focusable=True | focused=False | enabled=True
+button | name='Next' | focusable=True | focused=False | enabled=True

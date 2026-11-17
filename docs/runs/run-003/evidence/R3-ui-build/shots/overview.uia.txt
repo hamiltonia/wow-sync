@@ -1,0 +1,25 @@
+banner | name='Status' | focusable=False | focused=False | enabled=True
+status | name='This computer is up to date. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: ComputerA' | focusable=False | focused=False | enabled=True
+button | name='Sync now' | focusable=True | focused=False | enabled=True
+button | name='Pause syncing' | focusable=True | focused=False | enabled=True
+navigation | name='Sections' | focusable=False | focused=False | enabled=True
+button | name='Overview, current page' | focusable=True | focused=False | enabled=True
+button | name='Computers' | focusable=True | focused=False | enabled=True
+button | name='Add-ons' | focusable=True | focused=False | enabled=True
+button | name='Needs attention' | focusable=True | focused=False | enabled=True
+button | name='Activity' | focusable=True | focused=False | enabled=True
+button | name='Settings sync, coming later' | focusable=True | focused=False | enabled=True
+button | name='App settings' | focusable=True | focused=False | enabled=True
+button | name='About' | focusable=True | focused=False | enabled=True
+heading | name='Overview' | focusable=False | focused=False | enabled=True
+heading | name='This computer' | focusable=False | focused=False | enabled=True
+button | name='Add-ons, 2 up to date, open the list of add-ons that are not up to date' | focusable=True | focused=True | enabled=True
+group | name='Game, Not running' | focusable=False | focused=False | enabled=True
+group | name='Shared folder, D:\GitHub\wow-sync.worktrees\R3-ui-build\target\uistate\Shared · readable' | focusable=False | focused=False | enabled=True
+group | name='Last shared, 6 min ago (2 add-ons)' | focusable=False | focused=False | enabled=True
+group | name='Last check, just now; next in 4 min' | focusable=False | focused=False | enabled=True
+heading | name='Recent changes' | focusable=False | focused=False | enabled=True
+button | name='Shared this computer's add-on changes, Today 09:25' | focusable=True | focused=False | enabled=True
+button | name='This computer joined the add-on group, Earlier ' | focusable=True | focused=False | enabled=True
+button | name='See all activity' | focusable=True | focused=False | enabled=True
+heading | name='Other computers' | focusable=False | focused=False | enabled=True
