@@ -44,8 +44,8 @@ use wow_sync_core::records::{
 };
 use wow_sync_core::report::{outstanding, record_pending, store_needs_reconcile};
 use wow_sync_core::status::{
-    applied_here, derive_status, headline_sentence, journal_status, remember_applied, render_block,
-    render_headline, render_member, render_result, Headline, StatusInput, StatusView,
+    applied_here, derive_status, game_halted, headline_sentence, journal_status, remember_applied,
+    render_block, render_headline, render_member, render_result, Headline, StatusInput, StatusView,
 };
 use wow_sync_core::target::{compute_target, GroupTarget, TargetInput, TreeAvail};
 use wow_sync_core::toc::TocCandidate;
@@ -944,7 +944,7 @@ impl SliceService {
             members: &w.views,
             applied_here: &here,
             interrupted: &interrupted,
-            game_running: matches!(observed, wow_sync_core::plan::Activity::Running { .. }),
+            interrupted_by_game: &game_halted(&journals),
             needs_help: &needs_help,
             blocks: &blocks,
             retained: &retained,
@@ -960,6 +960,7 @@ impl SliceService {
             views: &w.views,
             titles: &w.titles,
             this_id: &w.computer.computer_id,
+            game_running: matches!(observed, wow_sync_core::plan::Activity::Running { .. }),
         };
         let rows = build_package_rows(&di);
         let game_build = w.variant.identity().build_version.clone();

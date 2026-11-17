@@ -1015,7 +1015,10 @@ impl Shell {
                     .child(
                         div()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child(SharedString::from(format!("Version {}", c.version))),
+                            .child(SharedString::from(format!(
+                                "Version {}",
+                                model::version_label(c)
+                            ))),
                     )
                     .child(self.muted(format!("Held by {holders}")))
                     .into_any_element(),

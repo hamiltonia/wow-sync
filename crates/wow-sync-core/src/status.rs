@@ -74,8 +74,9 @@ pub struct StatusInput<'a> {
     /// Packages applied here and verified, not yet confirmed by a peer, with their plan explanation.
     pub applied_here: &'a [(FolderKey, Explanation)],
     pub interrupted: &'a [FolderKey],
-    /// The game is observed running now; an interruption is blamed on it only then.
-    pub game_running: bool,
+    /// Interrupted packages whose journal records that the game start stopped them. Any other
+    /// interruption has no recorded cause and is described neutrally.
+    pub interrupted_by_game: &'a [FolderKey],
     pub needs_help: &'a [(FolderKey, String)],
     pub blocks: &'a [PlanBlock],
     pub retained: &'a [RecoveryPoint],
@@ -159,7 +160,7 @@ pub fn derive_status(input: &StatusInput) -> StatusView {
             } else if input.interrupted.contains(key) {
                 (
                     PackageStatus::Interrupted,
-                    if input.game_running {
+                    if input.interrupted_by_game.contains(key) {
                         Explanation::InterruptedByGame {
                             package: key.as_str().to_string(),
                         }
@@ -364,6 +365,16 @@ pub fn journal_status(journals: &[ApplyJournal]) -> JournalSplit {
     (interrupted, needs_help)
 }
 
+/// Journals that record the game start as the reason the update stopped. A journal written
+/// before the cause was recorded does not count.
+pub fn game_halted(journals: &[ApplyJournal]) -> Vec<FolderKey> {
+    journals
+        .iter()
+        .filter(|j| j.phase != JournalPhase::NeedsHelp && j.halted_by_game)
+        .map(|j| j.package.clone())
+        .collect()
+}
+
 /// Remember the plan explanation of every package this outcome applied (newest wins).
 pub fn remember_applied(
     remembered: &mut Vec<(FolderKey, Explanation)>,
@@ -408,8 +419,8 @@ pub fn applied_here(
 mod tests {
     use super::*;
     use crate::plan::{ExpectedLive, FolderAction};
-    use crate::records::{ApplyReport, ReportResult};
-    use crate::testkit::{addon, op, Scenario};
+    use crate::records::{decode, encode, ApplyReport, Record, ReportResult};
+    use crate::testkit::{addon, op, sample_journal, Scenario};
 
     fn pk() -> FolderKey {
         FolderKey::lossy("suite")
@@ -430,7 +441,7 @@ mod tests {
             members,
             applied_here: &[],
             interrupted: &[],
-            game_running: false,
+            interrupted_by_game: &[],
             needs_help: &[],
             blocks: &[],
             retained: &[],
@@ -625,15 +636,16 @@ mod tests {
     }
 
     #[test]
-    fn interruption_blames_the_game_only_when_it_is_running() {
+    fn interruption_blames_the_game_only_on_recorded_evidence() {
         let sc = base();
         let t = sc.target();
         let seen = BTreeMap::new();
         let ints = [pk()];
-        let text = |game_running| {
+        let text = |recorded: bool| {
+            let by_game: &[FolderKey] = if recorded { &ints } else { &[] };
             let v = derive_status(&StatusInput {
                 interrupted: &ints,
-                game_running,
+                interrupted_by_game: by_game,
                 ..input(&t, &sc.members, &seen)
             });
             render_package(&v.packages[0])
@@ -642,6 +654,33 @@ mod tests {
         let calm = text(false);
         assert!(!calm.contains("WoW"), "{calm}");
         assert!(calm.contains("interrupted"));
+    }
+
+    #[test]
+    fn only_journals_that_record_the_game_halt_blame_the_game() {
+        let mut crashed = sample_journal(JournalPhase::Committing);
+        let mut halted = sample_journal(JournalPhase::Committing);
+        halted.halted_by_game = true;
+        assert!(game_halted(&[crashed.clone()]).is_empty());
+        assert_eq!(game_halted(&[halted.clone(), crashed.clone()]).len(), 1);
+        crashed.phase = JournalPhase::NeedsHelp;
+        halted.phase = JournalPhase::NeedsHelp;
+        assert!(game_halted(&[halted, crashed]).is_empty());
+    }
+
+    #[test]
+    fn an_old_journal_without_the_cause_field_still_loads_as_unknown() {
+        let j = sample_journal(JournalPhase::Committing);
+        assert!(!j.halted_by_game);
+        let bytes = encode(&j);
+        let absent = !bytes.windows(14).any(|w| w == b"halted_by_game");
+        assert!(absent, "an unknown cause is not written");
+        let back: ApplyJournal = decode(&bytes, ApplyJournal::LIMIT).unwrap();
+        assert!(!back.halted_by_game);
+        let mut halted = j.clone();
+        halted.halted_by_game = true;
+        let back: ApplyJournal = decode(&encode(&halted), ApplyJournal::LIMIT).unwrap();
+        assert!(back.halted_by_game);
     }
 
     #[test]

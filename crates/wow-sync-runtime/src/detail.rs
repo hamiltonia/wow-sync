@@ -139,6 +139,8 @@ pub struct DetailInput<'a> {
     pub views: &'a [MemberView],
     pub titles: &'a BTreeMap<String, String>,
     pub this_id: &'a ComputerId,
+    /// The game is observed running now; only the next step depends on it.
+    pub game_running: bool,
 }
 
 fn folder_row(f: &FolderState) -> FolderRow {
@@ -272,7 +274,7 @@ pub fn build_package_rows(i: &DetailInput) -> Vec<PackageRow> {
             title,
             status: status.clone(),
             sentence: render_named(why, &name_of),
-            next: next_action(status, why),
+            next: next_action(status, why, i.game_running),
             version_here,
             version_target,
             sources,

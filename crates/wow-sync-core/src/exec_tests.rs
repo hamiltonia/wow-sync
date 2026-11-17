@@ -1,7 +1,7 @@
 use super::*;
 use crate::hash::sha256;
 use crate::plan::{plan_apply, plan_publish, ApplyGate, ObjectKind};
-use crate::status::{derive_status, StatusInput};
+use crate::status::{derive_status, PackageStatus, StatusInput};
 use crate::testkit::{
     addon, apply_fixture, computer, gate as test_gate, op, Dir, Effect, FakeEffects, Mutation,
     Scenario, Step,
@@ -186,6 +186,44 @@ fn no_live_mutation_after_launch_mid_commit() {
     let alpha = pkg(&plan, "alpha");
     assert_eq!(fx.journal_phase(&alpha.op), Some(JournalPhase::Committing));
     assert!(!fx.recovery.is_empty() && !fx.staging.is_empty());
+}
+
+#[test]
+fn a_game_start_halt_is_recorded_and_status_blames_the_game_from_it() {
+    let (sc, plan, mut fx) = apply_fixture();
+    fx.launch_after_renames = Some(1);
+    run_apply(&plan, &mut fx);
+    let alpha = pkg(&plan, "alpha");
+    let journal = fx.journal(&alpha.op).expect("journal kept");
+    assert!(journal.halted_by_game);
+    let journals = [journal];
+    let (interrupted, _) = crate::status::journal_status(&journals);
+    let by_game = crate::status::game_halted(&journals);
+    let target = sc.target();
+    let seen = BTreeMap::new();
+    let v = derive_status(&StatusInput {
+        target: &target,
+        members: &sc.members,
+        applied_here: &[],
+        interrupted: &interrupted,
+        interrupted_by_game: &by_game,
+        needs_help: &[],
+        blocks: &[],
+        retained: &[],
+        provider_error: false,
+        working: false,
+        last_publish_unix_ms: None,
+        seen_locally: &seen,
+    });
+    let alpha_status = v.packages.iter().find(|p| p.0 == alpha.package);
+    assert!(matches!(
+        alpha_status,
+        Some((
+            _,
+            PackageStatus::Interrupted,
+            Explanation::InterruptedByGame { .. }
+        ))
+    ));
 }
 
 #[test]
@@ -825,7 +863,7 @@ fn pinned_recovery_points_exceed_two_visibly() {
         members: &sc.members,
         applied_here: &[],
         interrupted: &[],
-        game_running: false,
+        interrupted_by_game: &[],
         needs_help: &[],
         blocks: &[],
         retained: &retained,

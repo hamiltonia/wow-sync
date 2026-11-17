@@ -177,6 +177,7 @@ tests = [
     "exec::tests::activity_checked_before_every_live_rename",
     "exec::tests::launch_before_commit_changes_nothing",
     "exec::tests::no_live_mutation_after_launch_mid_commit",
+    "exec::tests::a_game_start_halt_is_recorded_and_status_blames_the_game_from_it",
     "exec::tests::interrupted_package_recovers_after_game_exit",
     "exec::tests::verify_with_game_running_waits",
     "exec::tests::recovery_waits_while_game_running",
@@ -450,7 +451,9 @@ tests = [
     "variant::tests::consent_disclosures_cover_scope_mapping_replacement_removal_and_recovery",
     "plan::tests::blocked_folders_are_never_published",
     "plan::tests::publish_needed_decisions",
-    "status::tests::interruption_blames_the_game_only_when_it_is_running",
+    "status::tests::interruption_blames_the_game_only_on_recorded_evidence",
+    "status::tests::only_journals_that_record_the_game_halt_blame_the_game",
+    "status::tests::an_old_journal_without_the_cause_field_still_loads_as_unknown",
     "status::tests::headline_names_running_game_while_waiting",
     "status::tests::blocked_local_folder_is_not_synced_not_up_to_date",
 ]
@@ -590,6 +593,7 @@ id = "R3-ui-build:core"
 tier = "offline"
 tests = [
     "view::tests::each_status_has_a_distinct_next_action",
+    "view::tests::an_interruption_asks_to_close_wow_only_while_the_game_runs",
     "view::tests::a_decision_is_never_described_as_nothing_to_do",
 ]
 
@@ -618,6 +622,8 @@ tests = [
     "model::tests::last_check_text_uses_the_scheduler_or_says_unavailable",
     "model::tests::interrupted_text_follows_core_and_differs_by_cause",
     "model::tests::next_step_text_is_core_s_for_other_actions",
+    "model::tests::a_missing_candidate_version_reads_not_available_never_blank",
+    "model::tests::the_paused_hint_never_promises_zero_while_an_update_waits",
     "model::tests::every_decision_reason_has_distinct_build_free_wording",
     "probe::tests::bounded_read_refuses_a_file_over_the_limit",
     "probe::tests::subdir_names_lists_only_directories",

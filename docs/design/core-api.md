@@ -275,6 +275,11 @@ pub struct StatusView { pub headline: Headline, pub packages: Vec<(FolderKey, Pa
                         pub members: Vec<MemberStatus>, pub last_publish: Option<i64>, pub blocks: Vec<PlanBlock>,
                         pub retained_extra_recovery: u32 /* pinned points beyond the normal two */ }
 pub fn derive_status(input: &StatusInput) -> StatusView;
+// An interruption is `InterruptedByGame` only when its journal records the game start
+// (`ApplyJournal.halted_by_game`, collected by `game_halted`); otherwise `Interrupted` (neutral).
+pub fn next_action(status: &PackageStatus, why: &Explanation, game_running: bool) -> NextAction;
+// Interrupted: game running now => CloseGame ("Close WoW to let the update finish");
+// otherwise FinishOnNextSync (no "close WoW" step).
 pub fn confirmations(target: &GroupTarget, members: &[MemberView]) -> BTreeMap<FolderKey, Vec<ComputerId>>;
 
 pub enum Explanation { /* closed set, each with structured fields, e.g. */
