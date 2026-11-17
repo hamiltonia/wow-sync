@@ -125,6 +125,51 @@ in a Copilot CLI session on 2026-11-14, against spec revision `7a2ccdf`.
   report, dismissing Dependabot alerts, `git gc --prune`.
 - D-04 models, D-05 limits, data scope (D-08/D-09/D-14) still apply.
 
+### D-18: Owner review of run-002 (2026-11-16)
+
+Answers from an interactive review session with the orchestrator.
+
+- **Incidents:**
+  - V1: the owner noticed nothing closing unexpectedly. The memory gate may be
+    re-measured, using a harness that stops only processes it launched.
+  - The `git gc` incident is accepted with no further action.
+- **Held items:**
+  - Commit the S-forever report to `main`.
+  - Run-003 triages and fixes the Dependabot alerts.
+- **Confirmed run-002 PLAN §6 items:**
+  - GPUI is pinned to a Zed release tag, currently `v1.28.1`. It is bumped
+    deliberately, only for a needed fix or a security issue, and each bump
+    is re-checked for lifecycle, memory and accessibility.
+  - The `deny.toml` policy.
+  - The memory measurement method.
+  - R-11: minimize and report the launch race.
+- **D-12 (screen reader), resolved:**
+  - Narrator support is a nice-to-have, not a release blocker.
+  - The app keeps exposing accessible controls.
+  - Unverified screen-reader items are listed as known limitations. The owner
+    explicitly approves this under R-13 and E-07.
+- **Design questions (`docs/design/questions.md`), confirmed as written:**
+  - Q-1, Q-2, Q-4, Q-5, Q-6, Q-8, Q-9, Q-10, Q-12, Q-16, Q-18, Q-22 and Q-25.
+  - Q-22: same label with different content stays a decision.
+- **Q-21, changed:**
+  - A candidate from a computer on a different client build installs
+    automatically when its `## Interface:` number is supported by the
+    receiving client.
+  - Otherwise it is a decision (`NeedsDecision`).
+  - This is the compatibility evidence that R-05 requires. It is not a
+    blanket allow.
+- **Q-14:** non-ASCII names stay listed but not synced. Supporting them
+  (normalization and case-fold design) is wanted later, not in run-003.
+- **O-N1:** blocked folders appear in the details only and do not affect the
+  headline status.
+- **O-N2:** a build-version change does not force reconfirmation.
+- **O-N3:** the consent predicate belongs in core.
+- **Still open:**
+  - Q-3 and Q-23 (real-PC checks).
+  - Q-24 (real-data gate).
+  - UI direction.
+  - Run-003 scope and credit ceiling.
+
 ### D-10: Representative addon dataset
 
 - Resolved by D-14: the dev PC's `_forever_` addons (102 folders, ~3.3 GB as of
@@ -154,8 +199,7 @@ in a Copilot CLI session on 2026-11-14, against spec revision `7a2ccdf`.
 ## Deferred
 
 - D-11: Telemetry provider and schema (R-15). Propose after feasibility.
-- D-12: Screen-reader limitation policy (R-13, E-07). Decide after the
-  accessibility spike reports.
+- D-12: resolved by D-18 (Narrator is a nice-to-have; limitations are listed).
 
 ## Decision history
 
@@ -165,4 +209,5 @@ in a Copilot CLI session on 2026-11-14, against spec revision `7a2ccdf`.
 | 2026-11-14 | D-10, D-14, D-15 | Dev PC WoW data is test data; run-001 plan approved | `baa81e3` |
 | 2026-11-14 | D-13 | Run-001 ceiling 2,500 AIU cumulative approved | `a4d471b` |
 | 2026-11-15 | D-16 | Run-001 ceiling raised to 10,000 AIU; continue in current session | `f2a1323` |
-| 2026-11-15 | D-17 | Continue into run-002 within D-16 budget; provisional defaults | this commit |
+| 2026-11-15 | D-17 | Continue into run-002 within D-16 budget; provisional defaults | `961a133` |
+| 2026-11-16 | D-18 | Run-002 owner review: incidents, PLAN §6, D-12, design questions, Q-21 interface rule | this commit |
