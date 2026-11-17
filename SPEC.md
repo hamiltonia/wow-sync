@@ -132,8 +132,8 @@ incomplete join or temporary local/provider failure is not deletion authority.
 
 ### R-05: Automatic addon-code reconciliation
 
-Share the newest compatible versions already installed on participating
-computers. CurseForge or another updater obtains releases. This app does not
+Share the newest versions already installed on participating computers of the
+same game variant. CurseForge or another updater obtains releases. This app does not
 become an addon catalog, downloader or substitute updater.
 
 Automatically combine independently updated addons when their identities and
@@ -143,8 +143,13 @@ chosen result. Identical content should converge without unnecessary replacement
 Do not use file modification time, computer clock or an arbitrary machine
 preference as proof of a newer release. Version labels, channels, manual edits,
 multi-folder packages and identical labels with different contents can be
-ambiguous. If ordering or compatibility cannot be established, require a
-decision for that addon and continue safe work elsewhere.
+ambiguous. If ordering cannot be established, require a decision for that addon
+and continue safe work elsewhere.
+
+The app is a sync tool, not addon police (D-21). Whether an addon works with
+a game build is the user's responsibility. Never withhold an addon because of
+a game update or its `## Interface:` declaration. Variant and matching
+account/character boundaries still apply.
 
 Do not claim semantic compatibility that the app cannot establish. Version
 recognition must be tested with representative real metadata, not fixtures
@@ -157,8 +162,9 @@ Expose the affected addon or genuinely inseparable package/dependency scope,
 not an unexplained whole-profile failure.
 
 If one computer deliberately uninstalls an addon while an offline computer
-updates it, require a decision for that addon. Neither resurrection nor deletion
-is silently preferred. Preserve the alternatives and decision provenance.
+updates it, the removal wins (D-21). The offline computer's updated copy is
+preserved in recovery and named in the summary, so the user can restore it.
+Preserve the alternatives and provenance.
 
 The same observed inputs and accepted policies must produce the same result.
 Out-of-order, duplicate or late arrivals must not silently reverse a resolved
@@ -369,8 +375,8 @@ PowerShell behavior is a reference, not the new protocol or acceptance authority
    when available. An offline peer later returns with that bad release; it stays
    rejected. A missing settings checkpoint produces the chosen code-only warning.
 7. An addon is deliberately removed. Its active settings are removed too.
-   Restoring an older recovery point restores both, unless a newer competing
-   uninstall/update intent requires the user to decide.
+   Restoring an older recovery point restores both. A concurrent offline
+   update loses to the removal and is kept in recovery.
 8. A computer is unused for weeks. Its last confirmation remains visible but is
    never described as current. Returning cannot silently undo accepted decisions.
 9. A computer is permanently retired. History remains visible, but confirmation

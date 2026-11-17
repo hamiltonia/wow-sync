@@ -55,6 +55,8 @@ Status: **approved** (D-20). Active.
 | D | — | **Owner barrier** | Owner reviews the prototype (demo launcher plus screenshots) and approves or requests changes |
 | E | R3-check | Verification / gpt-6.1-sol | Independent checks: drive the prototype by keyboard and UIA, negative controls on R3-compat, CI evidence |
 | E | R3-review | Integration / opus-5.5 | E-06/E-08 review; the orchestrator writes the report |
+| E (added by D-21) | R3-d21 | Implementation / sonnet-5.5 | Remove the interface gating from the R3-compat code and tests, so only the variant limits sync; delete `spikes/gpui`, `spikes/mem` and `spikes/a11y`; update `docs/design` for D-21 |
+| E (added by D-21) | R3-dropbox-api | Design / opus-5.5 | Research-only spike: the Dropbox public API versus the desktop-client folder (auth, sync and notification model, rate limits, online-only files, offline behaviour, memory, cost, credential storage, A-29 and A-34 impact). Public docs only, no credentials (D-08). Ends in a recommendation |
 | F (conditional) | R3-ui-build | Implementation / sonnet-5.5 | Replace the slice shell with the approved design wired to the runtime; needs prototype approval and budget headroom |
 
 Planned workers: 10 (+ retries, + phase F) under the D-05 limits: 5

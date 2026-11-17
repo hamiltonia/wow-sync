@@ -20,9 +20,9 @@ chat is not.
 - Launcher: `D:\WoWSyncDemo\Start-Prototype.cmd`.
 - Unverified: Ctrl shortcuts, OS DPI, live theme toggle, OS toasts, IME, shutdown. See `evidence/R3-proto.md`.
 - The worker once used the forbidden `Set-Content` on source files; it disclosed this and the files were rebuilt. |
-| D | Owner barrier | **WAITING for the owner to review the prototype.** Phases E and F do not start until the owner approves |
-| E | R3-check (sol), R3-review (opus) | Pending |
-| F | R3-ui-build (conditional) | Pending |
+| D | Owner barrier | **Done (D-21, 2026-11-17).** Prototype approved. The owner answered Q-21, the UI defaults and the removal defaults, and asked for a Dropbox API spike |
+| E | R3-check (sol), R3-review (opus), R3-d21 (sonnet), R3-dropbox-api (opus) | Pending |
+| F | R3-ui-build | Approved by D-21. Must include the Q-26 "close quits" option and drop compatibility-hold UI states that D-21 removes |
 
 ## Incidents
 
@@ -30,19 +30,10 @@ None yet.
 
 ## Owner confirmation needed
 
-- **Q-21 evidence rule (R3D-3).** The owner was unavailable when asked, so
-  the orchestrator chose rule **A**, the most conservative option. It is
-  recorded here as interim, pending owner confirmation.
-  - A different-build or unknown-build candidate installs automatically only
-    when the same addon's installed local copy declares exactly the same valid
-    Interface set for every folder. Anything else becomes a decision.
-  - Alternatives offered:
-    - B: also allow new addons by majority local evidence.
-    - C: keep the union of all local declarations.
-  - The recheck (R3D-3, still open) notes that even rule A is a proxy:
-    WoW's install files do not expose the interface numbers the client
-    supports. Only the owner can accept a proxy. Until then, the code ships
-    rule A, which is the most conservative.
+- None open. D-21 replaced interim rule A: no Interface or build gating. R3-d21
+  removes the gating code. R3D-3 is moot.
+- glib alerts 1, 5 and 6 were dismissed per D-21. The grid alerts (2 to 4)
+  close when R3-d21 deletes the spikes.
 
 ## Follow-ups found
 
@@ -52,7 +43,8 @@ None yet.
   - omitting one violates the resolution rule.
 
   The run-003 retries are exhausted. The run that implements removal must
-  close it first.
+  close it first. D-21 ("removal wins") may simplify it, so re-review it
+  against D-21.
 - R3-mem limitations:
   - UIA Invoke had no effect, so the UI-use phase used posted keys.
   - Shown-window memory with real interaction may be somewhat higher.

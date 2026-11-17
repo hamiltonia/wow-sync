@@ -170,7 +170,57 @@ Answers from an interactive review session with the orchestrator.
   - UI direction.
   - Run-003 scope and credit ceiling.
 
-### D-20: Run-003 plan approved (2026-11-16)
+### D-21: Prototype review and design answers (2026-11-17)
+
+Answers from an interactive session with the orchestrator at the run-003
+phase D barrier.
+
+- **Prototype (A-42): approved** as the basis for the real UI.
+  - Phase E and phase F may proceed within the D-19 budget.
+- **Product principle:** WoW Sync is a sync tool, not addon police.
+  - Users are responsible for their own addon setup.
+  - The app does not protect users from their own choices beyond keeping
+    recovery points (R-10).
+- **Q-21: replaces the D-18 Q-21 rule and the interim rule A.**
+  - Never withhold an addon because of a game update or its `## Interface:`
+    declaration.
+  - Only the variant boundary and the matching account/character boundary
+    limit sync.
+  - SPEC R-05 is amended to match.
+- **Removal:** a deliberate removal syncs everywhere.
+  - **Q-41 kept:** a short settle wait (about 30 s, two stable scans) before a
+    missing folder counts as removed. This is correct observation, so a
+    half-extracted updater install is not published as a removal.
+  - **Q-42 rejected:** no confirmation when many addons vanish at once.
+  - **R-06 amended:** if a removal collides with a concurrent offline update,
+    the removal wins. The updated copy is kept in recovery and named in the
+    summary. ACCEPTANCE A-10 is amended to match.
+  - The other removal defaults (Q-43, Q-44, Q-46 to Q-53) are accepted as far
+    as they are consistent with "removed means removed everywhere".
+    - Q-48: a joining computer removes the addon; there is no
+      removal-versus-update decision.
+    - Q-52 is unchanged, because post-retirement actions are not authority.
+- **Q-45:** the owner reports that WoW keeps an uninstalled addon's saved
+  variables.
+- **UI defaults:**
+  - **Q-26:** close hides to the tray by default. App settings has an option
+    to make close quit.
+  - **Q-27:** 72 hours.
+  - **Q-28:** pause lasts until resumed.
+  - **Q-29:** "Quit when safe" sheet.
+  - **Q-34:** Follow system / Light / Dark.
+  - **Q-36:** update check on by default, with the disclosure and an opt-out.
+- **Dependabot:**
+  - Delete the obsolete `spikes/gpui`, `spikes/mem` and `spikes/a11y` (their
+    results remain in the docs).
+  - Dismiss the Linux-only glib alerts, since Linux is not a supported
+    platform.
+- **New spike:** evaluate the Dropbox public API as an alternative or
+  complement to the desktop-client folder.
+  - It is research only. D-08 still applies: no Dropbox API credentials.
+  - A live API trial needs a separate approval.
+
+
 
 - The owner approved `docs/runs/run-003/PLAN.md` as written.
 - Ceiling per D-19. Baseline at approval: 9,513.4 AIU cumulative (sessions
@@ -243,4 +293,5 @@ Answers from an interactive review session with the orchestrator.
 | 2026-11-15 | D-17 | Continue into run-002 within D-16 budget; provisional defaults | `961a133` |
 | 2026-11-16 | D-18 | Run-002 owner review: incidents, PLAN §6, D-12, design questions, Q-21 interface rule | `d83fda7` |
 | 2026-11-16 | D-19 | Run-003 scope, UI direction, 10,000 AIU ceiling; plan approval pending | `3d332fd` |
-| 2026-11-16 | D-20 | Run-003 plan approved as written | this commit |
+| 2026-11-16 | D-20 | Run-003 plan approved as written | `b420717` |
+| 2026-11-17 | D-21 | Prototype approved; Q-21 no interface gating; removal wins; UI defaults; Dropbox API spike | this commit |
