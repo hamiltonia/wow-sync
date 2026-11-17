@@ -52,5 +52,5 @@
   <text x="224" y="612" font-size="12" fill="#4A5363">Scope line from typed continuation scope (UG-25): S7 has no journal. With a journal needing help it reads "No updates are applied on this computer until …" (S16).</text>
   <text x="224" y="632" font-size="12" fill="#4A5363">After Keep this copy: "Saving your choice…" → "Your choice is saved. It will be applied on the next sync." → done.</text>
   <text x="224" y="652" font-size="12" fill="#4A5363">Build-out: buttons disabled with "Choosing is coming later; nothing has been changed" until a decision API exists (Q-25, UG-8).</text>
-  <text x="224" y="672" font-size="12" fill="#4A5363">Reason sentence per DecisionReason in screens.md (Ambiguous, PartialCandidate, DifferentClientBuild, …). Never a whole-profile choice.</text>
+  <text x="224" y="672" font-size="12" fill="#4A5363">Reason sentence per DecisionReason in screens.md (Ambiguous, PartialCandidate, NoCompatibleToc, DifferentTocMapping, UnvalidatedTocMapping). Never a whole-profile choice.</text>
 </svg>

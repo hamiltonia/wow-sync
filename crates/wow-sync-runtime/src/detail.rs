@@ -285,6 +285,20 @@ pub fn build_package_rows(i: &DetailInput) -> Vec<PackageRow> {
     rows
 }
 
+/// What this computer itself has confirmed: only packages that are applied or in sync here.
+/// Available, blocked, undecided, interrupted and not-synced packages are not confirmed.
+fn this_confirmed(packages: &[PackageRow]) -> u32 {
+    packages
+        .iter()
+        .filter(|p| {
+            matches!(
+                p.status,
+                PackageStatus::InSync | PackageStatus::AppliedHere | PackageStatus::ConfirmedBy(_)
+            )
+        })
+        .count() as u32
+}
+
 pub fn member_rows(
     i: &DetailInput,
     this: (&str, &str, Option<String>),
@@ -292,10 +306,7 @@ pub fn member_rows(
 ) -> Vec<MemberRow> {
     let (this_name, app_version, game_build) = this;
     let confirmed = confirmations(i.target, i.views);
-    let synced = packages
-        .iter()
-        .filter(|p| !matches!(p.status, PackageStatus::NotSynced))
-        .count();
+    let synced = this_confirmed(packages);
     let mut out = vec![MemberRow {
         id: i.this_id.to_string(),
         name: this_name.to_string(),
@@ -304,7 +315,7 @@ pub fn member_rows(
         app_version: Some(app_version.to_string()),
         game_build,
         seen_locally_at: None,
-        confirmed: synced as u32,
+        confirmed: synced,
         unconfirmed: Vec::new(),
     }];
     for m in &i.view.members {
@@ -350,6 +361,42 @@ pub fn member_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wow_sync_core::plan::PlanBlock;
+    use wow_sync_core::target::DecisionReason;
+
+    fn row(status: PackageStatus) -> PackageRow {
+        PackageRow {
+            key: "k".into(),
+            title: "t".into(),
+            status,
+            sentence: String::new(),
+            next: NextAction::Nothing,
+            version_here: None,
+            version_target: None,
+            sources: Vec::new(),
+            folders: Vec::new(),
+            awaiting: Vec::new(),
+            confirmed_by: Vec::new(),
+            candidates: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn this_computer_confirms_only_applied_or_in_sync_packages() {
+        let rows = [
+            row(PackageStatus::InSync),
+            row(PackageStatus::AppliedHere),
+            row(PackageStatus::ConfirmedBy(Vec::new())),
+            row(PackageStatus::Available),
+            row(PackageStatus::Blocked(PlanBlock::GameRunning)),
+            row(PackageStatus::NeedsDecision(DecisionReason::Ambiguous)),
+            row(PackageStatus::NeedsHelp("x".into())),
+            row(PackageStatus::Interrupted),
+            row(PackageStatus::Unavailable),
+            row(PackageStatus::NotSynced),
+        ];
+        assert_eq!(this_confirmed(&rows), 3);
+    }
 
     #[test]
     fn colour_codes_are_not_part_of_a_title() {

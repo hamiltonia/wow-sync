@@ -10,37 +10,55 @@ const SETTINGS_FILE: &str = "app-settings.txt";
 const SMALL: u64 = 16 * 1024;
 const AUDIT_READ: u64 = 2 * 1024 * 1024;
 
-/// When syncing was paused on this computer (unix ms), or `None` when it is running.
-/// A pause lasts until the user resumes; it survives restarts. An unreadable file reads as
-/// paused so a damaged pause is never silently dropped.
-pub fn paused_since(state: &LocalState) -> Option<i64> {
+/// The pause control as stored on this computer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PauseState {
+    Running,
+    /// Paused since this time (unix ms). Lasts until the user resumes.
+    Paused {
+        since_ms: i64,
+    },
+    /// The pause file exists but cannot be read or understood. Syncing stays held (a damaged
+    /// pause is never silently dropped) and the GUI shows it as a problem, not a time.
+    Damaged,
+}
+
+impl PauseState {
+    pub fn holds_sync(self) -> bool {
+        !matches!(self, PauseState::Running)
+    }
+}
+
+pub fn pause_state(state: &LocalState) -> PauseState {
     match state.read(PAUSE_FILE, SMALL) {
-        Ok(None) => None,
-        Ok(Some(b)) => Some(
-            String::from_utf8_lossy(&b)
-                .trim()
-                .parse::<i64>()
-                .unwrap_or(0),
-        ),
-        Err(_) => Some(0),
+        Ok(None) => PauseState::Running,
+        Ok(Some(b)) => match String::from_utf8_lossy(&b).trim().parse::<i64>() {
+            Ok(ms) if ms > 0 => PauseState::Paused { since_ms: ms },
+            _ => PauseState::Damaged,
+        },
+        Err(_) => PauseState::Damaged,
+    }
+}
+
+/// When syncing was paused on this computer (unix ms), or `None` when it is running or the
+/// pause file is damaged (see [`pause_state`]).
+pub fn paused_since(state: &LocalState) -> Option<i64> {
+    match pause_state(state) {
+        PauseState::Paused { since_ms } => Some(since_ms),
+        _ => None,
     }
 }
 
 pub fn set_paused(state: &LocalState, paused: bool) -> Result<(), String> {
     if paused {
-        if paused_since(state).is_some() {
+        if pause_state(state).holds_sync() {
             return Ok(());
         }
         state
             .write_atomic(PAUSE_FILE, now_unix_ms().to_string().as_bytes())
             .map_err(|e| e.to_string())
     } else {
-        let path = state.path().join(PAUSE_FILE);
-        match std::fs::remove_file(&path) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e.to_string()),
-        }
+        state.remove(PAUSE_FILE).map_err(|e| e.to_string())
     }
 }
 
@@ -225,11 +243,31 @@ mod tests {
     }
 
     #[test]
-    fn a_damaged_pause_file_still_reads_as_paused() {
+    fn a_damaged_pause_file_holds_sync_and_is_an_error_not_a_time() {
         let t = TempDir::new();
         let a = st(&t);
         a.write_atomic(PAUSE_FILE, b"not a number").unwrap();
-        assert!(paused_since(&a).is_some());
+        assert_eq!(pause_state(&a), PauseState::Damaged);
+        assert!(pause_state(&a).holds_sync());
+        assert_eq!(
+            paused_since(&a),
+            None,
+            "never reported as paused since 1970"
+        );
+        a.write_atomic(PAUSE_FILE, b"0").unwrap();
+        assert_eq!(pause_state(&a), PauseState::Damaged);
+        set_paused(&a, true).unwrap();
+        assert_eq!(
+            pause_state(&a),
+            PauseState::Damaged,
+            "pause does not overwrite it"
+        );
+        set_paused(&a, false).unwrap();
+        assert_eq!(
+            pause_state(&a),
+            PauseState::Running,
+            "resume clears a damaged pause"
+        );
     }
 
     #[test]

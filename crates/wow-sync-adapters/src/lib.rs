@@ -8,6 +8,7 @@ pub mod fs_install;
 pub mod fs_safe;
 pub mod fs_scan;
 pub mod localstate;
+pub mod probe;
 pub mod provider;
 pub mod sysinfo;
 pub mod winproc;

@@ -713,7 +713,9 @@ fn decision_title(r: DecisionReason) -> &'static str {
     match r {
         DecisionReason::Ambiguous => "can't tell which copy is newer",
         DecisionReason::PartialCandidate => "one copy is missing folders",
-        _ => "the copies are for different game builds",
+        DecisionReason::NoCompatibleToc => "a copy has no readable add-on file list",
+        DecisionReason::DifferentTocMapping => "the copies read their file lists differently",
+        DecisionReason::UnvalidatedTocMapping => "a copy has client-specific files",
     }
 }
 
@@ -727,10 +729,17 @@ pub fn decision_reason(_w: &World, a: &Addon, r: DecisionReason) -> String {
         DecisionReason::PartialCandidate => {
             "Laptop's copy is missing folders that other copies have: BagnonOptions.".into()
         }
-        DecisionReason::DifferentTocMapping | DecisionReason::NoCompatibleToc => {
-            "This copy came from a computer that reads add-on files by a different rule, or does not say it supports this game version.".into()
+        DecisionReason::NoCompatibleToc => {
+            "A copy of this add-on has no readable .toc file for this computer's WoW client, so WoW Sync can't tell which files to use."
+                .into()
         }
-        _ => "This add-on has game-version-specific files that WoW Sync does not handle yet.".into(),
+        DecisionReason::DifferentTocMapping => {
+            "The computers that hold this add-on read its .toc files by a different rule than this computer, so WoW Sync can't tell which files apply here."
+                .into()
+        }
+        DecisionReason::UnvalidatedTocMapping => {
+            "This add-on has client-specific .toc files that WoW Sync does not handle yet.".into()
+        }
     }
 }
 
@@ -1262,6 +1271,39 @@ mod tests {
     use super::*;
     use crate::scenario::{ScenarioId, ALL_SCENARIOS};
 
+    #[test]
+    fn every_decision_reason_has_distinct_build_free_wording() {
+        let w = World::new(ScenarioId::S7);
+        let a = w.addons.first().expect("S7 has add-ons");
+        let all = [
+            DecisionReason::Ambiguous,
+            DecisionReason::PartialCandidate,
+            DecisionReason::NoCompatibleToc,
+            DecisionReason::DifferentTocMapping,
+            DecisionReason::UnvalidatedTocMapping,
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for r in all {
+            let text = format!("{} {}", decision_title(r), decision_reason(&w, a, r));
+            let low = text.to_lowercase();
+            for bad in [
+                "build",
+                "game version",
+                "game-version",
+                "interface",
+                "supports",
+            ] {
+                assert!(!low.contains(bad), "{r:?} mentions {bad}: {text}");
+            }
+            assert!(seen.insert(text), "{r:?} wording is not distinct");
+        }
+        for a in &w.addons {
+            for c in &a.candidates {
+                let low = c.differences.to_lowercase();
+                assert!(!low.contains("build") && !low.contains("game version"));
+            }
+        }
+    }
     #[test]
     fn every_scenario_builds_with_expected_headline() {
         let want = [

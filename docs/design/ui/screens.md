@@ -445,11 +445,16 @@ Never a whole-profile choice.
     differ, for example after a manual edit." (Q-22)
   - `PartialCandidate`: "Laptop's copy is missing folders that other copies
     have: WeakAurasOptions."
-  - `DifferentClientBuild` / `NoCompatibleToc`: "This copy came from a computer
-    with a different game build and does not say it supports this one." (the
-    Q-21 rule is core's)
-  - `UnvalidatedTocMapping` / `DifferentTocMapping`: "This add-on has
-    game-version-specific files that WoW Sync does not handle yet."
+  - `NoCompatibleToc`: "A copy of this add-on has no readable .toc file for
+    this computer's WoW client, so WoW Sync can't tell which files to use."
+  - `DifferentTocMapping`: "The computers that hold this add-on read its .toc
+    files by a different rule than this computer, so WoW Sync can't tell which
+    files apply here."
+  - `UnvalidatedTocMapping`: "This add-on has client-specific .toc files that
+    WoW Sync does not handle yet."
+  - D-21: no decision text names a game build, a game version or an Interface
+    number as the reason; `DifferentClientBuild` no longer exists. The app and
+    the prototype each test every reason for distinct, build-free wording.
 - **Copies** (one card per candidate, from `Explanation::AmbiguousVersions.
   candidates` and `evidence`): version label, which computers hold it ("This
   computer and Laptop"), folder differences, per-folder evidence outcome.
@@ -457,11 +462,14 @@ Never a whole-profile choice.
   installed on every computer in this group. Other copies are kept as recovery
   copies."
 - Buttons per card: **Keep this copy**. Page: **Decide later**.
-- Scope line: "Only WeakAuras is affected. Other add-ons keep syncing." Shown
-  only when no interrupted update needs help on this computer; otherwise "Your
-  choice is kept, but no updates are applied on this computer until the
-  interrupted update is resolved." ([Continuation scope](#continuation-scope),
-  UG-25).
+- Scope line: none until core exposes a typed continuation scope (UG-25; open
+  question UQ-2 in [questions.md](questions.md)). The built app shows no "Only
+  X is affected" sentence and no claim that other updates are held. Intended
+  wording once core states it: "Only WeakAuras is affected. Other add-ons keep
+  syncing." Shown only when no interrupted update needs help on this computer;
+  otherwise "Your choice is kept, but no updates are applied on this computer
+  until the interrupted update is resolved."
+  ([Continuation scope](#continuation-scope)).
 - Details: hashes, folder keys, computer IDs.
 
 In the current core, decisions are read-only (Q-25, UG-8). The prototype shows

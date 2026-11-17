@@ -19,6 +19,10 @@ crates/
                                     the GUI; headless end-to-end tests.
   wow-sync-app/       R2-slice     GPUI tray/window binary on the R2-pin GPUI pin; calls
                                     SliceService only; holds no policy.
+  wow-sync-proto/     run-003      frozen GPUI prototype of the D-21 screens over fake
+                                    scenarios (no runtime dependency). Only D-21 copy fixes;
+                                    to be retired or merged into a shared UI crate later
+                                    (RV-9). RC-3 is fixed in the app only.
 ```
 
 Dependency graph (arrows = "depends on"):
@@ -26,6 +30,7 @@ Dependency graph (arrows = "depends on"):
 ```text
 wow-sync-app ──► wow-sync-runtime ──► wow-sync-core
                         └───────────► wow-sync-adapters
+wow-sync-proto ──► wow-sync-core      (types only; no runtime or adapters)
 ```
 
 `wow-sync-adapters` does not depend on `wow-sync-core`, so the two can be built
@@ -67,6 +72,7 @@ background thread), per S-mem option 1. Not a final decision.
 | `plan` | publish plan and apply plan (pure) |
 | `exec` | port traits `PublishEffects`, `ApplyEffects`; `run_publish`, `run_apply`, `recover_interrupted` |
 | `status` | status derivation for local computer, packages and members |
+| `view` | `NextAction` and `next_action(status, why)`: the typed next step per add-on, with one plain sentence each (UG-12) |
 | `explain` | `Explanation` enum and English rendering; audit entries |
 | `testkit` | builders and `FakeEffects`; `#[cfg(any(test, feature = "testkit"))]` |
 | `arch` | test-only architecture check (no OS I/O in core sources) |
@@ -82,8 +88,32 @@ background thread), per S-mem option 1. Not a final decision.
 | `provider` | `ProviderRoot`: bounded reads, atomic writes, listings with cloud state, blob put/copy |
 | `winproc` | WoW client observation by image path plus possible-client names for uninspectable processes; pure `classify`/`image_is_under`; `Unknown` on non-Windows |
 | `sysinfo` | `now_unix_ms`, `random_id_hex` |
-| `localstate` | per-computer app state directory: atomic named files, bounded audit append |
+| `localstate` | per-computer app state directory: atomic named files, `remove`, bounded audit append |
+| `probe` | read-only discovery port: `env_path`, `is_dir`, `subdir_names`, `read_text_bounded` (`INFO_JSON_LIMIT` = 64 KiB); the runtime does no direct directory or environment I/O (RV-7) |
 | `testkit` | `TempDir`, `SyntheticInstall`, synthetic dataset generator; `#[cfg(any(test, feature = "testkit"))]` |
+
+### `wow-sync-runtime` (R2-slice, extended in run-003)
+
+| Module | Contents |
+|---|---|
+| `service` | `SliceService` (`inspect`, `enroll`, `reconfirm`, `status`, `sync_once`, `pause_state`, `set_paused`, `app_settings`, `activity_log`) and `StatusSnapshot` |
+| `detail` | typed GUI rows: `StatusDetail`, `PackageRow` (core sentence and `NextAction`, `awaiting`), `MemberRow` (confirmed counts only applied or in-sync packages), `CandidateRow` |
+| `control` | pause state (`Running`, `Paused`, `Damaged`), `AppSettings`, `QuitGate`/`StopState`, bounded activity log |
+| `discover` | Dropbox and WoW discovery over the adapters' `probe` port |
+| `activity` | game activity sources (`WinprocActivity`, `ScriptedActivity`) |
+| `effects` | core port traits implemented over adapters; `Faulty` failure injection |
+| `e2e` | test-only end-to-end slice tests |
+
+### `wow-sync-app` and `wow-sync-proto`
+
+`wow-sync-app` has a GPUI-free view-model (`world`, `model`) that is unit
+tested, plus `backend` (sync thread, scheduler), `app`, `pages`, `setup`,
+`consent`, `theme`, `ui`, `win` and the `devkit` helper binary.
+`wow-sync-proto` mirrors the screens over fake scenarios (`scenario`,
+`model`, `pages`, `setup`, `notify`). It is frozen as the D-21-approved
+reference: only D-21 copy fixes go to it, and it is retired or merged into a
+shared UI crate in a later run. Its duplicated view-model is accepted until
+then; RC-3 is fixed in the app only (RV-9).
 
 Test module names must be unique across the workspace because
 `tests/required-cases.toml` matches libtest names without the crate

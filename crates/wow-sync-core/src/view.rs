@@ -54,9 +54,7 @@ impl NextAction {
                 "Wait for Dropbox to finish downloading, or make the folder available offline."
             }
             NextAction::WaitForFiles => "Wait for the add-on files to stop changing.",
-            NextAction::ChooseCopy => {
-                "Choose which copy to keep. Only this add-on is affected; other add-ons keep syncing."
-            }
+            NextAction::ChooseCopy => "Choose which copy to keep.",
             NextAction::ResolveHelp => "See what happened and choose how to continue.",
             NextAction::NotSynced => "Nothing to do. This add-on is not synced.",
         }

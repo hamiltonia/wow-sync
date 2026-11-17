@@ -54,6 +54,27 @@ fn add_addon(root: &Path, folder: &str, name: &str, tag: &str, version: &str, de
 }
 
 #[cfg(windows)]
+fn stop_inheriting_std_handles() {
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetStdHandle(which: u32) -> isize;
+        fn SetHandleInformation(h: isize, mask: u32, flags: u32) -> i32;
+    }
+    const STD_OUTPUT_HANDLE: u32 = -11i32 as u32;
+    const STD_ERROR_HANDLE: u32 = -12i32 as u32;
+    const HANDLE_FLAG_INHERIT: u32 = 1;
+    for which in [STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+        // SAFETY: plain Win32 calls; an invalid or absent handle just makes the call fail.
+        unsafe {
+            let h = GetStdHandle(which);
+            if h != 0 && h != -1 {
+                SetHandleInformation(h, HANDLE_FLAG_INHERIT, 0);
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
 fn fake_client(variant: &Path) {
     let system = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
     let ping = std::path::PathBuf::from(system)
@@ -64,6 +85,9 @@ fn fake_client(variant: &Path) {
         fail("not a variant folder created by make-install");
     }
     std::fs::copy(&ping, &exe).expect("copy stand-in client");
+    // A captured (piped) stdout or stderr must not stay open in the stand-in, or the capture
+    // would wait for the stand-in to exit (RC2-4).
+    stop_inheriting_std_handles();
     // Intentionally left running; the caller stops it by PID.
     #[allow(clippy::zombie_processes)]
     let child = std::process::Command::new(&exe)
@@ -73,7 +97,12 @@ fn fake_client(variant: &Path) {
         .stderr(std::process::Stdio::null())
         .spawn()
         .expect("start stand-in client");
-    println!("{}", child.id());
+    {
+        use std::io::Write;
+        let mut out = std::io::stdout();
+        let _ = writeln!(out, "{}", child.id());
+        let _ = out.flush();
+    }
 }
 
 #[cfg(not(windows))]

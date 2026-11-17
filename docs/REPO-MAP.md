@@ -86,6 +86,7 @@ not here.
 | Platform adapters (filesystem, process, provider) | [crates/wow-sync-adapters/](../crates/wow-sync-adapters/) |
 | Runtime: port implementations over adapters, `SliceService`, failure-injecting effects, e2e slice tests | [crates/wow-sync-runtime/](../crates/wow-sync-runtime/) |
 | GPUI shell (tray, window, G1-G9 screens) and `devkit` synthetic-install helper | [crates/wow-sync-app/](../crates/wow-sync-app/) |
+| Frozen D-21 UI prototype over fake scenarios; only D-21 copy fixes, to be retired or merged later | [crates/wow-sync-proto/](../crates/wow-sync-proto/); see [design/ui/prototype.md](design/ui/prototype.md) |
 
 ## Spikes
 

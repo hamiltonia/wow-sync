@@ -2,7 +2,7 @@
 //! `World`. No GPUI types here, so it runs on every platform and is unit tested.
 
 use crate::theme::Tone;
-use crate::world::{absolute, rel, Addon, ApplyScope, Busy, Kind, World};
+use crate::world::{absolute, rel, Addon, Busy, Kind, World};
 use wow_sync_core::plan::PlanBlock;
 use wow_sync_core::status::{Headline, MemberSummary, PackageStatus};
 use wow_sync_core::target::DecisionReason;
@@ -126,6 +126,9 @@ fn plural(n: usize, one: &str, many: &str) -> String {
 }
 
 pub fn headline(w: &World) -> Head {
+    // Core's `Headline` is used as is (RV-5). Pause is not part of core's status, so it only
+    // replaces the headlines that say nothing is wrong; errors and needed help always show.
+    let core_blocks_pause = matches!(w.view.headline, Headline::Error | Headline::NeedsHelp);
     let (text, tone) = if !w.enrolled {
         ("Set up this computer".to_string(), Tone::Unknown)
     } else if w.busy == Some(Busy::Pausing) {
@@ -133,15 +136,13 @@ pub fn headline(w: &World) -> Head {
             "Pausing, finishing the current step".to_string(),
             Tone::Paused,
         )
-    } else if w.is_paused() {
-        ("Paused".to_string(), Tone::Paused)
-    } else if w.reconfirm.is_some() {
-        // The design gives reconfirm no headline; showing "up to date" while syncing is stopped
-        // would be false (recorded as a design disagreement).
+    } else if w.pause_damaged && !core_blocks_pause {
         (
-            "Confirm the game version to continue syncing".to_string(),
+            "Syncing is held: the pause setting can't be read".to_string(),
             Tone::Help,
         )
+    } else if w.is_paused() && !core_blocks_pause {
+        ("Paused".to_string(), Tone::Paused)
     } else {
         match w.view.headline {
             Headline::Ok => ("This computer is up to date".to_string(), Tone::Ok),
@@ -327,12 +328,6 @@ pub fn status_label(w: &World, s: &PackageStatus) -> Label {
         PackageStatus::Available => {
             if paused {
                 label("Waiting: syncing is paused", Tone::Paused, Icon::Pause)
-            } else if w.apply_scope == ApplyScope::AllAppliesBlocked {
-                label(
-                    "Not applied: an earlier update needs help",
-                    Tone::Waiting,
-                    Icon::Hourglass,
-                )
             } else if matches!(w.busy, Some(Busy::Syncing { .. })) {
                 label("Updating…", Tone::Working, Icon::Sync)
             } else {
@@ -508,38 +503,6 @@ pub fn game_state(w: &World) -> &'static str {
     }
 }
 
-/// The one-sentence continuation for the case shown (Continuation scope). Core does not
-/// export which case applies (UG-25), so the prototype reads the fake typed scope.
-pub fn continuation(w: &World) -> Option<String> {
-    let c = counts(w);
-    if c.needs_help > 0 && w.apply_scope == ApplyScope::AllAppliesBlocked {
-        return Some(
-            "No updates are applied on this computer until this is resolved. Sharing this computer's add-ons continues."
-                .into(),
-        );
-    }
-    if c.needs_decision > 0 {
-        let names = decision_names(w);
-        return Some(if names.len() == 1 {
-            format!("Only {} is affected. Other add-ons keep syncing.", names[0])
-        } else {
-            format!(
-                "Only these {} add-ons are affected. Other add-ons keep syncing.",
-                names.len()
-            )
-        });
-    }
-    None
-}
-
-pub fn decision_names(w: &World) -> Vec<String> {
-    w.addons
-        .iter()
-        .filter(|a| matches!(a.kind, Kind::NeedsDecision(_)))
-        .map(|a| a.title.clone())
-        .collect()
-}
-
 // ---------------------------------------------------------------------------------------------
 // Banners
 
@@ -577,7 +540,15 @@ pub fn banners(w: &World) -> (Vec<Banner>, usize) {
             action_label: "Confirm…",
         });
     }
-    if w.is_paused() {
+    if w.pause_damaged {
+        all.push(Banner {
+            text: "The pause setting on this computer can't be read, so syncing is held. Choose Resume syncing to clear it."
+                .into(),
+            tone: Tone::Error,
+            action: BannerAction::Resume,
+            action_label: "Resume syncing",
+        });
+    } else if w.is_paused() {
         all.push(Banner {
             text: "Syncing is paused on this computer. Updates from other computers are not applied here, and changes here are not shared."
                 .into(),
@@ -659,7 +630,7 @@ pub fn need_items(w: &World) -> Vec<NeedItem> {
             v.push(NeedItem {
                 title: format!("{}: an update stopped unexpectedly", a.title),
                 reason: "The old and new files are both kept.".into(),
-                affects: "All updates on this computer".into(),
+                affects: String::new(),
                 button: "See what happened",
                 tone: Tone::Help,
                 target: NeedTarget::NeedsHelp(a.key.as_str().into()),
@@ -671,11 +642,7 @@ pub fn need_items(w: &World) -> Vec<NeedItem> {
             v.push(NeedItem {
                 title: format!("{}: {}", a.title, decision_title(r)),
                 reason: decision_reason(w, a, r),
-                affects: if w.apply_scope == ApplyScope::AllAppliesBlocked {
-                    format!("{} only (your choice is kept, but no updates are applied until the interrupted update is resolved)", a.title)
-                } else {
-                    format!("{} only", a.title)
-                },
+                affects: String::new(),
                 button: "Choose a copy",
                 tone: Tone::Help,
                 target: NeedTarget::Decision(a.key.as_str().into()),
@@ -700,11 +667,15 @@ pub fn need_items(w: &World) -> Vec<NeedItem> {
     v
 }
 
+/// D-21 wording: one sentence per `DecisionReason`, never about game builds, game versions
+/// or Interface numbers (those never hold an add-on back).
 fn decision_title(r: DecisionReason) -> &'static str {
     match r {
         DecisionReason::Ambiguous => "can't tell which copy is newer",
         DecisionReason::PartialCandidate => "one copy is missing folders",
-        _ => "the copies are for different game builds",
+        DecisionReason::NoCompatibleToc => "a copy has no readable add-on file list",
+        DecisionReason::DifferentTocMapping => "the copies read their file lists differently",
+        DecisionReason::UnvalidatedTocMapping => "a copy has client-specific files",
     }
 }
 
@@ -728,10 +699,17 @@ pub fn decision_reason(_w: &World, a: &Addon, r: DecisionReason) -> String {
                 format!("One copy is missing folders that other copies have. {}", who.join(" "))
             }
         }
-        DecisionReason::DifferentTocMapping | DecisionReason::NoCompatibleToc => {
-            "This copy came from a computer that reads add-on files by a different rule, or does not say it supports this game version.".into()
+        DecisionReason::NoCompatibleToc => {
+            "A copy of this add-on has no readable .toc file for this computer's WoW client, so WoW Sync can't tell which files to use."
+                .into()
         }
-        _ => "This add-on has game-version-specific files that WoW Sync does not handle yet.".into(),
+        DecisionReason::DifferentTocMapping => {
+            "The computers that hold this add-on read its .toc files by a different rule than this computer, so WoW Sync can't tell which files apply here."
+                .into()
+        }
+        DecisionReason::UnvalidatedTocMapping => {
+            "This add-on has client-specific .toc files that WoW Sync does not handle yet.".into()
+        }
     }
 }
 
@@ -875,18 +853,33 @@ pub struct Story {
     pub computers: Vec<(String, String, Tone, Icon)>,
     pub folders: String,
     pub grouped: Option<String>,
-    pub recovery: String,
     pub details: Vec<String>,
+}
+
+/// "Last check" line: the real time of the last check, then the scheduler's next check or
+/// "unavailable" (never a guessed interval).
+pub fn last_check_text(w: &World) -> String {
+    match (w.last_check_secs, &w.next_check_at) {
+        (None, _) => "Not yet".to_string(),
+        (Some(s), Some(at)) => format!("{}; next check about {at}", rel(s)),
+        (Some(s), None) => format!("{}; next check unavailable", rel(s)),
+    }
+}
+
+/// Core's rendered explanation as a sentence: first letter capitalised, one full stop.
+fn as_sentence(s: &str) -> String {
+    let s = s.trim().trim_end_matches('.');
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => format!("{}{}.", f.to_uppercase(), c.as_str()),
+        None => String::new(),
+    }
 }
 
 pub fn addon_story(w: &World, key: &str) -> Option<Story> {
     let a = w.addon(key)?;
     let st = status_of(w, key)?.clone();
     let label = status_label(w, &st);
-    let src = a
-        .source
-        .clone()
-        .unwrap_or_else(|| "another computer".into());
     let to = a
         .target_version
         .clone()
@@ -912,46 +905,13 @@ pub fn addon_story(w: &World, key: &str) -> Option<Story> {
             a.version, a.version
         ),
     };
+    // What happened and why come from core's `Explanation` (rendered by the runtime); the app
+    // adds no sentences of its own (RV-1). Decisions use the D-21 wording per reason.
     let what = match &st {
-        PackageStatus::AppliedHere => format!(
-            "Updated to {to}, copied from {src}. No other computer has confirmed it yet."
-        ),
-        PackageStatus::ConfirmedBy(_) => format!(
-            "Same as the group's version. Confirmed by {}.",
-            confirmed_names(w, a).join(", ")
-        ),
-        PackageStatus::InSync => "Same as the group's chosen version.".into(),
-        PackageStatus::Available => format!("Version {to} from {src} will be applied on the next sync."),
-        PackageStatus::Blocked(PlanBlock::GameRunning) => "WoW is running; nothing was changed.".into(),
-        PackageStatus::Blocked(_) => "Add-on files are still changing; waiting.".into(),
-        PackageStatus::Unavailable => format!("{src}'s copy has not finished downloading through Dropbox yet."),
-        PackageStatus::Interrupted => {
-            "The update was interrupted because WoW started. It will finish after WoW closes.".into()
-        }
         PackageStatus::NeedsDecision(r) => decision_reason(w, a, *r),
-        PackageStatus::NeedsHelp(_) => {
-            "An update stopped in an unexpected state. The old and new files are both kept.".into()
-        }
-        PackageStatus::NotSynced => {
-            "This folder uses a game-version-specific setup that is not supported yet, so it is never copied.".into()
-        }
+        _ => as_sentence(&a.why),
     };
     let why = match &st {
-        PackageStatus::AppliedHere
-        | PackageStatus::Available
-        | PackageStatus::Blocked(_)
-        | PackageStatus::Interrupted => {
-            let mut v = if a.why.is_empty() {
-                vec![format!("{src} has {to}. This computer has {}.", a.version)]
-            } else {
-                vec![a.why.clone()]
-            };
-            v.push("File dates and computer clocks are never used to decide.".into());
-            v
-        }
-        PackageStatus::ConfirmedBy(_) | PackageStatus::InSync => {
-            vec!["Every computer that reported has the same files.".into()]
-        }
         PackageStatus::NeedsDecision(_) => a
             .candidates
             .iter()
@@ -964,38 +924,23 @@ pub fn addon_story(w: &World, key: &str) -> Option<Story> {
                 )
             })
             .collect(),
-        PackageStatus::Unavailable => {
-            vec!["The files are not on this computer yet, so nothing can be compared.".into()]
+        _ if !a.awaiting.is_empty() => {
+            vec![format!(
+                "Not yet reported as applied by {}.",
+                a.awaiting.join(", ")
+            )]
         }
-        _ => vec!["Nothing was compared yet.".into()],
+        _ => Vec::new(),
     };
-    let (next, next_button) = match &st {
-        PackageStatus::NeedsDecision(_) => (
-            "Choose which copy to keep. Only this add-on is affected; other add-ons keep syncing."
-                .to_string(),
-            Some(("Choose a copy", Detail::Decision(key.to_string()))),
-        ),
-        PackageStatus::NeedsHelp(_) => (
-            "See what happened and choose how to continue.".to_string(),
-            Some(("See what happened", Detail::NeedsHelp(key.to_string()))),
-        ),
-        PackageStatus::Blocked(PlanBlock::GameRunning) | PackageStatus::Interrupted => {
-            ("Close WoW to let the update finish.".to_string(), None)
+    let next = a.next.sentence().to_string();
+    let next_button = match &st {
+        PackageStatus::NeedsDecision(_) => {
+            Some(("Choose a copy", Detail::Decision(key.to_string())))
         }
-        PackageStatus::Unavailable => (
-            "Wait for Dropbox to finish downloading, or make the folder available offline."
-                .to_string(),
-            None,
-        ),
-        PackageStatus::Available if w.apply_scope == ApplyScope::AllAppliesBlocked => (
-            "Not applied: an earlier update needs help. Resolve that first.".to_string(),
-            None,
-        ),
-        PackageStatus::Available => (
-            "Nothing to do. It will be applied on the next sync.".to_string(),
-            None,
-        ),
-        _ => ("Nothing to do.".to_string(), None),
+        PackageStatus::NeedsHelp(_) => {
+            Some(("See what happened", Detail::NeedsHelp(key.to_string())))
+        }
+        _ => None,
     };
     let mut computers = Vec::new();
     computers.push((
@@ -1003,11 +948,10 @@ pub fn addon_story(w: &World, key: &str) -> Option<Story> {
         match &st {
             PackageStatus::AppliedHere => "Updated here".to_string(),
             PackageStatus::Available => "Update ready, not applied yet".into(),
-            PackageStatus::NeedsDecision(_) => format!("Has {}", a.version),
             _ => format!("Has {}", a.version),
         },
-        Tone::Ok,
-        Icon::Check,
+        label.tone,
+        label.icon,
     ));
     for (i, p) in w.peers.iter().enumerate() {
         let pv = peer_view(w, i);
@@ -1043,16 +987,7 @@ pub fn addon_story(w: &World, key: &str) -> Option<Story> {
         computers.push((p.name.clone(), line, tone, icon));
     }
     let grouped =
-        (a.folders.len() > 1).then(|| "Grouped because they share a name prefix.".to_string());
-    let recovery = match &st {
-        PackageStatus::AppliedHere => {
-            "Earlier copies are kept so this update can be undone.".to_string()
-        }
-        PackageStatus::NeedsDecision(_) => {
-            "The competing copies are kept until the decision is made.".into()
-        }
-        _ => "No earlier copies are needed yet.".into(),
-    };
+        (a.folders.len() > 1).then(|| "These folders are treated as one add-on.".to_string());
     let details = vec![
         format!("Folder key: {}", a.key.as_str()),
         format!("Group ID: {}", w.group_id),
@@ -1069,7 +1004,6 @@ pub fn addon_story(w: &World, key: &str) -> Option<Story> {
         computers,
         folders: a.folders.join(", "),
         grouped,
-        recovery,
         details,
     })
 }
@@ -1261,7 +1195,155 @@ mod tests {
         w.view.headline = Headline::Error;
         assert_eq!(headline(&w).text, "Can't read the shared folder");
         w.paused_since = Some("12:00".into());
+        assert_eq!(headline(&w).text, "Can't read the shared folder");
+        w.view.headline = Headline::Ok;
         assert_eq!(headline(&w).text, "Paused");
+        w.paused_since = None;
+        w.pause_damaged = true;
+        assert!(headline(&w).text.contains("pause setting can't be read"));
+    }
+
+    #[test]
+    fn every_decision_reason_has_its_own_build_free_wording() {
+        use wow_sync_core::target::DecisionReason as R;
+        let w = enrolled();
+        let a = Addon {
+            key: "k".into(),
+            title: "Demo".into(),
+            version: "1".into(),
+            target_version: None,
+            folders: vec![],
+            kind: Kind::Available,
+            candidates: vec![],
+            why: String::new(),
+            next: wow_sync_core::view::NextAction::CloseGame,
+            awaiting: vec![],
+        };
+        let all = [
+            R::Ambiguous,
+            R::NoCompatibleToc,
+            R::DifferentTocMapping,
+            R::UnvalidatedTocMapping,
+            R::PartialCandidate,
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for r in all {
+            let text = format!("{} {}", decision_title(r), decision_reason(&w, &a, r));
+            let low = text.to_lowercase();
+            for bad in ["build", "game version", "interface", "supports"] {
+                assert!(!low.contains(bad), "{r:?} mentions {bad}: {text}");
+            }
+            assert!(seen.insert(text), "{r:?} wording is not distinct");
+        }
+    }
+
+    #[test]
+    fn last_check_text_uses_the_scheduler_or_says_unavailable() {
+        let mut w = enrolled();
+        assert_eq!(last_check_text(&w), "Not yet");
+        w.last_check_secs = Some(30);
+        assert!(last_check_text(&w).ends_with("next check unavailable"));
+        w.next_check_at = Some("14:07".into());
+        let t = last_check_text(&w);
+        assert!(t.ends_with("next check about 14:07"), "{t}");
+        assert!(!t.contains("min"), "no literal interval: {t}");
+    }
+
+    fn world_with(status: PackageStatus, why: wow_sync_core::explain::Explanation) -> World {
+        use crate::world::Inputs;
+        use wow_sync_runtime::{PackageRow, StatusDetail, StatusSnapshot};
+        let key = wow_sync_core::paths::validate_folder_name("Demo").unwrap();
+        let mut view = crate::world::placeholder_view();
+        view.packages.push((key, status.clone(), why.clone()));
+        let row = PackageRow {
+            key: "demo".into(),
+            title: "Demo".into(),
+            status: status.clone(),
+            sentence: wow_sync_core::explain::render(&why),
+            next: wow_sync_core::view::next_action(&status, &why),
+            version_here: Some("1".into()),
+            version_target: Some("2".into()),
+            sources: vec![],
+            folders: vec![],
+            awaiting: vec![],
+            confirmed_by: vec![],
+            candidates: vec![],
+        };
+        let snap = StatusSnapshot {
+            enrolled: true,
+            detail: Some(StatusDetail {
+                view,
+                packages: vec![row],
+                members: vec![],
+                game: wow_sync_core::plan::Activity::NotRunning,
+                group_id: String::new(),
+                computer_id: String::new(),
+                variant_label: String::new(),
+                variant_folder: String::new(),
+                app_version: String::new(),
+                game_build: None,
+            }),
+            ..Default::default()
+        };
+        World::from_snapshot(Inputs {
+            snap: &snap,
+            paused_since_ms: None,
+            pause_damaged: false,
+            activity: &[],
+            syncing: false,
+            last_check_ms: None,
+            next_check_ms: None,
+            setup: None,
+            app_version: "x",
+        })
+    }
+
+    #[test]
+    fn interrupted_text_follows_core_and_differs_by_cause() {
+        use wow_sync_core::explain::{render, Explanation as E};
+        let a = E::Interrupted {
+            package: "Demo".into(),
+        };
+        let b = E::InterruptedByGame {
+            package: "Demo".into(),
+        };
+        let sa = addon_story(&world_with(PackageStatus::Interrupted, a.clone()), "demo").unwrap();
+        let sb = addon_story(&world_with(PackageStatus::Interrupted, b.clone()), "demo").unwrap();
+        assert_eq!(sa.what, as_sentence(&render(&a)));
+        assert_eq!(sb.what, as_sentence(&render(&b)));
+        assert_ne!(sa.what, sb.what);
+        assert_eq!(
+            sa.next,
+            wow_sync_core::view::NextAction::CloseGame.sentence()
+        );
+    }
+
+    #[test]
+    fn next_step_text_is_core_s_for_other_actions() {
+        use wow_sync_core::explain::Explanation as E;
+        use wow_sync_core::view::NextAction;
+        let s = addon_story(
+            &world_with(
+                PackageStatus::Unavailable,
+                E::Interrupted {
+                    package: "Demo".into(),
+                },
+            ),
+            "demo",
+        )
+        .unwrap();
+        assert_eq!(s.next, NextAction::WaitForDropbox.sentence());
+        let s = addon_story(
+            &world_with(
+                PackageStatus::Available,
+                E::Interrupted {
+                    package: "Demo".into(),
+                },
+            ),
+            "demo",
+        )
+        .unwrap();
+        assert_eq!(s.next, NextAction::ApplyOnNextSync.sentence());
     }
 
     #[test]

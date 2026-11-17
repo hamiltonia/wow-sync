@@ -7,6 +7,12 @@ for the prototype. The prose in [README.md](README.md) and
 [screens.md](screens.md) is the authoritative layout; the wireframes follow it.
 Where this brief and another UI file disagree, report it; do not guess.
 
+> **Status (R3-fix, RV-9): frozen.** `crates/wow-sync-proto` is kept as the
+> D-21-approved reference. Only D-21 copy fixes go to it (for example the
+> per-reason decision wording, tested over every `DecisionReason`). It is to be
+> retired or merged into a shared UI crate in a later run. RC-3 (R3-check) is
+> fixed in the real app only; the prototype keeps its fake scenarios. Open UI
+> questions are in [questions.md](questions.md).
 ## Ground rules
 
 1. **Fake data only.** The prototype never reads WoW folders, the provider
@@ -89,7 +95,7 @@ timers (seconds, not real sync). "Group" is always "Main add-ons" on
 | S4 | Syncing | Working | S3 with 5 `Available`; header "Syncing: applying 2 of 5 updates"; after 6 s they become `AppliedHere` and one batch summary is queued |
 | S5 | WoW running | WoW running, Waiting | `PlanBlock::GameRunning`; 2 `Blocked(GameRunning)`; 1 `Interrupted` with `InterruptedByGame`; banner; notification preview shows 2 held notifications; button **Simulate: WoW closed** releases them as one summary + one action |
 | S6 | Waiting for Dropbox | Waiting | 2 `Unavailable` (`NotAvailableYet`), 1 `Blocked(Unstable)`; header "Waiting for Dropbox to finish downloading" |
-| S7 | Add-on decisions; other add-ons keep syncing | Waiting (core headline, UG-26), Needs attention | No apply journal (`FakeApplyScope::PerPackage`). WeakAuras `NeedsDecision(Ambiguous)` with 2 candidates (5.18.1 here and Laptop, 5.18.1-beta on Den PC); Bagnon `NeedsDecision(PartialCandidate)`; Questie `NeedsDecision(DifferentClientBuild)`; 39 others fine, including Details! `Available` from Laptop, which becomes `AppliedHere` after 4 s while the decisions stay open (shows unrelated work proceeding). Headline "Waiting for your decision on 3 add-ons". **Keep this copy** fakes Working → Waiting ("applied on the next sync") → Success |
+| S7 | Add-on decisions; other add-ons keep syncing | Waiting (core headline, UG-26), Needs attention | No apply journal (`FakeApplyScope::PerPackage`). WeakAuras `NeedsDecision(Ambiguous)` with 2 candidates (5.18.1 here and Laptop, 5.18.1-beta on Den PC); Bagnon `NeedsDecision(PartialCandidate)`; Questie `NeedsDecision(DifferentTocMapping)`; 39 others fine, including Details! `Available` from Laptop, which becomes `AppliedHere` after 4 s while the decisions stay open (shows unrelated work proceeding). Headline "Waiting for your decision on 3 add-ons". **Keep this copy** fakes Working → Waiting ("applied on the next sync") → Success |
 | S8 | Shared folder error | Error | `provider_error` "Dropbox is not running"; last known add-on data shown with "as of 3 hours ago"; **Try again** toggles to S3 after 2 s |
 | S9 | Silent and late computers | Offline/stale peer | Laptop current (`Usable`, 5 min, confirms all); Den PC `Usable` but last report 12 days ago, confirmed 40 of 42; Spare PC `NoState`; Old PC `Regressed`; button **Simulate: Den PC reports** delivers a late acknowledgement (Den PC then confirms 42 of 42, "reported again after 12 days" activity entry) (A-24) |
 | S10 | Paused | Paused | S4's 5 updates, paused since 21:04; banner; Sync now disabled; Resume moves to S4 |

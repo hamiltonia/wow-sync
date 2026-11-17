@@ -1389,6 +1389,11 @@ impl SliceService {
         crate::control::paused_since(&self.state)
     }
 
+    /// Running, paused since a time, or a damaged pause file that holds syncing.
+    pub fn pause_state(&self) -> crate::control::PauseState {
+        crate::control::pause_state(&self.state)
+    }
+
     pub fn set_paused(&self, paused: bool) -> Result<(), ServiceError> {
         crate::control::set_paused(&self.state, paused).map_err(ServiceError::Local)?;
         crate::control::log_activity(
