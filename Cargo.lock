@@ -6184,6 +6184,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "wow-sync-proto"
+version = "0.0.0"
+dependencies = [
+ "gpui",
+ "gpui_platform",
+ "raw-window-handle",
+ "tray-icon",
+ "wow-sync-core",
+]
+
+[[package]]
 name = "wow-sync-runtime"
 version = "0.0.0"
 dependencies = [
