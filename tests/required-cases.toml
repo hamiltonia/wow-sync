@@ -178,6 +178,7 @@ tests = [
     "exec::tests::launch_before_commit_changes_nothing",
     "exec::tests::no_live_mutation_after_launch_mid_commit",
     "exec::tests::a_game_start_halt_is_recorded_and_status_blames_the_game_from_it",
+    "exec::tests::recovery_blocked_by_a_running_game_does_not_record_a_cause",
     "exec::tests::interrupted_package_recovers_after_game_exit",
     "exec::tests::verify_with_game_running_waits",
     "exec::tests::recovery_waits_while_game_running",
