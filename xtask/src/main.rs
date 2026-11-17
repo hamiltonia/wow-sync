@@ -109,7 +109,10 @@ fn command_check(
                 "offline",
                 name,
                 Status::Fail,
-                format!("`{cmd}` failed:\n{}", tail(&r.output, 25)),
+                with_failed_names(
+                    format!("`{cmd}` failed:\n{}", tail(&r.output, 25)),
+                    &r.output,
+                ),
             ),
             r.output,
         ),
@@ -160,6 +163,77 @@ fn offline(root: &Path) -> Vec<Check> {
     );
     checks.push(link_check(root));
     checks
+}
+
+/// Appends the names of failed tests so CI logs identify them.
+fn with_failed_names(detail: String, output: &str) -> String {
+    let failed: Vec<String> = inventory::parse_test_output(output)
+        .into_iter()
+        .filter(|r| r.outcome == inventory::Outcome::Failed)
+        .map(|r| r.name)
+        .collect();
+    if failed.is_empty() {
+        detail
+    } else {
+        format!("{detail}\nfailed tests:\n  {}", failed.join("\n  "))
+    }
+}
+
+/// Windows native tier: runs the workspace tests and verifies the native cases.
+fn native(root: &Path) -> Vec<Check> {
+    if !cfg!(windows) {
+        return blocked_tier(root, "native", "native cases need a Windows host");
+    }
+    match run(root, "cargo", &["test", "--workspace"]) {
+        Err(why) => vec![Check::new(
+            "native",
+            "tier",
+            Status::Blocked,
+            format!("tool unavailable ({why}); install with: rustup toolchain install"),
+        )],
+        Ok(r) => vec![native_check(root, r.ok, &r.output)],
+    }
+}
+
+fn native_check(root: &Path, tests_ok: bool, output: &str) -> Check {
+    let name = "tier";
+    let text = match std::fs::read_to_string(root.join("tests").join("required-cases.toml")) {
+        Ok(t) => t,
+        Err(e) => {
+            return Check::new(
+                "native",
+                name,
+                Status::Fail,
+                format!("cannot read tests/required-cases.toml: {e}"),
+            )
+        }
+    };
+    let inv = match inventory::parse(&text) {
+        Ok(i) => i,
+        Err(e) => return Check::new("native", name, Status::Fail, e),
+    };
+    let results = inventory::parse_test_output(output);
+    let mut problems = inventory::check_required(&inv, "native", &results);
+    if !tests_ok {
+        problems.push(with_failed_names(
+            format!("`cargo test --workspace` failed:\n{}", tail(output, 25)),
+            output,
+        ));
+    }
+    if problems.is_empty() {
+        let listed = inv.case.iter().filter(|c| c.tier == "native").count();
+        Check::new(
+            "native",
+            name,
+            Status::Pass,
+            format!(
+                "{listed} native case(s) verified against {} test result(s)",
+                results.len()
+            ),
+        )
+    } else {
+        Check::new("native", name, Status::Fail, problems.join("\n"))
+    }
 }
 
 fn required_cases_check(root: &Path, tests_ran: bool, test_output: &str) -> Check {
@@ -287,7 +361,7 @@ fn main() -> ExitCode {
     for tier in &opts.tiers {
         match tier.as_str() {
             "offline" => checks.extend(offline(&root)),
-            "native" => checks.extend(blocked_tier(&root, "native", "no native cases defined yet")),
+            "native" => checks.extend(native(&root)),
             _ => checks.extend(blocked_tier(
                 &root,
                 "provider",
@@ -372,6 +446,37 @@ mod tests {
         );
         assert_eq!(c.status, Status::Blocked);
         assert!(c.detail.contains("install-me"));
+    }
+
+    #[test]
+    fn missing_native_test_fails_the_tier() {
+        let root = repo_root();
+        let text = std::fs::read_to_string(root.join("tests").join("required-cases.toml")).unwrap();
+        let inv = inventory::parse(&text).unwrap();
+        let names: Vec<&String> = inv
+            .case
+            .iter()
+            .filter(|c| c.tier == "native")
+            .flat_map(|c| &c.tests)
+            .collect();
+        assert!(names.len() >= 2, "native cases must be listed");
+        let all: String = names.iter().map(|n| format!("test {n} ... ok\n")).collect();
+        assert_eq!(native_check(&root, true, &all).status, Status::Pass);
+        let missing: String = names[1..]
+            .iter()
+            .map(|n| format!("test {n} ... ok\n"))
+            .collect();
+        let c = native_check(&root, true, &missing);
+        assert_eq!(c.status, Status::Fail);
+        assert!(c.detail.contains("did not run"));
+    }
+
+    #[test]
+    fn failed_test_names_are_printed() {
+        let out = "test a::one ... ok\ntest b::flaky ... FAILED\n";
+        let d = with_failed_names("x".into(), out);
+        assert!(d.contains("failed tests:") && d.contains("b::flaky"));
+        assert_eq!(with_failed_names("x".into(), "test a ... ok\n"), "x");
     }
 
     #[test]

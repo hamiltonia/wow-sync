@@ -30,11 +30,14 @@ cargo xtask verify --tier offline|native|provider|all [--allow-blocked]
 | Tier | Checks | Status today |
 |---|---|---|
 | `offline` | `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, required cases, `cargo deny check`, Markdown relative links | runnable |
-| `native` | Real OS/WoW-file behavior on the local OS | BLOCKED: no native cases defined yet |
+| `native` | `cargo test --workspace`, then the `native` required cases (Windows junction, locked-file, process and fake-client tests) | runnable on Windows; BLOCKED on other hosts |
 | `provider` | Real Dropbox test folder with enrolled peers | BLOCKED: requires D-08 Dropbox test folder and enrolled peers |
 
 A tier that cannot run is BLOCKED, never PASS. `required-cases` is SKIPPED when
 `cargo test` did not pass, because listed cases then cannot be verified.
+The `native` tier FAILS if any listed native test did not run, was ignored or
+failed. When `cargo test` fails, xtask prints a `failed tests:` list of the
+failing test names after the output tail.
 
 ## Required cases
 
