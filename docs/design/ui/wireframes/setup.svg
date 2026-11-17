@@ -23,7 +23,7 @@
   <path d="M152 192 l9 16 h-18 z" fill="#A64205"/>
   <text x="172" y="206" fill="#1A1F29">WoW Sync does not recognise this game version yet. Check that the details below are right.</text>
   <text x="144" y="242" font-weight="600" fill="#1A1F29">Game installation</text>
-  <text x="144" y="264" fill="#1A1F29">Folder _anniversary_ · build 1.15.8 · reported product "wow_anniversary"</text>
+  <text x="144" y="264" fill="#1A1F29">Folder _example_ · build fake-build-B · reported product "wowx" (fictional)</text>
   <text x="144" y="284" fill="#4A5363">This is treated as its own game version; it will only sync with the same version.</text>
   <text x="144" y="320" font-weight="600" fill="#1A1F29">Add-ons that will sync (38)</text>
   <text x="144" y="342" fill="#1A1F29">Bagnon, Deadly Boss Mods, Details!, Questie, WeakAuras, … Show all</text>

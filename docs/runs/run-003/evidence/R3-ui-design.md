@@ -181,3 +181,87 @@ overall: PASS (allow-blocked: false) -> exit 0
 
 The commit SHA is reported in this worker's final reply (not written here, to
 avoid amending the commit).
+
+## Retry 1 (R3-ui-fix)
+
+Worktree `D:\GitHub\wow-sync.worktrees\R3-ui-fix`, branch `run003/R3-ui-fix`
+from main `917bc05`. Input: the FAIL review
+[R3-design-review.md](R3-design-review.md). Scope: UI findings R3D-4, R3D-5,
+R3D-6, R3D-11 and R3D-12 only. R3D-1/2/3 (Q-21 code) and R3D-7..10 (removal)
+belong to other workers and were not touched.
+
+Sources re-read for the fixes (read only): `wow-sync-core` `variant.rs`
+(`confirm_enrolled`, `display_label`), `status.rs` (headline derivation, test
+`needs_decision_shows_evidence`), `plan.rs` (`PlanBlock::UnresolvedJournal`),
+`wow-sync-runtime` `service.rs` (journal path skips planning and pushes no
+block), OWNER-DECISIONS D-09 and D-18 O-N2, and GPUI at the pin
+(`e8bc16a`, `crates/gpui/src/elements/div.rs`, `focus_visible`).
+
+### Dispositions
+
+| Finding | Disposition | What changed |
+|---|---|---|
+| R3D-4 Forever shown as Classic Era | Fixed | New screens.md [Identity labels](../../../design/ui/screens.md#identity-labels): canonical "World of Warcraft: Forever (wowf)", folder `_forever_` (core `display_label`, D-09), never Classic Era; fake builds `fake-build-A/B`; fake unfamiliar client `_example_`/`wowx`. Every header context line, README layout and onboarding step 3, the interaction.md accessible-name example, prototype ground rule 5 and S1/S2 now use it. `dashboard-light.svg` (`_classic_era_`), `computers.svg` and `setup.svg` (`_anniversary_`, `1.15.8`) corrected. Audit grep of `docs/design/ui` for `Classic Era|_classic|1.15|Warcraft Forever|_anniversary_` leaves only the two "never Classic Era" rules. |
+| R3D-5 S12 reconfirm used a build-only change | Fixed | screens.md Reconfirm gains a trigger table from `confirm_enrolled`: `mapping_id` change and recognition-class change reconfirm; build-only change does not (D-18 O-N2); new folders under the same rule do not; product/folder change is `VariantChanged`, an Error with no Confirm. S12 is now a mapping change `validated-plain/1` → `profile:wowf/1` ("5 more folders would sync"). New S15 demonstrates a build-only patch (`fake-build-A` → `fake-build-B`) with no reconfirm, Ok headline and the new build shown. Checklist 16 (S12) and 17 (S15). UG-16 now names a typed `ReconfirmCause`. |
+| R3D-6 continuation text contradicted Q-25 | Fixed | New screens.md [Continuation scope](../../../design/ui/screens.md#continuation-scope) with two cases that are never merged: a decision ("Only WeakAuras is affected. Other add-ons keep syncing.") and a journal needing help ("No updates are applied on this computer until this is resolved. Sharing this computer's add-ons continues."); the journal sentence wins when both exist. Overview, Needs attention, Add-on detail and Decision use it. S7 is decisions only (DBM removed; Details! applies during the scenario); new S16 is the journal case with 3 held updates. Typed scope named as UI gap **UG-25** (`StatusView.apply_scope` or exported `PlanBlock::UnresolvedJournal`); the prototype fakes it (`FakeApplyScope`), and the build-out shows neither sentence until UG-25 exists. Checklist 9 (S7), 10 (S16). |
+| R3D-11 coverage mixed prototype coverage and deferred obligations | Fixed | Coverage split into two tables below. prototype.md gains "Deferred: not demonstrated and not claimed" (A-45, recovery restore/rollback, removal, settings sync A-15/A-26 settings parts, A-33). |
+| R3D-12 SVGs disagreed with prose; headline mismatch; focus note | Fixed | README and screens.md prose declared the single authoritative layout; wireframes follow it, and a disagreement is a design bug. Header is identical on every page (icon, headline, context line, Sync now, Pause); page buttons never replace them; all 10 page wireframes now draw it. `computers.svg` is the full-width list only (detail replaces it). `addons.svg`: no sort control, columns Name · Version here · Status · Confirmed by, chips All (44) / Not up to date (3) / Needs you (3) / Not synced here (2). `dashboard-light.svg`: This computer key/value rows + Recent changes left, Other computers right, no Needs attention panel in Success. `dashboard-dark.svg` (S7): Sync now restored, context line, Needs attention / This computer / Recent changes left, Other computers right. The NeedsDecision → `Headline::Waiting` mismatch is recorded as core gap **UG-26**; the UI renders core's value ("Waiting for your decision on 3 add-ons", hourglass) in the header, tray, dashboard-dark, addons and decision wireframes. style.md focus note corrected: GPUI `focus_visible` exists at the pin (keyboard-only, needs `track_focus`). |
+
+### Coverage now (Retry 1; replaces the table above)
+
+**Covered by the prototype now** (an owner checklist item and scenario
+demonstrate it on fake data; still subject to the owner's A-42 decision):
+
+| A-ID | Part demonstrated | Checklist / scenario |
+|---|---|---|
+| A-01 | Tray presence, hide/reopen, explicit quit (start at sign-in faked, UG-23) | 18, 20; P12, P13 |
+| A-04 | Join with explicit consent; replaced add-ons kept | 13, 15; S1 |
+| A-08 | Ambiguous/partial/different-build choices per add-on | 9, 11; S7 |
+| A-24 | Last confirmed vs unknown now; silent computer; late acknowledgement | 5, 6, 7; S9 |
+| A-25 | What changed, which copy, why, affected computers, next action; IDs only in Details (apply and decision only) | 8, 9, 10; S3, S4, S7, S16 |
+| A-26 | Add-on sync flows through the GUI and keyboard; readable themes | 1–4, 22–24 |
+| A-27 | Batched notifications, separate actions, deferral while gaming, no repeats (preview only) | 25; S5, S7 |
+| A-28 | Honest update notice, manual install, no self-replacement | 27; S13 |
+| A-42 | Owner reviews the early prototype | whole checklist |
+| A-46 | Guided identity and scope confirmation; reconfirm only for consent-relevant changes | 14, 16, 17; S2, S12, S15 |
+
+**Deferred obligations (not covered; no acceptance claim):**
+
+| A-ID | Deferred part | Where it stands |
+|---|---|---|
+| A-15 | Settings pause and all settings sync | Placeholder page only (P9, checklist 26 checks the placeholder, not A-15) |
+| A-25 | Recovery restore and removal explanations | Recovery count shown only; restore, rollback and removal UI not designed for the prototype (removal design owns removal) |
+| A-26 | GUI-only recovery restore, rollback, retirement and settings flows | Not designed or demonstrated |
+| A-33 | Diagnostic export | Disabled "Coming later" in App settings |
+| A-45 | Retire a computer; absent settings master not silently replaced | Disabled "Retire this computer…" only; UG-20 |
+
+### New or changed gaps
+
+- UG-16 changed: typed `ReconfirmCause { MappingChanged, RecognitionChanged }`.
+- UG-25 new: typed continuation/apply scope (Q-25).
+- UG-26 new: core decision-headline policy (`Waiting` vs `NeedsHelp`).
+- No new Q rows; Q-26..Q-39 unchanged.
+
+### Limits (Retry 1)
+
+- Docs only; SVGs were checked to parse as XML, not visually reviewed in a
+  renderer. Text widths in wireframes are approximate.
+- GPUI `focus_visible` behaviour on Windows is read from source, not run.
+
+### Verification (Retry 1)
+
+`cargo xtask verify --tier offline` from the R3-ui-fix worktree root with all
+changes staged, Windows 11 dev PC:
+
+```text
+[PASS   ] offline/fmt
+[PASS   ] offline/clippy
+[PASS   ] offline/test
+[PASS   ] offline/required-cases
+[PASS   ] offline/deny
+[PASS   ] offline/markdown-links
+overall: PASS (allow-blocked: false) -> exit 0
+```
+
+All 12 SVGs parsed as XML with PowerShell `[xml]`. The commit SHA is reported
+in the final reply.

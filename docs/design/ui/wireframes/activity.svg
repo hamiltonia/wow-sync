@@ -3,8 +3,11 @@
   <rect width="1040" height="720" fill="#F5F6F8"/>
   <rect x="0" y="0" width="1040" height="64" fill="#FFFFFF" stroke="#7D8799" stroke-width="0.5"/>
   <text x="20" y="40" font-size="16" font-weight="600" fill="#1A1F29">WoW Sync</text>
-  <rect x="223" y="23" width="18" height="18" fill="#8A5300"/>
-  <text x="252" y="38" font-size="18" font-weight="600" fill="#1A1F29">Waiting: WoW is running</text>
+  <path d="M224 20 h16 l-8 12 l8 12 h-16 l8 -12 z" fill="none" stroke="#8A5300" stroke-width="2"/>
+  <text x="252" y="29" font-size="18" font-weight="600" fill="#1A1F29">Waiting: WoW is running</text>
+  <text x="252" y="49" fill="#4A5363">World of Warcraft: Forever (wowf) · "Main add-ons" group · this computer: Desk PC</text>
+  <rect x="800" y="16" width="100" height="32" rx="4" fill="#1D5BBF"/><text x="850" y="37" text-anchor="middle" fill="#FFFFFF">Sync now</text>
+  <rect x="912" y="16" width="100" height="32" rx="4" fill="#FFFFFF" stroke="#7D8799"/><text x="962" y="37" text-anchor="middle" fill="#1A1F29">Pause</text>
   <rect x="0" y="64" width="200" height="656" fill="#EBEEF2"/>
   <text x="24" y="103" fill="#1A1F29">Overview</text>
   <text x="24" y="139" fill="#1A1F29">Computers</text>

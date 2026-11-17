@@ -59,7 +59,8 @@ sidebar, and a content area of stacked panels.
 ```text
 +--------------------------------------------------------------------------+
 | HEADER  [status icon] Headline sentence                [Sync now] [Pause]|
-|         Forever · "Main add-ons" group · this computer: Desk PC          |
+|         World of Warcraft: Forever (wowf) · "Main add-ons" group ·       |
+|         this computer: Desk PC                                           |
 +-------------+------------------------------------------------------------+
 | SIDEBAR     | CONTENT (scrolls)                                          |
 |  Overview   |  [banner: paused / WoW running / setup check, if any]      |
@@ -77,9 +78,11 @@ sidebar, and a content area of stacked panels.
 +-------------+------------------------------------------------------------+
 ```
 
-- **Header** (fixed, not scrolled): status icon and headline sentence, the
-  context line, and two global buttons, **Sync now** and **Pause syncing** /
-  **Resume syncing**. The headline is the same sentence as the tray tooltip.
+- **Header** (fixed, not scrolled, identical on every page and in every
+  state): status icon and headline sentence, the context line, and two global
+  buttons, **Sync now** and **Pause syncing** / **Resume syncing**. Page- or
+  item-specific buttons (Review, Choose a copy) never replace them. The
+  headline is the same sentence as the tray tooltip.
 - **Sidebar** (fixed, 220 px): navigation. **Needs attention** shows a count
   badge when non-zero. **Settings sync** carries a "Coming later" tag. App
   settings and About sit at the bottom, below a divider.
@@ -103,6 +106,13 @@ sidebar, and a content area of stacked panels.
 
 Wireframes: [dashboard light](wireframes/dashboard-light.svg),
 [dashboard dark](wireframes/dashboard-dark.svg).
+
+**Which document is authoritative.** The prose in this README and in
+[screens.md](screens.md) is the single authoritative layout and interaction
+specification. Each wireframe draws exactly one page in one named scenario and
+follows that prose; it adds no columns, controls or panels of its own. If a
+wireframe and the prose ever disagree, the prose wins and the difference is
+reported as a design bug.
 
 ## Navigation map
 
@@ -153,7 +163,7 @@ time:
 
 | Item | Behaviour |
 |---|---|
-| *Headline sentence* (disabled, informational) | e.g. "Up to date", "2 add-ons need your decision", "Paused" |
+| *Headline sentence* (disabled, informational) | e.g. "Up to date", "Waiting for your decision on 2 add-ons", "Paused" |
 | **Open WoW Sync** | Shows and focuses the main window |
 | **Sync now** | Same as the header button; disabled while paused, while a sync runs and before setup |
 | **Pause syncing** / **Resume syncing** | One item whose label flips; see [Pause](#pause) |
@@ -240,7 +250,9 @@ and a step indicator ("Step 2 of 6"). Nothing is written until the final
    claiming that asking for offline availability means the files are present
    (R-03, Q-6).
 3. **Game installation.** Lists the WoW installations found, each with a plain
-   identity ("World of Warcraft Forever, build 1.15.7, folder _forever_"). The
+   identity from core ("World of Warcraft: Forever (wowf), folder _forever_,
+   build <as reported>"; see
+   [identity labels](screens.md#identity-labels)). The
    user picks one. An unfamiliar client is labelled "Not recognised yet: you
    will confirm it in the next step" (A-46).
 4. **Confirm game version and add-ons.** The guided identity and scope

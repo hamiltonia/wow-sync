@@ -25,7 +25,7 @@ because pause changes every screen (R-13).
 | **Working** | A sync cycle is publishing or applying now | `Headline::Working`, `Shared.busy` |
 | **Waiting** | Something is ready but a safe condition is not met (data not downloaded, files still changing, interrupted update waiting) | `Headline::Waiting`, `PlanBlock`, `PackageStatus::{Available, Unavailable, Interrupted, Blocked}` |
 | **Success** | This computer matches the group's chosen add-ons | `Headline::Ok` |
-| **Needs help** | A user decision or help is needed for some add-ons; others continue | `Headline::NeedsHelp`, `PackageStatus::{NeedsDecision, NeedsHelp}`, `StatusSnapshot.reconfirm` |
+| **Needs help** | The user must act: a decision for one add-on, an interrupted update that needs help, or a reconfirmation. What else continues depends on the kind (see [Continuation scope](#continuation-scope)) | `PackageStatus::{NeedsDecision, NeedsHelp}`, `StatusSnapshot.reconfirm`; headline per [Headline](#headline) |
 | **Error** | The shared folder or local state cannot be read; nothing can sync | `Headline::Error`, `StatusSnapshot.provider_error` |
 | **Offline/stale peer** | Another computer has not reported for a while, or its report is unusable | `MemberStatus.{state, seen_locally_at}` |
 | **WoW running** | The game blocks every game-file change on this computer | `PlanBlock::GameRunning`, `StatusSnapshot.activity` (UG-10) |
@@ -33,15 +33,56 @@ because pause changes every screen (R-13).
 
 ### Headline
 
+The headline colour and icon always follow core's `Headline` value; the UI
+never promotes or demotes it. The sentence may add counts from
+`StatusView.packages`.
+
 | Core `Headline` | Header and tray sentence | Colour / icon ([style.md](style.md)) |
 |---|---|---|
 | `Ok` | "This computer is up to date" (core says "Everything is up to date", which reads as group-wide; UG-22) | `ok` / check |
 | `Working` | "Syncing: applying 2 of 5 updates" (the count needs UG-14; else "Syncing") | `working` / circular arrows |
 | `Waiting` + `GameRunning` | "Waiting: WoW is running" (`render_headline`) | `waiting` / hourglass |
+| `Waiting` with `NeedsDecision` packages and no block | "Waiting for your decision on 2 add-ons" | `waiting` / hourglass |
 | `Waiting` (other) | "Waiting for Dropbox to finish downloading", "Waiting for add-on files to stop changing" (first block's reason, `render_block`) | `waiting` / hourglass |
-| `NeedsHelp` | "2 add-ons need your decision" / "Something needs your help" | `help` / exclamation in triangle |
+| `NeedsHelp` | "An update needs your help" (core: "Something needs your help"); a journal `NeedsHelp` is the only core source today | `help` / exclamation in triangle |
 | `Error` | "Can't read the shared folder" (category needs UG-11; else "Something needs attention") | `error` / cross in circle |
 | (paused, UG-2) | "Paused" | `paused` / two bars |
+
+**Decision headline gap (UG-26).** Core `derive_status` gives
+`Headline::Waiting` when the only non-current packages are `NeedsDecision`
+(asserted by core test `needs_decision_shows_evidence`), although a decision
+needs the user. This design renders that value as is (waiting colour and
+icon, the sentence above, the Needs attention badge). Whether decisions should
+raise the headline to `NeedsHelp` is a core policy question recorded as UG-26;
+the UI does not change it.
+
+### Continuation scope
+
+What keeps working while something needs the user is core policy (R-06, Q-25),
+not a UI choice. Two cases are designed and must never be merged into one
+sentence:
+
+| Case | Core facts | Continuation sentence |
+|---|---|---|
+| **Add-on decision** (`NeedsDecision`, no apply journal on this computer) | `plan_apply` skips only that package; other packages are planned and applied | "Only WeakAuras is affected. Other add-ons keep syncing." |
+| **Interrupted update needs help** (an apply journal in `NeedsHelp`) | `plan_apply` returns `UnresolvedJournal` before considering any package (Q-25, apply.md §1); publishing continues | "No updates are applied on this computer until this is resolved. Sharing this computer's add-ons continues." |
+
+Both may be present at once; the journal sentence then wins everywhere. Today
+the runtime does not export which case applies: it skips planning while
+journals remain and pushes no block (UG-25). The prototype fakes the typed
+field (`FakeApplyScope`). Until UG-25 exists, the build-out shows **neither**
+continuation sentence rather than guess.
+
+### Identity labels
+
+Installation identity text comes from core, never from UI constants (R-02).
+For the owner's client the canonical identity is
+**World of Warcraft: Forever (wowf)**, folder `_forever_` (core
+`display_label()`; OWNER-DECISIONS D-09). Forever is never called, mapped to
+or shown with a Classic Era folder, product code or build. Build numbers are
+shown exactly as core reports them; fake data uses obviously fake builds
+(`fake-build-A`, `fake-build-B`), not real-looking numbers. Unfamiliar clients
+in fake data use the fictional folder `_example_` and product `wowx`.
 
 ### Add-on status
 
@@ -89,12 +130,17 @@ other computers last confirm. The Syncthing-style home page.
 Wireframes: [light](wireframes/dashboard-light.svg),
 [dark](wireframes/dashboard-dark.svg).
 
-**Layout.** Two columns at ≥ 820 px content width, else one.
+**Layout (authoritative; the wireframes follow it).** Header as in the
+[README](README.md#window-layout): status icon, headline, context line
+(`<identity label> · "<group>" group · this computer: <name>`), **Sync now**
+and **Pause syncing**, on every page and in every state. Content: two columns
+at ≥ 820 px content width, else one column in the order listed.
 
 - Left column:
   - **Needs attention** panel, only when there is something (up to 3 items,
     then "See all N").
-  - **This computer** panel: key/value rows.
+  - **This computer** panel: key/value rows (Add-ons, Game, Shared folder,
+    Last shared, Last check, Recovery copies when > 0).
   - **Recent changes** panel: the last 5 activity batches.
 - Right column:
   - **Other computers** panel: one compact card per computer.
@@ -126,8 +172,8 @@ with that entry selected.
 | Empty | No add-ons: "No add-ons found in this installation's AddOns folder yet. Add-ons you install with CurseForge or another updater appear here after the next check." No other computers: Other computers panel reads "No other computers have joined this group yet. Set up WoW Sync on another computer and choose **Join** to add it." Recent changes: "Nothing has changed yet." |
 | Working | Header "Syncing…" with an indeterminate progress bar under the headline; **Sync now** reads "Syncing…" and is disabled. Panels keep the previous values (no flashing). |
 | Waiting | Header in `waiting`; the first block's reason; the This computer Add-ons row shows "2 updates waiting" with the reason. |
-| Success | Header "This computer is up to date"; subline "Last check 1 min ago". The Other computers panel never adds a group-wide "all up to date"; each card shows what that computer last confirmed. |
-| Needs help | Needs attention panel first, with each item's one-line reason and a button ("Choose a copy", "Confirm game version"). The line "Other add-ons keep syncing." appears under the panel (R-06). |
+| Success | Header "This computer is up to date"; This computer shows "Last check 1 min ago". No Needs attention panel. The Other computers panel never adds a group-wide "all up to date"; each card shows what that computer last confirmed. |
+| Needs help | Needs attention panel first, with each item's one-line reason and a button ("Choose a copy", "See what happened", "Confirm game version"). Under the panel, the continuation sentence for the case shown ([Continuation scope](#continuation-scope)): decisions only → "Other add-ons keep syncing."; an interrupted update needing help → "No updates are applied on this computer until this is resolved. Sharing this computer's add-ons continues." Decisions alone keep the core `Waiting` headline (UG-26). |
 | Error | Header in `error`: "Can't read the shared folder"; a banner with the cause and the next step (UG-11), for example "Dropbox is not running. Start Dropbox, then choose **Try again**." **Try again** = Sync now. Add-on counts show "as of 3 hours ago" (UG-14). |
 | Offline/stale peer | That computer's card shows "Not heard from for 12 days" in `unknown` with a clock icon and "Last confirmed 40 of 42 add-ons, 12 days ago. What it has now is not known." (A-24, Q-27). |
 | WoW running | Banner: "WoW is running. WoW Sync never changes game files while the game runs. 2 updates will be applied after you close WoW." Header "Waiting: WoW is running". Sharing this computer's add-ons continues (Q-5). |
@@ -143,8 +189,11 @@ never states a computer's present state.
 
 Wireframe: [computers](wireframes/computers.svg).
 
-**List.** One row per member, this computer first (labelled "This computer").
+**List page (authoritative layout).** One column, full content width. One row
+per member, this computer first (labelled "This computer").
 Columns: Name · Last report received here · Last confirmed · Status.
+Activating a row opens **Computer detail**, which replaces the list (README
+Detail pages); the list and the detail are never shown side by side.
 
 | Element | Source | Gap |
 |---|---|---|
@@ -194,10 +243,11 @@ the user can find what changed or what waits (R-12).
 
 Wireframe: [add-ons list](wireframes/addons.svg).
 
-**List.** Rows sorted: needs your decision / needs help first, then waiting,
-then the rest by name. Columns: Name · Version here · Status · Confirmed by.
-Filter buttons above the list (toggle buttons, one active): **All (45)**,
-**Not up to date (3)**, **Needs you (1)**, **Not synced here (2)**.
+**List (authoritative layout).** Fixed order, no sort control: needs your
+decision / needs help first, then waiting, then the rest by name. Columns:
+Name · Version here · Status · Confirmed by. Filter buttons above the list
+(toggle buttons, one active), with counts: **All (44)**, **Not up to date
+(3)**, **Needs you (3)**, **Not synced here (2)** (S7 values).
 
 | Element | Source | Gap |
 |---|---|---|
@@ -267,7 +317,7 @@ Wireframe: [add-on detail](wireframes/addon-detail.svg).
 | Working | Status chip "Updating…"; Next step "Wait a moment." |
 | Waiting | Reason sentence and the next step, e.g. Unavailable: "Wait for Dropbox to finish downloading Laptop's copy. If it stays like this, make the WoW Sync folder available offline in Dropbox." |
 | Success | "Up to date"; On each computer lists confirmations with ages; Next step "Nothing to do." |
-| Needs help | Decision or needs-help summary with **Choose a copy** / **See what happened** to the Decision or Needs-help page. "Other add-ons keep syncing." |
+| Needs help | Decision or needs-help summary with **Choose a copy** / **See what happened** to the Decision or Needs-help page, and the continuation sentence for its case ([Continuation scope](#continuation-scope)). |
 | Error | Last known data with an "as of" note; Next step names the shared-folder fix. |
 | Offline/stale peer | That computer's line: "Not confirmed yet; not heard from for 12 days. What it has now is not known." |
 | WoW running | "Waiting for WoW to close. Nothing was changed." For `Interrupted` while running: "The update was interrupted because WoW started. It finishes after WoW closes." |
@@ -329,12 +379,24 @@ changed" panel (UG-16; until then "The game installation changed since it was
 set up."), and **Confirm and continue** / **Not now**. **Not now** leaves
 syncing stopped and says so.
 
+When reconfirmation is offered is core's decision (`confirm_enrolled`), not
+the UI's:
+
+| Change since setup | Core result | What the UI shows |
+|---|---|---|
+| The add-on file rule changed (`mapping_id`, e.g. `validated-plain/1` → `profile:wowf/1` once a verified Forever profile ships), so a different set of folders would sync | `StaleConfirmation` → reconfirm offered | Reconfirm page; "What changed: WoW Sync now uses a different rule for which add-on files this game version loads. 5 more folders would sync." with the new eligible/blocked lists |
+| The recognition class changed (a recognised client is now unfamiliar, or the reverse) | `StaleConfirmation` → reconfirm offered | Reconfirm page with the identity checkbox |
+| Only the build version changed (game patch) | Not a reconfirm (D-18 O-N2); syncing continues | Nothing to confirm. The new build appears in This computer → Game and in the computer's Details; compatibility of individual add-ons is core's Q-21 rule |
+| New add-on folders appeared under the same rule | Not a reconfirm (scope covers the rule, not a frozen list) | They appear in Add-ons as usual |
+| Product or folder changed (a different client) | `VariantChanged`; reconfirm is **not** offered (runtime test `changed_product_needs_help_without_a_doomed_reconfirm_offer`) | Error state: "This is not the game installation that was set up. Nothing is synced for it." No Confirm button |
+
 ---
 
 ## Needs attention
 
 **Purpose.** One place for everything that needs the user, each scoped to what
-it affects, with other work continuing (R-06, R-12).
+it affects (R-06, R-12). What continues meanwhile follows
+[Continuation scope](#continuation-scope).
 
 Wireframe: [needs attention and decision](wireframes/decision.svg).
 
@@ -350,7 +412,9 @@ then decisions, then peer problems):
 | Another computer's report | `MemberSummary::{Unusable, Regressed, Invalid}` | "Laptop's latest report could not be used" | **See details** |
 | Extra recovery copies (future) | `retained_extra_recovery`, UG-13 | "3 extra recovery copies are kept" | **See why** |
 
-Each row: icon, title, one-line reason, "Affects: WeakAuras only", button.
+Each row: icon, title, one-line reason, "Affects: …", button. "Affects" is
+"WeakAuras only" for a decision and "All updates on this computer" for an
+interrupted update that needs help (Q-25).
 
 **States.**
 
@@ -360,7 +424,7 @@ Each row: icon, title, one-line reason, "Affects: WeakAuras only", button.
 | Working | List unchanged; resolved items disappear after the next cycle. |
 | Waiting | Waiting conditions are not listed here (they need no user action); a link "See what is waiting" opens Add-ons filtered "Not up to date". |
 | Success | Same as Empty. |
-| Needs help | The list. A line under it: "Other add-ons keep syncing." |
+| Needs help | The list. Under it, the continuation sentence for the case ([Continuation scope](#continuation-scope)); if any interrupted update needs help, only the journal sentence is shown. |
 | Error | The error item first; other items still listed with their last known reason. |
 | Offline/stale peer | Not listed: silence is not a problem the user must fix. The Computers page shows it. |
 | WoW running | Items stay. Decisions can be made while WoW runs; the result is applied after WoW closes, and the confirmation says so. |
@@ -393,7 +457,11 @@ Never a whole-profile choice.
   installed on every computer in this group. Other copies are kept as recovery
   copies."
 - Buttons per card: **Keep this copy**. Page: **Decide later**.
-- Scope line: "Only WeakAuras is affected. Other add-ons keep syncing."
+- Scope line: "Only WeakAuras is affected. Other add-ons keep syncing." Shown
+  only when no interrupted update needs help on this computer; otherwise "Your
+  choice is kept, but no updates are applied on this computer until the
+  interrupted update is resolved." ([Continuation scope](#continuation-scope),
+  UG-25).
 - Details: hashes, folder keys, computer IDs.
 
 In the current core, decisions are read-only (Q-25, UG-8). The prototype shows
@@ -573,9 +641,9 @@ The tray is not a screen, but it has states. Shapes are in
 |---|---|---|
 | Empty (not set up) | base icon with dot | "WoW Sync: Set up this computer" |
 | Working | arrows | "WoW Sync: Syncing" |
-| Waiting | hourglass | "WoW Sync: Waiting, WoW is running" (or other reason) |
+| Waiting | hourglass | "WoW Sync: Waiting, WoW is running" (or other reason); decisions only: "WoW Sync: Waiting for your decision on 2 add-ons" (core `Waiting`, UG-26) |
 | Success | check | "WoW Sync: This computer is up to date" |
-| Needs help | exclamation | "WoW Sync: 2 add-ons need your decision" |
+| Needs help | exclamation | "WoW Sync: An update needs your help" |
 | Error | cross | "WoW Sync: Can't read the shared folder" |
 | Offline/stale peer | unchanged (success if this computer is fine) | headline unchanged; peers never change the tray icon |
 | WoW running | hourglass | "WoW Sync: Waiting, WoW is running" |
@@ -605,7 +673,7 @@ field is a suggestion for the owning packet; none is UI policy.
 | UG-13 | Recovery copies are only a count | add-on detail | `recovery: Vec<RecoveryPointView { created_unix_ms, version_label, reason, pinned, exception: Option<Explanation> }>` per package |
 | UG-14 | No last/next check time, no cycle progress | header, Overview | `last_cycle_unix_ms`, `next_cycle_unix_ms`, `progress: Option<(done, total)>` |
 | UG-15 | One group per app instance | sidebar, Overview | `groups: Vec<GroupSummary { id, name, product, headline }>` |
-| UG-16 | Reconfirm does not say what changed | Reconfirm | `EnrollPreview.changed: Vec<(field, before, after)>` |
+| UG-16 | Reconfirm does not say what changed or why it is needed | Reconfirm | `ReconfirmCause { MappingChanged { from, to }, RecognitionChanged { from, to } }` plus the eligible/blocked difference; build-only changes are not a cause (D-18 O-N2) |
 | UG-17 | No safe-point signal for pause/quit | Pause, Quit | runtime `request_stop() -> StopState { Now, AfterCurrentStep(package) }` and a "stopped" event |
 | UG-18 | No update information or build commit | About | `UpdateInfo { current, latest, page_url, checked_unix_ms }`; build commit via build script |
 | UG-19 | No batch summary events for notifications | notifications | `SyncBatchSummary { applied: Vec<(FolderKey, from, to, source)>, shared: bool, problems: Vec<ProblemKey> }` per completed cycle |
@@ -614,3 +682,5 @@ field is a suggestion for the owning packet; none is UI policy.
 | UG-22 | Core sentences show computer IDs ("added from computer 3f9a…") and an ambiguous Ok headline ("Everything is up to date") | all sentences | `render` takes a name resolver `Fn(&ComputerId) -> String`; Ok headline "This computer is up to date" |
 | UG-23 | No start-at-sign-in API | App settings | runtime `startup::{get, set}(enabled, hidden)` (Run key / LaunchAgent) |
 | UG-24 | Setup cannot discover Dropbox or WoW installations; paths come from command-line options | Setup | runtime `discover() -> { dropbox: Option<Path>, installs: Vec<InstallCandidate> }` and group last-activity in `GroupInfo` |
+| UG-25 | No typed continuation scope: the runtime skips apply planning while any journal remains and exports no block, so the UI cannot tell "only this add-on" from "all applies on this computer stopped" (Q-25) | Overview, Needs attention, Add-on detail, Decision | `StatusView.apply_scope: ApplyScope { AllAppliesBlocked { by: PlanBlock::UnresolvedJournal, packages: Vec<FolderKey> } \| PerPackage }`, or the runtime always reporting `PlanBlock::UnresolvedJournal` in `blocks` |
+| UG-26 | Decision headline policy: core derives `Headline::Waiting` when only `NeedsDecision` packages are non-current (`needs_decision_shows_evidence`), although the user must act. The UI renders core's value and does not decide this | header, tray | core decision (owner if product meaning changes): keep `Waiting`, or derive `NeedsHelp` for decisions |

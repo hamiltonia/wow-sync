@@ -145,8 +145,16 @@ and dark taskbars: the Windows variants use a 1 px contrasting outline.
   button.
 - Dark: `#FFD166` (≥ 8.67:1 against every surface), which keeps the slice's
   yellow ring.
-- Visible on keyboard focus always. Mouse clicks may also show it; GPUI has no
-  `:focus-visible` distinction, so the ring shows on any focus.
+- Always visible on keyboard focus. Drawn with GPUI
+  `InteractiveElement::focus_visible` (pinned `e8bc16a`,
+  `crates/gpui/src/elements/div.rs`): it applies only while the element is
+  focused **and** `window.last_input_was_keyboard()`, like CSS
+  `:focus-visible`. A mouse click therefore shows no ring; the element must be
+  focusable (`track_focus`). Whether this behaves as documented on Windows is a
+  prototype check.
+- After a mouse click, the next Tab shows the ring on the newly focused
+  element. If `focus_visible` misbehaves, the fallback is `.focus()` (ring on
+  any focus), recorded as a prototype limitation.
 - Never removed, never only a colour change of the border.
 
 ## Spacing scale
