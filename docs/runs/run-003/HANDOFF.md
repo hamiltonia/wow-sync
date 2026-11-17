@@ -45,6 +45,15 @@ chat is not.
   - The orchestrator fixed RV-10 (restored the D-20 heading) and RV-11
     (records).
   - RV-1 to RV-9 and RV-12 go to the fix packet R3-fix.
+- **E-5, R3-check2:**
+  - Negative controls, memory (peak 37.75 MiB) and both verify tiers PASS.
+  - Real screen values FAIL on RC2-1: an invented "next in 4 min".
+  - Tray clicks BLOCKED (no physical click was sent).
+  - RC2-1 to RC2-4 go to R3-fix.
+  - The orchestrator stopped the stranded synthetic stand-in (a renamed
+    `ping -t 127.0.0.1` in the R3-check2 scratch lab). It was identified by
+    its exact worktree executable path and command line and stopped by its
+    literal PID. No other process was touched.
 - **F-1, R3-ui-build:**
   - The real UI runs on runtime data.
   - Data gaps closed: UG-1 to UG-7, UG-10, UG-11, UG-14, UG-17, UG-22 and
@@ -102,10 +111,25 @@ chat is not.
     report" verify row is superseded by R3-check's independent offline and
     native PASS.
 
+## Owner question: app icon (OQ-ICON, 2026-11-17)
+
+- The owner provided app art in a local folder outside the repo: a 1254 px
+  PNG and an ICO with sizes from 16 to 256 px.
+- The art contains Blizzard's WoW "W" crest and the Dropbox logo. The repo is
+  **public**. Committing the art would publish third-party trademarks, which
+  needs owner approval under AGENTS.md.
+- The owner was not available, so the orchestrator chose the reversible
+  option: the art is **not committed**. R3-fix goal 12 optionally lets the app
+  use it as a local-only runtime override (gitignored).
+- Owner decision needed:
+  - commit the art as is;
+  - keep it local only;
+  - or provide a version without the third-party logos, which could then be
+    committed and embedded as the exe icon.
+
 ## Next actions
 
-1. Wait for R3-check2 (`0007206a`) and merge its evidence.
-2. Write packet R3-fix (sonnet) for RV-1 to RV-9, RV-12 and any R3-check2
-   findings. Launch it; then run an independent recheck.
-3. Stop launching new work at ≥19,013 AIU cumulative. Then write the
+1. R3-fix (sonnet) is running for RV-1 to RV-9, RV-12, RC2-1 to RC2-4 and
+   the optional icon goal 12. After it, run an independent recheck.
+2. Stop launching new work at ≥19,013 AIU cumulative. Then write the
    run-003 report and stop for the owner.
