@@ -325,9 +325,25 @@ candidate `c` can be chosen automatically only if all hold:
 |---|---|
 | every member folder of `c` has status `Ok` and a `Selected` toc under the source member's mapping | `NoCompatibleToc` |
 | the source member's `client.toc_mapping` equals the local mapping | `DifferentTocMapping` |
-| the source member's `client.build_version` equals the local one (both present) | `DifferentClientBuild` (Q-21) |
+| the source member's `client.build_version` equals the local one (both present), **or** every selected `.toc` `## Interface:` number of `c` is supported by this client (Q-21, below) | `DifferentClientBuild` (Q-21) |
 | no member folder is `Blocked(UnvalidatedTocMapping)` locally (§2.1) | `UnvalidatedTocMapping` |
 | `c` is **complete**: its folder set equals the package's full membership `Package.members` as established by grouping over **all** admitted observations and the local inventory (§5) — so neither leftover old parts here nor a missing part on an empty peer is possible (retry 2, R-M04) | `PartialCandidate` |
+
+**Client-build compatibility by interface number (Q-21, owner decision D-18).**
+When the source member's `build_version` differs from the local one (or either
+is missing), the candidate is still eligible if `interface_supported` holds
+(`target.rs`, a pure function of the candidate's folders and the local
+inventory). The supported set is local evidence only: the union of the
+`## Interface:` numbers of the selected `.toc` of this computer's own installed
+folders with status `Ok`, in the same confirmed variant. The candidate passes
+only if **every** folder has a selected `.toc` declaring at least one number and
+**every** declared number is in that set (exact equality; no ranges, no
+"newer is fine"). A missing or unparsable number, a folder without a selected
+`.toc`, or an empty local evidence set means `NeedsDecision(DifferentClientBuild)`.
+Ordinary patch-day builds that keep the interface number therefore stay
+automatic. `DifferentTocMapping` is unaffected, and the same build never
+consults interface numbers. Limitation: a stale local addon with an old
+interface number counts as evidence for that number.
 
 A local candidate is always "eligible" for the purpose of staying as it is
 (nothing is written). Completeness is checked against the group-wide
