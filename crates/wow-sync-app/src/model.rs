@@ -2,7 +2,7 @@
 //! `World`. No GPUI types here, so it runs on every platform and is unit tested.
 
 use crate::theme::Tone;
-use crate::world::{absolute, rel, Addon, Busy, Kind, World};
+use crate::world::{absolute, rel, Addon, Busy, Candidate, Kind, World};
 use wow_sync_core::plan::PlanBlock;
 use wow_sync_core::status::{Headline, MemberSummary, PackageStatus};
 use wow_sync_core::target::DecisionReason;
@@ -488,11 +488,33 @@ pub fn paused_hint(w: &World) -> Option<String> {
     if !w.is_paused() {
         return None;
     }
-    let n = counts(w).ready;
-    Some(format!(
-        "{} will be applied when you resume",
-        plural(n, "update", "updates")
-    ))
+    let c = counts(w);
+    // Waiting add-ons (including interrupted ones) are retried on resume, so "0 updates" would
+    // be untrue; their number is shown as a count of add-ons, not as a promise of success.
+    Some(match (c.ready, c.waiting) {
+        (n, 0) => format!(
+            "{} will be applied when you resume",
+            plural(n, "update", "updates")
+        ),
+        (0, k) => format!(
+            "{} waiting will be tried again when you resume",
+            plural(k, "add-on", "add-ons")
+        ),
+        (n, k) => format!(
+            "{} will be applied and {} waiting will be tried again when you resume",
+            plural(n, "update", "updates"),
+            plural(k, "add-on", "add-ons")
+        ),
+    })
+}
+
+/// A candidate's version label, or "not available" when the copy has none.
+pub fn version_label(c: &Candidate) -> &str {
+    if c.version.trim().is_empty() {
+        "not available"
+    } else {
+        &c.version
+    }
 }
 
 pub fn game_state(w: &World) -> &'static str {
@@ -683,8 +705,8 @@ pub fn decision_reason(_w: &World, a: &Addon, r: DecisionReason) -> String {
     match r {
         DecisionReason::Ambiguous => format!(
             "WoW Sync can't tell which copy is newer. Their version labels can't be compared safely ({} and {}).",
-            a.candidates.first().map(|c| c.version.as_str()).unwrap_or("?"),
-            a.candidates.get(1).map(|c| c.version.as_str()).unwrap_or("?")
+            a.candidates.first().map(version_label).unwrap_or("?"),
+            a.candidates.get(1).map(version_label).unwrap_or("?")
         ),
         DecisionReason::PartialCandidate => {
             let who: Vec<&str> = a
@@ -918,7 +940,7 @@ pub fn addon_story(w: &World, key: &str) -> Option<Story> {
             .map(|c| {
                 format!(
                     "{} ({}): {}",
-                    c.version,
+                    version_label(c),
                     c.holders.join(" and "),
                     c.differences
                 )
@@ -1260,7 +1282,7 @@ mod tests {
             title: "Demo".into(),
             status: status.clone(),
             sentence: wow_sync_core::explain::render(&why),
-            next: wow_sync_core::view::next_action(&status, &why),
+            next: wow_sync_core::view::next_action(&status, &why, false),
             version_here: Some("1".into()),
             version_target: Some("2".into()),
             sources: vec![],
@@ -1314,7 +1336,57 @@ mod tests {
         assert_ne!(sa.what, sb.what);
         assert_eq!(
             sa.next,
-            wow_sync_core::view::NextAction::CloseGame.sentence()
+            wow_sync_core::view::NextAction::FinishOnNextSync.sentence()
+        );
+        assert!(!sa.next.contains("WoW"), "{}", sa.next);
+    }
+
+    #[test]
+    fn a_missing_candidate_version_reads_not_available_never_blank() {
+        let w = enrolled();
+        let cand = |v: &str| Candidate {
+            version: v.into(),
+            holders: vec!["Laptop".into()],
+            differences: String::new(),
+        };
+        let a = Addon {
+            key: "k".into(),
+            title: "Demo".into(),
+            version: "1".into(),
+            target_version: None,
+            folders: vec![],
+            kind: Kind::Available,
+            candidates: vec![cand("1.0.0"), cand("")],
+            why: String::new(),
+            next: wow_sync_core::view::NextAction::Nothing,
+            awaiting: vec![],
+        };
+        let text = decision_reason(&w, &a, DecisionReason::Ambiguous);
+        assert!(text.contains("(1.0.0 and not available)"), "{text}");
+        assert_eq!(version_label(&a.candidates[1]), "not available");
+        assert_eq!(version_label(&cand("  ")), "not available");
+    }
+
+    #[test]
+    fn the_paused_hint_never_promises_zero_while_an_update_waits() {
+        let mut w = world_with(
+            PackageStatus::Interrupted,
+            wow_sync_core::explain::Explanation::Interrupted {
+                package: "Demo".into(),
+            },
+        );
+        w.paused_since = Some("12:00".into());
+        let hint = paused_hint(&w).unwrap();
+        assert!(!hint.starts_with("0 "), "{hint}");
+        assert!(hint.contains("1 add-on waiting"), "{hint}");
+        let mut ready = world_with(
+            PackageStatus::Available,
+            wow_sync_core::explain::Explanation::InSync,
+        );
+        ready.paused_since = Some("12:00".into());
+        assert_eq!(
+            paused_hint(&ready).unwrap(),
+            "1 update will be applied when you resume"
         );
     }
 

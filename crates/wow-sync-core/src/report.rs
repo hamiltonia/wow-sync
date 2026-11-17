@@ -141,6 +141,7 @@ mod tests {
             phase,
             from_phase: (phase == JournalPhase::RolledBack).then_some(JournalPhase::Committing),
             reason: None,
+            halted_by_game: false,
             folders: vec![JournalFolder {
                 name: "Alpha".into(),
                 key: FolderKey::lossy("alpha"),

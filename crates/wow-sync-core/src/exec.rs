@@ -326,6 +326,7 @@ fn journal_for(plan: &ApplyPlan, p: &PackageApply) -> ApplyJournal {
         phase: JournalPhase::Staging,
         from_phase: None,
         reason: None,
+        halted_by_game: false,
         folders: p
             .folders
             .iter()
@@ -350,7 +351,16 @@ fn transition(
     j.phase = phase;
     j.from_phase = from;
     j.reason = reason;
+    j.halted_by_game = false;
     fx.write_journal(j)
+}
+
+/// Records on disk that the game start stopped this update, so status can say so later.
+fn record_game_halt(fx: &mut impl ApplyEffects, j: &mut ApplyJournal, h: &Halt) {
+    if matches!(h.why, Explanation::InterruptedByGame { .. }) && !j.halted_by_game {
+        j.halted_by_game = true;
+        let _ = fx.write_journal(j);
+    }
 }
 
 fn needs_help(
@@ -580,6 +590,7 @@ fn apply_package(plan: &ApplyPlan, p: &PackageApply, fx: &mut impl ApplyEffects)
                 }
             }
             if let Err(h) = gate(fx, &name) {
+                record_game_halt(fx, &mut j, &h);
                 return interrupted(h.why, h.block);
             }
             if let Err(e) = fx.rename(&l, &r) {
@@ -593,6 +604,7 @@ fn apply_package(plan: &ApplyPlan, p: &PackageApply, fx: &mut impl ApplyEffects)
             }
         }
         if let Err(h) = gate(fx, &name) {
+            record_game_halt(fx, &mut j, &h);
             return interrupted(h.why, h.block);
         }
         if let Err(e) = fx.rename(&s, &l) {
@@ -674,6 +686,7 @@ fn verify_slots(fx: &mut impl ApplyEffects, j: &ApplyJournal) -> Result<(), Veri
 fn verify_and_finish(fx: &mut impl ApplyEffects, j: &mut ApplyJournal) -> PackageResult {
     let name = j.package.as_str().to_string();
     if let Err(h) = gate(fx, &name) {
+        record_game_halt(fx, j, &h);
         return PackageResult::Interrupted(h.why);
     }
     match verify_slots(fx, j) {
@@ -896,7 +909,10 @@ fn recover_one(fx: &mut impl ApplyEffects, j: &mut ApplyJournal) -> PackageResul
             cleanup(fx, j)
         }
         JournalPhase::Committing => match gate(fx, &name) {
-            Err(h) => PackageResult::Interrupted(h.why),
+            Err(h) => {
+                record_game_halt(fx, j, &h);
+                PackageResult::Interrupted(h.why)
+            }
             Ok(()) => rollback(fx, j),
         },
         JournalPhase::Committed => verify_and_finish(fx, j),
@@ -952,6 +968,7 @@ fn rollback(fx: &mut impl ApplyEffects, j: &mut ApplyJournal) -> PackageResult {
                     Err(e) => return failed(&name, e),
                 }
                 if let Err(h) = gate(fx, &name) {
+                    record_game_halt(fx, j, &h);
                     return PackageResult::Interrupted(h.why);
                 }
                 if let Err(e) = fx.rename(&l, &s) {
@@ -1038,7 +1055,10 @@ fn fail_restore(
     folder: &str,
 ) -> PackageResult {
     match res {
-        RestoreFail::Gate(h) => PackageResult::Interrupted(h.why),
+        RestoreFail::Gate(h) => {
+            record_game_halt(fx, j, &h);
+            PackageResult::Interrupted(h.why)
+        }
         RestoreFail::Rename(e) => PackageResult::Failed(Explanation::RestoreFailed {
             folder: format!("{folder} ({e})"),
         }),

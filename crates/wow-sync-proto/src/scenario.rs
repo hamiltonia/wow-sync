@@ -972,7 +972,7 @@ impl World {
             members: &[],
             applied_here: &applied_here,
             interrupted: &interrupted,
-            game_running: self.game_running,
+            interrupted_by_game: if self.game_running { &interrupted } else { &[] },
             needs_help: &needs_help,
             blocks: &blocks,
             retained: &[],

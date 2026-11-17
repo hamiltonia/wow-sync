@@ -303,7 +303,15 @@ pub struct ApplyJournal {
     pub from_phase: Option<JournalPhase>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// The executor stopped this update because the game started. Missing (old journals) means
+    /// the cause is unknown.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub halted_by_game: bool,
     pub folders: Vec<JournalFolder>,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 record!(ApplyJournal, "wowsync.apply-journal", MIB, |self| {
     if self.phase == JournalPhase::RolledBack

@@ -277,6 +277,7 @@ pub fn sample_journal(phase: JournalPhase) -> ApplyJournal {
         phase,
         from_phase: from,
         reason: None,
+        halted_by_game: false,
         folders: vec![
             JournalFolder {
                 name: "Suite".into(),
