@@ -139,28 +139,34 @@ fn folder_problem(f: &FolderState) -> Option<Ineligible> {
     }
 }
 
-/// Q-21 (domain.md §6): the interface numbers the receiving client itself demonstrates, from
-/// the selected `.toc` of its own usable installed folders. Nothing else counts as evidence.
-fn local_interface_evidence(local: &Inventory) -> BTreeSet<u32> {
-    local
-        .folders
-        .iter()
-        .filter(|f| f.status == FolderStatus::Ok && f.toc.kind == TocKind::Selected)
-        .flat_map(|f| f.toc.interface.iter().copied())
-        .collect()
+/// Valid, non-empty `## Interface:` set of a folder's selected `.toc`; `None` is "no evidence".
+fn interface_set(f: &FolderState) -> Option<BTreeSet<u32>> {
+    let set: BTreeSet<u32> = f.toc.interface.iter().copied().collect();
+    (f.toc.kind == TocKind::Selected && f.toc.interface_valid && !set.is_empty()).then_some(set)
 }
 
-/// True only when every folder of the candidate has a selected `.toc` that declares at least
-/// one `## Interface:` number and every declared number is in the receiving client's own
-/// evidence. Missing evidence on either side is "not supported".
+/// Q-21 rule A (domain.md §6, orchestrator interim): true only when, for every folder of the
+/// candidate, this computer has a usable copy of that same folder whose selected `.toc`
+/// declares a valid interface set exactly equal to the candidate folder's valid set.
+/// A new addon, a missing folder, invalid or missing numbers, or a differing set is "not
+/// supported". Unrelated installed addons are never evidence.
 pub fn interface_supported(candidate: &[FolderState], local: &Inventory) -> bool {
-    let evidence = local_interface_evidence(local);
     !candidate.is_empty()
         && candidate.iter().all(|f| {
-            f.toc.kind == TocKind::Selected
-                && !f.toc.interface.is_empty()
-                && f.toc.interface.iter().all(|n| evidence.contains(n))
+            let Some(want) = interface_set(f) else {
+                return false;
+            };
+            local
+                .get(&f.key)
+                .filter(|l| l.status == FolderStatus::Ok)
+                .and_then(interface_set)
+                .is_some_and(|have| have == want)
         })
+}
+
+/// Both builds present and equal: the only case that skips the interface rule (R3D-2).
+fn same_known_build(a: &ClientInfo, b: &ClientInfo) -> bool {
+    matches!((&a.build_version, &b.build_version), (Some(x), Some(y)) if x == y)
 }
 
 /// Eligible holders of the candidate, or the first reason it cannot be applied automatically.
@@ -196,7 +202,7 @@ fn eligible_holders(
                     there: client.toc_mapping.clone(),
                 },
             ));
-        } else if client.build_version != input.local_client.build_version
+        } else if !same_known_build(client, input.local_client)
             && !interface_supported(&c.pv.folders, input.local)
         {
             first_fail.get_or_insert((
@@ -722,6 +728,141 @@ mod tests {
         assert_eq!(
             reason(pkg(&t, "suite")),
             DecisionReason::DifferentTocMapping
+        );
+    }
+
+    fn raw_iface(raw: &str) -> Vec<crate::inventory::FolderScan> {
+        vec![addon_interface("Suite", "2.0", Some(raw), "b")]
+    }
+
+    fn decision_for_peer_iface(raw: &str) -> Option<DecisionReason> {
+        let t = Scenario::new(suite("1.0", "a"))
+            .peer_client(2, raw_iface(raw), client("2.0.0.1"))
+            .target();
+        match pkg(&t, "suite") {
+            PackageTarget::NeedsDecision { reason, .. } => Some(*reason),
+            PackageTarget::Chosen { .. } => None,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn malformed_interface_tokens_fail_closed() {
+        for raw in [
+            "11508,garbage",
+            "11508,4294967296",
+            "11508,",
+            "11508,,11508",
+            "",
+            "11508\n## Interface: 99999",
+        ] {
+            assert_eq!(
+                decision_for_peer_iface(raw),
+                Some(DecisionReason::DifferentClientBuild),
+                "{raw:?}"
+            );
+        }
+        assert_eq!(decision_for_peer_iface("11508"), None);
+        assert_eq!(decision_for_peer_iface("11508\n## Interface: 11508"), None);
+        let t = Scenario::new(vec![addon_interface("Suite", "1.0", Some("11508,x"), "a")])
+            .peer_client(2, suite("2.0", "b"), client("2.0.0.1"))
+            .target();
+        assert_eq!(
+            reason(pkg(&t, "suite")),
+            DecisionReason::DifferentClientBuild
+        );
+    }
+
+    #[test]
+    fn missing_builds_apply_the_interface_rule() {
+        let none = || ClientInfo {
+            build_version: None,
+            toc_mapping: client("x").toc_mapping,
+        };
+        let run = |local: Option<ClientInfo>, peer: ClientInfo, iface: &str| {
+            let mut sc = Scenario::new(suite("1.0", "a"));
+            if let Some(l) = local {
+                sc.local_client = l;
+            }
+            sc.peer_client(2, suite_iface("2.0", iface, "b"), peer)
+                .target()
+        };
+        // Both missing: still needs matching interface evidence.
+        let t = run(Some(none()), none(), "99999");
+        assert_eq!(
+            reason(pkg(&t, "suite")),
+            DecisionReason::DifferentClientBuild
+        );
+        let t = run(Some(none()), none(), "11508");
+        assert!(matches!(pkg(&t, "suite"), PackageTarget::Chosen { .. }));
+        // Either missing.
+        let t = run(Some(none()), client("2.0.0.1"), "99999");
+        assert_eq!(
+            reason(pkg(&t, "suite")),
+            DecisionReason::DifferentClientBuild
+        );
+        let t = run(None, none(), "99999");
+        assert_eq!(
+            reason(pkg(&t, "suite")),
+            DecisionReason::DifferentClientBuild
+        );
+        // Equal known builds skip the rule.
+        let t = run(None, client(crate::testkit::BUILD), "99999");
+        assert!(matches!(pkg(&t, "suite"), PackageTarget::Chosen { .. }));
+    }
+
+    #[test]
+    fn multi_client_local_toc_does_not_authorize() {
+        let t = Scenario::new(vec![addon_interface(
+            "Suite",
+            "1.0",
+            Some("11508, 99999"),
+            "a",
+        )])
+        .peer_client(2, suite_iface("2.0", "99999", "b"), client("2.0.0.1"))
+        .target();
+        assert_eq!(
+            reason(pkg(&t, "suite")),
+            DecisionReason::DifferentClientBuild
+        );
+    }
+
+    #[test]
+    fn stale_unrelated_local_addon_does_not_authorize() {
+        let t = Scenario::new(vec![
+            addon("Suite", Some("1.0"), "a"),
+            addon_interface("Other", "1.0", Some("99999"), "o"),
+        ])
+        .peer_client(2, suite_iface("2.0", "99999", "b"), client("2.0.0.1"))
+        .target();
+        assert_eq!(
+            reason(pkg(&t, "suite")),
+            DecisionReason::DifferentClientBuild
+        );
+    }
+
+    #[test]
+    fn new_addon_or_added_folder_on_other_build_needs_decision() {
+        let t = Scenario::new(vec![addon("Other", Some("1.0"), "o")])
+            .peer_client(2, suite("2.0", "b"), client("2.0.0.1"))
+            .target();
+        assert_eq!(
+            reason(pkg(&t, "suite")),
+            DecisionReason::DifferentClientBuild
+        );
+        let t = Scenario::new(vec![addon("Suite", Some("1.0"), "c1")])
+            .peer_client(
+                2,
+                vec![
+                    addon("Suite", Some("2.0"), "c2"),
+                    addon("Suite_Data", Some("2.0"), "d2"),
+                ],
+                client("2.0.0.1"),
+            )
+            .target();
+        assert_eq!(
+            reason(pkg(&t, "suite")),
+            DecisionReason::DifferentClientBuild
         );
     }
 
