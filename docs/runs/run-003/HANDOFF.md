@@ -13,8 +13,8 @@ chat is not.
 | Phase | Workers | Status |
 |---|---|---|
 | A | R3-ui-design (opus), R3-infra (sonnet), R3-compat (sonnet), R3-removal-design (opus) | Done, all merged |
-| B | R3-design-review (sol) | Review FAIL, merged `917bc05`. Recheck `09b2673`: **UI PASS**. Q-21 FAIL only on R3D-3 (owner proxy decision; see below). Removal FAIL (R3D-13 to R3D-16); retry 2 (final) running |
-| C | R3-proto (sonnet), R3-mem (sonnet) | Both running |
+| B | R3-design-review (sol) | Review FAIL, merged `917bc05`. Recheck `09b2673`: **UI PASS**. Q-21: R3D-3 owner decision. Removal: R3D-7 to R3D-10 and R3D-14 to R3D-16 closed; **R3D-13 still open, retries exhausted** (recheck2 `07fe195`). It is a blocker for any run that implements removal |
+| C | R3-proto (sonnet), R3-mem (sonnet) | R3-mem **A-29 PASS** on Windows x64 (worst 19.6 MiB of 100; sync start ≤0.26 s; macOS BLOCKED), merged `8e82673`. R3-proto running |
 | D | Owner prototype review | Pending |
 | E | R3-check (sol), R3-review (opus) | Pending |
 | F | R3-ui-build (conditional) | Pending |
@@ -40,6 +40,19 @@ None yet.
     rule A, which is the most conservative.
 
 ## Follow-ups found
+
+- **R3D-13 (removal design, major, open).** Conflicting removal-record
+  variants that span packages cannot be resolved:
+  - listing every variant violates V7;
+  - omitting one violates the resolution rule.
+
+  The run-003 retries are exhausted. The run that implements removal must
+  close it first.
+- R3-mem limitations:
+  - UIA Invoke had no effect, so the UI-use phase used posted keys.
+  - Shown-window memory with real interaction may be somewhat higher.
+  - The app has no graceful quit command-line option, so the harness used
+    `Stop-Process` on the validated root process.
 
 - `fake_client_blocks_real_apply` (runtime) can hit the same process
   start/exit race fixed in the adapters by R3-infra. Assign to a runtime
