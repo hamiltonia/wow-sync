@@ -1,0 +1,37 @@
+Selected verbatim lines transcribed from this worker's GUI execution console.
+This is an excerpt, not an automatically captured full console log.
+
+LAUNCH A PID=19636
+LAUNCH B PID=25980
+CAPTURE unstable-decision
+STOP captured PID=19636
+STOP captured PID=25980
+LAUNCH A PID=34164
+PASS Crash oracle : Real injected-crash journal is staging, without recorded game cause.
+STOP captured PID=34164
+LAUNCH stand-in captured PID=1464 (after crash)
+LAUNCH A PID=19504
+CAPTURE interrupted-running
+CAPTURE interrupted-running-lower
+STOP captured PID=19504
+STOP captured PID=1464
+LAUNCH A PID=17948
+CAPTURE paused-waiting
+CAPTURE interrupted-stopped
+CAPTURE interrupted-stopped-lower
+STOP captured PID=17948
+LAUNCH B PID=25596
+STOP captured PID=25596
+LAUNCH A PID=10092
+PASS Recovery probe crash oracle : Crash before any stand-in exists leaves committing journal with unknown cause.
+STOP captured PID=10092
+LAUNCH stand-in captured PID=17984 (after committing crash)
+LAUNCH A PID=14136
+CAPTURE recovery-before-resume
+INVOKE Resume syncing
+FAIL Recovery retains original unknown crash cause : A game already running before recovery must not turn a crash into evidence it originally started during the update.
+CAPTURE recovery-after-resume
+STOP captured PID=17984
+STOP captured PID=14136
+REMAINING CAPTURED PROCESSES=0
+GUI_EXIT=1

@@ -1,0 +1,17 @@
+{
+  "Source": "976ce45d6710efaf13ea131ca2b1e61c5fdf3637",
+  "Branch": "run003/R3-check4",
+  "Checkout": "D:\\GitHub\\wow-sync.worktrees\\R3-check4",
+  "OS": "Microsoft Windows 11 Pro",
+  "Version": "10.0.26300",
+  "Architecture": "64-bit",
+  "CPU": "13th Gen Intel(R) Core(TM) i7-13700HX",
+  "RAMGiB": 63.7,
+  "Rust": "rustc 1.100.0 (0ef1bc386 2026-11-09)",
+  "CargoDeny": "cargo-deny 0.20.2",
+  "Lab": "D:\\WoWSyncLab\\R3-check4",
+  "Provider": "ordinary synthetic local folder, not Dropbox",
+  "AppExists": true,
+  "AppSha256": "49F83F622FB613ACB55AB307709B9F393AFE61DD74296BA78D9773C8200DED8C",
+  "DevkitSha256": "CA871548AC78A3C84ABE2CEBB4D9E6719A8F66C389CD24EC5B7E6962EAC1A8B3"
+}

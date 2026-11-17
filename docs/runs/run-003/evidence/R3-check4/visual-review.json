@@ -1,0 +1,48 @@
+{
+  "method": "Independent verifier inspected the retained screenshots using the image-view tool; these are not UIA body-text assertions.",
+  "observations": [
+    {
+      "artifact": "unstable-decision.png",
+      "check": "RC3-2",
+      "verdict": "PASS",
+      "observed": "Their version labels can't be compared safely (1.0.0 and not available). Second card: Version not available."
+    },
+    {
+      "artifact": "interrupted-running.png",
+      "check": "RC3-1 original sequence, neutral cause",
+      "verdict": "PASS",
+      "observed": "Updating labbeta was interrupted; it will be finished or restored on the next sync."
+    },
+    {
+      "artifact": "interrupted-running-lower.png",
+      "check": "RC3-1 original sequence, running-game next step",
+      "verdict": "PASS",
+      "observed": "Close WoW to let the update finish."
+    },
+    {
+      "artifact": "interrupted-stopped.png",
+      "check": "RC3-1 original sequence, stopped-game cause and action",
+      "verdict": "PASS",
+      "observed": "Neutral interruption wording. Next step: Nothing to do. It will be finished or restored on the next sync. No close-WoW action."
+    },
+    {
+      "artifact": "paused-waiting.png",
+      "check": "RC3-3",
+      "verdict": "PASS",
+      "observed": "0 up to date, 1 waiting, 1 needs your decision. 1 add-on waiting will be tried again when you resume."
+    },
+    {
+      "artifact": "recovery-before-resume.png",
+      "check": "RC4-1 before recovery retry",
+      "verdict": "PASS",
+      "observed": "Updating labbeta was interrupted; it will be finished or restored on the next sync."
+    },
+    {
+      "artifact": "recovery-after-resume.png",
+      "check": "RC4-1 after recovery retry",
+      "verdict": "FAIL",
+      "observed": "WoW started while labbeta was being updated; it will be restored to its previous version after WoW exits.",
+      "reason": "The original interruption was an injected crash with no stand-in running; the stand-in was started afterwards and was already running before recovery began."
+    }
+  ]
+}

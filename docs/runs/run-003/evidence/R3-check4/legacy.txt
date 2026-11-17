@@ -1,0 +1,1 @@
+PASS retained R3-check3 pre-fix2 journal decodes, remains interrupted with unknown cause, roundtrips; explicit recorded cause survives separately.

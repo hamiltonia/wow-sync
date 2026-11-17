@@ -1,0 +1,42 @@
+[
+  {
+    "check": "RC3-2 candidate value",
+    "verdict": "NOT RUN",
+    "detail": "Automated body-text assertion unavailable in GPUI UIA. Visually inspect unstable-decision.png for: Unstable candidate explicitly not available in both sentence and card."
+  },
+  {
+    "check": "Crash oracle",
+    "verdict": "PASS",
+    "detail": "Real injected-crash journal is staging, without recorded game cause."
+  },
+  {
+    "check": "RC3-1 running cause and action",
+    "verdict": "NOT RUN",
+    "detail": "Automated body-text assertion unavailable in GPUI UIA. Visually inspect interrupted-running.png for: Neutral crash wording; Close WoW to let the update finish."
+  },
+  {
+    "check": "RC3-3 paused hint",
+    "verdict": "NOT RUN",
+    "detail": "Automated body-text assertion unavailable in GPUI UIA. Visually inspect paused-waiting.png for: 1 add-on waiting will be tried again when you resume; no promise of zero."
+  },
+  {
+    "check": "RC3-1 stopped cause and action",
+    "verdict": "NOT RUN",
+    "detail": "Automated body-text assertion unavailable in GPUI UIA. Visually inspect interrupted-stopped.png for: Neutral crash wording; next-sync recovery action, no request to close WoW."
+  },
+  {
+    "check": "Recovery probe crash oracle",
+    "verdict": "PASS",
+    "detail": "Crash before any stand-in exists leaves committing journal with unknown cause."
+  },
+  {
+    "check": "Recovery retains original unknown crash cause",
+    "verdict": "FAIL",
+    "detail": "A game already running before recovery must not turn a crash into evidence it originally started during the update."
+  },
+  {
+    "check": "Recovery cause after resume",
+    "verdict": "NOT RUN",
+    "detail": "Automated body-text assertion unavailable in GPUI UIA. Visually inspect recovery-after-resume.png for: Original interruption was a crash; wording must not claim WoW started during that update."
+  }
+]

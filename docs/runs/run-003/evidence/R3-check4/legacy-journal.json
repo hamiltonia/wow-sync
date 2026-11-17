@@ -1,0 +1,22 @@
+{
+  "schema": "wowsync.apply-journal/1",
+  "op": "40d31026b010733ff67eedab704745ec",
+  "group_id": "df93e437364ebee61a93326ef10cd309",
+  "started_unix_ms": 1794948629418,
+  "package": "labbeta",
+  "target_hash": "f90af73d6b735f597b9526ba3a19f7afc25abd2404ab6e4d68dc2bdeeae85826",
+  "phase": "staging",
+  "folders": [
+    {
+      "name": "LabBeta",
+      "key": "labbeta",
+      "action": "replace",
+      "target_tree": "a10eb6563612776523fdfc5100e28fb11ddba927eef14844d381c32d2b5315d3",
+      "expected_live": {
+        "kind": "tree",
+        "tree": "9504b454000abe96bb3330ff70e722294288229eb04dbbba08b89071ee7753eb",
+        "fingerprint": "b6cd28183ea42ad4cbcede96f6abfb5607cbe534fe4a1842c49132372a859403"
+      }
+    }
+  ]
+}
