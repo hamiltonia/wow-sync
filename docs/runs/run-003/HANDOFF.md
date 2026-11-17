@@ -13,8 +13,8 @@ chat is not.
 | Phase | Workers | Status |
 |---|---|---|
 | A | R3-ui-design (opus), R3-infra (sonnet), R3-compat (sonnet), R3-removal-design (opus) | Done, all merged |
-| B | R3-design-review (sol) | FAIL (10 major, 2 minor), merged `917bc05`. Fixes merged: compat `76c491b`, ui `3cf482c`; removal-fix running. Recheck part 1 (UI and Q-21) running |
-| C | R3-proto (sonnet), R3-mem (sonnet) | Pending |
+| B | R3-design-review (sol) | Review FAIL, merged `917bc05`. Recheck `09b2673`: **UI PASS**. Q-21 FAIL only on R3D-3 (owner proxy decision; see below). Removal FAIL (R3D-13 to R3D-16); retry 2 (final) running |
+| C | R3-proto (sonnet), R3-mem (sonnet) | Both running |
 | D | Owner prototype review | Pending |
 | E | R3-check (sol), R3-review (opus) | Pending |
 | F | R3-ui-build (conditional) | Pending |
@@ -34,6 +34,10 @@ None yet.
   - Alternatives offered:
     - B: also allow new addons by majority local evidence.
     - C: keep the union of all local declarations.
+  - The recheck (R3D-3, still open) notes that even rule A is a proxy:
+    WoW's install files do not expose the interface numbers the client
+    supports. Only the owner can accept a proxy. Until then, the code ships
+    rule A, which is the most conservative.
 
 ## Follow-ups found
 
