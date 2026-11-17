@@ -73,6 +73,14 @@ an invented value.
    don't act on them yet (UG-8 and UG-9 are deferred).
 7. **D-21 alignment:** no compatibility-hold or Interface-based UI states.
    The variant mismatch still shows.
+   - You may also remove the now-dead
+     `DecisionReason::DifferentClientBuild` and
+     `Explanation::DifferentClientBuild` from core `target.rs` and
+     `explain.rs`.
+   - If you do, update the one fake scenario in `crates/wow-sync-proto` that
+     uses them. That is the only proto edit allowed.
+8. **File writes:** edit/create tools only. **No** `Set-Content`,
+   `Out-File` or PowerShell string splicing into files (incident I-1).
 
 ### Deferred (show the designed placeholder; record in evidence)
 

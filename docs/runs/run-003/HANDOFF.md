@@ -21,12 +21,19 @@ chat is not.
 - Unverified: Ctrl shortcuts, OS DPI, live theme toggle, OS toasts, IME, shutdown. See `evidence/R3-proto.md`.
 - The worker once used the forbidden `Set-Content` on source files; it disclosed this and the files were rebuilt. |
 | D | Owner barrier | **Done (D-21, 2026-11-17).** Prototype approved. The owner answered Q-21, the UI defaults and the removal defaults, and asked for a Dropbox API spike |
-| E | R3-check (sol), R3-review (opus), R3-d21 (sonnet), R3-dropbox-api (opus) | Pending |
+| E | R3-check (sol), R3-review (opus), R3-d21 (sonnet), R3-dropbox-api (opus) | R3-d21 merged: gating removed, spikes deleted, negative control recorded. R3-dropbox-api merged: recommends keeping the desktop folder for v1 and a possible read-only API hybrid later; owner questions DA-1 to DA-4 in `docs/design/dropbox-api.md`. R3-check running |
 | F | R3-ui-build | Approved by D-21. Must include the Q-26 "close quits" option and drop compatibility-hold UI states that D-21 removes |
 
 ## Incidents
 
-None yet.
+- **I-1 (minor, COMMON rule):** R3-proto and R3-d21 each wrote source text
+  with PowerShell string operations instead of the edit tool. Both workers
+  disclosed it.
+  - The orchestrator checked the index line endings (LF), BOM and NUL
+    bytes, and re-ran both verify tiers: all clean.
+  - It is not a PLAN §5 stop condition (that covers gc/reset/rewrite and
+    foreign process stops).
+  - Later packets restate the rule.
 
 ## Owner confirmation needed
 
