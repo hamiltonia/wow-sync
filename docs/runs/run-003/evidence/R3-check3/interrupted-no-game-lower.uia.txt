@@ -1,0 +1,28 @@
+ControlType.Group: Status
+ControlType.StatusBar: Syncing is held: the pause setting can't be read. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Sync now, unavailable while paused
+ControlType.Button: Resume syncing
+ControlType.Group: Sections
+ControlType.Button: Overview
+ControlType.Button: Computers
+ControlType.Button: Add-ons, current page
+ControlType.Button: Needs attention, 1 items
+ControlType.Button: Activity
+ControlType.Button: Settings sync, coming later
+ControlType.Button: App settings
+ControlType.Button: About
+ControlType.Text: The pause setting on this computer can't be read, so syncing is held. Choose Resume syncing to clear it.
+ControlType.Button: Resume syncing
+ControlType.Button: Back to Add-ons
+ControlType.Text: LabBeta
+ControlType.Text: Versions
+ControlType.Text: What happened
+ControlType.Text: Why this version
+ControlType.Text: Next step
+ControlType.Text: On each computer
+ControlType.Button: Lab-B
+ControlType.Text: Folders
+ControlType.Text: Recovery copies
+ControlType.Button: Restore…, coming later
+ControlType.Text: Details
+ControlType.Button: Details, collapsed

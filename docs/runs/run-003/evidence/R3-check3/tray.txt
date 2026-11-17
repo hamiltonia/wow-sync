@@ -1,0 +1,5 @@
+TRAY ROOT PID=8404
+INITIAL VISIBLE=False
+OWN ICON hwnd=1574866 id=2 point=2048,1353 name=System tray overflow window.
+BLOCKED: the screen point does not uniquely expose our icon; no click sent
+STOP APP 8404=True

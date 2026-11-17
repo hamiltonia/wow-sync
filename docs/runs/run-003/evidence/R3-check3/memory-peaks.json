@@ -1,0 +1,9 @@
+{
+  "Samples": 1980,
+  "MaxProcesses": 1.0,
+  "private_ws_b_peak_mib": 37.34,
+  "private_bytes_b_peak_mib": 105.89,
+  "working_set_b_peak_mib": 71.86,
+  "gpu_dedicated_b_peak_mib": 0.0,
+  "gpu_shared_b_peak_mib": 43.11
+}

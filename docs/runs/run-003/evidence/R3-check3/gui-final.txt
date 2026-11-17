@@ -1,0 +1,35 @@
+LAUNCH A PID=29192
+CAPTURE damaged-pause
+ControlType.StatusBar: Syncing is held: the pause setting can't be read. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Sync now, unavailable while paused
+ControlType.Text: The pause setting on this computer can't be read, so syncing is held. Choose Resume syncing to clear it.
+ControlType.Button: Add-ons, 0 up to date, 1 waiting, 1 needs your decision, open the list of add-ons that are not up to date
+ControlType.Button: Syncing paused on this computer, Today 12:50
+INVOKE Add-ons
+INVOKE LabBeta*
+CAPTURE interrupted-no-game
+ControlType.StatusBar: Syncing is held: the pause setting can't be read. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Sync now, unavailable while paused
+ControlType.Text: The pause setting on this computer can't be read, so syncing is held. Choose Resume syncing to clear it.
+ControlType.Text: Versions
+ControlType.Text: Why this version
+CAPTURE interrupted-no-game-lower
+ControlType.StatusBar: Syncing is held: the pause setting can't be read. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Sync now, unavailable while paused
+ControlType.Text: The pause setting on this computer can't be read, so syncing is held. Choose Resume syncing to clear it.
+ControlType.Text: Versions
+ControlType.Text: Why this version
+INVOKE Overview
+INVOKE Resume syncing
+DAMAGED PAUSE CLEARED=True
+INVOKE Sync now
+INVOKE Needs attention*
+CAPTURE pending-attention-stable
+ControlType.StatusBar: Waiting for your decision on 1 add-on. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Pause syncing
+ControlType.ListItem: LabAlpha: can't tell which copy is newer, WoW Sync can't tell which copy is newer. Their version labels can't be compared safely (1.0.0 and 1.0.0)., Choose a copy
+INVOKE LabAlpha: can*
+CAPTURE pending-decision-stable
+ControlType.StatusBar: Waiting for your decision on 1 add-on. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Pause syncing
+STOP APP 29192=True

@@ -1,0 +1,9 @@
+[PASS   ] offline/fmt
+[PASS   ] offline/clippy
+[PASS   ] offline/test
+[PASS   ] offline/required-cases
+[PASS   ] offline/deny
+[FAIL   ] offline/markdown-links
+          broken relative links:
+          docs/runs/run-003/evidence/R3-check3.md: R3-check3/gui-resume.txt
+overall: FAIL (allow-blocked: false) -> exit 1

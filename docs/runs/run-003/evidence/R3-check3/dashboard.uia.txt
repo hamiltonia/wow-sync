@@ -1,0 +1,25 @@
+ControlType.Group: Status
+ControlType.StatusBar: This computer is up to date. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Sync now
+ControlType.Button: Pause syncing
+ControlType.Group: Sections
+ControlType.Button: Overview, current page
+ControlType.Button: Computers
+ControlType.Button: Add-ons
+ControlType.Button: Needs attention
+ControlType.Button: Activity
+ControlType.Button: Settings sync, coming later
+ControlType.Button: App settings
+ControlType.Button: About
+ControlType.Text: Overview
+ControlType.Text: This computer
+ControlType.Button: Add-ons, 2 up to date, open the list of add-ons that are not up to date
+ControlType.Group: Game, Not running
+ControlType.Group: Shared folder, D:\WoWSyncLab\R3-check3\gui\provider · readable
+ControlType.Group: Last shared, just now (2 add-ons)
+ControlType.Group: Last check, just now; next check about 12:48
+ControlType.Text: Recent changes
+ControlType.Button: Shared this computer's add-on changes, Today 12:47
+ControlType.Button: This computer joined the add-on group, Earlier 
+ControlType.Button: See all activity
+ControlType.Text: Other computers
