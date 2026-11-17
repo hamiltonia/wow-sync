@@ -1,0 +1,24 @@
+banner | name='Status' | focusable=False | focused=False | enabled=True
+status | name='Paused. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: ComputerA' | focusable=False | focused=False | enabled=True
+button | name='Sync now, unavailable while paused' | focusable=True | focused=False | enabled=True
+button | name='Resume syncing' | focusable=True | focused=True | enabled=True
+navigation | name='Sections' | focusable=False | focused=False | enabled=True
+button | name='Overview' | focusable=True | focused=False | enabled=True
+button | name='Computers' | focusable=True | focused=False | enabled=True
+button | name='Add-ons' | focusable=True | focused=False | enabled=True
+button | name='Needs attention' | focusable=True | focused=False | enabled=True
+button | name='Activity, current page' | focusable=True | focused=False | enabled=True
+button | name='Settings sync, coming later' | focusable=True | focused=False | enabled=True
+button | name='App settings' | focusable=True | focused=False | enabled=True
+button | name='About' | focusable=True | focused=False | enabled=True
+status | name='Syncing is paused on this computer. Updates from other computers are not applied here, and changes here are not shared.' | focusable=False | focused=False | enabled=True
+button | name='Resume syncing' | focusable=True | focused=False | enabled=True
+heading | name='Activity' | focusable=False | focused=False | enabled=True
+group | name='Filter activity' | focusable=False | focused=False | enabled=True
+button | name='All, selected' | focusable=True | focused=False | enabled=True
+button | name='Changes' | focusable=True | focused=False | enabled=True
+button | name='Problems' | focusable=True | focused=False | enabled=True
+list | name='Activity, 3 items' | focusable=False | focused=False | enabled=True
+list item | name='Syncing paused on this computer, Today 09:32' | focusable=True | focused=False | enabled=True
+list item | name='Shared this computer's add-on changes, Today 09:25' | focusable=True | focused=False | enabled=True
+list item | name='This computer joined the add-on group, Earlier ' | focusable=True | focused=False | enabled=True

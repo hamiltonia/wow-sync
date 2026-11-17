@@ -684,3 +684,9 @@ field is a suggestion for the owning packet; none is UI policy.
 | UG-24 | Setup cannot discover Dropbox or WoW installations; paths come from command-line options | Setup | runtime `discover() -> { dropbox: Option<Path>, installs: Vec<InstallCandidate> }` and group last-activity in `GroupInfo` |
 | UG-25 | No typed continuation scope: the runtime skips apply planning while any journal remains and exports no block, so the UI cannot tell "only this add-on" from "all applies on this computer stopped" (Q-25) | Overview, Needs attention, Add-on detail, Decision | `StatusView.apply_scope: ApplyScope { AllAppliesBlocked { by: PlanBlock::UnresolvedJournal, packages: Vec<FolderKey> } \| PerPackage }`, or the runtime always reporting `PlanBlock::UnresolvedJournal` in `blocks` |
 | UG-26 | Decision headline policy: core derives `Headline::Waiting` when only `NeedsDecision` packages are non-current (`needs_decision_shows_evidence`), although the user must act. The UI renders core's value and does not decide this | header, tray | core decision (owner if product meaning changes): keep `Waiting`, or derive `NeedsHelp` for decisions |
+
+### Status after run-003 R3-ui-build (D-21)
+
+- **Closed in runtime or core (real data in the app):** UG-1, UG-2, UG-3, UG-4, UG-5, UG-6, UG-7, UG-10, UG-11, UG-14, UG-17, UG-22, UG-24. UG-12 is partly closed (next action wording is computed from the typed detail).
+- **Deferred, shown as honest "not available yet" text, never faked:** UG-8 and UG-9 (decision and needs-help actions), UG-13 (restore), UG-15 and UG-16 (groups, reconfirm cause), UG-18 (update check), UG-19 (OS notifications), UG-20, UG-21, UG-23 (start at sign-in), UG-25 (apply scope is per package only), UG-26 (core decision, unchanged).
+- The new group's name defaults to "My add-ons" and the computer name is display-only; neither has an editor yet.

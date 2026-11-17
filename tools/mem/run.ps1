@@ -75,14 +75,21 @@ function Wait-Named([int]$ProcId, [string]$like, [int]$secs = 30) {
 function Enroll-Lab($lab) {
     $rec = Launch (App-Args $lab)
     try {
-        if (-not (Wait-Named $rec.Pid 'Create a new sync group' 40)) { throw 'enroll screen did not appear' }
+        if (-not (Wait-Named $rec.Pid 'Welcome' 40)) { throw 'setup wizard did not appear' }
         Start-Sleep -Seconds 1
-        # UIA invoke/toggle did not change app state on this PC; posted keys do (focus starts on the checkbox).
-        Send-Key $rec.Pid 0x20; Start-Sleep -Milliseconds 500   # Space: tick "I agree"
-        Send-Key $rec.Pid 0x09; Start-Sleep -Milliseconds 500   # Tab: move to Create
-        Send-Key $rec.Pid 0x0D                                   # Enter: Create a new sync group
+        # The setup wizard (R3-ui-build) is driven through UIA Invoke/Toggle on named controls.
+        $seq = 'Next', 'Use this folder', 'Next', 'Next', 'This is my*', 'These are the*', 'Next', 'Create a new group', 'Next', 'Set up this computer', 'Finish and open*'
+        foreach ($n in $seq) {
+            if (-not (Wait-Named $rec.Pid $n 40)) { throw "wizard control '$n' did not appear" }
+            Start-Sleep -Milliseconds 700
+            if (-not (Invoke-Named $rec.Pid $n)) { throw "wizard control '$n' could not be used" }
+            Start-Sleep -Milliseconds 900
+        }
         if (-not (Wait-Named $rec.Pid 'Sync now' 40)) { throw 'enrolment did not reach the status screen' }
         Start-Sleep -Seconds 4
+        # Acknowledge the one-time close explanation so later WM_CLOSE steps hide straight to the tray.
+        Close-AppWindow $rec.Pid
+        if (Wait-Named $rec.Pid 'Hide window' 10) { [void](Invoke-Named $rec.Pid 'Hide window'); Start-Sleep -Seconds 2 }
     }
     finally { [void](Stop-Launched $rec) }
 }

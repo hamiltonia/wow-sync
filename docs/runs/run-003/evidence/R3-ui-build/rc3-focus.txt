@@ -1,0 +1,19 @@
+RC-3 focus return, real app, UI Automation (HasKeyboardFocus of descendants of the app window).
+Driver: ui.ps1, fresh state with first_close_seen=0. Close = WM_CLOSE (what the X button sends).
+
+A. Focus starts on the Overview link; close opens the first-close sheet; Esc cancels it.
+focus[A-before]:    'Add-ons, 2 up to date, open the list of add-ons that are not up to date' (button)
+focus[A-in-sheet]:  'Hide window' (button)
+focus[A-after-esc]: 'Add-ons, 2 up to date, open the list of add-ons that are not up to date' (button)   PASS
+
+B. Tab twice to another control, close, Tab inside the sheet, Esc.
+focus[B-before]:    'This computer joined the add-on group, Earlier ' (button)
+focus[B-in-sheet]:  'Hide window' (button)
+focus[B-on-other]:  'Quit WoW Sync' (button)
+focus[B-after-esc]: 'This computer joined the add-on group, Earlier ' (button)                         PASS
+
+Not exercised by UIA: the "Keep running" path of the quit-when-safe sheet. It only appears while
+an apply is running, which the synthetic data cannot hold open. It uses the same close_sheet
+restore as Esc (code path shared; covered by reading, not by a run).
+Esc on the first-close sheet now only cancels it (no hide, nothing saved); the prototype hid the
+window on Esc.

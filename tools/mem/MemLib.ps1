@@ -154,7 +154,7 @@ function Save-Csv($Run, [string]$Path) {
 # ---- app control (windows of the tracked root only) -------------------------------------------
 
 function Get-AppWindow([int]$ProcId) {
-    foreach ($w in [MemWin]::Windows([uint32]$ProcId)) { if ($w[1] -eq 'WoW Sync') { return $w } }
+    foreach ($w in [MemWin]::Windows([uint32]$ProcId)) { if ($w[1] -like '*WoW Sync') { return $w } }
     $null
 }
 

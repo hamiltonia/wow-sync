@@ -240,6 +240,7 @@ fn main() {
                     WindowOptions {
                         window_bounds: Some(WindowBounds::Windowed(bounds)),
                         window_min_size: Some(size(px(760.), px(520.))),
+                        show: !hidden,
                         titlebar: Some(TitlebarOptions {
                             title: Some("WoW Sync".into()),
                             ..Default::default()

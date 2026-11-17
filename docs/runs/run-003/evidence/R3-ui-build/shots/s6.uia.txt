@@ -1,0 +1,4 @@
+status | name='' | focusable=False | focused=False | enabled=True
+heading | name='Review and set up' | focusable=False | focused=False | enabled=True
+button | name='Set up this computer' | focusable=True | focused=True | enabled=True
+button | name='Back' | focusable=True | focused=False | enabled=True
