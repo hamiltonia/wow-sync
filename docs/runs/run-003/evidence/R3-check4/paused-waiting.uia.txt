@@ -1,0 +1,31 @@
+ControlType.Group: Status
+ControlType.StatusBar: Paused. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Sync now, unavailable while paused
+ControlType.Button: Resume syncing
+ControlType.Group: Sections
+ControlType.Button: Overview, current page
+ControlType.Button: Computers
+ControlType.Button: Add-ons
+ControlType.Button: Needs attention, 1 items
+ControlType.Button: Activity
+ControlType.Button: Settings sync, coming later
+ControlType.Button: App settings
+ControlType.Button: About
+ControlType.StatusBar: Syncing is paused on this computer. Updates from other computers are not applied here, and changes here are not shared.
+ControlType.Button: Resume syncing
+ControlType.Text: Overview
+ControlType.Text: Needs attention
+ControlType.Button: Choose a copy: LabAlpha: can't tell which copy is newer
+ControlType.Text: This computer
+ControlType.Button: Add-ons, 0 up to date, 1 waiting, 1 needs your decision, open the list of add-ons that are not up to date
+ControlType.Group: Game, Not running
+ControlType.Group: Shared folder, D:\WoWSyncLab\R3-check4\gui\provider · readable
+ControlType.Group: Last shared, just now (2 add-ons)
+ControlType.Group: Last check, Not yet
+ControlType.Text: Recent changes
+ControlType.Button: Syncing paused on this computer, Today 13:51
+ControlType.Button: Shared this computer's add-on changes, Today 13:50
+ControlType.Button: This computer joined the add-on group, Earlier 
+ControlType.Button: See all activity
+ControlType.Text: Other computers
+ControlType.Button: Lab-B, report received, confirmed 0 of 2 current add-ons, as of just now. (received 13:51 on 17 November)

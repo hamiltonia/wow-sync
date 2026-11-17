@@ -1,0 +1,7 @@
+[PASS   ] offline/fmt
+[PASS   ] offline/clippy
+[PASS   ] offline/test
+[PASS   ] offline/required-cases
+[PASS   ] offline/deny
+[PASS   ] offline/markdown-links
+overall: PASS (allow-blocked: false) -> exit 0

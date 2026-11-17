@@ -1,0 +1,52 @@
+diff --git a/crates/wow-sync-app/src/model.rs b/crates/wow-sync-app/src/model.rs
+index bd15845..f25dc15 100644
+--- a/crates/wow-sync-app/src/model.rs
++++ b/crates/wow-sync-app/src/model.rs
+@@ -491,7 +491,7 @@ pub fn paused_hint(w: &World) -> Option<String> {
+     let c = counts(w);
+     // Waiting add-ons (including interrupted ones) are retried on resume, so "0 updates" would
+     // be untrue; their number is shown as a count of add-ons, not as a promise of success.
+-    Some(match (c.ready, c.waiting) {
++    Some(match (c.ready, 0) {
+         (n, 0) => format!(
+             "{} will be applied when you resume",
+             plural(n, "update", "updates")
+@@ -510,11 +510,7 @@ pub fn paused_hint(w: &World) -> Option<String> {
+ 
+ /// A candidate's version label, or "not available" when the copy has none.
+ pub fn version_label(c: &Candidate) -> &str {
+-    if c.version.trim().is_empty() {
+-        "not available"
+-    } else {
+-        &c.version
+-    }
++    &c.version
+ }
+ 
+ pub fn game_state(w: &World) -> &'static str {
+diff --git a/crates/wow-sync-core/src/status.rs b/crates/wow-sync-core/src/status.rs
+index 0e9f988..a4340a6 100644
+--- a/crates/wow-sync-core/src/status.rs
++++ b/crates/wow-sync-core/src/status.rs
+@@ -370,7 +370,7 @@ pub fn journal_status(journals: &[ApplyJournal]) -> JournalSplit {
+ pub fn game_halted(journals: &[ApplyJournal]) -> Vec<FolderKey> {
+     journals
+         .iter()
+-        .filter(|j| j.phase != JournalPhase::NeedsHelp && j.halted_by_game)
++        .filter(|j| j.phase != JournalPhase::NeedsHelp)
+         .map(|j| j.package.clone())
+         .collect()
+ }
+diff --git a/crates/wow-sync-core/src/view.rs b/crates/wow-sync-core/src/view.rs
+index d3f1142..321161e 100644
+--- a/crates/wow-sync-core/src/view.rs
++++ b/crates/wow-sync-core/src/view.rs
+@@ -34,7 +34,7 @@ pub fn next_action(status: &PackageStatus, _why: &Explanation, game_running: boo
+         }
+         PackageStatus::Available => NextAction::ApplyOnNextSync,
+         PackageStatus::Blocked(PlanBlock::GameRunning) => NextAction::CloseGame,
+-        PackageStatus::Interrupted if game_running => NextAction::CloseGame,
++        PackageStatus::Interrupted if game_running || !game_running => NextAction::CloseGame,
+         PackageStatus::Interrupted => NextAction::FinishOnNextSync,
+         PackageStatus::Blocked(PlanBlock::Unstable) => NextAction::WaitForFiles,
+         PackageStatus::Blocked(_) => NextAction::Nothing,
