@@ -112,3 +112,36 @@ implementation must show. macOS CI: NOT RUN by this worker (no push).
 - Authority objects grow with the number of removals and decisions (about
   1 KiB each, per member that mirrors them). Their lifetime and the
   retention of their manifests are inputs to provider GC (Q-7, Q-44).
+
+## Retry 2 (R3-removal-fix2)
+
+Worktree `D:\GitHub\wow-sync.worktrees\R3-removal-fix2`, branch
+`run003/R3-removal-fix2`, based on main `09b2673`. The input was
+[R3-design-recheck.md](R3-design-recheck.md) findings R3D-13 to R3D-16.
+Files changed: `docs/design/removal.md`, the removal section of
+`docs/design/questions.md` (Q-44 and Q-50 revised, Q-53 added) and this
+file. No other design document was edited. Each fix narrows or restates an
+existing rule rather than adding a new mechanism.
+
+| Finding | Disposition | Where |
+|---|---|---|
+| R3D-13 (a decision cannot resolve the inconsistent record it names) | Fixed in the design. Ledger entries are **variants** `(id, hash)`, and every cross-object reference is a variant reference. Statuses are now distinct: `pending` (missing authority → `AuthorityPending`), `conflicted` (known-inconsistent → `InconsistentRemovalRecord`, never authority), and `invalid` (diagnostic only; it no longer blocks). V4 requires referenced variants to be **known** in any status, not valid, so the resolving decision is valid while the variants stay conflicted. A decision listing every known variant resolves the id. Late replay of a listed variant changes nothing; an unlisted variant reopens the decision. Precedence: rejection, Held, unresolved conflict, AuthorityPending, ledger authority, constraint, ordinary ordering. New T31b: conflicting copies → GUI decision → restart → late replay → third variant, on 3 replicas | removal.md §2.2, §2.4, §2.5, §2.6, §3.1, §3.3, §7, §9 |
+| R3D-14 (one global top-level snapshot loses a package's rename evidence) | Fixed in the design. Each baseline entry references the top-level snapshot of its own scan. Snapshots are kept while any entry references them, so refreshing Q never replaces the snapshot P depends on. E6 compares only with P's own snapshot. The noted E3 reconciliation is also done: E3 checks the enrolled variant identity and mapping, not the folder-list-sensitive assessment digest. T6 extended over ≥ 4 cycles, with another package refreshing and a restart | removal.md §1.2 E3/E6, §1.6, §2.8, §9 |
+| R3D-15 (superseded payload retained indefinitely) | Fixed in the design. Permanent anti-resurrection **metadata** (authority objects, Q-44) is separate from **payload** roots. Payload is rooted only for the current state: the Active(P) intent's `removed` manifest and settings, the Active keep decision's chosen manifest, and frozen alternatives as a visible temporary exception. Superseded payload is released at once; earlier states are restorable only from local three-state recovery points. Provider restore is advertised only for an active intent. Owner policy on how long a currently removed addon's payload stays restorable is new Q-53, with a safe default. T23 extended to inspect the provider root set over several settled remove/re-add/keep cycles | removal.md §2.7, §6.1, §6.2, §6.3, §9; questions.md Q-44, Q-53 |
+| R3D-16 (resume-automatic newly declines the kept version) | Fixed in the design. `declined` has an explicit formula per choice: `keep W` → (inherited ∪ seen) − {W}; `automatic` → inherited − allow_again (nothing considered is added); `remove` → ∅. The worked example (keep V2 / decline V3 → resume) gives `declined = {V3}`, target V2, or V4 if present; a replay of V3 stays excluded. A target where only declined versions are eligible is `NeedsDecision(OnlyDeclinedVersions)`, not an empty selection. New T11c covers the cases the finding requires (with and without V4, replay of V3) plus the all-declined case. Q-50 revised | removal.md §3.1, §3.3, §7, §9, §10; questions.md Q-50 |
+
+### Commands and results (retry 2)
+
+| Command (worktree root) | Result |
+|---|---|
+| `cargo xtask verify --tier offline` | VERIFY_RESULT |
+
+Design-only change: no code or tests were added, so no A-38 negative
+controls ran. §9 lists the controls the implementation must show
+(now including T6, T11c, T23 and T31b). macOS CI: NOT RUN (no push).
+
+### Limits (retry 2)
+
+- Not yet re-reviewed; nothing is implemented.
+- Payload release depends on the unresolved provider GC design (Q-7) for
+  its grace period; Q-53 is an owner policy choice.
