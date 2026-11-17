@@ -24,6 +24,7 @@ or orchestrator records otherwise.
 | [tests.md](tests.md) | Required behavioral test names per packet, fixtures, end-to-end and provider tests | all, R2-check |
 | [questions.md](questions.md) | Owner and design questions with recommended defaults | owner, orchestrator |
 | [removal.md](removal.md) | Removal/uninstall design (run-003, not yet implemented): tombstones, intent evidence, apply, recovery | later runs |
+| [ui/README.md](ui/README.md) | GUI design (run-003): information architecture, screens, style, interaction, wireframes, prototype brief | R3-proto, later UI build |
 
 [../ARCHITECTURE.md](../ARCHITECTURE.md) is the short overview and invariant
 map; these files are the implementable detail.
