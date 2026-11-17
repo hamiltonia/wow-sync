@@ -14,7 +14,13 @@ chat is not.
 |---|---|---|
 | A | R3-ui-design (opus), R3-infra (sonnet), R3-compat (sonnet), R3-removal-design (opus) | Done, all merged |
 | B | R3-design-review (sol) | Review FAIL, merged `917bc05`. Recheck `09b2673`: **UI PASS**. Q-21: R3D-3 owner decision. Removal: R3D-7 to R3D-10 and R3D-14 to R3D-16 closed; **R3D-13 still open, retries exhausted** (recheck2 `07fe195`). It is a blocker for any run that implements removal |
-| C | R3-proto (sonnet), R3-mem (sonnet) | R3-mem **A-29 PASS** on Windows x64 (worst 19.6 MiB of 100; sync start ≤0.26 s; macOS BLOCKED), merged `8e82673`. R3-proto running |
+| C | R3-proto (sonnet), R3-mem (sonnet) | R3-mem **A-29 PASS** on Windows x64 (worst 19.6 MiB of 100; sync start ≤0.26 s; macOS BLOCKED), merged `8e82673`. R3-proto merged.
+- Screens P1 to P14 and scenarios S1 to S16 run on fake data.
+- It added no new dependencies, and both verify tiers pass.
+- Launcher: `D:\WoWSyncDemo\Start-Prototype.cmd`.
+- Unverified: Ctrl shortcuts, OS DPI, live theme toggle, OS toasts, IME, shutdown. See `evidence/R3-proto.md`.
+- The worker once used the forbidden `Set-Content` on source files; it disclosed this and the files were rebuilt. |
+| D | Owner barrier | **WAITING for the owner to review the prototype.** Phases E and F do not start until the owner approves |
 | D | Owner prototype review | Pending |
 | E | R3-check (sol), R3-review (opus) | Pending |
 | F | R3-ui-build (conditional) | Pending |

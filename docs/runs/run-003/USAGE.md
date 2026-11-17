@@ -34,3 +34,16 @@ Retries reuse the original agent; their usage is included in that row
 | R3-ui-design merged | 10,620.4 | 1,107.0 |
 | R3-infra merged | 10,720.8 | 1,207.4 |
 | Recheck merged; proto launched | 12,169.5 | 2,656.1 |
+| Proto merged; phase D barrier | 13,048.6 | 3,535.2 |
+
+Worker totals at the phase D barrier, in AIU, including retries:
+
+| Worker | AIU |
+|---|---|
+| ui | 879.5 |
+| removal | 747.1 |
+| proto | 458.8 |
+| review | 210.5 |
+| compat | 158.7 |
+| mem | 116.2 |
+| infra | 82.1 |
