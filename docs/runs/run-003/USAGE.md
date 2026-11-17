@@ -31,7 +31,7 @@
 | 16 | R3-macfix | sonnet-5.5 / claude-sonnet-5.5 | `b2ece888` | 14.5 | Merged `0e86e74`; macOS CI green (PR #1) |
 | 17 | R3-fix2 (+ retry 1 as R3-fix2b) | sonnet-5.5 / claude-sonnet-5.5 | `d65af3cf` | 148.2 | Merged `8afde5d` and `a513fc8`. RC3-1 to RC3-3 and RC4-1 done, with tests and negative controls. Disclosed edits outside owned paths (core exec, records) |
 | 18 | R3-check4 (+ follow-up R3-check4b) | sol / gpt-6.1-sol | `01169862` | 213.8 | Merged `025a1cd` (FAIL on RC4-1) and `00a9837` (RC4-1 closed in the real app, RC3-1 regression PASS) |
-| 19 | R3-icon (owner request, D-22) | sonnet-5.5 / claude-sonnet-5.5 | — | — | Running |
+| 19 | R3-icon (owner request, D-22) | sonnet-5.5 / claude-sonnet-5.5 | `126235c4` | 82.9 | Merged: tray, window/taskbar and exe icon from the brand art; both tiers PASS; memory peak 37.57 MiB |
 
 The orchestrator's row (agent NULL) covers all sessions since run-001: 5,313.3
 at the R3-review merge.

@@ -78,8 +78,8 @@ removal rules ("removed means removed everywhere").
 
 ## 5. Owner decisions pending
 
-- **OQ-ICON:** resolved by D-22. The art is committed and is being wired
-  in by R3-icon.
+- **OQ-ICON:** resolved by D-22. The art is the tray, window and exe icon
+  (R3-icon, merged).
 - **DA-1 to DA-4:** the Dropbox API questions.
 - **UQ-1 and UQ-2:** in `docs/design/ui/questions.md`.
 - **Q-3 and Q-23:** real-PC checks ([OWNER-CHECKS.md](OWNER-CHECKS.md)).

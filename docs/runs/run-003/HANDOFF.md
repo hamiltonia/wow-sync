@@ -122,9 +122,9 @@ chat is not.
   option: the art is **not committed**. R3-fix goal 12 optionally lets the app
   use it as a local-only runtime override (gitignored).
 - **Resolved by D-22:** the owner considers the art fair use. It is
-  committed under `assets/brand/` (`8601907`) and is being wired in as the
-  tray, window and exe icon by worker 19, R3-icon. That packet supersedes
-  R3-fix goal 12.
+  committed under `assets/brand/` (`8601907`). R3-icon (worker 19, merged)
+  made it the tray, window/taskbar and exe icon. That packet superseded
+  R3-fix goal 12. A macOS app bundle icon is out of scope.
 
 ## Next actions
 
