@@ -170,6 +170,23 @@ Answers from an interactive review session with the orchestrator.
   - UI direction.
   - Run-003 scope and credit ceiling.
 
+### D-22: App icon art (2026-11-17)
+
+- The owner provided app art: a PNG and an ICO with sizes from 16 to 256 px.
+  It contains Blizzard's WoW "W" crest and the Dropbox logo.
+- The orchestrator raised the concern that this repository is public and the
+  art includes third-party trademarks. The owner answered: "pretty sure the
+  imagery is fair use".
+- **Decision:** commit the art as is under `assets/brand/` and use it as the
+  app icon for the window, tray and `.exe`. The owner accepts the trademark
+  risk.
+- The orchestrator's recorded caution:
+  - fair use is a copyright defence;
+  - brand rules on using logos as an app icon are a separate trademark
+    question;
+  - revisit this before any public release or store listing.
+- This supersedes the OQ-ICON question in the run-003 HANDOFF.
+
 ### D-21: Prototype review and design answers (2026-11-17)
 
 Answers from an interactive session with the orchestrator at the run-003
@@ -295,4 +312,5 @@ phase D barrier.
 | 2026-11-16 | D-19 | Run-003 scope, UI direction, 10,000 AIU ceiling; plan approval pending | `3d332fd` |
 | 2026-11-16 | D-20 | Run-003 plan approved as written | `b420717` |
 | 2026-11-17 | D-21 | Prototype approved; Q-21 no interface gating; removal wins; UI defaults; Dropbox API spike | `f92a61a` |
-| 2026-11-17 | D-20 | Restored the D-20 heading that `f92a61a` accidentally deleted (R3-review RV-10) | this commit |
+| 2026-11-17 | D-20 | Restored the D-20 heading that `f92a61a` accidentally deleted (R3-review RV-10) | `ee244ef` |
+| 2026-11-17 | D-22 | App icon art committed and used as is; owner accepts trademark risk | this commit |
