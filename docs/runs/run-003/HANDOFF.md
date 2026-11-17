@@ -129,7 +129,8 @@ chat is not.
 
 ## Next actions
 
-1. R3-fix (sonnet) is running for RV-1 to RV-9, RV-12, RC2-1 to RC2-4 and
-   the optional icon goal 12. After it, run an independent recheck.
+1. R3-fix is merged as `042b44c` (retry 1 of 2 used); both verify tiers PASS.
+   R3-check3 (sol) is running and independently checks the fixes, including
+   real-app screenshots.
 2. Stop launching new work at ≥19,013 AIU cumulative. Then write the
    run-003 report and stop for the owner.

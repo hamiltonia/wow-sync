@@ -25,7 +25,9 @@
 | 10 | R3-check | sol / gpt-6.1-sol | `12077eaa` | 164.2 | Merged; RC-1 to RC-3 |
 | 11 | R3-ui-build (+ retry 1) | sonnet-5.5 / claude-sonnet-5.5 | `ec402443` | 863.8 | Merged `17a360a`; A-29 PASS (37.7 MiB) |
 | 12 | R3-review | opus-5.5 / claude-opus-5.5 | `92b95e84` | 273.0 | Merged; FAIL with 7 major and 5 minor findings, no blockers |
-| 13 | R3-check2 | sol / gpt-6.1-sol | `0007206a` | — | Running |
+| 13 | R3-check2 | sol / gpt-6.1-sol | `0007206a` | 164.0 | Merged `3b27ec7`; FAIL on RC2-1 (invented next-check time); RC2-1 to RC2-4 go to R3-fix |
+| 14 | R3-fix (+ retry 1) | sonnet-5.5 / claude-sonnet-5.5 | `8544314f` | 319.0 | Merged `042b44c`. RV-1 to RV-9, RV-12, RC2-1 and RC2-4 done. RC2-2 and RC2-3 in code only. No real-app screenshots. Icon goal not done |
+| 15 | R3-check3 | sol / gpt-6.1-sol | — | — | Running |
 
 The orchestrator's row (agent NULL) covers all sessions since run-001: 5,313.3
 at the R3-review merge.
@@ -42,6 +44,8 @@ at the R3-review merge.
 | Recheck merged; proto launched | 12,169.5 | 2,656.1 |
 | Proto merged; phase D barrier | 13,048.6 | 3,535.2 |
 | R3-review merged | 15,442.0 | 5,928.6 |
+| R3-check2 merged; R3-fix launched | 15,669.3 | 6,155.9 |
+| R3-fix merged; R3-check3 launched | 16,098.4 | 6,585.0 |
 
 Worker totals at the phase D barrier, in AIU, including retries:
 
