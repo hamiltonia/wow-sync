@@ -70,9 +70,6 @@ pub struct TocSummary {
     pub suffix: Option<String>,
     pub version: Option<String>,
     pub interface: Vec<u32>,
-    /// Absent in records written before R3-compat-fix: reads as `false` (no valid evidence).
-    #[serde(default)]
-    pub interface_valid: bool,
     pub hard_deps: Vec<String>,
     pub ids: Vec<ExternalId>,
 }
@@ -85,7 +82,6 @@ impl TocSummary {
             suffix: None,
             version: None,
             interface: vec![],
-            interface_valid: false,
             hard_deps: vec![],
             ids: vec![],
         }
@@ -154,7 +150,6 @@ fn summarize(sel: TocSelection) -> TocSummary {
             suffix,
             version: info.version,
             interface: info.interface,
-            interface_valid: info.interface_valid,
             hard_deps: info.hard_deps,
             ids: info.ids,
         },
@@ -234,14 +229,6 @@ pub fn build_inventory(
 mod tests {
     use super::*;
     use crate::testkit;
-
-    #[test]
-    fn summary_without_interface_valid_reads_as_invalid() {
-        let old = r#"{"kind":"selected","file":"A.toc","suffix":null,"version":"1","interface":[11508],"hard_deps":[],"ids":[]}"#;
-        let s: TocSummary = serde_json::from_str(old).unwrap();
-        assert_eq!(s.interface, vec![11508]);
-        assert!(!s.interface_valid);
-    }
 
     #[test]
     fn case_collision_marks_both_unsupported() {

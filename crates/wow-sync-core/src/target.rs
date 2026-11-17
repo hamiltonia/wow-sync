@@ -27,6 +27,7 @@ pub enum DecisionReason {
     Ambiguous,
     NoCompatibleToc,
     DifferentTocMapping,
+    /// Not produced by core since D-21 (no build gating); kept only for the prototype crate.
     DifferentClientBuild,
     UnvalidatedTocMapping,
     PartialCandidate,
@@ -139,36 +140,6 @@ fn folder_problem(f: &FolderState) -> Option<Ineligible> {
     }
 }
 
-/// Valid, non-empty `## Interface:` set of a folder's selected `.toc`; `None` is "no evidence".
-fn interface_set(f: &FolderState) -> Option<BTreeSet<u32>> {
-    let set: BTreeSet<u32> = f.toc.interface.iter().copied().collect();
-    (f.toc.kind == TocKind::Selected && f.toc.interface_valid && !set.is_empty()).then_some(set)
-}
-
-/// Q-21 rule A (domain.md §6, orchestrator interim): true only when, for every folder of the
-/// candidate, this computer has a usable copy of that same folder whose selected `.toc`
-/// declares a valid interface set exactly equal to the candidate folder's valid set.
-/// A new addon, a missing folder, invalid or missing numbers, or a differing set is "not
-/// supported". Unrelated installed addons are never evidence.
-pub fn interface_supported(candidate: &[FolderState], local: &Inventory) -> bool {
-    !candidate.is_empty()
-        && candidate.iter().all(|f| {
-            let Some(want) = interface_set(f) else {
-                return false;
-            };
-            local
-                .get(&f.key)
-                .filter(|l| l.status == FolderStatus::Ok)
-                .and_then(interface_set)
-                .is_some_and(|have| have == want)
-        })
-}
-
-/// Both builds present and equal: the only case that skips the interface rule (R3D-2).
-fn same_known_build(a: &ClientInfo, b: &ClientInfo) -> bool {
-    matches!((&a.build_version, &b.build_version), (Some(x), Some(y)) if x == y)
-}
-
 /// Eligible holders of the candidate, or the first reason it cannot be applied automatically.
 fn eligible_holders(
     c: &Cand,
@@ -200,16 +171,6 @@ fn eligible_holders(
                 Explanation::DifferentTocMapping {
                     here: input.local_client.toc_mapping.clone(),
                     there: client.toc_mapping.clone(),
-                },
-            ));
-        } else if !same_known_build(client, input.local_client)
-            && !interface_supported(&c.pv.folders, input.local)
-        {
-            first_fail.get_or_insert((
-                DecisionReason::DifferentClientBuild,
-                Explanation::DifferentClientBuild {
-                    here: input.local_client.build_version.clone(),
-                    there: client.build_version.clone(),
                 },
             ));
         } else {
@@ -556,12 +517,16 @@ mod tests {
     #[test]
     fn ineligible_dominating_candidate_no_fallback() {
         let t = Scenario::new(suite("1.0", "a"))
-            .peer_client(2, suite_iface("2.0", "99999", "z"), client("9.9.9.9"))
+            .peer_client(
+                2,
+                suite("2.0", "z"),
+                mapped("1.15.8.12345", "profile:wowf/1"),
+            )
             .peer(3, suite("1.5", "m"))
             .target();
         assert_eq!(
             reason(pkg(&t, "suite")),
-            DecisionReason::DifferentClientBuild
+            DecisionReason::DifferentTocMapping
         );
         assert!(!t.effective.contains_key(&FolderKey::lossy("suite")));
     }
@@ -613,117 +578,24 @@ mod tests {
         assert_eq!(pkg(&sc.target(), "suite"), &PackageTarget::InSync);
     }
 
-    #[test]
-    fn different_client_build_needs_decision() {
-        let t = Scenario::new(suite("1.0", "a"))
-            .peer_client(2, suite_iface("2.0", "99999", "b"), client("2.0.0.1"))
-            .target();
-        assert_eq!(
-            reason(pkg(&t, "suite")),
-            DecisionReason::DifferentClientBuild
-        );
-        let mut other_mapping = client("1.15.8.12345");
-        other_mapping.toc_mapping = "profile:wowf/1".into();
-        let t = Scenario::new(suite("1.0", "a"))
-            .peer_client(2, suite("2.0", "b"), other_mapping)
-            .target();
-        assert_eq!(
-            reason(pkg(&t, "suite")),
-            DecisionReason::DifferentTocMapping
-        );
-    }
-
     fn suite_iface(v: &str, iface: &str, tag: &str) -> Vec<crate::inventory::FolderScan> {
         vec![addon_interface("Suite", v, Some(iface), tag)]
     }
 
-    #[test]
-    fn different_build_same_interface_installs_automatically() {
-        let t = Scenario::new(suite("1.0", "a"))
-            .peer_client(2, suite("2.0", "b"), client("2.0.0.1"))
-            .target();
-        assert!(matches!(pkg(&t, "suite"), PackageTarget::Chosen { .. }));
+    fn mapped(build: &str, mapping: &str) -> ClientInfo {
+        let mut c = client(build);
+        c.toc_mapping = mapping.into();
+        c
     }
 
     #[test]
-    fn different_build_different_or_missing_interface_needs_decision() {
-        let t = Scenario::new(suite("1.0", "a"))
-            .peer_client(2, suite_iface("2.0", "11509", "b"), client("2.0.0.1"))
-            .target();
-        assert_eq!(
-            reason(pkg(&t, "suite")),
-            DecisionReason::DifferentClientBuild
-        );
+    fn different_toc_mapping_needs_decision() {
         let t = Scenario::new(suite("1.0", "a"))
             .peer_client(
                 2,
-                vec![addon_interface("Suite", "2.0", None, "b")],
-                client("2.0.0.1"),
+                suite("2.0", "b"),
+                mapped("1.15.8.12345", "profile:wowf/1"),
             )
-            .target();
-        assert_eq!(
-            reason(pkg(&t, "suite")),
-            DecisionReason::DifferentClientBuild
-        );
-        let t = Scenario::new(suite("1.0", "a"))
-            .peer_client(
-                2,
-                vec![addon_interface("Suite", "2.0", Some("11508, 99999"), "b")],
-                client("2.0.0.1"),
-            )
-            .target();
-        assert_eq!(
-            reason(pkg(&t, "suite")),
-            DecisionReason::DifferentClientBuild
-        );
-    }
-
-    #[test]
-    fn different_build_without_local_interface_evidence_needs_decision() {
-        let t = Scenario::new(vec![])
-            .peer_client(2, suite("2.0", "b"), client("2.0.0.1"))
-            .target();
-        assert_eq!(
-            reason(pkg(&t, "suite")),
-            DecisionReason::DifferentClientBuild
-        );
-    }
-
-    #[test]
-    fn multi_folder_package_needs_every_folder_supported() {
-        let peer = |data_iface: &str| {
-            vec![
-                addon_interface("Suite", "2.0", Some("11508"), "c2"),
-                addon_interface("Suite_Data", "2.0", Some(data_iface), "d2"),
-            ]
-        };
-        let t = Scenario::new(two_part("1.0", "c1", "1.0"))
-            .peer_client(2, peer("11508"), client("2.0.0.1"))
-            .target();
-        assert!(matches!(pkg(&t, "suite"), PackageTarget::Chosen { .. }));
-        let t = Scenario::new(two_part("1.0", "c1", "1.0"))
-            .peer_client(2, peer("99999"), client("2.0.0.1"))
-            .target();
-        assert_eq!(
-            reason(pkg(&t, "suite")),
-            DecisionReason::DifferentClientBuild
-        );
-    }
-
-    #[test]
-    fn same_build_ignores_interface_numbers() {
-        let t = Scenario::new(suite("1.0", "a"))
-            .peer(2, suite_iface("2.0", "99999", "b"))
-            .target();
-        assert!(matches!(pkg(&t, "suite"), PackageTarget::Chosen { .. }));
-    }
-
-    #[test]
-    fn different_mapping_still_needs_decision_with_same_interface() {
-        let mut other = client("2.0.0.1");
-        other.toc_mapping = "profile:wowf/1".into();
-        let t = Scenario::new(suite("1.0", "a"))
-            .peer_client(2, suite("2.0", "b"), other)
             .target();
         assert_eq!(
             reason(pkg(&t, "suite")),
@@ -731,139 +603,54 @@ mod tests {
         );
     }
 
-    fn raw_iface(raw: &str) -> Vec<crate::inventory::FolderScan> {
-        vec![addon_interface("Suite", "2.0", Some(raw), "b")]
-    }
-
-    fn decision_for_peer_iface(raw: &str) -> Option<DecisionReason> {
-        let t = Scenario::new(suite("1.0", "a"))
-            .peer_client(2, raw_iface(raw), client("2.0.0.1"))
-            .target();
-        match pkg(&t, "suite") {
-            PackageTarget::NeedsDecision { reason, .. } => Some(*reason),
-            PackageTarget::Chosen { .. } => None,
-            other => panic!("{other:?}"),
-        }
-    }
-
     #[test]
-    fn malformed_interface_tokens_fail_closed() {
-        for raw in [
-            "11508,garbage",
-            "11508,4294967296",
-            "11508,",
-            "11508,,11508",
-            "",
-            "11508\n## Interface: 99999",
-        ] {
-            assert_eq!(
-                decision_for_peer_iface(raw),
-                Some(DecisionReason::DifferentClientBuild),
-                "{raw:?}"
+    fn different_build_syncs_whatever_the_interface_says() {
+        // D-21: a game update or an `## Interface:` declaration never withholds an addon.
+        let cases: [(Option<&str>, &str); 5] = [
+            (Some("11508"), "same interface"),
+            (Some("99999"), "different interface"),
+            (Some("11508,garbage"), "malformed token"),
+            (Some(""), "empty header"),
+            (None, "no header"),
+        ];
+        for (iface, what) in cases {
+            let theirs = vec![addon_interface("Suite", "2.0", iface, "b")];
+            let t = Scenario::new(suite("1.0", "a"))
+                .peer_client(2, theirs, client("2.0.0.1"))
+                .target();
+            assert!(
+                matches!(pkg(&t, "suite"), PackageTarget::Chosen { .. }),
+                "{what}"
             );
         }
-        assert_eq!(decision_for_peer_iface("11508"), None);
-        assert_eq!(decision_for_peer_iface("11508\n## Interface: 11508"), None);
-        let t = Scenario::new(vec![addon_interface("Suite", "1.0", Some("11508,x"), "a")])
-            .peer_client(2, suite("2.0", "b"), client("2.0.0.1"))
-            .target();
-        assert_eq!(
-            reason(pkg(&t, "suite")),
-            DecisionReason::DifferentClientBuild
-        );
     }
 
     #[test]
-    fn missing_builds_apply_the_interface_rule() {
-        let none = || ClientInfo {
+    fn unknown_build_and_new_addon_sync() {
+        let unknown = ClientInfo {
             build_version: None,
             toc_mapping: client("x").toc_mapping,
         };
-        let run = |local: Option<ClientInfo>, peer: ClientInfo, iface: &str| {
-            let mut sc = Scenario::new(suite("1.0", "a"));
-            if let Some(l) = local {
-                sc.local_client = l;
-            }
-            sc.peer_client(2, suite_iface("2.0", iface, "b"), peer)
-                .target()
-        };
-        // Both missing: still needs matching interface evidence.
-        let t = run(Some(none()), none(), "99999");
-        assert_eq!(
-            reason(pkg(&t, "suite")),
-            DecisionReason::DifferentClientBuild
-        );
-        let t = run(Some(none()), none(), "11508");
+        let t = Scenario::new(suite("1.0", "a"))
+            .peer_client(2, suite_iface("2.0", "99999", "b"), unknown)
+            .target();
         assert!(matches!(pkg(&t, "suite"), PackageTarget::Chosen { .. }));
-        // Either missing.
-        let t = run(Some(none()), client("2.0.0.1"), "99999");
-        assert_eq!(
-            reason(pkg(&t, "suite")),
-            DecisionReason::DifferentClientBuild
-        );
-        let t = run(None, none(), "99999");
-        assert_eq!(
-            reason(pkg(&t, "suite")),
-            DecisionReason::DifferentClientBuild
-        );
-        // Equal known builds skip the rule.
-        let t = run(None, client(crate::testkit::BUILD), "99999");
+        let t = Scenario::new(vec![])
+            .peer_client(2, suite_iface("1.0", "99999", "b"), client("2.0.0.1"))
+            .target();
         assert!(matches!(pkg(&t, "suite"), PackageTarget::Chosen { .. }));
     }
 
     #[test]
-    fn multi_client_local_toc_does_not_authorize() {
-        let t = Scenario::new(vec![addon_interface(
-            "Suite",
-            "1.0",
-            Some("11508, 99999"),
-            "a",
-        )])
-        .peer_client(2, suite_iface("2.0", "99999", "b"), client("2.0.0.1"))
-        .target();
-        assert_eq!(
-            reason(pkg(&t, "suite")),
-            DecisionReason::DifferentClientBuild
-        );
-    }
-
-    #[test]
-    fn stale_unrelated_local_addon_does_not_authorize() {
-        let t = Scenario::new(vec![
-            addon("Suite", Some("1.0"), "a"),
-            addon_interface("Other", "1.0", Some("99999"), "o"),
-        ])
-        .peer_client(2, suite_iface("2.0", "99999", "b"), client("2.0.0.1"))
-        .target();
-        assert_eq!(
-            reason(pkg(&t, "suite")),
-            DecisionReason::DifferentClientBuild
-        );
-    }
-
-    #[test]
-    fn new_addon_or_added_folder_on_other_build_needs_decision() {
-        let t = Scenario::new(vec![addon("Other", Some("1.0"), "o")])
-            .peer_client(2, suite("2.0", "b"), client("2.0.0.1"))
+    fn multi_folder_package_syncs_across_builds_and_interfaces() {
+        let peer = vec![
+            addon_interface("Suite", "2.0", Some("11508"), "c2"),
+            addon_interface("Suite_Data", "2.0", Some("99999"), "d2"),
+        ];
+        let t = Scenario::new(two_part("1.0", "c1", "1.0"))
+            .peer_client(2, peer, client("2.0.0.1"))
             .target();
-        assert_eq!(
-            reason(pkg(&t, "suite")),
-            DecisionReason::DifferentClientBuild
-        );
-        let t = Scenario::new(vec![addon("Suite", Some("1.0"), "c1")])
-            .peer_client(
-                2,
-                vec![
-                    addon("Suite", Some("2.0"), "c2"),
-                    addon("Suite_Data", Some("2.0"), "d2"),
-                ],
-                client("2.0.0.1"),
-            )
-            .target();
-        assert_eq!(
-            reason(pkg(&t, "suite")),
-            DecisionReason::DifferentClientBuild
-        );
+        assert!(matches!(pkg(&t, "suite"), PackageTarget::Chosen { .. }));
     }
 
     #[test]

@@ -224,23 +224,7 @@ mod tests {
         assert!(r.applied.is_empty(), "{r:?}");
     }
 
-    #[test]
-    fn different_build_same_interface_applies() {
-        let lab = Lab::new();
-        let mut a = lab.pc("a");
-        let mut b = lab.pc("b");
-        b.set_build("1.0.0.2");
-        a.addon("Alpha", "alpha-v1");
-        b.addon("Alpha", "alpha-v0");
-        let g = a.create();
-        synced(&mut a);
-        b.join(&g);
-        let r = synced(&mut b);
-        assert_eq!(r.applied.len(), 1, "{}", texts(&r));
-        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
-    }
-
-    fn other_build_update_blocked(candidate_toc: &str, local_has_addon: bool) {
+    fn other_build_update_applies(candidate_toc: &str, local_has_addon: bool) {
         let lab = Lab::new();
         let mut a = lab.pc("a");
         let mut b = lab.pc("b");
@@ -254,27 +238,34 @@ mod tests {
         synced(&mut a);
         b.join(&g);
         let r = synced(&mut b);
-        assert!(r.applied.is_empty(), "{}", texts(&r));
-        let kept = b.read("Alpha/main.lua");
-        assert_eq!(kept.as_deref(), local_has_addon.then_some("alpha-v0"));
-        assert!(texts(&r).contains("another game build"), "{}", texts(&r));
+        assert_eq!(r.applied.len(), 1, "{}", texts(&r));
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
     }
 
     #[test]
-    fn different_build_different_interface_needs_decision() {
-        other_build_update_blocked("## Interface: 99999\n## Version: 2.0\n", true);
+    fn different_build_same_interface_applies() {
+        other_build_update_applies("## Interface: 11508\n## Version: 2.0\n", true);
     }
 
     #[test]
-    fn different_build_malformed_interface_needs_decision() {
-        other_build_update_blocked("## Interface: 11508,garbage\n## Version: 2.0\n", true);
+    fn different_build_different_interface_applies() {
+        other_build_update_applies("## Interface: 99999\n## Version: 2.0\n", true);
     }
 
     #[test]
-    fn different_build_new_addon_needs_decision() {
-        other_build_update_blocked("## Interface: 11508\n## Version: 2.0\n", false);
+    fn different_build_malformed_interface_applies() {
+        other_build_update_applies("## Interface: 11508,garbage\n## Version: 2.0\n", true);
     }
 
+    #[test]
+    fn different_build_missing_interface_applies() {
+        other_build_update_applies("## Version: 2.0\n", true);
+    }
+
+    #[test]
+    fn different_build_new_addon_applies() {
+        other_build_update_applies("## Interface: 99999\n## Version: 2.0\n", false);
+    }
     #[test]
     fn independent_updates_converge() {
         let lab = Lab::new();

@@ -1,5 +1,17 @@
 # Addon removal and uninstall across the group
 
+> **D-21 supersedes parts of this design (owner decision, 2026-11-17).**
+> - A removal that collides with a concurrent offline update **wins**; the
+>   updated copy is kept in recovery and named in the summary (R-06, A-10).
+>   The removal-versus-update decision is gone.
+> - Q-42 is rejected: no confirmation when many addons vanish at once (E7).
+> - A joining computer simply removes the addon (Q-48); no decision.
+> - Q-41 (settle wait, about 30 s, two stable scans), Q-43, Q-44 and Q-46 to
+>   Q-53 stand as far as they are consistent with "removed means removed
+>   everywhere". Q-45: WoW keeps an uninstalled addon's saved variables.
+> - **R3D-13 must be re-reviewed against D-21** before anything here is
+>   implemented. The sections below are not yet rewritten.
+
 Status: **design for a later run** (run-003 packet
 [R3-removal-design](../runs/run-003/packets/R3-removal-design.md)). Not yet
 implemented. Revised in retry 1 (R3-removal-fix) for review findings
