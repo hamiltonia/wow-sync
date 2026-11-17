@@ -5,7 +5,10 @@ Status: **design for a later run** (run-003 packet
 implemented. Revised in retry 1 (R3-removal-fix) for review findings
 R3D-7 (presence baseline, §1.6), R3D-8 (authority ledger, §2.4–§2.6),
 R3D-9 (immutable intent and refs, §2.2–§2.3) and R3D-10 (selection
-constraint, §3.3); not yet re-reviewed. Nothing here changes
+constraint, §3.3), and in retry 2 (R3-removal-fix2) for R3D-13
+(resolving inconsistent authority, §2.5), R3D-14 (per-baseline top-level
+evidence, §1.6), R3D-15 (bounded payload retention, §2.7) and R3D-16
+(per-choice `declined` formulas, §3.3); not yet re-reviewed. Nothing here changes
 the running slice. The slice's rule "absence never removes" stays the
 safety base. This document adds the **only** evidence that may remove addon
 code and saved settings from a computer.
@@ -63,10 +66,10 @@ computer only if every row holds:
 |---|---|---|
 | E1 | **Prior presence.** This enrollment has a durable presence-baseline entry for P (§1.6), written from a stable, complete scan of the same variant and AddOns directory in which every folder of P was present, `ok` and eligible. Published or admitted own states are **not** read: the absent state that the same cycle publishes, and pruning of old own states, cannot erase the evidence | "never had it"; a new enrollment's missing addons (R-03, A-04) |
 | E2 | **Whole package absent.** No folder of P, by `FolderKey`, appears in the listing in **any** status (ok, unreadable, unsafe, unsupported, unstable). Partial absence is not a removal of P (§1.5) | unreadable folder; failed or partial scan of one folder |
-| E3 | **Listing is trustworthy.** The AddOns top-level listing was stable and complete in the scan. The variant verdict and layout-assessment digest equal the enrolled ones (domain.md §2.1). The AddOns directory has the same **directory identity** as recorded in the baseline (Windows: volume serial + file ID; macOS: device + inode) | moved or re-pointed install root; a recreated empty AddOns; variant change (`NeedsHelp(VariantChanged)` already stops the cycle) |
+| E3 | **Listing is trustworthy.** The AddOns top-level listing was stable and complete in the scan. The variant verdict is the enrolled identity (no `VariantChanged`) and the layout assessment is `Supported` with the enrolled mapping (domain.md §2.1). The assessment digest is **not** compared: it hashes the eligible and blocked folder lists, which change with every install and removal. The AddOns directory has the same **directory identity** as recorded in the baseline (Windows: volume serial + file ID; macOS: device + inode) | moved or re-pointed install root; a recreated empty AddOns; variant change (`NeedsHelp(VariantChanged)` already stops the cycle) |
 | E4 | **Persistence.** E1–E3 hold in two consecutive complete scans at least `REMOVAL_HOLD` apart (Q-41, default 30 s and two sync cycles). Any reappearance of any folder of P resets the hold | an updater's delete-then-extract during an update; a transient listing glitch |
 | E5 | **Not our own move.** No journal (any phase) of this computer names P or any folder of P, and no journal remained after `recover_interrupted` in either scan's cycle | our own apply or recovery temporarily moving folders out of `AddOns` |
-| E6 | **No unexplained newcomer.** Compared with the top-level entry set recorded with the baseline scan, no **new** non-`ok` top-level entry appeared (unsupported, unreadable, unsafe or unstable), and no new entry whose name differs from a folder of P only by Unicode, case or normalization, or that `paths` rejects (Q-14) | a rename to a non-ASCII or otherwise unsupported name; a folder that became unreadable (it is listed with that status, so E2 fails anyway); a copy that the app cannot read |
+| E6 | **No unexplained newcomer.** Compared with the top-level snapshot referenced by **P's own** baseline entry (§1.6), never a snapshot from a later scan that refreshed another package, no **new** non-`ok` top-level entry appeared (unsupported, unreadable, unsafe or unstable), and no new entry whose name differs from a folder of P only by Unicode, case or normalization, or that `paths` rejects (Q-14) | a rename to a non-ASCII or otherwise unsupported name; a folder that became unreadable (it is listed with that status, so E2 fails anyway); a copy that the app cannot read |
 | E7 | **Not a mass disappearance.** Fewer than `MASS_REMOVAL` packages satisfy E1–E6 in the same window, and AddOns is not empty. Otherwise the intents are held as `PendingLocalConfirmation` and the GUI asks "Did you mean to uninstall these N addons from all computers?" (Q-42, default: ≥ 3 packages or ≥ 25 % of synced packages, or an empty AddOns) | a wiped or replaced AddOns; a mistaken bulk delete; an updater reset |
 | E8 | **P was synced.** P was transfer-eligible here (no `Blocked(UnvalidatedTocMapping)` folder, domain.md §2.1) and is not in a `NeedsDecision` with an unresolved removal kind (§3) | removing something the group never shared |
 
@@ -156,8 +159,16 @@ durable record: `wowsync.presence-baseline/1` (§2.8).
   `ok`, not `Unstable`, and transfer-eligible (E8). The entry records the
   folder keys, names and trees, the package hash, the local scan counter and
   the newest own published seq that listed P, if any (`published_seq`).
-  The record-level `addons_dir_id`, `variant_digest` and top-level entry
-  set are those of that scan.
+  The entry references the **top-level snapshot** of that scan (every
+  top-level name with its status) by the scan counter. Snapshots are stored
+  in the baseline record and kept while at least one package entry
+  references them; a snapshot no entry references is dropped. Refreshing
+  package Q therefore never replaces the snapshot that a still-absent
+  package P depends on (R3D-14). Normally every present package refreshes
+  each scan, so only the newest snapshot and one per held or absent
+  baseline remain. The record-level `addons_dir_id` and enrolled variant
+  identity and mapping are those of the scans; a change discards the whole
+  record (below).
 - **Persisted** with temp + flush + rename **before** the cycle proceeds to
   publication. A restart reloads it. It holds its own content (keys and
   trees), so pruning of own state files or of the provider never removes it.
@@ -289,7 +300,7 @@ bytes verbatim, so every copy of an object has the same hash.
              { "key": "suite_data", "trees": ["<sha256>"] }],
   "basis": [{ "computer_id": "…", "enrollment_id": "…", "seq": 17,
               "package_hash": "<sha256>|null" }],
-  "knows": ["<ids of earlier intents, decisions and supersessions for this package>"],
+  "knows": [{ "id": "<32 hex>", "hash": "<object hash>" }],
   "dependents_at_origin": ["<package keys that hard-depended on a removed folder>"],
   "settings": { "kind": "none_in_this_version" },
   "written_unix_ms": 1767225600000
@@ -311,14 +322,21 @@ bytes verbatim, so every copy of an object has the same hash.
   settings form is a new object schema major, never an edit of an existing
   object.
 
+Every reference from one authority object to another (`knows`,
+`considered`, `supersedes`, `ack`, `intent`) is a **variant reference**
+`{ "id", "hash" }`, never a bare id, so a record can name exactly which
+copy of a conflicted id it means (§2.5). `knows` lists every variant of
+every intent, decision and supersession for the package that the issuer
+had in its ledger.
+
 **Removal decision** (`wowsync.removal-decision/1`): §3.3.
 
 **Re-add supersession** (`wowsync.removal-supersession/1`):
-`{ id, package_key, issuer, supersedes: [<intent id>], ack: <ack id>,
+`{ id, package_key, issuer, supersedes: [<intent ref>], ack: <ack ref>,
 present: [{key, name, tree}], written_unix_ms }` (§2.6).
 
 **Confirming acknowledgment** (`wowsync.removal-ack/1`):
-`{ id, package_key, issuer, intent: <intent id>, result: "removed|absent",
+`{ id, package_key, issuer, intent: <intent ref>, result: "removed|absent",
 written_unix_ms }`. Only these two results are authority. `pending` and
 `decision` are progress and stay in the state (§2.3). The issuer writes
 its own `removed` ack together with its intent.
@@ -353,7 +371,7 @@ allowed):
   `kind`, `package_key` and `hash` all match the object's fields and its
   recomputed hash. A ref whose `kind` or `package_key` differs from the
   object, or two objects or refs with the same `id` and different hashes,
-  make that id **inconsistent** (§2.5).
+  make that id **conflicted** (§2.5).
 - `authority_refs` lists every **valid** entry of the member's ledger
   (§2.4), not only its own objects. It is grow-only for an enrollment. A
   reader receiving a state with fewer refs than an older admitted state of
@@ -373,11 +391,11 @@ authority objects known to this enrollment:
 
 | Field per entry | Meaning |
 |---|---|
-| `id`, `kind`, `package_key`, `hash` | as in the ref |
+| `id`, `kind`, `package_key`, `hash` | as in the ref; an entry is one **variant** `(id, hash)`, so a conflicted id has several entries |
 | `bytes_path` | local verbatim copy under the app data `authority\` directory |
 | `issuer` | from the object |
 | `learned_from` | `[{computer_id, path}]`, every place the object was read |
-| `validity` | `valid` \| `pending(reason)` \| `invalid(reason)`, re-derived (§2.5) |
+| `validity` | `valid` \| `pending(reason)` \| `conflicted` \| `invalid(reason)`, re-derived (§2.5) |
 | `mirrored_seq` | the own seq at which this computer first referenced it, or `null` |
 
 Learning, in cycle step 2a (§1.6):
@@ -409,24 +427,42 @@ An entry is `valid` only if all hold:
 
 | # | Rule | Otherwise |
 |---|---|---|
-| V1 | The object parses, its schema major is known, its size ≤ 64 KiB, and its recomputed hash equals every ref and every copy seen for that `id` | different hashes for one id → `invalid(inconsistent)` and `NeedsDecision(InconsistentRemovalRecord)` for the package; unknown major → `pending(unknown_schema)` |
+| V1 | The object parses, its schema major is known, its size ≤ 64 KiB, and its id has exactly **one** known variant: every ref and every copy seen for that `id` has the same hash, kind and package key | two or more variants of one id → **every** variant is `conflicted` (below); unknown major → `pending(unknown_schema)`; unreadable bytes → `pending(object_unreadable)` |
 | V2 | `issuer.computer_id`/`enrollment_id` is a member enrollment of this group (`member.json`), current or retired | `invalid(not_a_member)`; diagnostic only |
 | V3 | If the issuer enrollment is retired: `issued_at_seq` ≤ the retirement cutoff, or the id is listed in the retirement record's `authority_known` (§8.2) | `invalid(after_retirement)` |
-| V4 | Every id in `knows`, `considered`, `supersedes`, `ack`, `intent` and `chose` is in the ledger and `valid` | `pending(missing_reference)` |
+| V4 | Every variant reference in `knows`, `considered`, `supersedes`, `ack` and `intent` names a variant that is in the ledger, in **any** status (`valid`, `conflicted` or `invalid`). In addition `chose.remove.intent` must be `valid`, and V5 requires a `valid` ack. A reference never requires a conflicted variant to become valid | `pending(missing_reference)` |
 | V5 | Supersession: `ack` is a `removed`/`absent` ack by the **same enrollment** for every superseded intent, with a lower `issued_at_seq` than the supersession | `invalid(readd_without_ack)` |
 | V6 | Decision: §3.3 well-formedness (chosen alternative among `considered`, manifests hash to the declared package hashes, `declined` derived correctly) | `invalid(malformed_decision)` |
-| V7 | `package_key` of every referenced object equals the entry's `package_key` | `invalid(inconsistent)` |
+| V7 | `package_key` of every referenced object equals the entry's `package_key` | `invalid(wrong_package)`; diagnostic only |
 
 Validity is re-derived whenever a member or retirement record changes, and
 whenever a referenced entry arrives. `invalid(after_retirement)` can
 therefore appear after the entry was `valid`. The effect of that is in §8.2.
 
-Any `pending` entry for package P, or any admitted state whose
-`authority_refs` include a P entry that is not `valid` here, puts P in
-`Unavailable(AuthorityPending)` on this computer: no install, replace or
-removal for P until it resolves. Other packages proceed. This is the
-stop-on-missing-authority rule: a computer that knows an authority object
-exists but cannot read it does not act on its older knowledge.
+Statuses are distinct and handled differently:
+
+| Status | Meaning | Effect for package P |
+|---|---|---|
+| `valid` | authority | §2.6 |
+| `pending(reason)` | **missing** authority: referenced or listed but unreadable, unknown schema, or a missing reference | `Unavailable(AuthorityPending)` on this computer: no install, replace or removal for P until it resolves. Other packages proceed. A computer that knows an authority object exists but cannot read it does not act on its older knowledge |
+| `conflicted` | **known-inconsistent** evidence: the id has two or more variants | never authority (no Active(P), coverage, ack or supersession effect); `NeedsDecision(InconsistentRemovalRecord)` until resolved (below) |
+| `invalid(reason)` | known and well-formed but not authority (not a member, after retirement, re-add without ack, malformed decision, wrong package) | ignored for P; diagnostic only; never blocks |
+
+**Resolving a conflicted id (R3D-13).** The GUI decision for
+`InconsistentRemovalRecord` is a normal decision object (§3.3) with
+`kind: inconsistent_removal_record` that lists **every** known variant of
+the conflicted id as variant references in `considered.intents` (or
+`considered.decisions` for a conflicted decision id). Because V4 accepts
+references to conflicted variants, the decision is `valid` while the
+variants stay `conflicted` forever in the grow-only ledger. The id is then
+**resolved**: it no longer causes a decision, and the decision's choice
+(keep removed, or keep version V) is the authority for P. Late replay of a
+listed variant, from any member or after a restart, changes nothing. A
+variant of that id that the decision did not list (a third copy, or one
+learned only afterwards) is new information: it reopens
+`InconsistentRemovalRecord`, and the next decision must know the earlier
+one and list the new variant. Every computer derives the same resolved
+set from the same ledger, so the result converges.
 
 An authority object that is not visible anywhere yet is unknown, not
 pending. The result is only a delay, the same as an intent that has not
@@ -437,7 +473,8 @@ window has no ack for the intent, so its copy is never treated as a re-add
 
 ### 2.6 Active authority per package
 
-For package P, all from **valid** ledger entries:
+For package P, all from **valid** ledger entries (`conflicted` variants
+are never members; references match on `(id, hash)`):
 
 - **Intents(P)** = removal intents for P, minus those named in a valid
   supersession's `supersedes`, minus those in a valid decision's
@@ -452,7 +489,7 @@ For package P, all from **valid** ledger entries:
 **Re-add.** A member M that has a valid `removed`/`absent` ack for intent
 T, and whose package P later becomes present by a deliberate install (two
 stable complete scans, E5: not our own apply), writes a supersession for T
-(with `ack` = its ack id and `present` = the re-added manifest), then
+(with `ack` = a reference to its ack and `present` = the re-added manifest), then
 publishes P present. The re-added version propagates as an ordinary
 addition. A member without an ack for T is never re-adding. Its copy is
 covered (removed when safe) or uncovered (decision). This is the line
@@ -489,21 +526,42 @@ is covered and its folder set is a subset of the `removed` key set.
 | superseded | removed from Active(P) by a supersession or decision; kept in the ledger as history |
 
 A settled intent remains authority for coverage: a late or re-enrolled
-member holding a covered version still has it removed when safe (§8). Its
-lifetime is "while the group exists" (Q-44).
+member holding a covered version still has it removed when safe (§8).
+Authority **metadata** (the objects: ids, hashes, manifests as lists of
+tree hashes, covers) is kept while the group exists, so a removed addon
+cannot be resurrected (Q-44). This metadata is small (under 64 KiB per
+object, typically about 1 KiB) and holds no addon or settings content.
 
-**Retention roots** (input to provider garbage collection, Q-7): every
-authority object; for every valid intent, the trees and blobs of its
-`removed` manifest and its settings roots; for every valid keep decision,
-the trees and blobs of its chosen manifest; for a frozen package (§3.2),
-every alternative. Without them a restore on a computer without a local
-recovery point is impossible (§6.3).
+**Payload retention (R3D-15).** Authority metadata never roots payload by
+itself. Provider **payload** (tree records, blobs and provider-held
+settings checkpoints) is a retention root for removal only in these cases,
+each tied to the package's **current** state or a visible temporary
+exception, never to superseded history:
+
+| Payload root | Kept while | Visible as |
+|---|---|---|
+| `removed` manifest and settings roots of an intent in Active(P) | the intent is in Active(P), i.e. the removal is P's current state (Q-53) | history state "Removed — restorable on any computer" with its size in storage use |
+| chosen manifest of a keep decision in Active(P) | the decision is in Active(P) (it is P's current target) | the current version |
+| every alternative of a frozen package (§3.2) | the decision is recorded and applied | temporary exception (§6.2) |
+
+When an intent or keep decision leaves Active(P) (re-add, later decision,
+or a later removal that knows it), its payload stops being a removal root
+at once. It stays only if something else roots it (a current inventory, or
+another root above). Earlier states of P are then restorable only from
+local recovery points, which follow the three-state rule of §6.1. The
+provider never keeps superseded removal payload as history. The garbage
+collector (Q-7) applies its own grace period. A restore that finds payload
+already released is `Unavailable` with the reason, never partial.
+
+The GUI advertises a provider-sourced restore (§6.3) **only** for an
+intent in Active(P). Other restores are offered only from local recovery
+points that exist.
 
 ### 2.8 Local records (never uploaded)
 
 | Schema | Fields | Limit |
 |---|---|---|
-| `wowsync.presence-baseline/1` | `group_id`, `enrollment_id`, `variant_digest`, `addons_dir_id`, `scan`, `top_level: [{name, status}]` (for E6), `packages: [{package_key, folders: [{key, name, tree}], package_hash, scan, published_seq?}]` (§1.6) | 1 MiB |
+| `wowsync.presence-baseline/1` | `group_id`, `enrollment_id`, `variant_identity`, `mapping`, `addons_dir_id`, `snapshots: [{scan, top_level: [{name, status}]}]` (each kept while referenced, for E6), `packages: [{package_key, folders: [{key, name, tree}], package_hash, scan (references a snapshot), published_seq?}]` (§1.6) | 1 MiB; exceeding it → `NeedsHelp(StorageLow)`, never dropping a referenced snapshot |
 | `wowsync.removal-observation/1` | `group_id`, `enrollment_id`, `package_key`, `baseline_scan`, `first_absent_scan` (local monotonic scan counter, not a clock), `scans_absent`, `addons_dir_id`, `state` ∈ `holding \| pending_local_confirmation \| ready \| published`, `intent?`, `reason?` | 64 KiB |
 | `wowsync.authority-ledger/1` | §2.4; object copies stored beside it, 64 KiB each | 16 MiB |
 | `wowsync.apply-journal/2` | `/1` plus `kind` ∈ `apply \| remove \| restore`, `intent?`, `ack_id?` (fixed before commit so a retried finalize writes the same ack), folder `action` gains `remove` (§4.2), `settings_ops?` (§5) | 1 MiB |
@@ -523,19 +581,25 @@ as covered: the group already refuses them, so they cannot keep P alive.
 **Precedence** per package, first match wins:
 
 1. group rejections (§8.1) exclude versions in every level below;
-2. local `Held` (§1.6) and `Unavailable(AuthorityPending)` (§2.5);
-3. ledger authority: Active(P) intents and decisions, including
-   inconsistent and competing records (table below);
-4. the selection constraint of an active keep decision (§3.3);
-5. ordinary domain.md §6 ordering, minus `declined` versions (§3.3).
+2. local `Held` (§1.6);
+3. an unresolved `conflicted` id for P: `NeedsDecision(InconsistentRemovalRecord)`
+   (§2.5). It precedes level 4 because it is actionable: the user can
+   resolve it. If `pending` entries also exist, the status says that more
+   information is still arriving; nothing is applied either way;
+4. `Unavailable(AuthorityPending)` for `pending` entries (§2.5);
+5. ledger authority: Active(P) intents and decisions, including competing
+   records (table below);
+6. the selection constraint of an active keep decision (§3.3);
+7. ordinary domain.md §6 ordering, minus the `declined` versions of an
+   active decision (§3.3).
 
 A later level never overrides an earlier one. In particular, ordinary
-newest ordering (level 5) can never override a decision (levels 3–4).
+newest ordering (level 7) can never override a decision (levels 5–6).
 
 | Situation (per package P) | Result | Effect |
 |---|---|---|
 | Observation holding or pending confirmation here | `Held(RemovalObserved \| RemovalConfirmation)` **on this computer only** | nothing for P installed, replaced or removed here (§1.6) |
-| A ledger entry for P is `pending`, or an admitted ref for P is not `valid` here | `Unavailable(AuthorityPending)` **on this computer only** | nothing for P applied here until it resolves |
+| A ledger entry for P is `pending` (unreadable, unknown schema, missing reference) | `Unavailable(AuthorityPending)` **on this computer only** | nothing for P applied here until it resolves |
 | No active intent and no active decision | unchanged domain.md §6 (minus `declined`) | — |
 | Active intent(s); every candidate everywhere is covered or rejected; or there are no candidates | `Remove { intents }` | members holding P remove it when safe (§4); members without P acknowledge `absent` |
 | Active intent; some candidate uncovered, not rejected and not `declined` | `NeedsDecision(RemovalVsUpdate)` | **frozen** (§3.2) on every computer |
@@ -543,7 +607,8 @@ newest ordering (level 5) can never override a decision (levels 3–4).
 | An active intent and a valid supersession or keep decision for P, neither `knows` the other; or two keep decisions with different chosen versions, neither `knows` the other | `NeedsDecision(CompetingRemovalDecisions)` | frozen |
 | Active keep decision (selection constraint, §3.3) | target exactly V | holders of other non-rejected versions replace with V |
 | Active keep decision; a candidate W not considered, not declined and not dominated by V | `NeedsDecision(NewVersionAfterDecision)` | frozen; the constraint stays |
-| Same id with different hashes, or a ref that does not match its object (§2.3) | `NeedsDecision(InconsistentRemovalRecord)` | frozen; diagnostics show every source |
+| An id for P has two or more variants (different hashes, or a ref that does not match its object, §2.3), not all listed by a valid resolving decision | `NeedsDecision(InconsistentRemovalRecord)` | frozen; diagnostics show every variant and source |
+| An active automatic decision; every eligible candidate is `declined` | `NeedsDecision(OnlyDeclinedVersions)` | frozen; holders keep their copies; choices: allow a version again, keep removed |
 | Receiver's local package has folders not in `removed` (grouping differs here) | `NeedsDecision(RemovalScopeDiffers)` **on this computer only** | frozen here; others proceed |
 | Removing P would break a hard dependency of a remaining local package Q (§4.4) that was not in `dependents_at_origin` | `NeedsDecision(RemovalBreaksDependency)` **on this computer only** | frozen here; others proceed |
 | Folder drop where the local tree of the dropped folder is neither listed nor dominated (§1.5) | `NeedsDecision(DroppedFolderDiffers)` | package frozen here |
@@ -586,34 +651,44 @@ immutable authority object (§2.2), learned and validated like an intent:
   "issuer": { "computer_id": "…", "enrollment_id": "…", "issued_at_seq": 52 },
   "kind": "removal_vs_update|competing_removal_decisions|inconsistent_removal_record|new_version_after_decision|resume_automatic",
   "considered": {
-    "intents": ["<intent ids>"],
-    "decisions": ["<decision ids>"],
+    "intents": [{ "id": "<32 hex>", "hash": "<object hash>" }],
+    "decisions": [{ "id": "<32 hex>", "hash": "<object hash>" }],
     "versions": [{ "package_hash": "<sha256>",
                    "manifest": [{ "key": "suite-core", "name": "Suite-Core", "tree": "<sha256>" }] }]
   },
-  "chose": { "remove": { "intent": "<new intent id>" } },
+  "chose": { "remove": { "intent": { "id": "<32 hex>", "hash": "<object hash>" } } },
   "declined": ["<package hashes>"],
-  "knows": ["<every intent and decision id for this package the issuer had>"],
+  "knows": [{ "id": "<32 hex>", "hash": "<object hash>" }],
   "written_unix_ms": 1767225600000
 }
 ```
 
-`chose` is exactly one of `{ "remove": { "intent": "<id>" } }`,
+`chose` is exactly one of `{ "remove": { "intent": <intent ref> } }`,
 `{ "keep": { "package_hash": "<sha256>" } }` or
 `{ "automatic": { "allow_again": ["<package hashes>"] } }`.
 
-Well-formedness (V6): every `manifest` hashes to its `package_hash`; a
-`keep` hash is one of `considered.versions`; `declined` equals
-`considered.versions` minus the chosen hash, plus the `declined` of every
-decision in `considered.decisions`, minus `allow_again`; `knows` ⊇
-`considered.intents` ∪ `considered.decisions`.
+Well-formedness (V6): every `manifest` hashes to its `package_hash`;
+`knows` ⊇ `considered.intents` ∪ `considered.decisions`; and `declined` is
+exactly the value of the formula for its choice (R3D-16). Let
+`inherited` = the union of the `declined` sets of the decisions in
+`considered.decisions`, and `seen` = the package hashes of
+`considered.versions`:
+
+| Choice | `declined` | Notes |
+|---|---|---|
+| `keep W` | (`inherited` ∪ `seen`) − {W} | W ∈ `seen`. Choosing a previously declined W removes it from `declined` |
+| `automatic` | `inherited` − `allow_again` | `allow_again` ⊆ `inherited`. **Nothing in `seen` is added**: the kept version and any new version are not declined by resuming |
+| `remove` | ∅ | a removal ends version preferences; a later re-add is ordinary new intent (§2.6) |
+
+Each formula is total and deterministic, so every computer validates the
+same record the same way.
 
 - **Keep removed:** the issuer first writes a new intent with
   `evidence: decision`, `covers` = the union of the old `covers` and the
   manifests of every considered version, `removed` = the issuer's own
   baseline manifest if it held P, otherwise the manifest of a considered
   version (so the intent is restorable, §6.3), and `knows` ⊇ the
-  considered ids. Then it writes the decision with `chose.remove.intent`
+  considered variant references (including conflicted ones). Then it writes the decision with `chose.remove.intent`
   naming it. Members holding a considered version remove it into a
   recovery point.
 - **Keep version V:** the decision creates a **selection constraint** for P
@@ -621,9 +696,16 @@ decision in `considered.decisions`, minus `allow_again`; `knows` ⊇
   install V, and their pinned removal recovery points become ordinary
   history.
 - **Resume automatic updates:** ends the constraint. Ordinary domain.md §6
-  ordering applies again, except that versions left in `declined` stay
-  excluded (Q-50). The GUI lists them in the consequence text with a
+  ordering applies again, except that versions **previously** declined stay
+  excluded unless allowed again (Q-50). The version that was kept, and any
+  version considered for the first time in this choice, stay eligible. The
+  GUI lists the still-declined versions in the consequence text with a
   per-version "allow again" choice, recorded in `chose.automatic.allow_again`.
+  Example: D1 keeps V2 and declines V3. Resuming without allowing V3 gives
+  `declined = {V3}`: the target is V2 by ordinary ordering, and holders of
+  V3 are moved to V2. If V4 (`Greater` than V3) is also present, the target
+  is V4. A late replay of V3 stays excluded. If only declined versions are
+  eligible, the result is `NeedsDecision(OnlyDeclinedVersions)` (§3.1).
 
 Decision provenance (who, which alternatives, which choice) is the object
 itself and is also in the audit log. It is retained with the ledger.
@@ -877,6 +959,11 @@ Pruning in finalize (apply.md §2.4) counts states, not recovery points.
 current plus the two previous states. Re-adding P makes `removed` a previous
 state. Its byte-holding neighbour is retained while it is within the window.
 
+Provider payload follows §2.7: only the current removal of P (an intent in
+Active(P)) and visible temporary exceptions are kept in the provider.
+Superseded removal payload is released, so provider retention never
+exceeds what the three-state window and its exceptions promise (R-10).
+
 ### 6.2 Temporary exceptions (A-17)
 
 Kept beyond three, each shown as "kept for recovery: N extra copies
@@ -888,6 +975,7 @@ Kept beyond three, each shown as "kept for recovery: N extra copies
 | package frozen in a removal decision (§3.2) | decision recorded and applied |
 | covered copy removed while another member's copy is uncovered (alternative of a pending decision) | as above |
 | restore in progress (§6.3) | restore verified |
+| provider payload of every alternative of a frozen package (§2.7) | decision recorded and applied |
 | settings checkpoint referenced by a retained code point | that point pruned |
 
 Low storage while an exception exists → `NeedsHelp(StorageLow)` with the
@@ -899,7 +987,8 @@ From the package's history (GUI, §7), the user restores a removed package
 on this computer:
 
 1. Source: the local recovery point of kind `removed`. If it is absent (this
-   computer never had P, or every local point was pruned), the source is
+   computer never had P, or every local point was pruned) **and** the
+   intent is in Active(P) (§2.7), the source is
    the intent object's exact `removed` manifest (§2.2) from the ledger: each
    folder's tree record from the provider `trees\`, then its blobs, staged
    and verified exactly like an apply (apply.md §2.2), and the staged
@@ -941,6 +1030,8 @@ Each is a status/explanation field to be provided by core (A-25, A-26).
 | Local hold while uninstall is observed | "Removing *X* from all computers in N s"; that it will not be reinstalled meanwhile (§1.6) | keep it (cancels; reinstalls from the group) |
 | Removal vs update decision | per alternative: version label, holders (computers), whether removed where, recovery availability, consequence of each choice | keep removed / keep version V |
 | New version after a decision (`NewVersionAfterDecision`) | the recorded decision (who, when, chosen V, declined versions), the new version W and its holders | keep V / take W / resume automatic updates (lists versions that stay declined, each with "allow again") |
+| Only declined versions available (`OnlyDeclinedVersions`) | declined versions, who declined them and when | allow a version again / keep removed |
+| Inconsistent record (`InconsistentRemovalRecord`) | every variant of the id with its source computers; whether more information is still pending | keep removed / keep version V (the decision lists every variant shown) |
 | Kept version (selection constraint active) | "Kept at version V by decision on *computer*"; declined versions | resume automatic updates |
 | Waiting for removal information (`AuthorityPending`) | which computer referenced it; that nothing changes for *X* until it is readable | — |
 | Competing removal decisions; inconsistent record | the conflicting records' origins and choices | choose one |
@@ -1030,13 +1121,14 @@ Settings cases become required only when the settings design lands.
 | T3 | Runtime, real cycle loop: P absent in one scan (absent state published), then reappears with the same or new content; and the same across a restart | no intent; hold reset; baseline refreshed; new content is an ordinary update | A-10, A-21 |
 | T4 | Folder becomes unreadable / scan unstable / listing unstable | no intent (E2/E3) | A-05, A-20 |
 | T5 | AddOns directory identity changed (re-pointed root) with all folders gone | no intent; needs help | A-05, A-36 |
-| T6 | ASCII folder absent while a new unsupported (non-ASCII) entry appears | no intent; "removed or renamed" notice; user confirmation creates `user_confirmed` intent | A-23 |
+| T6 | ASCII folder absent while a new unsupported (non-ASCII) entry appears; continued over ≥ 4 ordinary cycles in which another package Q (≥ 4 other packages, below E7) is updated and refreshes its baseline, then a restart, then more cycles | no intent; "removed or renamed" notice; user confirmation creates `user_confirmed` intent | A-23 |
 | T7 | ≥ `MASS_REMOVAL` packages vanish | held as pending confirmation; nothing published until confirmed | A-10, A-20 |
 | T8 | Our own interrupted apply leaves `L` absent (`Half`) | no intent (E5); recovery restores | A-22 |
 | T9 | Peer state lacks P, peer newest state unusable or regressed, provider object missing; also an admitted ref whose object is unreadable | nothing removed anywhere; the unreadable ref gives `AuthorityPending` and nothing is installed for P either | A-20 |
 | T9b | Receiver learns intent T (ledger), has not acked; then T's issuer's newest state becomes `Unusable`, its provider `authority\` copy is deleted, the receiver restarts, and a late covered copy of P arrives from a third member (reordered deliveries) | T stays active from the ledger; the covered copy is removed when safe; no stale inventory of the issuer is used; the receiver's mirror lets a fourth member learn T | A-20, A-22 |
 | T10 | Offline peer updated P (uncovered) then reconnects | `NeedsDecision(RemovalVsUpdate)` on every computer; package frozen; both alternatives preserved and listed; other packages proceed | A-10, A-17, A-07 |
 | T11 | Decide "keep removed" then "keep V" (separate runs) | respective propagation; decision provenance in audit and record | A-10, A-25 |
+| T11c | D1 keeps V2 and declines V3; then "resume automatic updates" without allow-again, (a) with no new version, (b) with a new V4 `Greater` than V3, (c) then a late replay of V3; also (d) only V3 eligible anywhere | resume record valid with `declined = {V3}` (V2 and V4 not declined); target (a) V2, V3 holders moved to V2, (b) V4, (c) V3 still excluded; (d) `OnlyDeclinedVersions`, nothing changed | A-08, A-20, A-25, A-26 |
 | T11b | Alternatives V2 and V3 (V3 `Greater`); user keeps the **lower** V2; then a new V4 (`Greater` than V3) appears after the decision on one member; separately a V1 dominated by V2 appears | V3 holders are downgraded to V2 (V3 into recovery); ordinary ordering never selects V3; V4 gives `NewVersionAfterDecision` with everything frozen and V2 kept; V1 is replaced by V2 without a decision; "keep V2" declines V4; "resume automatic" keeps V3 and V4 excluded unless allowed again | A-10, A-20 |
 | T12 | Concurrent "keep removed" and "keep V" decisions on two members | `CompetingRemovalDecisions`; no silent winner | A-20 |
 | T13 | Late / duplicate / reordered delivery of intent, ack, supersession and decision objects and of the states referencing them, including refs before objects, objects without refs, restarts between deliveries, and a higher version delivered after a keep decision (property test over permutations, 3 replicas) | identical final result independent of order; `AuthorityPending` only while a referenced object is unreadable; no reversal of a recorded decision; never a higher version overriding a selection constraint | A-20 |
@@ -1049,7 +1141,7 @@ Settings cases become required only when the settings design lands.
 | T20 | Mixed update op with a folder drop; local dropped tree listed / not listed | removed with the update / `DroppedFolderDiffers` | A-09 |
 | T21 | Receiver grouping has an extra folder not in `removed` | `RemovalScopeDiffers` on that computer only | A-09 |
 | T22 | Remaining package hard-depends on removed folder, not in / in `dependents_at_origin` | decision here / proceeds with warning | A-09 |
-| T23 | More than three history states with a removal among them; prune | current + two previous retained; `removed` state counts; exceptions visible; low storage → needs help | A-16, A-17 |
+| T23 | More than three history states with a removal among them; prune. Then several settled remove → re-add → update → keep-decision cycles of one package at distinct versions, inspecting the **provider** root set (trees, blobs, settings checkpoints) after each | local: current + two previous retained; `removed` state counts; exceptions visible; low storage → needs help. Provider: removal roots are only the Active(P) intent's manifest and settings, the Active keep decision's manifest and frozen alternatives; every superseded payload is no longer rooted; provider restore is advertised only for an active intent | A-16, A-17 |
 | T24 | Restore removed package with local point; without local point (from provider); with pruned provider objects | restored and propagated / staged from provider / `Unavailable` | A-10, A-16 |
 | T24b | Restore on a computer that never had P, after every member's local recovery points for P were pruned and the issuer's state files were pruned | restored from the intent manifest, tree records and blobs; package hash equals `removed_hash`; code-only settings warning; supersession written; propagates | A-10, A-16, A-19 |
 | T25 | Restore when settings checkpoint missing | code-only restore, current settings preserved, distinct warning (settings phase) | A-19 |
@@ -1059,6 +1151,7 @@ Settings cases become required only when the settings design lands.
 | T29 | Joining computer with a covered / uncovered copy of a removed addon | listed in consent and removed / decision | A-04 |
 | T30 | `code-state/2` read by a `/1` reader, and `/1` state read by `/2` reader | `/1` reader shows "written by a newer version" and does nothing; `/2` reader treats `/1` absence as absence (never removal) | A-36, A-20 |
 | T31 | Same intent id with different content | `InconsistentRemovalRecord`; nothing removed | A-23 |
+| T31b | Two variants of intent T on 3 replicas → GUI decision (each of: keep removed, keep version V) listing both variants → restart → late replay of both variants from other members → then a third variant appears | decision is `valid` while the variants stay `conflicted`; status precedence shows the decision, not `AuthorityPending`; after the decision all replicas converge on the chosen result and stay there across restart and replay; the third variant reopens `InconsistentRemovalRecord` | A-20, A-23, A-25, A-26 |
 | T34 | Mixed arrivals for one intent: ref first then object; object from a mirror; ref with matching id but a different hash, kind or package key; the same object from three members | equal-hash copies are one record; any mismatch → `InconsistentRemovalRecord`; no false inconsistency from verbatim mirrors | A-20, A-23 |
 | T35 | Settling: all current members acked | status "settled"; objects unchanged byte for byte; a late member with a covered copy still has it removed | A-10, A-20 |
 | T36 | Re-add supersession without an earlier own ack, or with an ack issued later than the supersession | `invalid(readd_without_ack)`; intent stays active | A-10, A-20 |
@@ -1066,13 +1159,16 @@ Settings cases become required only when the settings design lands.
 | T32 | GUI: remove, see pending/confirmed per computer, resolve a removal decision, restore — without a terminal, keyboard only | flows complete; wording does not claim "removed everywhere" early | A-25, A-26, A-24 |
 | T33 | Installed-app removal through real Dropbox on two computers (provider tier, after owner Check 2) | removal applied and confirmed; provenance retained | A-34 |
 
-A-38 negative controls for at least T2, T3, T9, T9b, T10, T11b, T13, T16,
-T18, T24b and T34 must show a named test failing (exit 101) when the
+A-38 negative controls for at least T2, T3, T6, T9, T9b, T10, T11b, T11c,
+T13, T16, T18, T23, T24b, T31b and T34 must show a named test failing (exit 101) when the
 corresponding rule is removed, for example by treating absence as removal,
 dropping the coverage check, reading E1 from the newest published state,
 omitting `Held`, recomputing active intents from latest admitted states
 instead of the ledger, hashing a compact form, dropping the `removed`
-manifest, or letting ordinary newest ordering override a keep decision.
+manifest, letting ordinary newest ordering override a keep decision,
+comparing E6 with a shared latest snapshot, requiring referenced variants
+to be valid, rooting superseded payload, or deriving `declined` for
+`automatic` from the considered versions.
 
 ## 10. Changes to existing design documents when implemented
 
@@ -1080,7 +1176,7 @@ Recorded here because this packet does not own those files.
 
 | Document | Change |
 |---|---|
-| [domain.md](domain.md) §6 | Selection runs below the removal precedence of §3.1: rejections, `Held`/`AuthorityPending`, ledger authority, selection constraint, then ordinary ordering minus `declined` versions. **Supersedes domain.md §6 Q-2 when implemented:** completeness is "group-wide membership minus the candidate's evidenced `dropped` folders" (§1.5). The final sentence "There is no removal record in the slice" is replaced by: "Absence never removes; only an active intent in the authority ledger (removal.md §2–§3) yields `Remove`, and an uncovered candidate under an intent yields `NeedsDecision(RemovalVsUpdate)`." New `DecisionReason` values: `RemovalVsUpdate`, `CompetingRemovalDecisions`, `InconsistentRemovalRecord`, `NewVersionAfterDecision`, `RemovalScopeDiffers`, `RemovalBreaksDependency`, `DroppedFolderDiffers`. New target states `Held(RemovalObserved \| RemovalConfirmation)` and `Unavailable(AuthorityPending)` |
+| [domain.md](domain.md) §6 | Selection runs below the removal precedence of §3.1: rejections, `Held`/`AuthorityPending`, ledger authority, selection constraint, then ordinary ordering minus `declined` versions. **Supersedes domain.md §6 Q-2 when implemented:** completeness is "group-wide membership minus the candidate's evidenced `dropped` folders" (§1.5). The final sentence "There is no removal record in the slice" is replaced by: "Absence never removes; only an active intent in the authority ledger (removal.md §2–§3) yields `Remove`, and an uncovered candidate under an intent yields `NeedsDecision(RemovalVsUpdate)`." New `DecisionReason` values: `RemovalVsUpdate`, `CompetingRemovalDecisions`, `InconsistentRemovalRecord`, `NewVersionAfterDecision`, `OnlyDeclinedVersions`, `RemovalScopeDiffers`, `RemovalBreaksDependency`, `DroppedFolderDiffers`. New target states `Held(RemovalObserved \| RemovalConfirmation)` and `Unavailable(AuthorityPending)` |
 | [domain.md](domain.md) §1 step 5 | Consent text changes from "Addons missing here are installed, never treated as removed" to also state that addons deliberately uninstalled on one computer are removed on the others and kept for recovery, and that settings effects follow §5 |
 | [publication.md](publication.md) §1 | layout gains `members\<computer_id>\authority\<id>.json` (single writer, write-if-absent, never deleted while the group exists; §2.1). Readers list it for every member including unusable and retired ones; that is authority, not an inventory fallback |
 | [publication.md](publication.md) §2 | `wowsync.code-state/2` with `authority_refs` and `progress` (§2.3); object schemas `wowsync.removal-intent/1`, `removal-decision/1`, `removal-supersession/1`, `removal-ack/1` (§2.2); local schemas of §2.8 (`presence-baseline/1`, `authority-ledger/1`); report result `removed`; confirmation rule of §4.2 |
