@@ -541,3 +541,32 @@ tests = [
     "e2e::tests::different_build_malformed_interface_needs_decision",
     "e2e::tests::different_build_new_addon_needs_decision",
 ]
+
+# R3-proto (crates/wow-sync-proto): view-model and notification rules on fake scenario data.
+[[case]]
+id = "R3-proto:model"
+tier = "offline"
+tests = [
+    "model::tests::every_scenario_builds_with_expected_headline",
+    "model::tests::forever_is_never_labelled_classic",
+    "model::tests::decisions_are_isolated_to_the_affected_addons",
+    "model::tests::tray_shape_differs_by_state_not_only_colour",
+]
+
+[[case]]
+id = "R3-proto:notify"
+tier = "offline"
+tests = [
+    "notify::tests::nonurgent_held_while_game_runs_urgent_sent",
+    "notify::tests::release_sends_at_most_two",
+    "notify::tests::unchanged_condition_is_not_repeated_but_changed_content_notifies",
+    "notify::tests::held_set_is_bounded_per_kind",
+]
+
+[[case]]
+id = "R3-proto:theme"
+tier = "offline"
+tests = [
+    "theme::tests::theme_choice_overrides_system",
+    "theme::tests::palettes_differ_and_tones_are_distinct",
+]

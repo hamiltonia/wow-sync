@@ -1,0 +1,35 @@
+banner | name='Status' | focusable=False | focused=False | enabled=True
+status | name='Waiting for your decision on 3 add-ons. World of Warcraft: Forever (wowf), Main add-ons group, this computer: Desk PC' | focusable=False | focused=False | enabled=True
+button | name='Sync now' | focusable=True | focused=False | enabled=True
+button | name='Pause syncing' | focusable=True | focused=False | enabled=True
+navigation | name='Sections' | focusable=False | focused=False | enabled=True
+button | name='Overview, current page' | focusable=True | focused=False | enabled=True
+button | name='Computers' | focusable=True | focused=False | enabled=True
+button | name='Add-ons' | focusable=True | focused=False | enabled=True
+button | name='Needs attention, 3 items' | focusable=True | focused=False | enabled=True
+button | name='Activity' | focusable=True | focused=False | enabled=True
+button | name='Settings sync, coming later' | focusable=True | focused=False | enabled=True
+button | name='App settings' | focusable=True | focused=False | enabled=True
+button | name='About' | focusable=True | focused=False | enabled=True
+button | name='Prototype scenarios' | focusable=True | focused=False | enabled=True
+heading | name='Overview' | focusable=False | focused=False | enabled=True
+heading | name='Needs attention' | focusable=False | focused=False | enabled=True
+button | name='Choose a copy: WeakAuras: can't tell which copy is newer' | focusable=True | focused=False | enabled=True
+button | name='Choose a copy: Bagnon: one copy is missing folders' | focusable=True | focused=False | enabled=True
+button | name='Choose a copy: Questie: the copies are for different game builds' | focusable=True | focused=False | enabled=True
+heading | name='This computer' | focusable=False | focused=False | enabled=True
+button | name='Add-ons, 39 up to date, 3 needs your decision, 2 not synced here, open the list of add-ons that are not up to date' | focusable=True | focused=False | enabled=True
+group | name='Game, Not running' | focusable=False | focused=False | enabled=True
+group | name='Shared folder, Dropbox\WoW Sync (fake) · readable' | focusable=False | focused=False | enabled=True
+group | name='Last shared, 12 min ago (42 add-ons)' | focusable=False | focused=False | enabled=True
+group | name='Last check, 1 min ago; next in 4 min' | focusable=False | focused=False | enabled=True
+heading | name='Recent changes' | focusable=False | focused=False | enabled=True
+button | name='Updated 1 add-on from Laptop, Today 21:10' | focusable=True | focused=False | enabled=True
+button | name='Updated 3 add-ons from Laptop, Today 21:05' | focusable=True | focused=False | enabled=True
+button | name='Updated 2 add-ons from Laptop, Today 18:40' | focusable=True | focused=False | enabled=True
+button | name='Updated 1 add-on from Laptop, Yesterday 22:15' | focusable=True | focused=True | enabled=True
+button | name='See all activity' | focusable=True | focused=False | enabled=True
+heading | name='Other computers' | focusable=False | focused=False | enabled=True
+button | name='Laptop, report received, confirmed 38 of 42 current add-ons, as of 5 min ago. (received 21:05 on 16 November)' | focusable=True | focused=False | enabled=True
+button | name='Den PC, report received, confirmed 38 of 42 current add-ons, as of 18 min ago. (received 20:52 on 16 November)' | focusable=True | focused=False | enabled=True
+status | name='Prototype: fake data, nothing is synced' | focusable=False | focused=False | enabled=True

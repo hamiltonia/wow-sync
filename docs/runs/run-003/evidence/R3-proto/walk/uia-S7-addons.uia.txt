@@ -1,0 +1,66 @@
+banner | name='Status' | focusable=False | focused=False | enabled=True
+status | name='Waiting for your decision on 3 add-ons. World of Warcraft: Forever (wowf), Main add-ons group, this computer: Desk PC' | focusable=False | focused=False | enabled=True
+button | name='Sync now' | focusable=True | focused=False | enabled=True
+button | name='Pause syncing' | focusable=True | focused=False | enabled=True
+navigation | name='Sections' | focusable=False | focused=False | enabled=True
+button | name='Overview' | focusable=True | focused=False | enabled=True
+button | name='Computers' | focusable=True | focused=False | enabled=True
+button | name='Add-ons, current page' | focusable=True | focused=False | enabled=True
+button | name='Needs attention, 3 items' | focusable=True | focused=False | enabled=True
+button | name='Activity' | focusable=True | focused=False | enabled=True
+button | name='Settings sync, coming later' | focusable=True | focused=False | enabled=True
+button | name='App settings' | focusable=True | focused=False | enabled=True
+button | name='About' | focusable=True | focused=False | enabled=True
+button | name='Prototype scenarios' | focusable=True | focused=False | enabled=True
+heading | name='Add-ons' | focusable=False | focused=False | enabled=True
+group | name='Filter add-ons' | focusable=False | focused=False | enabled=True
+button | name='All, 44 add-ons, selected' | focusable=True | focused=True | enabled=True
+button | name='Not up to date, 4 add-ons' | focusable=True | focused=False | enabled=True
+button | name='Needs you, 3 add-ons' | focusable=True | focused=False | enabled=True
+button | name='Not synced here, 2 add-ons' | focusable=True | focused=False | enabled=True
+list | name='Add-ons, 44 items, filter All' | focusable=False | focused=False | enabled=True
+list item | name='Bagnon, needs your decision, version 1.3.3, not confirmed yet' | focusable=True | focused=False | enabled=True
+list item | name='Questie, needs your decision, version 1.4.4, not confirmed yet' | focusable=True | focused=False | enabled=True
+list item | name='WeakAuras, needs your decision, version 5.18.1, not confirmed yet' | focusable=True | focused=False | enabled=True
+list item | name='Details!, update ready, version 9.2.4, not confirmed yet' | focusable=True | focused=False | enabled=True
+list item | name='Action Bar Keys, up to date, version 1.4.5, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Auction Lens, up to date, version 1.7.0, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Bag Sorter Lite, up to date, version 1.8.1, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Camera Tweaks, up to date, version 1.3.4, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Chat Tidy, up to date, version 1.0.2, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Combat Text Lite, up to date, version 1.5.6, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Cooldown Strip, up to date, version 1.1.3, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Damage Meter Mini, up to date, version 1.2.4, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Deadly Boss Mods, up to date, version 11.0.3, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Dungeon Notes, up to date, version 1.3.5, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Flight Timer, up to date, version 1.4.6, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Gear Compare, up to date, version 1.5.0, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Guild Roster Plus, up to date, version 1.6.1, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Healer Frames, up to date, version 1.7.2, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Inspect Plus, up to date, version 1.8.3, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Interrupt Alert, up to date, version 1.0.4, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Keybind Helper, up to date, version 1.1.5, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Legacy Suffixed Pack, not synced here, version 1.1.2, not confirmed yet' | focusable=True | focused=False | enabled=True
+list item | name='Loot Council, up to date, version 1.2.6, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Mailbox Helper, up to date, version 1.6.6, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Map Pins, up to date, version 1.3.0, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Minimap Buttons, up to date, version 1.4.1, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Nameplate Lite, up to date, version 1.5.2, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Party Buffs, up to date, version 1.6.3, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Profession Tracker, up to date, version 1.7.4, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Quest Log Plus, up to date, version 1.8.5, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Raid Cooldowns, up to date, version 1.0.6, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Reputation Bars, up to date, version 1.1.0, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Roll Tracker, up to date, version 1.2.1, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Scroll Frames, up to date, version 1.3.2, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Spell Queue, up to date, version 1.4.3, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Stat Summary, up to date, version 1.5.4, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Talent Notes, up to date, version 1.6.5, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Threat Meter Lite, up to date, version 1.7.6, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Tooltip Extras, up to date, version 1.8.0, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Tooltip Skin Suffixed, not synced here, version 1.2.3, not confirmed yet' | focusable=True | focused=False | enabled=True
+list item | name='Trail Markers, up to date, version 1.5.5, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Unit Frames Slim, up to date, version 1.0.1, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Vendor Price, up to date, version 1.1.2, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+list item | name='Zone Info, up to date, version 1.2.3, confirmed by Laptop, Den PC' | focusable=True | focused=False | enabled=True
+status | name='Prototype: fake data, nothing is synced' | focusable=False | focused=False | enabled=True

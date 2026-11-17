@@ -1,0 +1,19 @@
+[package]
+name = "wow-sync-proto"
+description = "WoW Sync clickable UI prototype on fake in-memory scenario data (A-42); no provider, install or runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "wow-sync-proto"
+path = "src/main.rs"
+
+[dependencies]
+wow-sync-core = { version = "0.0.0", path = "../wow-sync-core" }
+gpui = { workspace = true }
+gpui_platform = { workspace = true }
+tray-icon = { workspace = true }
+raw-window-handle = { workspace = true }
