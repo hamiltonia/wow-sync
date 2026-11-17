@@ -23,6 +23,7 @@ or orchestrator records otherwise.
 | [apply.md](apply.md) | Apply algorithm, safety gates, staging/commit/recovery, crash recovery, status and audit | R2-core, R2-adapters |
 | [tests.md](tests.md) | Required behavioral test names per packet, fixtures, end-to-end and provider tests | all, R2-check |
 | [questions.md](questions.md) | Owner and design questions with recommended defaults | owner, orchestrator |
+| [removal.md](removal.md) | Removal/uninstall design (run-003, not yet implemented): tombstones, intent evidence, apply, recovery | later runs |
 
 [../ARCHITECTURE.md](../ARCHITECTURE.md) is the short overview and invariant
 map; these files are the implementable detail.
