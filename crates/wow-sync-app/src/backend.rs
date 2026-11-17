@@ -9,8 +9,8 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use wow_sync_runtime::{
-    ActivityEntry, AppSettings, EnrollPreview, EnrollRequest, QuitGate, ReconfirmRequest,
-    ServiceConfig, SliceService, StatusSnapshot, StopState,
+    ActivityEntry, AppSettings, EnrollPreview, EnrollRequest, PauseState, QuitGate,
+    ReconfirmRequest, ServiceConfig, SliceService, StatusSnapshot, StopState,
 };
 
 /// Which install and shared folder a computer is set up with.
@@ -41,10 +41,14 @@ pub struct Shared {
     pub snapshot: StatusSnapshot,
     pub preview: Option<EnrollPreview>,
     pub paused_since: Option<i64>,
+    pub pause_damaged: bool,
     pub activity: Vec<ActivityEntry>,
     pub settings: AppSettings,
     pub busy: bool,
     pub last_check_ms: Option<i64>,
+    /// When the scheduler will next run a check on its own; `None` while none is scheduled
+    /// (paused, not enrolled, or no sync thread service).
+    pub next_check_ms: Option<i64>,
     pub message: String,
     pub quit_ready: bool,
     pub setup: Option<SetupData>,
@@ -153,15 +157,15 @@ fn now_ms() -> i64 {
 
 fn refresh(svc: &mut SliceService, shared: &SharedState, wake: &Sender<()>, checked: bool) {
     let st = svc.status();
-    let (paused, act, settings) = (
-        svc.paused_since(),
-        svc.activity_log(300),
-        svc.app_settings(),
-    );
+    let (pause, act, settings) = (svc.pause_state(), svc.activity_log(300), svc.app_settings());
     publish(shared, wake, |g| {
         g.started = true;
         g.snapshot = st;
-        g.paused_since = paused;
+        g.paused_since = match pause {
+            PauseState::Paused { since_ms } => Some(since_ms),
+            _ => None,
+        };
+        g.pause_damaged = pause == PauseState::Damaged;
         g.activity = act;
         g.settings = settings;
         if checked {
@@ -199,6 +203,11 @@ fn run(
         let cmd = if force {
             None
         } else {
+            let scheduled = svc
+                .as_mut()
+                .is_some_and(|s| !s.pause_state().holds_sync() && s.status().enrolled);
+            let next = scheduled.then(|| now_ms() + opts.interval.as_millis() as i64);
+            publish(&shared, &wake, |g| g.next_check_ms = next);
             match rx.recv_timeout(opts.interval) {
                 Err(RecvTimeoutError::Disconnected) => return,
                 Ok(c) => Some(c),
@@ -298,7 +307,7 @@ fn run(
         if !s.status().enrolled {
             continue;
         }
-        if s.paused_since().is_some() && !manual {
+        if s.pause_state().holds_sync() && !manual {
             refresh(s, &shared, &wake, false);
             continue;
         }

@@ -77,6 +77,28 @@ impl LocalState {
             .map(|_| ())
     }
 
+    /// Removes a named plain file; already absent is success.
+    pub fn remove(&self, name: &str) -> Result<(), FsError> {
+        let path = self.root.join(name)?;
+        match self.root.check_components(name) {
+            Ok(m) if m.is_dir => {
+                return Err(FsError::new(
+                    FsErrorKind::NotPlainFile,
+                    &path,
+                    "is a directory",
+                ))
+            }
+            Ok(_) => {}
+            Err(e) if e.kind == FsErrorKind::NotFound => return Ok(()),
+            Err(e) => return Err(e),
+        }
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(FsError::from_io(&path, &e)),
+        }
+    }
+
     /// Appends one line to `audit.jsonl`; rotates at 1 MiB to `audit.1.jsonl`
     /// (two files are kept).
     pub fn append_audit(&self, line: &str) -> Result<(), FsError> {
@@ -147,6 +169,18 @@ impl LocalState {
 mod tests {
     use super::*;
     use crate::testkit::TempDir;
+
+    #[test]
+    fn remove_deletes_a_file_and_tolerates_absence() {
+        let t = TempDir::new();
+        let ls = LocalState::open_at(&t.path().join("state")).unwrap();
+        ls.write_atomic("a.txt", b"x").unwrap();
+        ls.remove("a.txt").unwrap();
+        assert_eq!(ls.read("a.txt", 10).unwrap(), None);
+        ls.remove("a.txt").unwrap();
+        std::fs::create_dir(ls.path().join("d")).unwrap();
+        assert!(ls.remove("d").is_err(), "a directory is not removed");
+    }
 
     #[test]
     fn audit_rotates_at_limit_keeping_two() {

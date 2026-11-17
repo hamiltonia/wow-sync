@@ -2,6 +2,7 @@
 //! and reads Dropbox's own `info.json`; nothing is written and the game is never started.
 
 use std::path::{Path, PathBuf};
+use wow_sync_adapters::probe;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DetectedInstall {
@@ -11,15 +12,10 @@ pub struct DetectedInstall {
 }
 
 fn variant_folders(root: &Path) -> Vec<String> {
-    let mut out: Vec<String> = std::fs::read_dir(root)
-        .map(|rd| {
-            rd.filter_map(|e| e.ok())
-                .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-                .filter_map(|e| e.file_name().into_string().ok())
-                .filter(|n| n.len() > 2 && n.starts_with('_') && n.ends_with('_'))
-                .collect()
-        })
-        .unwrap_or_default();
+    let mut out: Vec<String> = probe::subdir_names(root)
+        .into_iter()
+        .filter(|n| n.len() > 2 && n.starts_with('_') && n.ends_with('_'))
+        .collect();
     out.sort();
     out
 }
@@ -46,8 +42,8 @@ pub fn find_wow(candidates: &[PathBuf]) -> Vec<DetectedInstall> {
 pub fn wow_candidates() -> Vec<PathBuf> {
     let mut v = Vec::new();
     for var in ["ProgramFiles(x86)", "ProgramFiles"] {
-        if let Some(p) = std::env::var_os(var) {
-            v.push(PathBuf::from(p).join("World of Warcraft"));
+        if let Some(p) = probe::env_path(var) {
+            v.push(p.join("World of Warcraft"));
         }
     }
     for drive in ["C", "D", "E", "F"] {
@@ -97,12 +93,12 @@ pub fn dropbox_paths_from_info(text: &str) -> Vec<PathBuf> {
 pub fn find_dropbox(info_files: &[PathBuf], defaults: &[PathBuf]) -> Vec<PathBuf> {
     let mut out: Vec<PathBuf> = Vec::new();
     let mut push = |p: PathBuf| {
-        if p.is_dir() && !out.contains(&p) {
+        if probe::is_dir(&p) && !out.contains(&p) {
             out.push(p);
         }
     };
     for f in info_files {
-        if let Ok(text) = std::fs::read_to_string(f) {
+        if let Some(text) = probe::read_text_bounded(f, probe::INFO_JSON_LIMIT) {
             for p in dropbox_paths_from_info(&text) {
                 push(p);
             }
@@ -117,14 +113,14 @@ pub fn find_dropbox(info_files: &[PathBuf], defaults: &[PathBuf]) -> Vec<PathBuf
 pub fn dropbox_info_files() -> Vec<PathBuf> {
     ["APPDATA", "LOCALAPPDATA"]
         .iter()
-        .filter_map(std::env::var_os)
-        .map(|p| PathBuf::from(p).join("Dropbox").join("info.json"))
+        .filter_map(|v| probe::env_path(v))
+        .map(|p| p.join("Dropbox").join("info.json"))
         .collect()
 }
 
 pub fn dropbox_defaults() -> Vec<PathBuf> {
-    std::env::var_os("USERPROFILE")
-        .map(|p| vec![PathBuf::from(p).join("Dropbox")])
+    probe::env_path("USERPROFILE")
+        .map(|p| vec![p.join("Dropbox")])
         .unwrap_or_default()
 }
 
@@ -158,6 +154,24 @@ mod tests {
             ]
         );
         assert!(dropbox_paths_from_info("garbage {").is_empty());
+    }
+
+    #[test]
+    fn an_oversized_dropbox_info_file_is_not_read() {
+        let t = TempDir::new();
+        let real = t.join("Dropbox");
+        std::fs::create_dir_all(&real).unwrap();
+        let info = t.join("info.json");
+        let mut body = format!(
+            "{{\"personal\": {{\"path\": \"{}\"}}}}",
+            real.display().to_string().replace('\\', "\\\\")
+        );
+        assert_eq!(find_dropbox(std::slice::from_ref(&info), &[]).len(), 0);
+        std::fs::write(&info, &body).unwrap();
+        assert_eq!(find_dropbox(std::slice::from_ref(&info), &[]), vec![real]);
+        body.push_str(&" ".repeat(probe::INFO_JSON_LIMIT as usize));
+        std::fs::write(&info, &body).unwrap();
+        assert!(find_dropbox(&[info], &[]).is_empty());
     }
 
     #[test]

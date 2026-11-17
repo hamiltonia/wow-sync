@@ -2,12 +2,12 @@
 
 use crate::app::{Act, Bk, Shell};
 use crate::model::{
-    self, addon_rows, addon_story, continuation, counts_sentence, filter_count, headline,
-    need_items, paused_hint, peer_view, unconfirmed_addons, Detail, Icon, Label, Page, FILTERS,
+    self, addon_rows, addon_story, counts_sentence, filter_count, headline, need_items,
+    paused_hint, peer_view, unconfirmed_addons, Detail, Icon, Label, Page, FILTERS,
 };
 use crate::theme::{Mode, Palette, ThemeChoice, Tone};
 use crate::ui::{icon, u};
-use crate::world::{rel, ApplyScope, Kind};
+use crate::world::{rel, Kind};
 use gpui::accesskit::Role;
 use gpui::{div, prelude::*, rgb, AnyElement, Context, Div, FontWeight, SharedString};
 use wow_sync_core::status::MemberSummary;
@@ -134,9 +134,6 @@ impl Shell {
                     .into_any_element(),
                 );
             }
-            if let Some(c) = continuation(&self.w) {
-                rows.push(self.muted(c).into_any_element());
-            }
             left.push(self.panel("Needs attention", rows).into_any_element());
         }
         let c = counts_sentence(&self.w);
@@ -196,17 +193,18 @@ impl Shell {
             self.kv("Last shared", ls.clone(), format!("Last shared, {ls}"))
                 .into_any_element(),
         );
-        let lc = self
-            .w
-            .last_check_secs
-            .map(|s| format!("{}; next in 4 min", rel(s)))
-            .unwrap_or_else(|| "Not yet".into());
+        let lc = match (self.w.last_check_secs, &self.w.next_check_at) {
+            (None, _) => "Not yet".to_string(),
+            (Some(s), Some(at)) => format!("{}; next check about {at}", rel(s)),
+            (Some(s), None) => format!("{}; next check unavailable", rel(s)),
+        };
         tc.push(
             self.kv("Last check", lc.clone(), format!("Last check, {lc}"))
                 .into_any_element(),
         );
         if self.w.recovery_extra > 0 {
-            let r = format!("{} extra copies kept for 2 add-ons", self.w.recovery_extra);
+            let n = self.w.recovery_extra;
+            let r = format!("{n} extra {} kept", if n == 1 { "copy" } else { "copies" });
             tc.push(
                 self.kv(
                     "Recovery copies",
@@ -360,7 +358,10 @@ impl Shell {
                             .child(SharedString::from(it.title.clone())),
                     )
                     .child(self.muted(it.reason.clone()))
-                    .child(self.muted(format!("Affects: {}", it.affects))),
+                    .children(
+                        (!it.affects.is_empty())
+                            .then(|| self.muted(format!("Affects: {}", it.affects))),
+                    ),
             )
             .child(button)
             .into_any_element()
@@ -795,12 +796,7 @@ impl Shell {
             folders.push(self.muted(g.clone()).into_any_element());
         }
         let restore = self.btn_off("restore", "Restore…", "coming later", cx);
-        let rec: Vec<AnyElement> = vec![
-            div()
-                .child(SharedString::from(s.recovery.clone()))
-                .into_any_element(),
-            restore.into_any_element(),
-        ];
+        let rec: Vec<AnyElement> = vec![restore.into_any_element()];
         let mut det: Vec<AnyElement> = vec![self
             .disclosure("addon-details", "Details", cx)
             .into_any_element()];
@@ -874,10 +870,14 @@ impl Shell {
         let mut rows: Vec<AnyElement> = Vec::new();
         for (i, it) in items.iter().enumerate() {
             let act = Self::needs_target_act(&it.target);
-            let a = format!(
-                "{}, {}, affects {}, {}",
-                it.title, it.reason, it.affects, it.button
-            );
+            let a = if it.affects.is_empty() {
+                format!("{}, {}, {}", it.title, it.reason, it.button)
+            } else {
+                format!(
+                    "{}, {}, affects {}, {}",
+                    it.title, it.reason, it.affects, it.button
+                )
+            };
             let r = self
                 .rov_row("needs", i, n, &format!("n{i}"), a, act, cx)
                 .flex()
@@ -899,7 +899,10 @@ impl Shell {
                                 .child(SharedString::from(it.title.clone())),
                         )
                         .child(self.muted(it.reason.clone()))
-                        .child(self.muted(format!("Affects: {}", it.affects))),
+                        .children(
+                            (!it.affects.is_empty())
+                                .then(|| self.muted(format!("Affects: {}", it.affects))),
+                        ),
                 )
                 .child(
                     div()
@@ -926,9 +929,6 @@ impl Shell {
             .border_color(rgb(pal.divider))
             .children(rows);
         col = col.child(list);
-        if let Some(c) = continuation(&self.w) {
-            col = col.child(self.muted(c));
-        }
         col.into_any_element()
     }
 
@@ -1052,11 +1052,6 @@ impl Shell {
             );
         }
         col = col.child(self.muted("The chosen copy is installed on every computer in this group. Other copies are kept as recovery copies."));
-        col = col.child(self.muted(if self.w.apply_scope == ApplyScope::AllAppliesBlocked {
-            "Your choice is kept, but no updates are applied on this computer until the interrupted update is resolved.".to_string()
-        } else {
-            format!("Only {} is affected. Other add-ons keep syncing.", a.title)
-        }));
         col = col.child(self.btn("decide-later", "Decide later", Bk::Secondary, Act::Back, cx));
         col.into_any_element()
     }
@@ -1090,12 +1085,18 @@ impl Shell {
                 .into_any_element(),
             );
         }
+        let what = model::addon_story(&self.w, key)
+            .map(|s| s.what)
+            .filter(|t| !t.is_empty())
+            .unwrap_or_else(|| format!("An update of {title} stopped unexpectedly."));
         let mut col = self
             .body_col()
             .child(back)
             .child(self.heading(&format!("{title}: an update stopped unexpectedly"), 1))
-            .child(self.panel("What happened", vec![div().child(SharedString::from(format!("An update of {title} stopped in an unexpected state. Both the previous files and the new files are kept."))).into_any_element()]))
-            .child(self.panel("What it affects", vec![div().child("No updates are applied on this computer until this is resolved. Sharing this computer's add-ons continues.").into_any_element()]))
+            .child(self.panel(
+                "What happened",
+                vec![div().child(SharedString::from(what)).into_any_element()],
+            ))
             .child(div().flex().gap(u(10.)).child(try_again).child(keep));
         if working {
             col = col.child(
@@ -1358,7 +1359,9 @@ impl Shell {
                 cx,
             )
         };
-        let status = if paused {
+        let status = if self.w.pause_damaged {
+            "The pause setting can't be read. Syncing is held until you resume.".to_string()
+        } else if paused {
             format!(
                 "Paused since {}",
                 self.w.paused_since.clone().unwrap_or_default()

@@ -15,8 +15,8 @@ mod e2e;
 
 pub use activity::{ActivityHandle, ActivitySource, ScriptedActivity, WinprocActivity};
 pub use control::{
-    log_activity, paused_since, read_activity, set_paused, ActivityEntry, AppSettings, QuitGate,
-    StopState,
+    log_activity, pause_state, paused_since, read_activity, set_paused, ActivityEntry, AppSettings,
+    PauseState, QuitGate, StopState,
 };
 pub use detail::{
     strip_colour_codes, CandidateRow, FolderRow, MemberRow, PackageRow, StatusDetail,

@@ -430,9 +430,11 @@ impl Shell {
             let mut w = World::from_snapshot(Inputs {
                 snap: &g.snapshot,
                 paused_since_ms: g.paused_since,
+                pause_damaged: g.pause_damaged,
                 activity: &g.activity,
                 syncing: g.busy,
                 last_check_ms: g.last_check_ms,
+                next_check_ms: g.next_check_ms,
                 setup,
                 app_version: &self.app_version,
             });

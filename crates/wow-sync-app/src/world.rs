@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use wow_sync_core::plan::Activity;
 use wow_sync_core::status::{MemberSummary, PackageStatus, StatusView};
 use wow_sync_core::target::DecisionReason;
+use wow_sync_core::view::NextAction;
 use wow_sync_runtime::{ActivityEntry, EnrollPreview, MemberRow, PackageRow, StatusSnapshot};
 
 // ---------------------------------------------------------------------------------------------
@@ -93,14 +94,6 @@ fn day_label(days: i64, today: i64) -> String {
 // ---------------------------------------------------------------------------------------------
 // Types the pages read
 
-/// UG-25: which continuation sentence applies. Core has no typed field for it yet, so the real
-/// app always uses the per-package wording.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ApplyScope {
-    PerPackage,
-    AllAppliesBlocked,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Kind {
     InSync,
@@ -134,8 +127,13 @@ pub struct Addon {
     pub kind: Kind,
     pub source: Option<String>,
     pub candidates: Vec<Candidate>,
-    /// The runtime's own sentence for why this add-on is in its current state.
+    /// The runtime's own sentence (core's `Explanation`, rendered) for why this add-on is in
+    /// its current state.
     pub why: String,
+    /// Core's next action for this add-on (`core::view::next_action`).
+    pub next: NextAction,
+    /// Computers that have not yet reported applying this package.
+    pub awaiting: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -221,9 +219,9 @@ pub struct World {
     pub build: String,
     pub addons: Vec<Addon>,
     pub peers: Vec<Peer>,
-    pub apply_scope: ApplyScope,
     pub busy: Option<Busy>,
     pub paused_since: Option<String>,
+    pub pause_damaged: bool,
     pub game_running: bool,
     pub provider_error: Option<String>,
     pub stale_secs: Option<i64>,
@@ -232,6 +230,8 @@ pub struct World {
     pub update: UpdateInfo,
     pub last_shared_secs: Option<i64>,
     pub last_check_secs: Option<i64>,
+    /// Local clock time ("21:05") of the next scheduled check; `None` when none is scheduled.
+    pub next_check_at: Option<String>,
     pub recovery_extra: u32,
     pub group_id: String,
     pub computer_id: String,
@@ -244,9 +244,11 @@ pub struct World {
 pub struct Inputs<'a> {
     pub snap: &'a StatusSnapshot,
     pub paused_since_ms: Option<i64>,
+    pub pause_damaged: bool,
     pub activity: &'a [ActivityEntry],
     pub syncing: bool,
     pub last_check_ms: Option<i64>,
+    pub next_check_ms: Option<i64>,
     pub setup: Option<SetupData>,
     pub app_version: &'a str,
 }
@@ -356,9 +358,9 @@ impl World {
             build: String::new(),
             addons: Vec::new(),
             peers: Vec::new(),
-            apply_scope: ApplyScope::PerPackage,
             busy: None,
             paused_since: None,
+            pause_damaged: false,
             game_running: false,
             provider_error: None,
             stale_secs: None,
@@ -369,6 +371,7 @@ impl World {
             },
             last_shared_secs: None,
             last_check_secs: None,
+            next_check_at: None,
             recovery_extra: 0,
             group_id: String::new(),
             computer_id: String::new(),
@@ -394,8 +397,13 @@ impl World {
             let (_, hm) = local_parts(ms);
             hm
         });
+        w.pause_damaged = i.pause_damaged;
         w.busy = i.syncing.then_some(Busy::Syncing { done: 0, total: 0 });
         w.last_check_secs = i.last_check_ms.map(|ms| secs_since(now, ms));
+        w.next_check_at = i
+            .next_check_ms
+            .filter(|_| !w.is_paused())
+            .map(|ms| local_parts(ms).1);
         w.activity = activity_items(i.activity, now);
         // The service only remembers a publish made in this run; the log remembers older ones.
         let logged_publish = i
@@ -451,6 +459,8 @@ impl World {
                         })
                         .collect(),
                     why: p.sentence.clone(),
+                    next: p.next,
+                    awaiting: p.awaiting.clone(),
                 })
                 .collect();
         } else {
@@ -476,7 +486,7 @@ impl World {
     }
 
     pub fn is_paused(&self) -> bool {
-        self.paused_since.is_some()
+        self.paused_since.is_some() || self.pause_damaged
     }
 }
 
@@ -509,9 +519,11 @@ mod tests {
         let w = World::from_snapshot(Inputs {
             snap: &snap,
             paused_since_ms: None,
+            pause_damaged: false,
             activity: &[],
             syncing: false,
             last_check_ms: None,
+            next_check_ms: None,
             setup: None,
             app_version: "1.2.3",
         });
@@ -528,13 +540,19 @@ mod tests {
         let w = World::from_snapshot(Inputs {
             snap: &snap,
             paused_since_ms: Some(now_ms()),
+            pause_damaged: false,
             activity: &[],
             syncing: true,
             last_check_ms: Some(now_ms() - 5_000),
+            next_check_ms: Some(now_ms() + 60_000),
             setup: None,
             app_version: "x",
         });
         assert!(w.is_paused());
+        assert!(
+            w.next_check_at.is_none(),
+            "no check is scheduled while paused"
+        );
         assert!(matches!(w.busy, Some(Busy::Syncing { .. })));
         assert!(w.last_check_secs.is_some_and(|s| (4..60).contains(&s)));
     }
@@ -576,9 +594,11 @@ mod tests {
         let w = World::from_snapshot(Inputs {
             snap: &snap,
             paused_since_ms: None,
+            pause_damaged: false,
             activity: &log,
             syncing: false,
             last_check_ms: None,
+            next_check_ms: None,
             setup: None,
             app_version: "x",
         });
