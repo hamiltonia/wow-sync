@@ -38,10 +38,6 @@ pub enum Explanation {
         here: String,
         there: String,
     },
-    DifferentClientBuild {
-        here: Option<String>,
-        there: Option<String>,
-    },
     UnvalidatedTocMapping {
         folder: String,
     },
@@ -130,12 +126,18 @@ pub enum Explanation {
     },
 }
 
-fn ver(v: &Option<String>) -> &str {
-    v.as_deref().unwrap_or("unknown")
+fn another_computer(_: &ComputerId) -> String {
+    "another computer".to_string()
 }
 
-/// One plain-English line. Peer clocks are never presented as "current".
+/// Like [`render_named`] with no names known: a computer reads "another computer".
 pub fn render(e: &Explanation) -> String {
+    render_named(e, &another_computer)
+}
+
+/// One plain-English line. Peer clocks are never presented as "current". Computer IDs never
+/// appear: a computer is named only through `name_of` (UG-22).
+pub fn render_named(e: &Explanation, name_of: &dyn Fn(&ComputerId) -> String) -> String {
     use Explanation::*;
     match e {
         NewerVersion {
@@ -145,11 +147,11 @@ pub fn render(e: &Explanation) -> String {
             source,
         } => {
             format!(
-                "{folder}: version {to} from computer {} is newer than {from} here",
-                source.as_str()
+                "{folder}: version {to} from {} is newer than {from} here",
+                name_of(source)
             )
         }
-        Installed { source } => format!("added from computer {}", source.as_str()),
+        Installed { source } => format!("added from {}", name_of(source)),
         AmbiguousVersions {
             evidence,
             candidates,
@@ -173,7 +175,7 @@ pub fn render(e: &Explanation) -> String {
                     if c.here {
                         who.push("this computer".to_string());
                     }
-                    who.extend(c.sources.iter().map(|s| format!("computer {}", s.as_str())));
+                    who.extend(c.sources.iter().map(|s| name_of(s)));
                     format!("version {} on {}", c.label, who.join(" and "))
                 })
                 .collect();
@@ -193,11 +195,6 @@ pub fn render(e: &Explanation) -> String {
         DifferentTocMapping { here, there } => {
             format!("the other computer reads .toc files differently ({there} vs {here})")
         }
-        DifferentClientBuild { here, there } => format!(
-            "the other computer runs another game build ({} vs {} here)",
-            ver(there),
-            ver(here)
-        ),
         UnvalidatedTocMapping { folder } => format!(
             "{folder} has client-specific .toc files that are not validated for this client, so it is not synced"
         ),
@@ -218,13 +215,13 @@ pub fn render(e: &Explanation) -> String {
             reason,
         } => {
             format!(
-                "waiting for usable data from computer {} (record {seq}: {reason})",
-                computer.as_str()
+                "waiting for usable data from {} (record {seq}: {reason})",
+                name_of(computer)
             )
         }
         MemberRegressed { computer } => format!(
-            "data from computer {} went backwards and was not used",
-            computer.as_str()
+            "data from {} went backwards and was not used",
+            name_of(computer)
         ),
         DestinationChanged { folder } => {
             format!("{folder} changed while it was being prepared; nothing was replaced")
@@ -270,16 +267,16 @@ pub fn render(e: &Explanation) -> String {
                 _ => "installed".to_string(),
             };
             format!(
-                "{package}: {change} from computer {} and verified on this computer",
-                source.as_str()
+                "{package}: {change} from {} and verified on this computer",
+                name_of(source)
             )
         }
         Interrupted { package } => format!(
             "updating {package} was interrupted; it will be finished or restored on the next sync"
         ),
         ConfirmedBy { computers } => {
-            let ids: Vec<&str> = computers.iter().map(|c| c.as_str()).collect();
-            format!("applied and reported by computer(s) {}", ids.join(", "))
+            let names: Vec<String> = computers.iter().map(name_of).collect();
+            format!("applied and reported by {}", names.join(", "))
         }
         Unsupported { folder, why } => format!("{folder} is not supported: {why}"),
         GroupedBy { edges } => format!("grouped because: {}", edges.join("; ")),

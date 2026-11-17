@@ -734,18 +734,20 @@ impl World {
                 let q = set_kind(
                     &mut addons,
                     "Questie",
-                    Kind::NeedsDecision(DecisionReason::DifferentClientBuild),
+                    Kind::NeedsDecision(DecisionReason::DifferentTocMapping),
                 );
                 addons[q].candidates = vec![
                     FakeCandidate {
                         version: "6.1.1".into(),
                         holders: vec!["Laptop".into()],
-                        differences: "Came from a computer with game build fake-build-B.".into(),
+                        differences:
+                            "Came from a computer that reads add-on files by a different rule."
+                                .into(),
                     },
                     FakeCandidate {
                         version: "6.1.0".into(),
                         holders: vec!["This computer".into()],
-                        differences: "Made for game build fake-build-A.".into(),
+                        differences: "Uses this computer's add-on file rule.".into(),
                     },
                 ];
                 let d = set_kind(&mut addons, "Details!", Kind::Available);
@@ -1032,9 +1034,9 @@ impl World {
             DecisionReason::PartialCandidate => Explanation::PartialCandidate {
                 missing: vec!["BagnonOptions".into()],
             },
-            _ => Explanation::DifferentClientBuild {
-                here: Some("fake-build-A".into()),
-                there: Some("fake-build-B".into()),
+            _ => Explanation::DifferentTocMapping {
+                here: "fake-rule-A".into(),
+                there: "fake-rule-B".into(),
             },
         }
     }

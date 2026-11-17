@@ -21,6 +21,7 @@ pub mod target;
 pub mod toc;
 pub mod variant;
 pub mod version;
+pub mod view;
 
 #[cfg(any(test, feature = "testkit"))]
 pub mod testkit;

@@ -27,8 +27,6 @@ pub enum DecisionReason {
     Ambiguous,
     NoCompatibleToc,
     DifferentTocMapping,
-    /// Not produced by core since D-21 (no build gating); kept only for the prototype crate.
-    DifferentClientBuild,
     UnvalidatedTocMapping,
     PartialCandidate,
 }

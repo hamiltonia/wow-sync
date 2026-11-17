@@ -508,7 +508,9 @@ mod tests {
         }
         let t = texts(&last);
         assert!(
-            t.contains("on this computer") && t.contains("computer a"),
+            t.contains("on this computer")
+                && t.contains("another computer")
+                && !t.contains("computer a"),
             "{t}"
         );
     }
@@ -537,7 +539,8 @@ mod tests {
             .iter()
             .map(|p| p.text.clone())
             .collect::<String>();
-        assert!(line.contains("from computer"), "{line}");
+        assert!(line.contains("from another computer"), "{line}");
+        assert!(!line.contains("from computer"), "{line}");
     }
 
     #[test]
