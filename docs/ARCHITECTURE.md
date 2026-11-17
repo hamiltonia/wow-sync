@@ -1,9 +1,12 @@
 # Architecture
 
-> **Status: slice design (run-002), pending independent review.**
+> **Status: slice design (run-002) as extended by run-003 (UI, pause, discovery,
+> D-21 target rules). The code described here is merged; independent review and
+> verification evidence live under [runs/](runs/).**
 > History: written as a PROPOSAL in run-001 packet P1-map to bound the
 > feasibility spikes; updated in run-002 packet R2-design from spike evidence
-> into the design for the first vertical slice. Implementable detail is in
+> into the design for the first vertical slice; brought in line with the
+> merged run-003 code by R3-fix (RV-8). Implementable detail is in
 > [design/](design/README.md); this file is the overview and invariant map.
 > Product meaning lives in [SPEC.md](../SPEC.md) and
 > [ACCEPTANCE.md](../ACCEPTANCE.md); this file only says where that meaning is
@@ -34,9 +37,12 @@
 
 Crates ([design/crates.md](design/crates.md)): `wow-sync-core` (platform-free
 policy, plans and the step executor over port traits, R2-core),
-`wow-sync-adapters` (Windows filesystem/process, provider folder, local state;
-no dependency on core, R2-adapters), `wow-sync-runtime` (glue and service,
-R2-slice), `wow-sync-app` (GPUI shell, R2-slice). One process for the slice
+`wow-sync-adapters` (Windows filesystem/process, provider folder, local state,
+`probe` read-only discovery port; no dependency on core, R2-adapters),
+`wow-sync-runtime` (glue and service, R2-slice), `wow-sync-app` (GPUI shell,
+R2-slice), and `wow-sync-proto`, the frozen D-21-approved UI prototype
+(fake scenarios only; no runtime dependency, see
+[design/ui/prototype.md](design/ui/prototype.md)). One process for the slice
 (S-mem option 1, Q-19).
 
 ### 2.1 Domain core (platform-free)
@@ -57,6 +63,9 @@ Home: [crates/wow-sync-core/](../crates/wow-sync-core/).
 - **Inputs:** bytes and observations from adapters, decoded records, user
   decisions. Times arrive as data for display only, never as ordering proof
   (R-05, R-09).
+- **View helpers (`view`).** `NextAction` and `next_action(status, why)` give
+  the typed "what can the user do next" for one add-on, with one plain
+  sentence each. The GUI renders it and never decides it (A-25).
 - **Must not:** perform I/O, read clocks or RNG, spawn processes, depend on
   GPUI or a provider, or execute content. Enforced by
   `arch::tests::core_sources_use_no_os_io_or_clock` and `#![forbid(unsafe_code)]`.
@@ -67,6 +76,40 @@ Home: [crates/wow-sync-core/](../crates/wow-sync-core/).
 ([design/adapters-api.md](design/adapters-api.md) §9) and runs the sync cycle
 ([design/apply.md](design/apply.md) §1). It makes no policy choices: when an
 adapter reports a changed precondition it returns the observation to core.
+
+Service API used by the GUI (`SliceService` and helpers, all in
+`wow-sync-runtime`):
+
+- **Snapshot.** `status()` returns a `StatusSnapshot` with a typed
+  `StatusDetail` (`detail`): core's `StatusView` plus `PackageRow`s (core's
+  rendered explanation as `sentence`, core's `NextAction` as `next`, computers
+  still `awaiting` a report, candidates), `MemberRow`s and game activity. The
+  GUI shows these rows and adds no sentences of its own (RV-1).
+  "This computer confirmed" counts only applied or in-sync packages (RV-6).
+- **Pause.** `control::pause_state`/`SliceService::pause_state` return
+  `Running`, `Paused { since_ms }` or `Damaged`; a pause file that cannot be
+  read holds sync and is shown as an error, never as a time (RV-2). The file is
+  read and written through the adapters' `localstate` port.
+- **Quit.** `QuitGate`/`StopState` implement quit-when-safe: a sync cycle is a
+  step that may change game files, and quitting is only taken between steps.
+- **Activity.** `log_activity`/`read_activity` keep a bounded, plain-language
+  activity log; `ActivitySource`/`WinprocActivity` observe the game.
+- **Settings.** `AppSettings` (close behaviour and similar) persists in local
+  state.
+- **Discovery.** `find_dropbox`, `find_wow`, `dropbox_*` and `wow_candidates`
+  locate a Dropbox folder and WoW installs. All directory listing, environment
+  reads and the bounded (64 KiB) Dropbox `info.json` read go through the
+  adapters' `probe` port (RV-7).
+
+The app (`wow-sync-app`) keeps a pure view-model (`world`, `model`) that is
+unit-tested without GPUI; `backend` runs the sync thread and publishes the
+snapshot, the last check and the scheduler's next check.
+
+### 2.2a Prototype (`wow-sync-proto`)
+
+A GPUI prototype of the D-21 screens over fake scenarios, kept as the approved
+visual reference. It is frozen: only D-21 copy fixes are applied, and it is to
+be retired or merged into a shared UI crate in a later run (RV-9).
 ### 2.3 Adapters (responsibilities, unchanged from the proposal)
 
 Every adapter treats file, provider and log contents as untrusted data (E-06)

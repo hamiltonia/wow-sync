@@ -171,8 +171,9 @@ pub struct TargetInput<'a> { pub group: &'a GroupRecord, pub variant: &'a Confir
 pub enum PackageTarget { InSync, Chosen { version: PackageVersion, sources: Vec<ComputerId>, why: Explanation },
                          NeedsDecision { reason: DecisionReason, candidates: Vec<(PackageVersion, Vec<ComputerId>)>, why: Explanation },
                          Unavailable { why: Explanation } }
-// DecisionReason: Ambiguous | NoCompatibleToc | DifferentTocMapping | DifferentClientBuild
+// DecisionReason: Ambiguous | NoCompatibleToc | DifferentTocMapping
 //               | UnvalidatedTocMapping | PartialCandidate          (domain.md §6)
+// (D-21: DifferentClientBuild was removed; build and Interface numbers never gate a package.)
 pub struct GroupTarget { pub packages: BTreeMap<FolderKey, PackageTarget> }
 pub fn compute_target(input: &TargetInput) -> GroupTarget;
 
@@ -280,7 +281,7 @@ pub enum Explanation { /* closed set, each with structured fields, e.g. */
     NewerVersion { folder: String, from: String, to: String, source: ComputerId },
     Installed { source: ComputerId }, AmbiguousVersions { evidence: Vec<FolderEvidence> },
     PartialCandidate { missing: Vec<String> /* membership folders absent from the candidate */ }, NoCompatibleToc { folder: String },
-    DifferentClientBuild { here: Option<String>, there: Option<String> }, UnvalidatedTocMapping { folder: String },
+    DifferentTocMapping { here: String, there: String }, UnvalidatedTocMapping { folder: String },
     GameRunning, ActivityUnknown(String), Unstable, NotAvailableYet { missing: Vec<Sha256> },
     MemberUnusable { computer: ComputerId, seq: u64, reason: String }, MemberRegressed { computer: ComputerId },
     DestinationChanged { folder: String }, InterruptedByGame { package: String },

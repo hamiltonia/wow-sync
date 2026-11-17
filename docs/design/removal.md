@@ -631,7 +631,7 @@ objects, so every computer that has learned the same authority reaches the
 same group-wide result (R-06 determinism). A computer that knows of an
 object it cannot read waits (`AuthorityPending`) instead of acting on less.
 Per
-computer results are explained per computer, like `DifferentClientBuild`.
+computer results are explained per computer, like `DifferentTocMapping`.
 
 ### 3.2 Safe default while undecided
 

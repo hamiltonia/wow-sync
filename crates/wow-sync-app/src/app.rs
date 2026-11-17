@@ -1016,12 +1016,9 @@ impl Shell {
         let Some(t) = &self.tray else { return };
         match e {
             TrayEv::Click => {
+                // Q-39: a left click (and a second instance's request) always opens the window.
                 log("tray left click");
-                if self.visible {
-                    self.hide();
-                } else {
-                    self.show();
-                }
+                self.show();
             }
             TrayEv::Menu(id) => {
                 log("tray menu item");
@@ -1170,7 +1167,19 @@ impl Shell {
             } else {
                 div().into_any_element()
             });
+        let me = cx.entity();
+        let a11y_act = act.clone();
+        let a11y_key = key.to_string();
         self.clickable(key, act, cx)
+            .on_a11y_action(gpui::accesskit::Action::Click, move |_, window, app| {
+                // UIA TogglePattern arrives as Click without a pointer position; act directly.
+                let act = a11y_act.clone();
+                let key = a11y_key.clone();
+                me.update(app, |this, cx| {
+                    this.last_key = key;
+                    this.do_act(act, window, cx)
+                });
+            })
             .role(if switch { Role::Switch } else { Role::CheckBox })
             .aria_label(SharedString::from(label.to_string()))
             .aria_toggled(if on { Toggled::True } else { Toggled::False })

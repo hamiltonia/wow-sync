@@ -193,11 +193,7 @@ impl Shell {
             self.kv("Last shared", ls.clone(), format!("Last shared, {ls}"))
                 .into_any_element(),
         );
-        let lc = match (self.w.last_check_secs, &self.w.next_check_at) {
-            (None, _) => "Not yet".to_string(),
-            (Some(s), Some(at)) => format!("{}; next check about {at}", rel(s)),
-            (Some(s), None) => format!("{}; next check unavailable", rel(s)),
-        };
+        let lc = model::last_check_text(&self.w);
         tc.push(
             self.kv("Last check", lc.clone(), format!("Last check, {lc}"))
                 .into_any_element(),

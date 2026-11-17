@@ -1,0 +1,18 @@
+A-29 summary (2026-11-17 12:39), scale=1; private working set, MiB; limit 100
+scenario a: runs=3 steady-median per run [28.43, 28.47, 28.44] min/median/max = 28.43/28.44/28.47; whole-run max 30.09; verdict PASS
+   context (median of runs): private bytes 56.05, working set 59.14, gpu dedicated 0, gpu shared 13
+scenario b: runs=3 steady-median per run [35.01, 35.63, 35.45] min/median/max = 35.01/35.45/35.63; whole-run max 37.26; verdict PASS
+   context (median of runs): private bytes 99.49, working set 70.26, gpu dedicated 0, gpu shared 39.84
+scenario c: runs=3 steady-median per run [35.02, 35.5, 35.55] min/median/max = 35.02/35.5/35.55; whole-run max 36.77; verdict PASS
+   context (median of runs): private bytes 104.8, working set 68.99, gpu dedicated 0, gpu shared 21.38
+sync start (launch -> first state/provider change), s: n=9 min/median/max = 0.21/0.26/0.28; timeouts=0
+   a-run1: 0.27 s [state\admission.json]
+   a-run2: 0.25 s [state\admission.json]
+   a-run3: 0.28 s [state\admission.json]
+   b-run1: 0.23 s [state\admission.json]
+   b-run2: 0.21 s [state\admission.json]
+   b-run3: 0.24 s [state\admission.json]
+   c-run1: 0.26 s [state\admission.json]
+   c-run2: 0.27 s [state\admission.json]
+   c-run3: 0.26 s [state\admission.json]
+findings: 0

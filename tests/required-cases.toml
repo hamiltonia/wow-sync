@@ -569,7 +569,7 @@ id = "R3-ui-build:runtime"
 tier = "offline"
 tests = [
     "control::tests::pause_persists_across_a_restart_until_resumed",
-    "control::tests::a_damaged_pause_file_still_reads_as_paused",
+    "control::tests::a_damaged_pause_file_holds_sync_and_is_an_error_not_a_time",
     "control::tests::quit_waits_for_the_safe_point",
     "control::tests::quit_is_immediate_when_idle_and_cancel_keeps_running",
     "control::tests::settings_default_off_and_round_trip",
@@ -608,4 +608,20 @@ tests = [
     "world::tests::activity_jargon_is_rewritten_and_last_shared_comes_from_the_log",
     "backend::tests::refusals_read_as_plain_language",
     "backend::tests::target_round_trips_and_partial_files_are_ignored",
+]
+
+[[case]]
+id = "R3-fix:app"
+tier = "offline"
+tests = [
+    "model::tests::every_decision_reason_has_its_own_build_free_wording",
+    "model::tests::last_check_text_uses_the_scheduler_or_says_unavailable",
+    "model::tests::interrupted_text_follows_core_and_differs_by_cause",
+    "model::tests::next_step_text_is_core_s_for_other_actions",
+    "model::tests::every_decision_reason_has_distinct_build_free_wording",
+    "probe::tests::bounded_read_refuses_a_file_over_the_limit",
+    "probe::tests::subdir_names_lists_only_directories",
+    "localstate::tests::remove_deletes_a_file_and_tolerates_absence",
+    "discover::tests::an_oversized_dropbox_info_file_is_not_read",
+    "detail::tests::this_computer_confirms_only_applied_or_in_sync_packages",
 ]

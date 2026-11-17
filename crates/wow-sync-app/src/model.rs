@@ -856,6 +856,16 @@ pub struct Story {
     pub details: Vec<String>,
 }
 
+/// "Last check" line: the real time of the last check, then the scheduler's next check or
+/// "unavailable" (never a guessed interval).
+pub fn last_check_text(w: &World) -> String {
+    match (w.last_check_secs, &w.next_check_at) {
+        (None, _) => "Not yet".to_string(),
+        (Some(s), Some(at)) => format!("{}; next check about {at}", rel(s)),
+        (Some(s), None) => format!("{}; next check unavailable", rel(s)),
+    }
+}
+
 /// Core's rendered explanation as a sentence: first letter capitalised, one full stop.
 fn as_sentence(s: &str) -> String {
     let s = s.trim().trim_end_matches('.');
@@ -1204,7 +1214,6 @@ mod tests {
             target_version: None,
             folders: vec![],
             kind: Kind::Available,
-            source: None,
             candidates: vec![],
             why: String::new(),
             next: wow_sync_core::view::NextAction::CloseGame,
@@ -1226,6 +1235,115 @@ mod tests {
             }
             assert!(seen.insert(text), "{r:?} wording is not distinct");
         }
+    }
+
+    #[test]
+    fn last_check_text_uses_the_scheduler_or_says_unavailable() {
+        let mut w = enrolled();
+        assert_eq!(last_check_text(&w), "Not yet");
+        w.last_check_secs = Some(30);
+        assert!(last_check_text(&w).ends_with("next check unavailable"));
+        w.next_check_at = Some("14:07".into());
+        let t = last_check_text(&w);
+        assert!(t.ends_with("next check about 14:07"), "{t}");
+        assert!(!t.contains("min"), "no literal interval: {t}");
+    }
+
+    fn world_with(status: PackageStatus, why: wow_sync_core::explain::Explanation) -> World {
+        use crate::world::Inputs;
+        use wow_sync_runtime::{PackageRow, StatusDetail, StatusSnapshot};
+        let key = wow_sync_core::paths::validate_folder_name("Demo").unwrap();
+        let mut view = crate::world::placeholder_view();
+        view.packages.push((key, status.clone(), why.clone()));
+        let row = PackageRow {
+            key: "demo".into(),
+            title: "Demo".into(),
+            status: status.clone(),
+            sentence: wow_sync_core::explain::render(&why),
+            next: wow_sync_core::view::next_action(&status, &why),
+            version_here: Some("1".into()),
+            version_target: Some("2".into()),
+            sources: vec![],
+            folders: vec![],
+            awaiting: vec![],
+            confirmed_by: vec![],
+            candidates: vec![],
+        };
+        let snap = StatusSnapshot {
+            enrolled: true,
+            detail: Some(StatusDetail {
+                view,
+                packages: vec![row],
+                members: vec![],
+                game: wow_sync_core::plan::Activity::NotRunning,
+                group_id: String::new(),
+                computer_id: String::new(),
+                variant_label: String::new(),
+                variant_folder: String::new(),
+                app_version: String::new(),
+                game_build: None,
+            }),
+            ..Default::default()
+        };
+        World::from_snapshot(Inputs {
+            snap: &snap,
+            paused_since_ms: None,
+            pause_damaged: false,
+            activity: &[],
+            syncing: false,
+            last_check_ms: None,
+            next_check_ms: None,
+            setup: None,
+            app_version: "x",
+        })
+    }
+
+    #[test]
+    fn interrupted_text_follows_core_and_differs_by_cause() {
+        use wow_sync_core::explain::{render, Explanation as E};
+        let a = E::Interrupted {
+            package: "Demo".into(),
+        };
+        let b = E::InterruptedByGame {
+            package: "Demo".into(),
+        };
+        let sa = addon_story(&world_with(PackageStatus::Interrupted, a.clone()), "demo").unwrap();
+        let sb = addon_story(&world_with(PackageStatus::Interrupted, b.clone()), "demo").unwrap();
+        assert_eq!(sa.what, as_sentence(&render(&a)));
+        assert_eq!(sb.what, as_sentence(&render(&b)));
+        assert_ne!(sa.what, sb.what);
+        assert_eq!(
+            sa.next,
+            wow_sync_core::view::NextAction::CloseGame.sentence()
+        );
+    }
+
+    #[test]
+    fn next_step_text_is_core_s_for_other_actions() {
+        use wow_sync_core::explain::Explanation as E;
+        use wow_sync_core::view::NextAction;
+        let s = addon_story(
+            &world_with(
+                PackageStatus::Unavailable,
+                E::Interrupted {
+                    package: "Demo".into(),
+                },
+            ),
+            "demo",
+        )
+        .unwrap();
+        assert_eq!(s.next, NextAction::WaitForDropbox.sentence());
+        let s = addon_story(
+            &world_with(
+                PackageStatus::Available,
+                E::Interrupted {
+                    package: "Demo".into(),
+                },
+            ),
+            "demo",
+        )
+        .unwrap();
+        assert_eq!(s.next, NextAction::ApplyOnNextSync.sentence());
     }
 
     #[test]

@@ -125,7 +125,6 @@ pub struct Addon {
     pub target_version: Option<String>,
     pub folders: Vec<String>,
     pub kind: Kind,
-    pub source: Option<String>,
     pub candidates: Vec<Candidate>,
     /// The runtime's own sentence (core's `Explanation`, rendered) for why this add-on is in
     /// its current state.
@@ -448,7 +447,6 @@ impl World {
                     target_version: p.version_target.clone(),
                     folders: p.folders.iter().map(|f| f.name.clone()).collect(),
                     kind: kind_of(p, &others),
-                    source: p.sources.first().cloned(),
                     candidates: p
                         .candidates
                         .iter()

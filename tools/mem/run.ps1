@@ -1,13 +1,16 @@
 # A-29 memory measurement of the current product app (run-003, R3-mem).
-#   powershell -NoProfile -File tools\mem\run.ps1 [-Scenarios a,b,c] [-Runs 3] [-OutDir <dir>] [-Scale 1.0]
+#   powershell -NoProfile -File tools\mem\run.ps1 [-Scenarios a,b,c] [-Runs 3] [-OutDir <dir>] [-Scale 1.0] [-LabRoot <dir>]
 # Needs: cargo build --release -p wow-sync-app   (target\release\wow-sync.exe, devkit.exe)
 # -Scale shortens the idle/UI durations (smoke tests only; gated numbers use the default 1.0).
-# Synthetic data only, under $env:TEMP\wowsync-mem. Never touches WoW, Battle.net or Dropbox.
+# -LabRoot is the neutral directory for synthetic data (default: $env:WOWSYNC_LAB_ROOT, else
+# $env:TEMP\wowsync-mem). Use a path with no user name, e.g. D:\WoWSyncLab\<packet>, for evidence runs.
+# Synthetic data only, under the lab root. Never touches WoW, Battle.net or Dropbox.
 param(
     [string[]]$Scenarios = @('a', 'b', 'c'),
     [int]$Runs = 3,
     [string]$OutDir = "$PSScriptRoot\..\..\docs\runs\run-003\evidence\R3-mem",
-    [double]$Scale = 1.0
+    [double]$Scale = 1.0,
+    [string]$LabRoot = $(if ($env:WOWSYNC_LAB_ROOT) { $env:WOWSYNC_LAB_ROOT } else { Join-Path $env:TEMP 'wowsync-mem' })
 )
 . "$PSScriptRoot\MemLib.ps1"
 $Scenarios = @($Scenarios | ForEach-Object { $_ -split ',' })
@@ -16,7 +19,7 @@ Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 $Repo = (Resolve-Path "$PSScriptRoot\..\..").Path
 $App = "$Repo\target\release\wow-sync.exe"
 $Dev = "$Repo\target\release\devkit.exe"
-$LabRoot = Join-Path $env:TEMP 'wowsync-mem'
+$LabRoot = [IO.Path]::GetFullPath($LabRoot).TrimEnd('\')
 $OutDir = (New-Item -ItemType Directory -Force $OutDir).FullName
 $Findings = [Collections.Generic.List[string]]::new()
 $Results = [Collections.Generic.List[object]]::new()

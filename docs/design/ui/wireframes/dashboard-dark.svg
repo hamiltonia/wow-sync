@@ -37,7 +37,7 @@
   <text x="592" y="144" text-anchor="end" fill="#8AB8FF">Choose a copy</text>
   <text x="244" y="172" fill="#E8EAEE">Bagnon: newest copy is incomplete</text>
   <text x="592" y="172" text-anchor="end" fill="#8AB8FF">Choose a copy</text>
-  <text x="244" y="200" fill="#E8EAEE">Questie: made for a different game build</text>
+  <text x="244" y="200" fill="#E8EAEE">Questie: the copies read their file lists differently</text>
   <text x="592" y="200" text-anchor="end" fill="#8AB8FF">Choose a copy</text>
   <text x="244" y="236" font-size="12" fill="#A7AFBB">Other add-ons keep syncing.</text>
   <!-- left column 2: This computer, key/value rows -->
