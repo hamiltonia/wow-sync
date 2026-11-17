@@ -523,6 +523,13 @@ tests = [
     "target::tests::multi_folder_package_needs_every_folder_supported",
     "target::tests::same_build_ignores_interface_numbers",
     "target::tests::different_mapping_still_needs_decision_with_same_interface",
+    "target::tests::malformed_interface_tokens_fail_closed",
+    "target::tests::missing_builds_apply_the_interface_rule",
+    "target::tests::multi_client_local_toc_does_not_authorize",
+    "target::tests::stale_unrelated_local_addon_does_not_authorize",
+    "target::tests::new_addon_or_added_folder_on_other_build_needs_decision",
+    "toc::tests::interface_validity_requires_clean_agreeing_headers",
+    "inventory::tests::summary_without_interface_valid_reads_as_invalid",
 ]
 
 [[case]]
@@ -531,4 +538,6 @@ tier = "offline"
 tests = [
     "e2e::tests::different_build_same_interface_applies",
     "e2e::tests::different_build_different_interface_needs_decision",
+    "e2e::tests::different_build_malformed_interface_needs_decision",
+    "e2e::tests::different_build_new_addon_needs_decision",
 ]

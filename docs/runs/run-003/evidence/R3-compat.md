@@ -45,3 +45,38 @@ No mutation is committed.
 - A stale local addon with an old interface number counts as evidence for that number.
 - Exact equality only; no ranges or "newer is fine".
 - Multi-number tocs need every number supported (conservative).
+
+## Retry 1 (R3-compat-fix): R3D-1, R3D-2, R3D-3
+
+Environment: Windows 11 x64, Rust 1.100.0, worktree `R3-compat-fix`, branch `run003/R3-compat-fix`.
+
+- **R3D-1 fixed.** `TocInfo`/`TocSummary` gain `interface_valid` (true only for at least one
+  header, every token a valid `u32`, repeated headers agreeing). Empty, non-numeric,
+  overflowing tokens and conflicting repeated headers fail closed. Wire: the field is
+  `#[serde(default)]`, so records written earlier read as invalid (cross-build candidates
+  from them need a decision until republished); older readers ignore the new field.
+- **R3D-2 fixed.** Only two present, equal builds skip the interface rule.
+- **R3D-3 rule A (orchestrator interim, owner to confirm).** A different/unknown-build
+  candidate installs only if the same package is installed locally and, for every candidate
+  folder, the local copy's valid Interface set exactly equals the candidate's. Union
+  evidence was removed.
+- Tests: core `malformed_interface_tokens_fail_closed`, `missing_builds_apply_the_interface_rule`,
+  `multi_client_local_toc_does_not_authorize`, `stale_unrelated_local_addon_does_not_authorize`,
+  `new_addon_or_added_folder_on_other_build_needs_decision`, toc
+  `interface_validity_requires_clean_agreeing_headers`, inventory
+  `summary_without_interface_valid_reads_as_invalid`; e2e `different_build_same_interface_applies`
+  (same addon updated), `..._different_interface_...`, `..._malformed_interface_...`,
+  `..._new_addon_...`. Existing positive tests kept (same-addon match still applies).
+
+A-38 negative controls (mutate, observe exit 101, restore; none committed):
+
+| Mutation | Failing tests |
+|---|---|
+| `interface_valid` ignores bad tokens/conflicts | `malformed_interface_tokens_fail_closed`, `interface_validity_requires_clean_agreeing_headers`, `parses_header_keys_with_bom_and_crlf`, e2e `different_build_malformed_interface_needs_decision` |
+| build check skips when both builds are `None` | `missing_builds_apply_the_interface_rule` |
+| evidence = any local folder with an equal set (union style) | `stale_unrelated_local_addon_does_not_authorize`, `new_addon_or_added_folder_on_other_build_needs_decision`, e2e `different_build_new_addon_needs_decision` |
+| subset instead of exact equality | `multi_client_local_toc_does_not_authorize` |
+| remove `#[serde(default)]` | `summary_without_interface_valid_reads_as_invalid` |
+
+Results: `cargo xtask verify --tier offline` PASS (Windows 11 x64, local; macOS NOT RUN, CI only).
+`cargo test --workspace`: core 185, runtime 30, adapters 45 (3 ignored), 0 failed.
