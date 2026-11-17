@@ -133,8 +133,8 @@ mod tests {
     fn finds_only_roots_with_variant_folders() {
         let t = TempDir::new();
         let wow = t.join("World of Warcraft");
-        std::fs::create_dir_all(format!("{}\\_classic_era_", wow.display())).unwrap();
-        std::fs::create_dir_all(format!("{}\\Data", wow.display())).unwrap();
+        std::fs::create_dir_all(wow.join("_classic_era_")).unwrap();
+        std::fs::create_dir_all(wow.join("Data")).unwrap();
         let empty = t.join("Nothing");
         std::fs::create_dir_all(&empty).unwrap();
         let found = find_wow(&[wow.clone(), empty, t.join("missing"), wow.clone()]);
