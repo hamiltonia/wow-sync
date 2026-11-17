@@ -170,6 +170,28 @@ Answers from an interactive review session with the orchestrator.
   - UI direction.
   - Run-003 scope and credit ceiling.
 
+### D-19: Run-003 direction and ceiling (2026-11-16)
+
+- **Credit ceiling:** 10,000 AIU for run-003, counted from run-003 start and
+  separate from the D-16 allowance.
+  - Stop launching new work at 95% of the ceiling.
+  - Settling up to 110% is acceptable, as under D-16.
+- **Scope:**
+  - UI design plus a clickable prototype that needs owner approval (A-42).
+  - Memory gate re-measured with a safe harness.
+  - Windows `native` test tier enforced, and the flaky CI test fixed.
+  - Dependabot triage and fix.
+  - Q-21 interface-number compatibility rule.
+  - Addon uninstall/removal design.
+- **UI direction:**
+  - A roomier dashboard rather than a compact tray popup.
+  - Follows the system light/dark theme.
+  - Owner reference: Syncthing.
+- **Owner help:** the owner will do the real-PC checks for Q-3 (`.toc`
+  selection) and Q-23 (an online-only Dropbox file) once given instructions.
+- **Still required:** the run-003 plan itself needs owner approval before any
+  worker launches.
+
 ### D-10: Representative addon dataset
 
 - Resolved by D-14: the dev PC's `_forever_` addons (102 folders, ~3.3 GB as of
@@ -210,4 +232,5 @@ Answers from an interactive review session with the orchestrator.
 | 2026-11-14 | D-13 | Run-001 ceiling 2,500 AIU cumulative approved | `a4d471b` |
 | 2026-11-15 | D-16 | Run-001 ceiling raised to 10,000 AIU; continue in current session | `f2a1323` |
 | 2026-11-15 | D-17 | Continue into run-002 within D-16 budget; provisional defaults | `961a133` |
-| 2026-11-16 | D-18 | Run-002 owner review: incidents, PLAN §6, D-12, design questions, Q-21 interface rule | this commit |
+| 2026-11-16 | D-18 | Run-002 owner review: incidents, PLAN §6, D-12, design questions, Q-21 interface rule | `d83fda7` |
+| 2026-11-16 | D-19 | Run-003 scope, UI direction, 10,000 AIU ceiling; plan approval pending | this commit |
