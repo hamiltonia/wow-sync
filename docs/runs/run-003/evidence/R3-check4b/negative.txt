@@ -1,0 +1,42 @@
+   Compiling version_check v0.9.5
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling typenum v1.20.1
+   Compiling unicode-ident v1.0.27
+   Compiling serde_core v1.0.229
+   Compiling zmij v1.0.23
+   Compiling serde v1.0.229
+   Compiling serde_json v1.0.154
+   Compiling memchr v2.8.3
+   Compiling cfg-if v1.0.5
+   Compiling itoa v1.0.19
+   Compiling cpufeatures v0.2.17
+   Compiling generic-array v0.14.7
+   Compiling syn v3.0.10
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling digest v0.10.7
+   Compiling sha2 v0.10.9
+   Compiling serde_derive v1.0.229
+   Compiling wow-sync-core v0.0.0 (D:\GitHub\wow-sync.worktrees\R3-check4b\crates\wow-sync-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 17.00s
+     Running unittests src\lib.rs (target\debug\build\wow-sync-core/77511e3dde9d5048\out\wow_sync_core-77511e3dde9d5048.exe)
+
+running 1 test
+test exec::tests::recovery_blocked_by_a_running_game_does_not_record_a_cause ... FAILED
+
+failures:
+
+---- exec::tests::recovery_blocked_by_a_running_game_does_not_record_a_cause stdout ----
+
+thread 'exec::tests::recovery_blocked_by_a_running_game_does_not_record_a_cause' (19468) panicked at crates\wow-sync-core\src\exec_tests.rs:205:9:
+Committed: cause stays unknown
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    exec::tests::recovery_blocked_by_a_running_game_does_not_record_a_cause
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 181 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p wow-sync-core --lib`

@@ -1,0 +1,17 @@
+[
+  {
+    "check": "Original crash oracle",
+    "verdict": "PASS",
+    "detail": "Crash happens with no stand-in; staging journal has no recorded cause."
+  },
+  {
+    "check": "Original update finishes",
+    "verdict": "PASS",
+    "detail": "After resume, Beta 3.0.0 bytes match the provider peer."
+  },
+  {
+    "check": "Recovery crash oracle",
+    "verdict": "PASS",
+    "detail": "Crash with no stand-in leaves a committing journal with unknown cause."
+  }
+]

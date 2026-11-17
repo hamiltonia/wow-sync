@@ -1,0 +1,22 @@
+[
+  {
+    "check": "Recovery crash oracle",
+    "verdict": "PASS",
+    "detail": "Crash with no stand-in leaves a committing journal with unknown cause."
+  },
+  {
+    "check": "Recovery retains unknown cause",
+    "verdict": "PASS",
+    "detail": "Resume while the stand-in runs leaves the journal byte-identical with no cause field."
+  },
+  {
+    "check": "Recovery does not apply while game runs",
+    "verdict": "PASS",
+    "detail": "Existing Beta 3.0.0 stays unchanged while the stand-in runs."
+  },
+  {
+    "check": "Recovery finishes after game stops",
+    "verdict": "PASS",
+    "detail": "After stopping the captured stand-in and clicking Sync now, journal is removed and Beta 5.0.0 matches B."
+  }
+]

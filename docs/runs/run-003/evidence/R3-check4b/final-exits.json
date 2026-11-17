@@ -1,0 +1,12 @@
+[
+  {
+    "label": "positive-core",
+    "command": "cargo test --locked -p wow-sync-core --lib",
+    "exit": 0
+  },
+  {
+    "label": "offline",
+    "command": "cargo xtask verify --tier offline",
+    "exit": 0
+  }
+]

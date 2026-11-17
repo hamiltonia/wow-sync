@@ -1,0 +1,71 @@
+PASS Recovery crash oracle : Crash with no stand-in leaves a committing journal with unknown cause.
+LAUNCH stand-in captured PID=32064
+LAUNCH app-A captured PID=22964
+INVOKE Resume syncing
+PASS Recovery retains unknown cause : Resume while the stand-in runs leaves the journal byte-identical with no cause field.
+PASS Recovery does not apply while game runs : Existing Beta 3.0.0 stays unchanged while the stand-in runs.
+INVOKE Add-ons
+INVOKE LabBeta*
+CAPTURE recovery-running-after-resume (body text requires visual review)
+ControlType.Group: Status
+ControlType.StatusBar: Waiting. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Sync now
+ControlType.Button: Pause syncing
+ControlType.Group: Sections
+ControlType.Button: Overview
+ControlType.Button: Computers
+ControlType.Button: Add-ons, current page
+ControlType.Button: Needs attention
+ControlType.Button: Activity
+ControlType.Button: Settings sync, coming later
+ControlType.Button: App settings
+ControlType.Button: About
+ControlType.StatusBar: WoW is running. WoW Sync never changes game files while the game runs. 1 update will be applied after you close WoW.
+ControlType.Button: Back to Add-ons
+ControlType.Text: LabBeta
+ControlType.Text: Versions
+ControlType.Text: What happened
+ControlType.Text: Why this version
+ControlType.Text: Next step
+ControlType.Text: On each computer
+ControlType.Button: Lab-B
+ControlType.Text: Folders
+ControlType.Text: Recovery copies
+ControlType.Button: Restore…, coming later
+ControlType.Text: Details
+ControlType.Button: Details, collapsed
+STOP captured PID=32064
+INVOKE Overview
+INVOKE Sync now
+PASS Recovery finishes after game stops : After stopping the captured stand-in and clicking Sync now, journal is removed and Beta 5.0.0 matches B.
+INVOKE Add-ons
+INVOKE LabBeta*
+CAPTURE recovery-finished (body text requires visual review)
+ControlType.Group: Status
+ControlType.StatusBar: This computer is up to date. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Sync now
+ControlType.Button: Pause syncing
+ControlType.Group: Sections
+ControlType.Button: Overview
+ControlType.Button: Computers
+ControlType.Button: Add-ons, current page
+ControlType.Button: Needs attention
+ControlType.Button: Activity
+ControlType.Button: Settings sync, coming later
+ControlType.Button: App settings
+ControlType.Button: About
+ControlType.Button: Back to Add-ons
+ControlType.Text: LabBeta
+ControlType.Text: Versions
+ControlType.Text: What happened
+ControlType.Text: Why this version
+ControlType.Text: Next step
+ControlType.Text: On each computer
+ControlType.Button: Lab-B
+ControlType.Text: Folders
+ControlType.Text: Recovery copies
+ControlType.Button: Restore…, coming later
+ControlType.Text: Details
+ControlType.Button: Details, collapsed
+STOP captured PID=22964
+REMAINING CAPTURED PROCESSES=0; LOST STAND-IN PID=False
