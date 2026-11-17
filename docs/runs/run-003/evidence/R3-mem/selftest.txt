@@ -1,0 +1,15 @@
+PASS  synthetic: valid child + grandchild counted
+PASS  synthetic: older process naming the root as parent NOT counted
+PASS  synthetic: grandchild older than its parent NOT counted
+PASS  synthetic: unrelated tree NOT counted
+PASS  synthetic: root PID reused (different creation time) -> empty set
+PASS  synthetic: root gone -> empty set
+PASS  live: dummy parent has a child process
+PASS  live: parent + its real child counted
+PASS  live: independently launched process NOT counted
+PASS  live: record with wrong creation time (PID-reuse stand-in) owns nothing
+PASS  live: Stop-Launched refuses a mismatched creation time (process still alive)
+PASS  live: Stop-Launched stops the validated parent
+PASS  live: the independently launched process was not touched
+INFO  child survived parent stop (reported, never stopped by the harness): True
+SELFTEST PASS
