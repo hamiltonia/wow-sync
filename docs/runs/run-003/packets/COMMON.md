@@ -2,7 +2,8 @@
 
 Authority:
 - SPEC.md, ACCEPTANCE.md and ENGINEERING.md.
-- OWNER-DECISIONS.md: D-04, D-05, D-08, D-09, D-14, D-18, D-19 and D-20.
+- OWNER-DECISIONS.md: D-04, D-05, D-08, D-09, D-14, D-18, D-19, D-20 and
+  D-21. D-21 overrides earlier Q-21 and removal defaults.
 - [../PLAN.md](../PLAN.md).
 
 Read AGENTS.md first. Each `R3-*` packet plus this file is the full work
