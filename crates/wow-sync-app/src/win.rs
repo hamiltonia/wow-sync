@@ -7,7 +7,6 @@ mod imp {
     #[link(name = "user32")]
     extern "system" {
         fn ShowWindow(hwnd: isize, cmd: i32) -> i32;
-        fn IsWindowVisible(hwnd: isize) -> i32;
         fn SetForegroundWindow(hwnd: isize) -> i32;
     }
 
@@ -18,6 +17,38 @@ mod imp {
         fn SetEvent(h: isize) -> i32;
         fn WaitForSingleObject(h: isize, ms: u32) -> u32;
         fn GetLastError() -> u32;
+        fn GetTimeZoneInformation(info: *mut TimeZoneInformation) -> u32;
+    }
+
+    #[repr(C)]
+    struct TimeZoneInformation {
+        bias: i32,
+        standard_name: [u16; 32],
+        standard_date: [u16; 8],
+        standard_bias: i32,
+        daylight_name: [u16; 32],
+        daylight_date: [u16; 8],
+        daylight_bias: i32,
+    }
+
+    /// Minutes to add to UTC to get local time (daylight saving included).
+    pub fn local_offset_minutes() -> i32 {
+        let mut t = TimeZoneInformation {
+            bias: 0,
+            standard_name: [0; 32],
+            standard_date: [0; 8],
+            standard_bias: 0,
+            daylight_name: [0; 32],
+            daylight_date: [0; 8],
+            daylight_bias: 0,
+        };
+        // SAFETY: `t` matches the Win32 TIME_ZONE_INFORMATION layout and outlives the call.
+        let id = unsafe { GetTimeZoneInformation(&mut t) };
+        match id {
+            1 => -(t.bias + t.standard_bias),
+            2 => -(t.bias + t.daylight_bias),
+            _ => -t.bias,
+        }
     }
 
     const SW_HIDE: i32 = 0;
@@ -38,11 +69,6 @@ mod imp {
                 ShowWindow(hwnd, SW_HIDE);
             }
         }
-    }
-
-    pub fn is_visible(hwnd: isize) -> bool {
-        // SAFETY: plain Win32 query.
-        unsafe { IsWindowVisible(hwnd) != 0 }
     }
 
     /// Some(show-event) for the first instance; a later instance signals the first and gets None.
@@ -79,15 +105,15 @@ mod imp {
 #[cfg(not(windows))]
 mod imp {
     pub fn set_visible(_hwnd: isize, _show: bool) {}
-    pub fn is_visible(_hwnd: isize) -> bool {
-        false
-    }
     pub fn single_instance(_key: &str) -> Option<isize> {
         Some(0)
     }
     pub fn show_requested(_ev: isize) -> bool {
         false
     }
+    pub fn local_offset_minutes() -> i32 {
+        0
+    }
 }
 
-pub use imp::{is_visible, set_visible, show_requested, single_instance};
+pub use imp::{local_offset_minutes, set_visible, show_requested, single_instance};
