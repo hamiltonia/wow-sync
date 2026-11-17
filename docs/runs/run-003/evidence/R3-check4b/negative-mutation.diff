@@ -1,0 +1,6 @@
+diff --git a/crates/wow-sync-core/src/exec.rs b/crates/wow-sync-core/src/exec.rs
+index 3a44d66..d55f4ed 100644
+--- a/crates/wow-sync-core/src/exec.rs
++++ b/crates/wow-sync-core/src/exec.rs
+@@ -702,0 +703 @@ fn verify_and_finish(fx: &mut impl ApplyEffects, j: &mut ApplyJournal) -> Packag
++        record_game_halt(fx, j, &h);

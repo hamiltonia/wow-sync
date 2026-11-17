@@ -1,0 +1,13 @@
+LAUNCH app-A captured PID=6284
+INVOKE Next
+INVOKE Use this folder
+INVOKE Next
+INVOKE Next
+STOP captured PID=6284
+REMAINING CAPTURED PROCESSES=0; LOST STAND-IN PID=False
+[31;1mParentContainsErrorRecordException: [0mD:\GitHub\wow-sync.worktrees\R3-check4b\docs\runs\run-003\evidence\R3-check4b\gui-check.ps1:84
+[36;1mLine |[0m
+[36;1m[36;1m  84 | [0m …    } else { [36;1m$e.GetCurrentPattern([Windows.Automation.InvokePattern]::[0m …
+[36;1m     | [31;1m               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[36;1m[31;1m[31;1m[36;1m     | [31;1mException calling "GetCurrentPattern" with "1" argument(s): "Unsupported Pattern."[0m
+[36;1m[31;1m[31;1m[36;1m[31;1m[0m

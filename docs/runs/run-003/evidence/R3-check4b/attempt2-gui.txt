@@ -1,0 +1,155 @@
+LAUNCH app-A captured PID=13420
+INVOKE Next
+INVOKE Use this folder
+INVOKE Next
+INVOKE Next
+INVOKE This is my*
+INVOKE These are the*
+INVOKE Next
+INVOKE Create a new group
+INVOKE Next
+INVOKE Set up this computer
+INVOKE Finish and open*
+INVOKE Sync now
+LAUNCH app-B captured PID=3908
+INVOKE Next
+INVOKE Use this folder
+INVOKE Next
+INVOKE Next
+INVOKE This is my*
+INVOKE These are the*
+INVOKE Next
+INVOKE Join My add-ons*
+INVOKE Next
+INVOKE Set up this computer
+INVOKE Finish and open*
+INVOKE Sync now
+INVOKE Sync now
+STOP captured PID=13420
+INVOKE Sync now
+INVOKE Sync now
+STOP captured PID=3908
+LAUNCH app-A captured PID=12220
+PASS Original crash oracle : Crash happens with no stand-in; staging journal has no recorded cause.
+STOP captured PID=12220
+LAUNCH stand-in captured PID=6868
+LAUNCH app-A captured PID=30360
+INVOKE Add-ons
+INVOKE LabBeta*
+CAPTURE original-running (body text requires visual review)
+ControlType.Group: Status
+ControlType.StatusBar: Paused. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Sync now, unavailable while paused
+ControlType.Button: Resume syncing
+ControlType.Group: Sections
+ControlType.Button: Overview
+ControlType.Button: Computers
+ControlType.Button: Add-ons, current page
+ControlType.Button: Needs attention
+ControlType.Button: Activity
+ControlType.Button: Settings sync, coming later
+ControlType.Button: App settings
+ControlType.Button: About
+ControlType.StatusBar: Syncing is paused on this computer. Updates from other computers are not applied here, and changes here are not shared.
+ControlType.Button: Resume syncing
+ControlType.StatusBar: WoW is running. WoW Sync never changes game files while the game runs. 1 update will be applied after you close WoW.
+ControlType.Button: Back to Add-ons
+ControlType.Text: LabBeta
+ControlType.Text: Versions
+ControlType.Text: What happened
+ControlType.Text: Why this version
+ControlType.Text: Next step
+ControlType.Text: On each computer
+ControlType.Button: Lab-B
+ControlType.Text: Folders
+ControlType.Text: Recovery copies
+ControlType.Button: Restore…, coming later
+ControlType.Text: Details
+ControlType.Button: Details, collapsed
+CAPTURE original-running-lower (body text requires visual review)
+ControlType.Group: Status
+ControlType.StatusBar: Paused. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Sync now, unavailable while paused
+ControlType.Button: Resume syncing
+ControlType.Group: Sections
+ControlType.Button: Overview
+ControlType.Button: Computers
+ControlType.Button: Add-ons, current page
+ControlType.Button: Needs attention
+ControlType.Button: Activity
+ControlType.Button: Settings sync, coming later
+ControlType.Button: App settings
+ControlType.Button: About
+ControlType.StatusBar: Syncing is paused on this computer. Updates from other computers are not applied here, and changes here are not shared.
+ControlType.Button: Resume syncing
+ControlType.StatusBar: WoW is running. WoW Sync never changes game files while the game runs. 1 update will be applied after you close WoW.
+ControlType.Button: Back to Add-ons
+ControlType.Text: LabBeta
+ControlType.Text: Versions
+ControlType.Text: What happened
+ControlType.Text: Why this version
+ControlType.Text: Next step
+ControlType.Text: On each computer
+ControlType.Button: Lab-B
+ControlType.Text: Folders
+ControlType.Text: Recovery copies
+ControlType.Button: Restore…, coming later
+ControlType.Text: Details
+ControlType.Button: Details, collapsed
+STOP captured PID=30360
+STOP captured PID=6868
+LAUNCH app-A captured PID=17324
+INVOKE Add-ons
+INVOKE LabBeta*
+CAPTURE original-stopped (body text requires visual review)
+ControlType.Group: Status
+ControlType.StatusBar: Paused. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Lab-A
+ControlType.Button: Sync now, unavailable while paused
+ControlType.Button: Resume syncing
+ControlType.Group: Sections
+ControlType.Button: Overview
+ControlType.Button: Computers
+ControlType.Button: Add-ons, current page
+ControlType.Button: Needs attention
+ControlType.Button: Activity
+ControlType.Button: Settings sync, coming later
+ControlType.Button: App settings
+ControlType.Button: About
+ControlType.StatusBar: Syncing is paused on this computer. Updates from other computers are not applied here, and changes here are not shared.
+ControlType.Button: Resume syncing
+ControlType.Button: Back to Add-ons
+ControlType.Text: LabBeta
+ControlType.Text: Versions
+ControlType.Text: What happened
+ControlType.Text: Why this version
+ControlType.Text: Next step
+ControlType.Text: On each computer
+ControlType.Button: Lab-B
+ControlType.Text: Folders
+ControlType.Text: Recovery copies
+ControlType.Button: Restore…, coming later
+ControlType.Text: Details
+ControlType.Button: Details, collapsed
+INVOKE Overview
+INVOKE Resume syncing
+INVOKE Sync now
+PASS Original update finishes : After resume, Beta 3.0.0 bytes match the provider peer.
+STOP captured PID=17324
+LAUNCH app-B captured PID=26280
+INVOKE Sync now
+INVOKE Sync now
+STOP captured PID=26280
+LAUNCH app-A captured PID=8112
+PASS Recovery crash oracle : Crash with no stand-in leaves a committing journal with unknown cause.
+STOP captured PID=8112
+LAUNCH stand-in captured PID=35400
+LAUNCH app-A captured PID=228
+STOP captured PID=35400
+STOP captured PID=228
+REMAINING CAPTURED PROCESSES=0; LOST STAND-IN PID=False
+[31;1mParentContainsErrorRecordException: [0mD:\GitHub\wow-sync.worktrees\R3-check4b\docs\runs\run-003\evidence\R3-check4b\gui-check.ps1:86
+[36;1mLine |[0m
+[36;1m[36;1m  86 | [0m …    } else { [36;1m$e.GetCurrentPattern([Windows.Automation.InvokePattern]::[0m …
+[36;1m     | [31;1m               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[36;1m[31;1m[31;1m[36;1m     | [31;1mException calling "GetCurrentPattern" with "1" argument(s): "Unsupported Pattern."[0m
+[36;1m[31;1m[31;1m[36;1m[31;1m[0m

@@ -1,0 +1,35 @@
+{
+  "method": "Independent verifier inspected the retained real-app screenshots using the image-view tool. UIA was used for control interaction, not as proof of inaccessible body text.",
+  "observations": [
+    {
+      "artifact": "original-running.png",
+      "check": "Original RC3-1, running-game cause",
+      "verdict": "PASS",
+      "observed": "Updating labbeta was interrupted; it will be finished or restored on the next sync."
+    },
+    {
+      "artifact": "original-running-lower.png",
+      "check": "Original RC3-1, running-game next step",
+      "verdict": "PASS",
+      "observed": "Close WoW to let the update finish."
+    },
+    {
+      "artifact": "original-stopped.png",
+      "check": "Original RC3-1, stopped-game cause and action",
+      "verdict": "PASS",
+      "observed": "Neutral interruption wording. Next step: Nothing to do. It will be finished or restored on the next sync. No close-WoW action."
+    },
+    {
+      "artifact": "recovery-running-after-resume.png",
+      "check": "RC4-1, after Resume while stand-in runs",
+      "verdict": "PASS",
+      "observed": "Updating labbeta was interrupted; it will be finished or restored on the next sync. Next step: Close WoW to let the update finish. Current version 3.0.0, chosen version 5.0.0."
+    },
+    {
+      "artifact": "recovery-finished.png",
+      "check": "RC4-1, after stand-in stops and GUI Sync now",
+      "verdict": "PASS",
+      "observed": "This computer is up to date. LabBeta: Updated here. This computer and group's chosen version both 5.0.0. LabBeta: updated from 3.0.0 to 5.0.0 from Lab-B and verified on this computer. Next step: Nothing to do."
+    }
+  ]
+}
