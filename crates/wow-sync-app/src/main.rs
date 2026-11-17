@@ -12,6 +12,7 @@
 mod app;
 mod assets;
 mod backend;
+mod brand;
 mod consent;
 mod model;
 mod pages;

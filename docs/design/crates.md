@@ -151,7 +151,7 @@ windows-sys = "=0.59.0"
 | `wow-sync-core` | `serde`, `serde_json`, `sha2` (workspace). Nothing else; `arch` test enforces it |
 | `wow-sync-adapters` | `sha2`, `getrandom`; `windows-sys` under `[target.'cfg(windows)'.dependencies]` with features `Win32_Foundation`, `Win32_System_Threading`, `Win32_System_Diagnostics_ToolHelp`, `Win32_Storage_FileSystem`. No core dependency. No `tempfile` (testkit has its own `TempDir`) |
 | `wow-sync-runtime` | core, adapters (path deps), `serde_json` if needed |
-| `wow-sync-app` | runtime, GPUI pin and tray crates per R2-pin evidence |
+| `wow-sync-app` | runtime, GPUI pin and tray crates per R2-pin evidence; `png` (decodes the brand ICO's 32 px tray entry once at start-up) and, on Windows only as a build dependency, `embed-resource` (embeds the ICO as `wow-sync.exe`'s icon resource id 1, which GPUI also uses for the window/taskbar icon). Both are MIT/Apache-2.0 at versions already in `Cargo.lock` (D-22, R3-icon) |
 
 Versions: serde/serde_json are the ones already locked by `xtask`; sha2,
 getrandom and windows-sys are versions already present in the dev PC cargo
