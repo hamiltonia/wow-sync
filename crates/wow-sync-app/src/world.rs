@@ -559,6 +559,33 @@ mod tests {
     }
 
     #[test]
+    fn activity_jargon_is_rewritten_and_last_shared_comes_from_the_log() {
+        let t = now_ms() - 120_000;
+        let log = [
+            entry(t, "published", "published seq 7 (6 new objects)"),
+            entry(
+                t - 5_000,
+                "audit",
+                "enrolled group c711e3bc581b7b837690423711570789",
+            ),
+        ];
+        let items = activity_items(&log, now_ms());
+        assert_eq!(items[0].title, "Shared this computer's add-on changes");
+        assert_eq!(items[1].title, "This computer joined the add-on group");
+        let snap = StatusSnapshot::default();
+        let w = World::from_snapshot(Inputs {
+            snap: &snap,
+            paused_since_ms: None,
+            activity: &log,
+            syncing: false,
+            last_check_ms: None,
+            setup: None,
+            app_version: "x",
+        });
+        assert!(w.last_shared_secs.is_some_and(|s| (115..180).contains(&s)));
+    }
+
+    #[test]
     fn activity_without_a_time_is_not_given_one() {
         let items = activity_items(
             &[ActivityEntry {
