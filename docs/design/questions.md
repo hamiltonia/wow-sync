@@ -49,3 +49,21 @@ before release.
 | Any existing journal blocks all new applies on that computer; `needs_help` is resolved later via GUI | Q-25 |
 | A crash after the last commit rename but before `committed` is recorded rolls the package back (new content is re-applied next cycle) | Q-25 |
 | Online-only or recall-flagged provider entries (files and directories) are refused, never hydrated | Q-6, Q-23 |
+
+## Removal design questions (run-003, R3-removal-design)
+
+Raised by [removal.md](removal.md). Numbered from Q-40 so they do not
+collide with the UI design's questions. None of these affect the running
+slice; they apply when removal is implemented.
+
+| # | Question | Recommended default | Who | Used in |
+|---|---|---|---|---|
+| Q-40 | Removal changes what absence in a state record means. New fields within `code-state/1` (ignored by old apps, Q-13), or a new major? | New major `wowsync.code-state/2`. Old apps refuse it as "written by a newer version" instead of reading it as an ordinary inventory; `/2` readers treat `/1` absence as absence, never removal | design | [removal.md](removal.md) §2.1 |
+| Q-41 | How long must a package stay absent before it counts as a deliberate removal? | Two consecutive complete stable scans, at least 30 s apart; any reappearance resets. Covers an updater's delete-then-extract. Not a clock comparison between computers | owner | [removal.md](removal.md) §1.2 E4 |
+| Q-42 | When does a disappearance need a local confirmation before it is published as a removal? | When ≥ 3 packages, or ≥ 25 % of synced packages, vanish in one hold window, or AddOns is empty. One or two packages propagate automatically after the hold | owner | [removal.md](removal.md) §1.2 E7 |
+| Q-43 | A computer that freshly installs exactly the removed release, concurrently and before seeing the removal, has its copy removed (into recovery). Acceptable, or track "present since" per folder to turn that into a decision? | Accept; the copy is restorable and named in the summary. Per-folder "present since seq" tracking adds record and admission complexity for a narrow race | owner | [removal.md](removal.md) §2.3 |
+| Q-44 | How long are settled tombstones kept? | Until superseded by a re-add or decision, in compact form (a few hundred bytes), so late, rejoining or re-enrolled computers cannot resurrect removed addons. Review with provider GC (Q-7) before release | owner | [removal.md](removal.md) §2.5 |
+| Q-45 | Does the client rewrite, keep or drop saved variables of an addon that is no longer installed? | Unknown; requires an owner-run client check before the settings design claims a complete removal. Until then removal is code-only and says so | owner | [removal.md](removal.md) §5.2 |
+| Q-46 | Saved settings with unknown or shared ownership when an addon is removed | Remove the code; leave those settings untouched; report `removed_code_only` with a diagnosis for that scope. Alternative: hold the whole removal until diagnosed | owner | [removal.md](removal.md) §5.2 |
+| Q-47 | Removal of an addon whose settings are paused on a computer | Remove the code; keep the paused settings in place and show "settings kept (paused)"; nothing is published | owner | [removal.md](removal.md) §5.2 |
+| Q-48 | A joining computer has a locally installed copy of an addon the group removed | Covered release: listed in the join consent and removed after consent (kept for recovery). Different release: a removal-vs-update decision; the copy stays live | owner | [removal.md](removal.md) §8.3 |
