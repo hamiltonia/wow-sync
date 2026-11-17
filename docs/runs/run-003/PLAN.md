@@ -1,7 +1,6 @@
 # Run 003: UI direction, verification debt, removal design
 
-Status: **draft, awaiting owner approval** (D-19). No worker may launch
-before approval.
+Status: **approved** (D-20). Active.
 
 - Ceiling: 10,000 AIU counted from run-003 start.
   - Stop launching new work at ≥9,500.

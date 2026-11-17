@@ -170,6 +170,15 @@ Answers from an interactive review session with the orchestrator.
   - UI direction.
   - Run-003 scope and credit ceiling.
 
+### D-20: Run-003 plan approved (2026-11-16)
+
+- The owner approved `docs/runs/run-003/PLAN.md` as written.
+- Ceiling per D-19. Baseline at approval: 9,513.4 AIU cumulative (sessions
+  `961f3baa`, `fea20f53`).
+  - Stop launching new work at ≥19,013.
+  - Settling up to ≈20,513 is acceptable.
+- Phase F requires a recorded owner approval of the prototype.
+
 ### D-19: Run-003 direction and ceiling (2026-11-16)
 
 - **Credit ceiling:** 10,000 AIU for run-003, counted from run-003 start and
@@ -233,4 +242,5 @@ Answers from an interactive review session with the orchestrator.
 | 2026-11-15 | D-16 | Run-001 ceiling raised to 10,000 AIU; continue in current session | `f2a1323` |
 | 2026-11-15 | D-17 | Continue into run-002 within D-16 budget; provisional defaults | `961a133` |
 | 2026-11-16 | D-18 | Run-002 owner review: incidents, PLAN §6, D-12, design questions, Q-21 interface rule | `d83fda7` |
-| 2026-11-16 | D-19 | Run-003 scope, UI direction, 10,000 AIU ceiling; plan approval pending | this commit |
+| 2026-11-16 | D-19 | Run-003 scope, UI direction, 10,000 AIU ceiling; plan approval pending | `3d332fd` |
+| 2026-11-16 | D-20 | Run-003 plan approved as written | this commit |
