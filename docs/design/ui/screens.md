@@ -445,7 +445,9 @@ Never a whole-profile choice.
     differ, for example after a manual edit." (Q-22)
   - `PartialCandidate`: "Laptop's copy is missing folders that other copies
     have: WeakAurasOptions."
-  - `NoCompatibleToc`: "A copy of this add-on has no readable .toc file for
+  - `NoCompatibleToc` (renamed `UnusableMetadata` in run-004,
+    [contracts.md](../contracts.md) §5.1; it has no options, only this
+    explanation): "A copy of this add-on has no readable .toc file for
     this computer's WoW client, so WoW Sync can't tell which files to use."
   - `DifferentTocMapping`: "The computers that hold this add-on read its .toc
     files by a different rule than this computer, so WoW Sync can't tell which

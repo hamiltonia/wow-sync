@@ -1,9 +1,20 @@
 # Addon settings sync
 
 Status: **design for a later run** (run-004 packet
-[R4-settings-design](../runs/run-004/packets/R4-settings-design.md)). Not
-yet implemented and not yet independently reviewed. Nothing here changes the
-running slice, which does not read or write anything under `WTF` today.
+[R4-settings-design](../runs/run-004/packets/R4-settings-design.md),
+revised by [R4-design-fix](../runs/run-004/packets/R4-design-fix.md) after
+[R4-design-review](../runs/run-004/evidence/R4-design-review.md)). Not
+yet implemented. Nothing here changes the running slice, which does not
+read or write anything under `WTF` today.
+
+**Contract status.** Authority records (envelope, identity, refs, `Known`,
+validation, learning, mirroring), apply journals, recovery points, settings
+units, identity normalization, checkpoint references and target precedence
+are defined only in [contracts.md](contracts.md). This document defines
+the settings-specific bodies (policy, revision, checkpoint manifest,
+settings state) and behaviour. Where an earlier draft disagreed with
+contracts.md, the draft text has been removed. Phase C owner: R4-core-settings
+(contracts.md §9).
 
 Product authority: SPEC R-07, R-08, R-09, R-10, R-11 and R-12
 ([SPEC.md](../../SPEC.md)). Acceptance: A-11 to A-17, A-19, A-20 to A-26 and
@@ -11,29 +22,30 @@ A-45 ([ACCEPTANCE.md](../../ACCEPTANCE.md)). Rollback and rejection are in
 [rollback.md](rollback.md). This document builds on
 [domain.md](domain.md), [publication.md](publication.md),
 [apply.md](apply.md) and [core-api.md](core-api.md). It implements the
-settings interface that [removal.md](removal.md) requires, in that
-document's "settings for removed addons" section. Choices that approved
-intent does not settle are marked **(Q-n)** and listed in
-[questions.md](questions.md) from Q-67 on. The computer-retirement design
-(`docs/design/ops.md`, run-004 R4-ops-design, written in parallel) uses the
-same terms **settings master** and **reassign**.
+settings interface that [removal.md](removal.md) §6 requires. Choices that
+approved intent does not settle are marked **(Q-n)** and listed in
+[questions.md](questions.md) from Q-67 on; **PENDING OWNER** marks a
+conservative default the owner has not decided. Computer retirement is
+[ops.md](ops.md) §2 with the barrier of contracts.md §1.10; it uses the same
+terms **settings master** and **reassign**.
 
 ## 0. Vocabulary
 
 | Term | Meaning |
 |---|---|
-| identity | an account or character scope inside one variant. Account: `account:<ACCOUNT>`. Character: `char:<ACCOUNT>/<Realm>/<Character>`. Names are the exact WTF folder names (§1.4) |
-| settings file | one saved-variable file that WoW writes for an addon folder: `<Folder>.lua` in an identity's `SavedVariables` folder (§1.1) |
-| settings unit | `(package_key, identity)`: all settings files of one package for one identity. History, sharing, decisions and pause all work on units. The GUI groups units by addon ("per addon") and shows the identity as the scope |
-| checkpoint | the exact bytes of every settings file of one unit at one moment, held as a content-addressed manifest (§3.1). Bytes are opaque |
+| identity | an account or character scope inside one variant: `account(<account>)` or `character(<account>, <realm>, <character>)`, from the exact WTF folder names, compared after NFC ([contracts.md](contracts.md) §3.2–§3.3) |
+| settings file | the saved-variable file that WoW writes for an addon folder: `<Folder>.lua` in an identity's `SavedVariables` folder (§1.1) |
+| settings unit | `SettingsUnit { folder, identity }` ([contracts.md](contracts.md) §3.2): the settings file of one addon **folder** for one identity. History, sharing, policy, decisions and pause all work on units or folders, never on local package keys. The GUI groups units by addon ("per addon"), shows "mixed" when one addon's units differ, and shows the identity as the scope |
+| checkpoint | the exact bytes of a unit's settings file (or its absence) at one moment, held as a content-addressed manifest (§3.1). Bytes are opaque |
 | capture | a local checkpoint taken at a completed play-session boundary (§2) |
-| revision | a group-visible, immutable record that says "the shared settings of unit U are now checkpoint C", with its kind and its parents (§3.2) |
-| head | a revision of a unit that no other valid revision names as a parent. One head means the unit has one shared state. Two or more heads with different checkpoints means competing intentional choices (§4.4) |
-| basis | the revision whose checkpoint is in this computer's live files for a unit, as recorded locally when it last applied or published (§2.3) |
-| settings master | the computer whose completed-session captures publish automatically. One default master per group, plus per-addon exceptions (§5). Assigned and reassigned only by an explicit user action |
+| revision | a group-visible, immutable authority record that says "the shared settings of unit U are now checkpoint C", with its kind and its parents (§3.3) |
+| revision graph | per unit, the **structural** graph of valid revisions and their parent edges (§4.2). A revision stays in the graph as ancestry even when its checkpoint is no longer selectable |
+| head | a valid revision of a unit that no other valid revision names as a parent. **Head states** group heads by checkpoint: one head state means one shared state, even if several heads carry it. Two or more head states means competing intentional choices (§4.4) |
+| basis | the **set** of revisions whose common checkpoint is in this computer's live file for a unit, as recorded locally when it last applied or published: all heads of the head state it applied (§2.3, R4D-7) |
+| settings master | the computer whose completed-session captures publish automatically. One default master per group, plus per-folder exceptions (§5). Assigned and reassigned only by an explicit user action |
 | routine change | a capture on a computer that is not the authority for that unit. It stays local and is never published automatically (R-08) |
 | push | a deliberate user action on any computer that publishes its current checkpoint of one or more units as the new shared state ("Share my settings") |
-| yield | replacing a computer's routine local settings with a newer shared revision, after moving the replaced files into recovery (§4.2) |
+| yield | replacing a computer's routine local settings with a newer shared revision, after moving the replaced files into recovery (§4.3) |
 | pause | a per-computer protection of one addon's units, or of all units ("Pause settings"), so local experiments are neither published nor replaced (§6) |
 
 The GUI words come from [ui/screens.md](ui/screens.md): "Settings master",
@@ -52,13 +64,17 @@ WTF\Account\<ACCOUNT>\SavedVariables\<Folder>.lua                     account id
 WTF\Account\<ACCOUNT>\<Realm>\<Character>\SavedVariables\<Folder>.lua character identity
 ```
 
-`<Folder>` is the name of an addon folder of an installed package
+`<Folder>` is the name of an installed addon folder
 ([domain.md](domain.md) §5), compared case-insensitively on Windows and
-exactly otherwise, as domain.md does for folders. A file belongs to the
-package that contains that folder **and** whose selected `.toc` declares
-`## SavedVariables` (account file) or `## SavedVariablesPerCharacter`
-(character file) **(Q-67)**. The declaration is `.toc` metadata, read by the
-existing `.toc` rule; it is never Lua.
+exactly otherwise, as domain.md does for folders. The file is the settings
+of unit `{ folder: FolderKey(<Folder>), identity }` when that folder's
+selected `.toc` declares `## SavedVariables` (account file) or
+`## SavedVariablesPerCharacter` (character file) **(Q-67)**. This is the
+SavedVariables ownership rule that [contracts.md](contracts.md) §3.2 refers
+to. Ownership depends only on the folder, not on how folders are grouped
+into packages, so regrouping never moves a file to another unit (R4D-6).
+The declaration is `.toc` metadata, read by the existing `.toc` rule; it is
+never Lua.
 
 Everything else under `WTF` is out of scope and is never read for content,
 written, moved or deleted by settings sync **(Q-68)**:
@@ -78,17 +94,25 @@ settings sync **for the affected units only**; other units continue
 
 | Case | Diagnosis | Effect |
 |---|---|---|
-| Two installed packages declare the same saved-variable name in their `.toc` | `SharedVariable { name, packages }` | Units of every listed package are not synced in either direction; their live files are not touched |
-| A file `<Folder>.lua` exists but no installed package folder declares saved variables for that shape | `Unowned { file }` | Not synced, not moved, not deleted. Listed in Details only, as information |
+| Two installed folders declare the same saved-variable name in their `.toc` | `SharedVariable { name, folders }` | Units of every listed folder are not synced in either direction; their live files are not touched |
+| A file `<Folder>.lua` exists but no installed folder declares saved variables for that shape | `Unowned { file }` | Not synced, not moved, not deleted. Listed in Details only, as information |
 | A folder declares saved variables but the `.toc` selection for the folder is ambiguous ([domain.md](domain.md) `.toc` rule) | `AmbiguousToc { folder }` | Unit not synced |
 | A path component is a reparse point, link, junction, or names differ only in case on a case-sensitive volume | `UnsafePath { path }` | Unit not synced; nothing under that path is written |
-| A file exceeds the size limit (Q-77) | `TooLarge { file, size }` | Unit not synced |
+| A file exceeds the saved-file size cap `MAX_SETTINGS_FILE_BYTES` (Q-77 **PENDING OWNER**) | `TooLarge { file, size }` | Unit not synced |
 | An identity folder name fails the safe-name rules of [domain.md](domain.md) (control characters, reserved names, trailing dot or space) | `UnsafeIdentity { name }` | Identity not synced |
+| Two local identity paths with equal NFC forms but different bytes | `IdentityNormalizationCollision { paths }` ([contracts.md](contracts.md) §3.3) | Neither identity synced on this computer |
+| A peer's identity differs from a local one only by letter case | `IdentityCaseMismatch` (contracts.md §3.3) | Not matched; neither applied to the other |
+
+**Q-77 (PENDING OWNER).** The size cap is a product gate (contracts.md
+§8). It is a named parameter with no approved value. Until the owner sets
+it, phase C may implement and test the diagnosis with a test-only value,
+but settings sync on real data stays disabled. The run-004 draft's 64 MiB
+is a proposal only.
 
 There is **no fallback** to copying `WTF`, a whole account folder or a whole
 `SavedVariables` folder. Settings sync never splits one file into parts and
 never deletes a file it does not own. A removal of an addon whose ownership
-is diagnosed is code-only for those units (removal design, owned-only rule;
+is diagnosed is code-only for those units ([removal.md](removal.md) §6.2;
 Q-46).
 
 ### 1.3 Opaque bytes
@@ -103,10 +127,10 @@ imported-content rule in [domain.md](domain.md) and the A-23 obligations.
 ### 1.4 Identities and matching across computers
 
 - An identity is matched across computers by **exact** WTF folder names
-  (`<ACCOUNT>`, `<Realm>`, `<Character>`) after Unicode NFC normalization.
-  Names that differ only in case are not the same identity; on Windows
-  such a pair on two computers is an `IdentityCaseMismatch` diagnosis for
-  that identity **(Q-69)**.
+  (`<ACCOUNT>`, `<Realm>`, `<Character>`) after Unicode NFC normalization,
+  with the collision and case diagnoses of
+  [contracts.md](contracts.md) §3.3 **(Q-69)**. A normalizing key never
+  hides two distinct local identities; both are diagnosed instead.
 - A computer shares only the accounts the user included when turning on
   settings sync on that computer (§5.4). A newly seen account folder is
   "not included" until the user includes it. Characters inside an included
@@ -155,7 +179,9 @@ A capture is taken per unit, never while WoW for that variant runs:
    a session end (it was not running, the computer slept), any unit whose
    files differ from the last capture or applied checkpoint is captured
    once, as kind `found_at_start`. Several missed sessions become one
-   capture **(Q-72)**.
+   capture **(Q-72)**. Whether it may publish automatically is decided by
+   the authority epoch of §4.1, so a startup capture never publishes a
+   difference that predates this computer becoming the authority (Q-75).
 3. **Before a settings or code change by this app.** Before a yield,
    restore, removal or rollback moves a unit's files, the current files are
    captured (kind `before_change`) so that what is replaced is a recovery
@@ -187,25 +213,30 @@ copy". A later complete capture replaces the condition.
 
 ```json
 {
-  "unit": { "package_key": "details", "identity": "char:ERIC/Argent Dawn/Thrall" },
-  "checkpoint": "<checkpoint hash>",
+  "unit": { "folder": "details", "identity": { "character": ["ERIC", "Argent Dawn", "Thrall"] } },
+  "checkpoint": "<CheckpointRef>",
   "kind": "session_end|found_at_start|before_change",
   "complete": true,
-  "basis": { "id": "<revision id>", "hash": "<object hash>" },
+  "basis": ["<revision hash>"],
+  "compared_with_local_seq": 405,
   "changed_in_session": true,
   "code_package_hash": "<sha256 of the installed package at capture>",
   "local_seq": 412
 }
 ```
 
-- `basis` is the revision applied or published by this computer for the
-  unit before the session, or `null` if none.
+- `basis` is the set of revision hashes (contracts.md §1.5, plain hashes)
+  applied or published by this computer for the unit before the session:
+  all heads of the head state it last applied, or `[]` if none.
+- `compared_with_local_seq` is the `local_seq` of the previous capture or
+  applied checkpoint that `changed_in_session` compares with. The
+  authority epoch rule (§4.1) uses it.
 - `changed_in_session` is true when the checkpoint differs from the
   previous capture or applied checkpoint of the unit **on this computer**.
   Only changed units can publish (§4.1). A difference that already existed
   before the session is not re-published by a later unrelated session.
 - `code_package_hash` pairs the settings with the code that wrote them.
-  Rollback uses it ([rollback.md](rollback.md), paired restore).
+  Paired selection (§4.6) uses it.
 - `local_seq` is a local counter. Order never comes from timestamps.
 
 ## 3. Records and on-disk formats
@@ -217,96 +248,108 @@ A checkpoint is the canonical encoding of:
 ```json
 {
   "schema": "wowsync.settings-checkpoint/1",
-  "unit": { "package_key": "details", "identity": "account:ERIC" },
+  "unit": { "folder": "details", "identity": { "account": "ERIC" } },
   "files": [
-    { "folder_key": "details", "name": "Details.lua", "size": 183402, "blob": "<sha256>" }
+    { "name": "Details.lua", "size": 183402, "blob": "<sha256>" }
   ]
 }
 ```
 
-- `files` is sorted by `folder_key`. An empty list is valid and means "this
-  unit has no settings files" (for example after the user reset an addon).
-- **Checkpoint hash** = SHA-256 over `"wowsync-settings-checkpoint-v1\n"` +
-  canonical manifest. Same bytes, same unit, same hash on every computer.
+- `files` holds zero or one entry (the unit's one file). An empty list is
+  valid and means "this unit has no settings file" (for example after the
+  user reset an addon).
+- **Checkpoint reference** = `sha256(exact manifest bytes)`, written with
+  `records::encode` ([contracts.md](contracts.md) §3.4). No domain prefix.
+  Same unit and bytes give the same reference on every computer.
 - Blobs are the existing content-addressed provider blobs
   ([publication.md](publication.md) §1, §3). A manifest is stored in the
-  provider as `trees\<checkpoint hash>.json` only when a revision
+  provider as `trees\<checkpoint ref>.json` only when a revision
   references it (Q-76). Local captures stay local.
 - Local store: `<variant>\.wowsync\settings\blobs\<sha256>` and
-  `<variant>\.wowsync\settings\manifests\<checkpoint hash>.json`, on the
+  `<variant>\.wowsync\settings\manifests\<checkpoint ref>.json`, on the
   same volume as `WTF`.
 
-### 3.2 Group authority objects
+### 3.2 Settings policy (`wowsync.settings-policy/1`)
 
-Settings policy and revisions are **immutable authority objects** of the
-same family as removal intents (removal design, "immutable authority
-objects" and "authority ledger"): one file per object in
-`groups\<g>\members\<computer>\authority\<id>.json`, write-if-absent,
-temp + flush + rename, read back and hash-checked before any state that
-references it is published, mirrored verbatim by every computer that learns
-it, and learned into the durable grow-only local authority ledger. Common
-fields: `schema`, `id`, `issuer {computer_id, enrollment_id,
-issued_at_seq}`, `written_unix_ms` (display only). The object hash rule is
-removal's: SHA-256 over `"wowsync-authority-v1\n"` + canonical encoding of
-every field. References are variant references `{id, hash}`.
+Policy and revisions are kinds of the one authority family
+([contracts.md](contracts.md) §1.1): same envelope (§1.4), identity
+(`sha256` of the exact bytes, §1.3), location, mirroring, learning and
+validation (§1.11–§1.12). Only the bodies are defined here.
 
-**Settings policy** (`wowsync.settings-policy/1`), a full snapshot each
-time:
+A policy is a full snapshot each time:
 
 ```json
 {
   "schema": "wowsync.settings-policy/1",
-  "id": "<32 hex>",
+  "group_id": "…",
   "issuer": { "computer_id": "…", "enrollment_id": "…", "issued_at_seq": 51 },
   "master": { "computer_id": "<den>", "enrollment_id": "<den enr>" },
-  "addons": {
-    "details": { "rule": "master", "computer_id": "<laptop>", "enrollment_id": "<laptop enr>" },
-    "weakauras": { "rule": "not_shared" }
-  },
-  "supersedes": [{ "id": "…", "hash": "…" }],
+  "folders": [
+    { "folder": "details", "rule": "master", "computer_id": "<laptop>", "enrollment_id": "<laptop enr>" },
+    { "folder": "weakauras", "rule": "not_shared" }
+  ],
+  "known": { "seen": [], "extra": [] },
   "written_unix_ms": 1767225600000
 }
 ```
 
 - `master` may be `null` (settings sync is set up but nobody publishes
   automatically; pushes still work).
-- `addons` holds only exceptions. Absent means "follow the default master".
-  `rule: "master"` names a different authority for that addon.
-  `rule: "not_shared"` means the addon's settings are local only on every
-  computer.
-- `supersedes` lists every policy head the issuer had in its ledger.
+- `folders` holds only exceptions, keyed by **folder key**, sorted and
+  unique, at most 512 entries. Absent means "follow the default master".
+  `rule: "master"` names a different authority for that folder.
+  `rule: "not_shared"` means the folder's settings are local only on every
+  computer. The GUI sets one rule for every folder of an addon at once and
+  shows "mixed" if they differ; a regrouping never changes any folder's rule
+  (R4D-6).
+- **Supersession:** policy X supersedes policy Y iff X's `known` covers Y
+  (contracts.md §1.8). The **policy heads** are the valid policies no
+  other valid policy supersedes.
+- V-POLICY rules: named computers are in historical membership; folder
+  keys pass `validate_folder_name`; otherwise `invalid(policy_body)`.
 
-**Settings revision** (`wowsync.settings-revision/1`):
+### 3.3 Settings revision (`wowsync.settings-revision/1`)
 
 ```json
 {
   "schema": "wowsync.settings-revision/1",
-  "id": "<32 hex>",
+  "group_id": "…",
   "issuer": { "computer_id": "…", "enrollment_id": "…", "issued_at_seq": 52 },
-  "unit": { "package_key": "details", "identity": "account:ERIC" },
+  "unit": { "folder": "details", "identity": { "account": "ERIC" } },
   "kind": "auto|push|choice|restore",
-  "checkpoint": "<checkpoint hash>",
-  "parents": [{ "id": "…", "hash": "…" }],
-  "policy": { "id": "…", "hash": "…" },
+  "checkpoint": "<CheckpointRef>",
+  "parents": ["<revision hash>"],
+  "policy": ["<policy hash>"],
   "code_package_hash": "<sha256>|null",
-  "rejects": [],
   "written_unix_ms": 1767225600000
 }
 ```
 
 - `kind`: `auto` = completed-session capture of the authority; `push` =
-  explicit "Share my settings"; `choice` = resolution of competing heads
-  (§4.4); `restore` = user restored an earlier copy, or a paired rollback
-  ([rollback.md](rollback.md)).
-- `parents` = the issuer's basis for an `auto`/`push`/`restore`, or every
-  head being resolved for a `choice`. Empty only for the first revision of
-  a unit.
-- `policy` = the policy head under which the issuer acted. An `auto`
-  revision is valid only if the issuer is the unit's authority under that
-  policy (§5.1).
-- `rejects` is used only by settings rejection ([rollback.md](rollback.md)).
+  explicit "Share my settings"; `choice` = resolution of competing head
+  states (§4.4); `restore` = user restored an earlier copy, or a paired
+  rollback ([rollback.md](rollback.md)).
+- `parents` = plain hashes of revisions of the same unit: the issuer's
+  whole basis set for `auto`/`push`/`restore`, or **every head** of every
+  head state being resolved for a `choice`. Empty only for the first
+  revision of a unit. At most 64 entries (a technical cap, contracts.md
+  §8); more gives `NeedsHelp(TooManySettingsHeads)`.
+- `policy` = the policy heads under which the issuer acted (≤ 8). An
+  `auto` revision is valid only if the issuer is the unit's authority
+  under **every** listed policy head and those heads agree on it (§5.1).
+- There is no `rejects` field: settings-checkpoint rejection is not part
+  of this design (Q-82 PENDING OWNER, [rollback.md](rollback.md) §5).
+- V-REVISION rules (V-KIND): `parents` and `policy` sorted and unique;
+  V-REF for `parents` (kind `settings-revision`, same unit) and `policy`
+  (kind `settings-policy`); a parent of a different unit is
+  `invalid(wrong_reference)`. A missing parent or policy is
+  `pending(missing_reference)` (§4.2).
+- The authority index ref of a revision carries its unit's folder key as
+  the hint (contracts.md §1.5).
 
-**Settings state** (`wowsync.settings-state/1`), a new per-member stream in
+### 3.4 Settings state (`wowsync.settings-state/1`)
+
+A new per-member stream in
 `groups\<g>\members\<computer>\settings\<enrollment_id>-<seq:010>.json`,
 written last, as the code state is:
 
@@ -314,56 +357,52 @@ written last, as the code state is:
 {
   "schema": "wowsync.settings-state/1",
   "computer_id": "…", "enrollment_id": "…", "seq": 88,
-  "knows": [{ "id": "…", "hash": "…" }],
-  "applied": [{ "unit": { "…": "…" }, "revision": { "id": "…", "hash": "…" },
-                "checkpoint": "<hash>", "result": "applied|kept_local|paused|blocked|diagnosed" }],
-  "paused": { "all": false, "packages": ["weakauras"] },
+  "applied": [{ "unit": { "…": "…" }, "revisions": ["<revision hash>"],
+                "checkpoint": "<CheckpointRef>",
+                "result": "applied|kept_local|paused|blocked|diagnosed|waiting" }],
+  "paused": { "all": false, "folders": ["weakauras"] },
   "included_accounts": ["ERIC"],
-  "capabilities": ["settings/1", "rejection/1"],
   "diagnoses": [{ "unit": { "…": "…" }, "kind": "SharedVariable" }]
 }
 ```
 
-`knows` lists every policy and revision object the computer has in its
-ledger for the group. `applied` is the settings apply report
-([publication.md](publication.md) §6): confirmation of a revision on a
-computer requires an `applied` entry with the revision's checkpoint hash.
-`kept_local`, `paused`, `blocked` and `diagnosed` are reported so the group
-view never shows such a computer as in sync (R-12, A-15, A-24).
-`capabilities` lists the object kinds this app version understands;
-[rollback.md](rollback.md) §2.3 uses it before a group-wide rejection.
+- There is no `knows` list and no `capabilities` list. Which records a
+  computer has is its authority index (contracts.md §1.6); what it
+  understands is `code-state/1.features` (§1.13), including `settings/1`.
+- `applied` is the settings apply report ([publication.md](publication.md)
+  §6): confirmation of a revision on a computer requires an `applied`
+  entry naming that revision (or a head of the same head state) with its
+  checkpoint. `kept_local`, `paused`, `blocked`, `diagnosed` and `waiting`
+  are reported so the group view never shows such a computer as in sync
+  (R-12, A-15, A-24). Diagnoses carry closed kinds only, never paths or
+  names (contracts.md §7).
+- Admission: same rules as code states, with its own watermark and the
+  retirement cutoff (contracts.md §6).
 
-### 3.3 Local records (never uploaded)
+### 3.5 Local records (never uploaded)
 
 | Record | Content |
 |---|---|
-| `wowsync.settings-local/1` (local state) | per unit: captures (newest first, §2.3), basis, last applied checkpoint, pinned flags; pause set; included accounts; per-computer consent and first-adoption choice (§5.4) |
-| `wowsync.apply-journal/2` `settings_ops` | as introduced by the removal design; one op per settings file move (§4.3) |
-| `wowsync.recovery-point/2` with `kind: "settings"` | yielded, restored-over or removed settings (§7) |
+| `wowsync.settings-local/1` (local state) | per unit: captures (newest first, §2.3), basis set, last applied checkpoint, pinned flags, `authority_since` (§4.1); pause set (folders); included accounts; per-computer consent and first-adoption choice (§5.4) |
+| `wowsync.apply-journal/2` with `settings_ops` | [contracts.md](contracts.md) §2.2; kinds `settings` and `settings_cleanup` |
+| `wowsync.recovery-point/2` | [contracts.md](contracts.md) §2.3; one of the three shapes (settings-only, mixed, code-only fallback) |
 
-### 3.4 Compatibility
+### 3.6 Compatibility
 
 - All formats follow [publication.md](publication.md) §2 and Q-13: first
   field `schema`, unknown fields ignored within a major, unknown major
-  refused and shown as "written by a newer version", size limits checked
-  before parsing.
-- Settings are new **streams and object kinds**, not a change to
-  `wowsync.code-state`. A reader without settings support ignores
-  `settings\` and does not list settings objects, so it neither applies
-  nor removes settings. It does see unknown schema names in `authority\`;
-  it must skip those (the removal design already requires per-object
-  schema checks). An implementer must verify that the shipped reader
-  skips, and does not refuse the whole folder for, an unknown authority
-  schema; that is a test (T-S30).
-- Admission of the settings stream uses the same rules as code states (the
-  newest state only, no fallback to an older one, `Unusable`/`Regressed`
-  handling), with a separate watermark in `wowsync.admission/1` as a new
-  optional field.
-- The removal tombstone's `settings` field changes from
-  `{kind: "none_in_this_version"}` to `{kind: "checkpoints", roots: [{identity,
-  checkpoint, location}]}` as a new removal-intent major, as the removal
-  design states. `location` is `provider` when a revision references the
-  checkpoint and `local` otherwise.
+  `pending(unknown_schema)` and shown as "written by a newer version",
+  size limits checked before parsing.
+- Settings are a new stream and two new authority kinds, not a change to
+  `wowsync.code-state`. The slice app never reads `authority\`,
+  `authority-index\` or `settings\` (contracts.md §1.13), so it neither
+  applies nor removes settings. A newer app without `settings/1` (not
+  possible within run-004, but defined) treats the kinds as
+  `pending(unknown_schema)` and never as absent (T-S30).
+- Removal records carry the settings they took as `SettingsRoot`s in their
+  `settings` field ([removal.md](removal.md) §2.3); receivers record theirs
+  in `/2` recovery points (contracts.md §2.3) and in the ack's `settings`
+  value. No removal schema major changes for settings.
 
 ## 4. Sharing, receiving and applying
 
@@ -373,39 +412,86 @@ For each unit, after each capture:
 
 | This computer is… | Capture | Result |
 |---|---|---|
-| the unit's authority (§5.1), not paused, capture complete, `changed_in_session` | any | an `auto` revision, parent = basis |
-| the authority, but the capture is unchanged, suspect, or the unit is paused | — | nothing published |
+| the unit's authority (§5.1), not paused, capture complete, `changed_in_session`, and inside its **authority epoch** (below) | any | an `auto` revision, parents = basis set |
+| the authority, but the capture is unchanged, suspect, outside the epoch, or the unit is paused | — | nothing published; a difference outside the epoch is `LocalDifferent` with "Share my settings" |
 | not the authority | any | stays local as a routine change. **Never** published automatically (R-08, A-12) |
-| any computer, user chooses "Share my settings" for the unit or addon | current files (captured first, kind `before_change`) | a `push` revision, parent = basis |
-| any computer, unit diagnosed, not included, or addon `not_shared` | — | nothing published |
+| any computer, user chooses "Share my settings" for the unit or addon | current file (captured first, kind `before_change`) | a `push` revision, parents = basis set |
+| any computer, unit diagnosed, not included, or folder `not_shared` | — | nothing published |
 
-A push is offered only when WoW for the variant is not running (the files
+**Authority epoch (Q-72 with Q-75).** When this computer first learns a
+policy head under which it is the authority for a unit, it records
+`authority_since` = its current local `local_seq` for that unit (§3.5).
+It loses the epoch when it stops being the authority. A capture may
+publish automatically only if `compared_with_local_seq ≥ authority_since`,
+that is, the difference arose after this computer became the authority.
+So:
+
+- a `session_end` capture of a session that started after the change
+  publishes (Q-75);
+- a `found_at_start` capture publishes only if the capture it is compared
+  with was taken inside the epoch. A computer that becomes master while
+  its app is closed, or that had an unshared experiment before becoming
+  master, never publishes that experiment at the next start; it shows
+  `LocalDifferent` with "Share my settings" (T-R4D-startup-after-reassign).
+
+A push is offered only when WoW for the variant is not running (the file
 must be a complete capture). A push for a whole addon issues one revision
-per included identity that has files or a basis.
+per folder and included identity that has a file or a basis.
 
-### 4.2 Receiving: the target per unit
+### 4.2 Receiving: the target per unit (R4D-7, R4D-8)
 
-The settings target is computed per unit from the valid revisions in the
-ledger:
+The settings target is computed per unit from the ledger. The **structural
+graph** and the **selectable heads** are separate:
 
-1. Drop invalid revisions: issuer not a valid member at `issued_at_seq`
-   (retirement rules from `ops.md`), `auto` from a non-authority, rejected
-   checkpoints ([rollback.md](rollback.md)), schema or size failures.
-2. Compute heads. Heads whose checkpoint hashes are equal are one state
-   (the representative is the smallest object hash).
-3. One head state H:
-   - live checkpoint == H's checkpoint: `InSync`; record basis = H.
-   - basis is an ancestor of H (H is newer than what this computer had):
-     **yield**. Capture the current files (`before_change`); if they
-     differ from the basis checkpoint, keep that capture as a recovery
-     state (it was a routine change or a stale copy); then apply H. The
-     master and every other computer do this, so an accepted push reaches
-     the master too (A-12, A-13).
-   - basis == H and live differs: `LocalDifferent` ("Changed here, not
-     shared"). Nothing is applied. The routine change stays until a newer
-     head arrives or the user acts.
-   - no basis (first adoption): §5.4.
-4. Two or more head states: `NeedsDecision(SettingsChoice)` (§4.4).
+1. **Nodes.** Every `valid` revision of the unit is a node. Validity is the
+   contract's (contracts.md §1.11) plus §3.3 and §5.1: an `auto` revision
+   from a non-authority is `invalid(not_authority)`; a revision above its
+   issuer's retirement cutoff is `invalid(after_retirement)`. Invalid
+   revisions are not nodes. There is no settings-checkpoint rejection
+   (Q-82 PENDING OWNER), so no valid node is ever excluded from
+   selection.
+2. **Pending.** A revision whose parent or policy is not yet in the
+   ledger is `pending(missing_reference)`. It is **not** a node yet. If any
+   pending revision of the unit exists, the unit is `Waiting(MissingParent)`:
+   nothing is applied or published automatically for it until the record
+   arrives (it resolves by itself, contracts.md §1.11). The GUI says
+   "Waiting for settings information from <computer>".
+3. **Invalid parents.** A valid revision whose parent is `invalid` (for
+   example issued above its issuer's retirement cutoff) stays a node; the
+   invalid parent is treated as absent for ancestry. Its own validity does
+   not depend on its parent's (V-REF needs only presence and kind), so a
+   late retirement never deletes a later valid revision.
+4. **Heads** = nodes that no node names as a parent. **Head states** group
+   heads by checkpoint ref.
+5. **Basis status.** Let `B` be this computer's basis set, restricted to
+   nodes. "B is an ancestor of H" means every element of B is H or an
+   ancestor of H, over node edges only.
+
+Outcomes:
+
+| Situation | Target |
+|---|---|
+| zero nodes (no valid revision) | `Off` for this unit if there is no policy; otherwise `NoSharedCopy`: nothing applied, local file kept, first `auto`/`push` creates the root |
+| one head state H, live checkpoint == H's | `InSync`; set basis = **all heads of H** |
+| one head state H, B is an ancestor of every head of H | **yield**: capture the current file (`before_change`); if it differs from the basis checkpoint keep the capture as a recovery state; apply H; basis = all heads of H (A-12, A-13) |
+| one head state H, B == heads of H, live differs | `LocalDifferent` ("Changed here, not shared"). Nothing applied |
+| one head state H, B non-empty but not an ancestor of H (B's revision became invalid, or B is on a branch that H does not descend from) | `LocalDifferent` with reason `BasisNotShared`: nothing applied automatically; "Use shared settings" (yield on request, current file kept in recovery) or "Share my settings" (push). Never a silent overwrite |
+| one head state H, B empty (first adoption) | §5.4 |
+| two or more head states | `NeedsDecision(SettingsChoice)` (§4.4) |
+
+**Equal heads (R4D-7).** Concurrent `choice` or `push` revisions with the
+same checkpoint are several heads of **one** head state. They are not
+collapsed to a representative: the basis records every head, and the next
+`auto`/`push`/`restore` names **all** of them as parents. So the master's
+next change after an equal-choice convergence has every equivalent head as
+an ancestor and produces one head state, not a false conflict
+(T-R4D7-equal-heads-frontier).
+
+**Ancestry over the valid graph only (R4D-8).** Ancestry is never computed
+through pending or invalid revisions, and a missing parent is never treated
+as a root. The undo-then-next-session case (a `restore` revision followed
+by the master's next session) is ordinary ancestry: the restore names the
+basis set as parents and the next `auto` names the restore.
 
 Paused units and units blocked by a diagnosis are skipped (§6, §1.2).
 
@@ -421,17 +507,19 @@ single files instead of folders:
    (R-11, A-21).
 2. **Stage.** Copy each target blob to
    `<variant>\.wowsync\settings\staging\<op>\<n>`, flush, re-hash.
-3. **Journal.** `apply-journal/2` with `settings_ops`: for each file
-   `{live_rel, expected_live: {size, sha256}|absent, staged, recovery_slot,
-   target: {sha256}|absent}`.
+3. **Journal.** `apply-journal/2`, `kind: settings`, with one
+   `SettingsFileOp` per file ([contracts.md](contracts.md) §2.2):
+   `unit`, `live_rel`, `expected_live` (hash or absent), `staged` (or
+   `None` to only move the live file out) and `recovery_slot`.
 4. **Commit.** Per file: re-check that the live file still matches
    `expected_live` (a different file means WoW or the user wrote it: stop,
    capture, re-plan), `G`, rename live → recovery slot, `G`, rename staged →
-   live. A target `absent` only moves live → recovery (the addon has no
+   live. With `staged: None` it only moves live → recovery (the addon has no
    settings file in the chosen copy).
 5. **Verify** the live hashes, record the capture of the new state with
-   basis = the applied revision, append the audit entry, finalize the
-   journal, report `applied` in the next settings state.
+   basis = all heads of the applied head state, write the settings-only
+   `/2` recovery point, append the audit entry, finalize the journal,
+   report `applied` in the next settings state.
 
 Recovery after a crash uses the slot classification of apply.md §3–§4
 (`classify_slots`: Untouched/Done/Unknown) per file. A unit is all-or-nothing
@@ -456,10 +544,15 @@ two pushes, or a push and a restore.
   Q-37), and the consequence: "The copy you don't pick is kept as a
   recovery copy." Choices: "Use <computer>'s settings" for each head, and
   "Decide later". Other addons and code continue (A-14).
-- Resolving issues one `choice` revision with `parents` = all heads and the
-  chosen checkpoint. Two computers resolving at once produce two `choice`
-  revisions: if they chose the same checkpoint they are one state (§4.2
-  step 2); otherwise it is a new decision that lists both earlier choices.
+- Resolving issues one `choice` revision with `parents` = **every head of
+  every head state** shown and the chosen checkpoint. Two computers
+  resolving at once produce two `choice` revisions: if they chose the same
+  checkpoint they are two heads of one head state (§4.2, no new decision,
+  and the next change parents both); otherwise it is a new decision whose
+  resolution parents both earlier choices.
+- `decide` re-derives the head states from current evidence before
+  writing (contracts.md §5.5); if a head arrived meanwhile the choice is
+  refused with `Changed` and shown again.
 - A competing master `auto` revision is "intentional" because the master's
   completed-session changes are the group's default authority (R-09
   names "unpublished master changes" explicitly).
@@ -470,34 +563,62 @@ The master must not undo an accepted push with its old copy:
 
 - Apply happens only when WoW is not running. If the master was playing
   when the push arrived, its session-end capture is taken **before** the
-  push is applied, with basis = the old revision. If the session changed
+  push is applied, with the old basis set. If the session changed
   nothing (`changed_in_session` false, or the content equals the basis
   checkpoint), nothing is published and the push is then applied (yield).
 - If the master did change the addon in that session, its `auto` revision
-  has the old parent, so it competes with the push: a decision (§4.4), not
+  has the old parents, so it competes with the push: a decision (§4.4), not
   a silent overwrite either way.
-- After applying the push, the master's basis is the push revision, so its
-  next `auto` revision is a child of the push.
+- After applying the push, the master's basis is the push's head state, so
+  its next `auto` revision descends from the push.
+
+### 4.6 Paired selection (Q-80)
+
+When code version X of an addon is restored (removal restore, rollback),
+the settings restored with it are chosen per unit of X's folders, in this
+order, and **never** by comparing different computers' `local_seq` or
+clocks:
+
+1. The settings roots of the `/2` recovery point that took X out
+   (contracts.md §2.3): exact pairing from the same operation.
+2. Otherwise, this computer's own local history states of the unit whose
+   `code_package_hash` is X's package hash: the one with the highest
+   **local** `local_seq` (one computer's own counter).
+3. Otherwise, valid revisions of the unit with `code_package_hash` = X:
+   if exactly one of them is not an ancestor of another such revision, use
+   it; if several are mutually unordered, do not pick: restore code only
+   and list each as "Settings saved with this version on <computer>" in
+   the unit's history, for an explicit restore.
+4. Otherwise, code only, with the warning "Settings were not restored: no
+   saved copy for this version" (A-19).
+
+Paired, partial and code-only outcomes are reported distinctly
+(`paired` field, contracts.md §2.3).
 
 ## 5. Settings master and exceptions (R-07, A-11, A-45)
 
 ### 5.1 Authority for a unit
 
-For package P: if the policy head has an `addons[P]` exception, use it;
-otherwise use `master`. `not_shared` means no authority and no sync.
+For unit `{folder, identity}`: collect the authority each policy head
+gives the folder: its `folders` exception if one names the folder,
+otherwise its `master`. `not_shared` means no authority and no sync.
 `null` master means no automatic publication; pushes, choices and restores
-still work.
+still work. If the policy heads disagree for the folder, the folder is in
+`PolicyConflict` (§5.2). The local package key is never consulted, so a
+folder keeps its rule when it joins or leaves a package (R4D-6,
+T-R4D6-regroup-policy-stable). The settings master is not code authority
+(contracts.md §4.1).
 
 ### 5.2 Assigning and reassigning
 
-- Settings sync is **off** in a new group: there is no policy object and
+- Settings sync is **off** in a new group: there is no policy record and
   nothing under `WTF` is read for sharing (Q-70).
 - "Choose a settings master" / "Change master…" (Settings sync page,
-  Computers page) issues a new `settings-policy` with `supersedes` = all
-  current policy heads. The same object carries exception changes
+  Computers page) issues a new `settings-policy` whose `known` covers all
+  current policy heads. The same record carries exception changes
   ("Follow master", "Use <computer> for this addon", "Don't share this
-  addon").
-- **Never re-elected.** Nothing in this design writes a policy object
+  addon"), written for every folder of the addon.
+- **Never re-elected.** Nothing in this design writes a policy record
   except an explicit user action. In particular, master retirement,
   long absence, an unusable master state or a missing master folder never
   changes the master.
@@ -506,18 +627,23 @@ still work.
   automatic publication and no automatic apply until the user picks one
   policy ("Settings master was changed on two computers"). Addons whose
   authority is the same in every head continue. Choosing issues a policy
-  that supersedes both.
+  whose `known` covers both.
 - **Becoming master** does not publish existing local differences. Only
-  captures from sessions that start after this computer learned the policy
-  publish automatically. The confirmation for "Make this computer the
-  master" lists addons whose settings differ here and offers "Share these
-  now" (a push) as a separate checkbox, off by default (Q-75).
+  differences that arise inside the authority epoch (§4.1) publish
+  automatically, including after a restart. The confirmation for "Make
+  this computer the master" lists addons whose settings differ here and
+  offers "Share these now" (a push) as a separate checkbox, off by default
+  (Q-75).
+- **Consent is truthful about accounts (Q-70).** "Make <other computer>
+  the master" states that only the accounts that computer has included are
+  shared from it, and names them as reported in its settings state; it
+  never implies that this computer's account list applies there.
 
 ### 5.3 Master absent: retirement or offline
 
 | Situation | Behaviour | GUI |
 |---|---|---|
-| The master (or an addon's exception computer) is **retired** (`ops.md`) | Its revisions issued before retirement stay valid. Later objects from it are invalid. No automatic publication for its units until the user reassigns. Pushes, choices and restores still work. The policy is not changed | Settings sync page and Needs attention: "The settings master Den PC was retired. Choose a new master; WoW Sync does not pick one for you." Button "Change master…" (A-45) |
+| The master (or a folder's exception computer) is **retired** ([ops.md](ops.md) §2; barrier [contracts.md](contracts.md) §1.10) | Its revisions with `issued_at_seq ≤ Cutoff` stay valid; later ones are invalid and leave the graph (§4.2 step 3). No automatic publication for its units until the user reassigns. Pushes, choices and restores still work. The policy is not changed. Retirement is monotone: nothing later makes it the master again without re-enrollment and an explicit reassignment (Q-60 PENDING OWNER) | Settings sync page and Needs attention: "The settings master Den PC was retired. Choose a new master; WoW Sync does not pick one for you." Button "Change master…" (A-45) |
 | The master is **offline** or has not published for a long time | Nothing changes. Others keep its last revision; their routine changes stay local; pushes are accepted without the master (Q-74). When it returns, its captures with an old basis compete with pushes made meanwhile only if it changed those addons (§4.5) | "Settings master Den PC last shared settings 12 days ago." with "Change master…" as an option, not a prompt |
 | The master's state is `Unusable` or `Regressed` | As offline, plus the existing admission explanation | as offline, with the admission reason |
 | The master **re-enrolls** after retirement | It is a new enrollment, not the master, until the user reassigns | "Den PC rejoined. It is not the settings master." |
@@ -541,8 +667,9 @@ still work.
 
 ## 6. Pause (R-08, A-15)
 
-- **Pause settings for an addon** (Add-on detail) pauses all its units on
-  this computer. **Pause all settings** (Settings sync page) pauses every
+- **Pause settings for an addon** (Add-on detail) pauses every unit of its
+  folders on this computer (the pause set holds folder keys, so a
+  regrouping never loses the pause). **Pause all settings** (Settings sync page) pauses every
   unit of the variant on this computer, including addons installed later,
   and does not pause code (Q-83). Pause lasts until resumed (Q-28).
 - While paused: captures continue locally (history and recovery), but no
@@ -587,25 +714,43 @@ the addon will share all its settings.
 - Pruning deletes only `.wowsync\settings\…` data, never a live file. If
   storage is low, the app stops capturing new states and shows "Not enough
   space to keep settings history" with the size needed; it never prunes a
-  pinned state to make room (A-17).
-- Provider data: revision objects are immutable. Blobs and manifests of
-  revisions older than each unit's newest three are not needed for
-  recovery and become garbage-collection candidates under the future
-  provider retention design (Q-7, Q-76).
+  pinned state to make room (A-17). A capture that fails (read error,
+  disk full while storing blobs) is not recorded as a state, leaves
+  nothing half-written in the store (temp + rename), and the unit shows
+  "Settings could not be saved" with the reason; the previous three states
+  are untouched.
+- **GC roots (Q-76).** A checkpoint (local manifest and blobs, or provider
+  tree and blobs) is a root, and therefore kept, while any of these names
+  it:
+  - the unit's current plus two previous local states;
+  - a pinned exception above;
+  - a `SettingsRoot` of a retained `/2` recovery point
+    ([contracts.md](contracts.md) §2.3), local or provider;
+  - a `SettingsRoot` of a live removal record ([removal.md](removal.md)
+    §7.3);
+  - any head of the unit's revision graph, and every head of an
+    unresolved settings choice;
+  - a paired-selection candidate (§4.6) of a retained code recovery point.
+- Provider data: revision records are immutable and never deleted.
+  Provider blobs and manifests that no root names are **candidates** for
+  the future provider collector (Q-7). This design does not claim the
+  collector exists, and the GUI does not promise provider recovery of a
+  checkpoint that no root names.
 
 ## 8. Removal, re-add and identity boundaries
 
-This section implements the removal design's "settings interface":
+This section implements [removal.md](removal.md) §6.1:
 
 | Removal needs | Here |
 |---|---|
-| `settings_scope(variant, package, identities)` → owned items + `unknown_or_shared` | §1.1–§1.2. For a package that is already gone from `Interface\AddOns`, ownership uses the folder names and `.toc` declarations recorded in the presence baseline |
-| `settings_checkpoint(scope)` → content-addressed ref scoped by `(GroupId, product, identity)` | §3.1, one checkpoint per unit |
-| a removal plan of single-file moves to recovery with `expected_live` and `G` before each move | §4.3 with target `absent` |
-| `settings_restore` to the same identity only | §4.3 applying a recovery checkpoint to the same unit; any other identity is refused |
-| owned-only; shared or unknown ownership gives `removed_code_only` | §1.2 |
-| paused settings are kept on removal (Q-47) | the pause wins: paused units are not moved; the recovery point is `code_only` for them |
-| `paired` / `code_only` / `settings_not_applicable` flag | `settings_not_applicable` when the package declares no saved variables |
+| `settings_scope(variant, folders, identities)` → owned units + diagnoses | §1.1–§1.2, per folder. For a folder already gone from `Interface\AddOns`, ownership uses the `.toc` declarations recorded in the presence baseline ([removal.md](removal.md) §1.6) or, on a receiver, the removal record's manifest (§6.3 there) |
+| `settings_checkpoint(unit)` → `CheckpointRef` | §3.1, one checkpoint per `SettingsUnit` |
+| a plan of single-file moves to recovery with `expected_live` and `G` before each move | §4.3 with `SettingsFileOp.staged = None`, in a `/2` journal of kind `remove` or `settings_cleanup` |
+| restore to the same unit only | §4.3 applying a recovery checkpoint to the same `SettingsUnit`; any other identity is refused |
+| owned-only; shared or unknown ownership gives `code_only` | §1.2 |
+| paused settings are kept on removal (Q-47) | the pause wins: paused units are not moved; the ack says `kept_paused` and the recovery point lists them as not captured |
+| `paired` / `partial` / `code_only` / `not_applicable` | contracts.md §2.3; `not_applicable` when no removed folder declares saved variables |
+| settings cleanup on the observing computer before its ack (R4D-5) | [removal.md](removal.md) §6.3 uses §4.3 and these units |
 | no merge, no master needed | removal moves files; it never publishes a revision |
 
 WoW keeps the saved variables of an uninstalled addon (Q-45, D-21).
@@ -623,19 +768,21 @@ one exists, otherwise leaves the unit empty.
 |---|---|---|
 | `Off` | no policy, or not confirmed on this computer, or account not included | "Settings not shared" |
 | `InSync` | live == head, reported `applied` | "Settings up to date (from Den PC)" |
-| `Waiting` | newer head, blocked by WoW running or by another journal | "New settings from Den PC will be used when WoW closes" |
-| `LocalDifferent` | live differs from head; this computer is not the authority | "Changed here, not shared" with "Share my settings" |
+| `Waiting` | newer head, blocked by WoW running or by another journal; or `Waiting(MissingParent)` (§4.2) | "New settings from Den PC will be used when WoW closes"; "Waiting for settings information from Den PC" |
+| `LocalDifferent` | live differs from head and is not published (non-authority, outside the authority epoch, or `BasisNotShared`, §4.2) | "Changed here, not shared" with "Share my settings" (and "Use shared settings" for `BasisNotShared`) |
+| `NoSharedCopy` | a policy exists but no valid revision of the unit yet | "Not shared yet" |
 | `Paused` | §6 | "Settings paused on this computer" |
 | `NeedsChoice` | §4.4 | "Choose which settings to keep" |
 | `PolicyConflict` | §5.2 | "Settings master was changed on two computers" |
 | `MasterAbsent` | §5.3 retired | "The settings master Den PC was retired…" |
 | `Diagnosed(kind)` | §1.2 | "WoW Sync can't tell which addon owns these settings" |
 | `Suspect` | §2.2 | "Settings may be incomplete after WoW stopped" |
+| `CaptureFailed` | §7 | "Settings could not be saved" |
 | `NotShared` | group exception | "Not shared (your choice)" |
 
 The group roll-up for settings never says "in sync" while any included unit
 on any non-retired computer is `Waiting`, `Paused`, `LocalDifferent`,
-`NeedsChoice`, `Diagnosed`, `Suspect` or unconfirmed (A-15, A-24).
+`NeedsChoice`, `Diagnosed`, `Suspect`, `CaptureFailed` or unconfirmed (A-15, A-24).
 
 ### 9.2 Explanations (R-12, A-25)
 
@@ -668,10 +815,11 @@ master-absence part of UG-20.
 | Module | Additions |
 |---|---|
 | `toc` | `TocInfo.saved_variables: Vec<String>`, `saved_variables_per_character: Vec<String>`: names from the `## SavedVariables` and `## SavedVariablesPerCharacter` lines, validated as identifiers, metadata only |
-| `ids` | `Identity { Account(AccountName), Character(AccountName, RealmName, CharName) }`, `SettingsUnit { package: PackageKey, identity: Identity }`, `RevisionId`, `PolicyId`, `CheckpointHash` |
+| `ids` | per [contracts.md](contracts.md) §3 (owner R4-core-settings): `Identity { Account(AccountName), Character(AccountName, RealmName, CharName) }`, `SettingsUnit { folder: FolderKey, identity: Identity }`, `CheckpointRef`, `SettingsRoot`; NFC/case diagnoses. No revision or policy id types: records are named by their hash (contracts.md §1.3) |
 | `paths` | `wtf_saved_variables_rel(identity, folder) -> Result<RelPath, PathError>`: builds only the two §1.1 shapes; `classify_wtf_rel(&RelPath) -> WtfPathKind` |
-| **new `settings`** | `SettingsScope { items, diagnoses }`, `ScopeDiagnosis`, `settings_scope(&VariantRoot, &Inventory, &WtfListing, &IncludedAccounts) -> SettingsScope`; `Checkpoint`, `checkpoint_of(unit, &[FileFact]) -> Checkpoint`; `Capture`, `classify_capture(prev, settle_scans, activity) -> CaptureClass {Complete, Suspect, Unchanged}`; `PolicyView`, `policy_heads(&Ledger) -> PolicyView`, `authority_for(&PolicyView, &PackageKey) -> Authority`; `RevisionView`, `unit_heads(&Ledger, &SettingsUnit, &Validity) -> Heads`; `UnitTarget { Apply(Revision), Keep, LocalDifferent, NeedsChoice(Vec<Revision>), Blocked(Reason) }`, `compute_settings_target(...) -> Vec<(SettingsUnit, UnitTarget)>`; `publish_decision(capture, authority, paused) -> PublishAction`; `resume_preview(...) -> ResumeCase`; `KEEP_SETTINGS_STATES = 3` re-using `plan::KEEP_OWN_STATES` |
-| `records` | via `record!`: `SettingsPolicyObject`, `SettingsRevisionObject`, `SettingsCheckpointManifest`, `SettingsState`, `SettingsLocal`; `ApplyJournal.settings_ops: Option<Vec<SettingsFileOp>>`; `RecoveryPoint` v2 fields `kind`, `settings`, `paired` (shared with the removal design) |
+| **new `settings`** | `SettingsScope { items, diagnoses }`, `ScopeDiagnosis`, `settings_scope(&VariantRoot, &Inventory, &WtfListing, &IncludedAccounts) -> SettingsScope`; `Checkpoint`, `checkpoint_of(unit, &[FileFact]) -> Checkpoint`; `Capture`, `classify_capture(prev, settle_scans, activity) -> CaptureClass {Complete, Suspect, Unchanged}`; `PolicyView`, `policy_heads(&Ledger) -> PolicyView`, `authority_for(&PolicyView, &FolderKey) -> Authority`, `master_state(&PolicyView, &Membership) -> MasterState { Present, Absent { was, why }, NotChosen }` (consumed by ops.md §2.6), `authority_epoch(...)`; `RevisionGraph { nodes, pending, heads, head_states }`, `revision_graph(&Ledger, &SettingsUnit) -> RevisionGraph` (§4.2); `UnitTarget { Apply(HeadState), Keep, LocalDifferent(Reason), NoSharedCopy, Waiting(Reason), NeedsChoice(Vec<HeadState>), Blocked(Reason) }`, `compute_settings_target(...) -> Vec<(SettingsUnit, UnitTarget)>`; `publish_decision(capture, authority, epoch, paused) -> PublishAction`; `paired_selection(...)` (§4.6); `gc_roots(...)` (§7); `resume_preview(...) -> ResumeCase`; `KEEP_SETTINGS_STATES = 3` re-using `plan::KEEP_OWN_STATES` |
+| `authority` (consumer) | adds the `settings-policy` and `settings-revision` kinds with V-POLICY and V-REVISION to the family owned by R4-core-removal (contracts.md §9) |
+| `records` | via `record!`: `SettingsCheckpointManifest`, `SettingsState`, `SettingsLocal`. `ApplyJournal/2` with `SettingsFileOp` and `RecoveryPoint/2` are the shared contract (contracts.md §2), owned by R4-core-removal and consumed here |
 | `plan` | `plan_settings_apply(&UnitTarget, &LiveFacts, &ApplyGate) -> Result<SettingsPlan, PlanBlock>`; new `PlanBlock::SettingsPaused`, `SettingsDiagnosed` |
 | `exec` | `SettingsEffects` port trait (`stage_blob`, `live_fact`, `rename_live_to_recovery`, `rename_staged_to_live`, `gate`), `run_settings_apply`; `recover_interrupted` also settles `settings_ops` with `classify_slots` |
 | `status` | `SettingsStatus` per unit (§9.1), group roll-up in `StatusView`; `Headline` counts settings attention items |
@@ -689,20 +837,22 @@ master-absence part of UG-20.
   restricted to the paths of an approved `SettingsPlan`.
 - `fs_install`: settings staging, journal `settings_ops`, recovery slots,
   local blob/manifest store.
-- `provider`: write and list settings objects and the settings stream
-  (`write_atomic`, `put_object`, write-if-absent).
+- `provider`: write and list the settings stream (`write_atomic`) and
+  checkpoint manifests and blobs (write-if-absent). Authority records and
+  index chunks use the shared authority I/O (contracts.md §9).
 - `localstate`: `SettingsLocal`.
 - `winproc`: unchanged; session end is a transition of the existing
   activity signal.
 
 ### 10.3 `wow-sync-runtime`
 
-Cycle (removal design numbering, new steps marked): 1 recover (also
-`settings_ops`), 2 admit (also settings stream), 2a learn authority (also
-policy and revisions), 3 scan, **3s scan WTF and capture (§2)**, 3a observe
-removals, 4 publish (code state, then settings objects and settings state),
-5 target, **5s settings target (§4.2)**, 6 gate/plan, 7 apply code,
-**7s apply settings (§4.3)**, 8 status. Settings steps never delay the code
+Cycle (removal.md §1.6 numbering, new steps marked; cycle wiring is
+integrated by R4-core-ops, contracts.md §9): 1 recover (also
+`settings_ops`), 2 admit (also settings stream, contracts.md §6), 2a learn
+authority (also policy and revisions), 3 scan, **3s scan WTF and capture
+(§2)**, 3a observe removals, 4 publish (code state, then settings records,
+index and settings state), 5 target, **5s settings target (§4.2)**, 6
+gate/plan, 7 apply code, **7s apply settings (§4.3)**, 8 status. Settings steps never delay the code
 steps for other addons. `activity.rs` emits the session-end event;
 `control.rs` gains commands `SetPolicy`, `ShareSettings`, `PauseSettings`,
 `ResumeSettings(ResumeChoice)`, `ChooseSettings`, `RestoreSettings`,
@@ -731,30 +881,45 @@ deliberate break that makes it fail).
 | T-S08 Neg | master playing during push, no change in session: no stale `auto` revision after exit | A-13 |
 | T-S09 | push vs unpublished master change on same parent: both heads, `NeedsChoice`, no apply anywhere, both checkpoints pinned; another addon updates meanwhile | A-14 |
 | T-S10 Neg | no merged bytes ever; choosing by older/newer timestamp is impossible (fixture with reversed clocks gives the same decision) | A-14, A-20 |
-| T-S11 | two computers resolve the same choice identically: one state; differently: new decision | A-14, A-20 |
+| T-S11 | two computers resolve the same choice identically: two heads of one head state, no decision; then the master's next changed session, a push, a replay of both choices, and two later resolutions: never a false conflict (extends to T-R4D7); differently: new decision | A-14, A-20 |
 | T-S12 | pause one addon, then pause all: no revision published, no apply, status "paused" in group view | A-15 |
 | T-S13 | each resume row of §6 gives the stated explanation and default; resume never publishes | A-15 |
 | T-S14 | more than three captures per unit: three kept; code history independent | A-16 |
 | T-S15 | pinned states (choice, paired, removal, suspect, needs_help) survive pruning with an exception, then prune back to three | A-17 |
 | T-S16 Neg | low storage: no pinned state deleted; needs-help message | A-17 |
-| T-S17 Neg | account identity settings never applied to another account; character never to another character or realm; case-only differences diagnosed | A-23 |
+| T-S17 Neg | account identity settings never applied to another account; character never to another character or realm; case-only differences and NFC collisions diagnosed on NTFS and APFS fixtures (contracts.md T-C11) | A-23 |
 | T-S18 Neg | `config-cache.wtf`, `bindings-cache.wtf`, `macros-cache.txt`, `layout-local.txt`, `AddOns.txt`, `Blizzard_*.lua` never read, moved or written | A-23 |
 | T-S19 Neg | shared declared variable: both packages' units diagnosed, live files untouched, other addons sync | A-23 |
 | T-S20 Neg | file with Lua that would write a file or run a command if executed: bytes copied, nothing executed (no process spawn, no file created) | A-23 |
 | T-S21 Neg | junction/symlink at `WTF`, account, realm, character or `SavedVariables`: no write through it | A-23 |
-| T-S22 Neg | malformed or oversized policy/revision/state objects: refused per object, others still used | A-20, A-23 |
+| T-S22 Neg | malformed or oversized policy/revision/state records, a parent of another unit, a wrong-kind policy ref: refused per record (`invalid` or `pending`, contracts.md §1.11), others still used | A-20, A-23 |
 | T-S23 | WoW starts between file renames: stop before next rename, recovery settles later, no process killed (real temp filesystem) | A-21, A-22 |
 | T-S24 | crash/disk-full/permission failure at every settings op transition: next start reports the actual state; prior files recoverable | A-22 |
-| T-S25 | master retired: no automatic publication for its units, master-absent status and reassign action; no policy object written automatically | A-45 |
-| T-S26 Neg | stale publication from the retired master after retirement: not valid, does not reactivate it | A-45 |
+| T-S25 | master retired: no automatic publication for its units, master-absent status and reassign action; no policy record written automatically | A-45 |
+| T-S26 Neg | stale publication from the retired master above its cutoff: not valid, not a graph node, does not reactivate it; a later lower-cutoff retirement invalidates nothing more | A-45 |
 | T-S27 | concurrent policy changes: only addons whose authority differs are held | A-20 |
 | T-S28 | three replicas with reordered, duplicated and deleted deliveries and a manifest without its blobs: no false `InSync`, no apply of a partial checkpoint | A-20 |
 | T-S29 | removal of an addon with settings: owned files moved to recovery; "undo removal" restores both to the same identity; diagnosed ownership gives code-only with the GUI text | A-09, A-19 |
-| T-S30 | a reader without settings support skips settings objects and streams without refusing the group | A-20 |
+| T-S30 | the slice app with a group holding settings records, index chunks and a settings stream: it ignores them and never applies or removes settings; a `/2` settings journal under the slice gives `NeedsHelp` (contracts.md T-C06) | A-20, A-22 |
 | T-S31 | group status never "in sync" with any paused, waiting, local-different or unconfirmed unit; confirmation needs an `applied` report | A-24 |
 | T-S32 (GUI) | setup consent, change master, exception, share, pause/resume, settings choice and restore all complete without a terminal, with keyboard and screen evidence | A-25, A-26 |
+| T-R4D6-regroup-policy-stable | suite {a, b} with `not_shared` for a's folder and default master for b; pause on a; then folder a is removed (and later re-added) and peers group the suite differently | b's units keep the master rule, a's `not_shared` and pause stay on folder a; no unit changes key; no sharing is granted by regrouping; recovery stays paired with the right folder | A-11, A-15, A-18, A-20 |
+| T-R4D7-equal-heads-frontier | concurrent `choice` revisions a and b with the same checkpoint; master's next change c; then a push, a replay of a and b, and two later resolutions | c's parents are {a, b}; one head state throughout; no `NeedsChoice` until a genuine competing change | A-13, A-14, A-20 |
+| T-R4D8-child-before-parent | revision c arrives before its parent p, then p; with and without restarts | `Waiting(MissingParent)` with nothing applied; after p, ordinary yield; never a false root or conflict | A-20 |
+| T-R4D8-retired-basis | this computer's basis revision is from a master later retired with a cutoff below it; a valid push descends from it | the basis is invalid; the push stays a node; target is `LocalDifferent(BasisNotShared)` with "Use shared settings", never a silent overwrite | A-20, A-45 |
+| T-R4D8-undo-then-next-session | a `restore` revision, then the master's next session | the restore parents the basis set; the next `auto` parents the restore; one head state | A-18, A-20 |
+| T-R4D8-zero-heads | policy set, no valid revision; and every revision invalid | `NoSharedCopy`; nothing applied or deleted; first `auto`/`push` creates the root | A-20 |
+| T-R4D-startup-after-reassign | laptop has an unshared experiment, then becomes master while its app is closed; app starts (found_at_start); also a session completed right after reassignment | the experiment is not published (`LocalDifferent`, "Share my settings"); a session after the reassignment publishes | A-11, A-12 |
+| T-S-paired-selection | restore code X with: an exact `/2` pairing; only local history with X's hash; two unordered remote revisions with X's hash; none | exact pairing; newest local; code-only with both offered explicitly; code-only with the A-19 warning. Never by comparing peers' `local_seq` or clocks | A-18, A-19 |
+| T-S-retention-roots | paired recovery roots, unresolved-choice heads, live removal roots and provider-location roots across prune and restart; a 16 MiB+ ledger (contracts.md T-C09) | no root pruned; unrooted checkpoints become collector candidates only; nothing claims provider recovery for them | A-16, A-17 |
+| T-S-capture-failures | read error, disk full while storing blobs, crash between blob and manifest | no partial state recorded; previous three states intact; `CaptureFailed` shown | A-17, A-22 |
+| T-S-size-cap-pending | a file above the test-only cap | `TooLarge` diagnosis; with no approved cap, real-data settings sync is disabled (Q-77 PENDING OWNER) | A-23 |
 
 A-38 controls to include, at minimum: publish non-master captures
 automatically (T-S06 must fail); pick the newer timestamp for a choice
 (T-S10); apply a revision to a different account (T-S17); skip `G` before a
-settings rename (T-S23); auto-elect a master on retirement (T-S25).
+settings rename (T-S23); auto-elect a master on retirement (T-S25);
+collapse equal heads to one representative parent (T-R4D7); treat a
+missing parent as a root (T-R4D8-child-before-parent); key policy by
+package key (T-R4D6); publish `found_at_start` captures regardless of the
+epoch (T-R4D-startup-after-reassign).
