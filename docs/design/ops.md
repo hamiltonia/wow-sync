@@ -22,7 +22,7 @@ packet R4-ops-design. It covers five operational features of the GUI app:
   - D-24 approves P4-1 (the GitHub Releases check) and P4-2 (an OS
     notification crate).
 - This document does not change product meaning. Choices the approved intent
-  does not settle are listed as Q-54 to Q-61 in [questions.md](questions.md),
+  does not settle are listed as Q-59 to Q-66 in [questions.md](questions.md),
   each with a safe default.
 
 **Inputs this design builds on.**
@@ -214,7 +214,7 @@ impl PackageStatus { pub fn reach(&self) -> Option<DecisionReach> }
 - **Tray:** attention tone, the same shape as `NeedsHelp`, with the tooltip
   "WoW Sync: review needed".
 - Pending decisions (`NeedsDecision`) do **not** promote the headline. They
-  keep core's headline and the Needs attention count (Q-54, safe default).
+  keep core's headline and the Needs attention count (Q-59, safe default).
 
 ---
 
@@ -280,7 +280,7 @@ concurrently. Validity is computed as a grounded labelling:
 Retirement only removes authority, so this choice fails safe. A computer
 someone meant to retire cannot keep publishing because of a race. The GUI
 says: "Laptop and Den PC retired each other at the same time. Join again on
-the computer you still use." (Q-56.) Every computer derives the same result
+the computer you still use." (Q-61.) Every computer derives the same result
 from the same set of records.
 
 Several valid records may retire the same enrollment. The effective cutoff is
@@ -321,7 +321,7 @@ When a computer admits a valid retirement of its own current enrollment:
 
 - It **stops publishing** immediately. No state, no authority objects and no
   mirrors are written, and nothing is uploaded on its behalf.
-- It **stops applying** group changes (Q-55).
+- It **stops applying** group changes (Q-60).
 - Local addons, settings, recovery points and logs stay **untouched**.
   Nothing is uninstalled.
 - The headline becomes `NeedsHelp`-tone **"This computer was retired"**, with
@@ -347,7 +347,7 @@ computer** (self-retirement).
 3. **Recent report warning.** If the computer reported within the last 72
    hours (Q-27), the sheet adds: "Den PC reported 3 hours ago. Retire only
    computers you no longer use, or that are lost." This is a warning, not a
-   block (Q-60).
+   block (Q-65).
 4. **Settings master paragraph** (§2.6), if the computer is the settings
    master.
 5. **A confirmation checkbox:** "I understand Den PC stops syncing." The
@@ -516,7 +516,7 @@ pub struct RecordingNotifier { pub shown: Mutex<Vec<RenderedNotice>> } // testki
 - **`win-toast-notify` and `winrt-toast`.** They are less used, Windows only,
   and still need a macOS crate.
 
-**Platform caveats (native verification required, Q-57 and Q-58):**
+**Platform caveats (native verification required, Q-62 and Q-63):**
 - **Windows identity (AUMID).** An unpackaged app needs an AppUserModelID,
   or Windows attributes toasts to PowerShell (the backend's default) or drops
   them.
@@ -663,7 +663,7 @@ privacy statement. No other WoW Sync network call exists (D-23).
 **Rejected alternatives:**
 - **`ureq 3` with `native-tls`.** It pulls `webpki-root-certs`
   (CDLA-Permissive-2.0, not on the deny allow list). deny **fails**.
-  Allowing that licence is an owner decision (Q-61).
+  Allowing that licence is an owner decision (Q-66).
 - **`rustls` with `ring` or `aws-lc-rs`.** `ring` needs a C toolchain and
   clang for ARM64 Windows, and `aws-lc-rs` needs cmake and NASM. Root stores
   (`webpki-roots`) are CDLA-licensed too.
@@ -674,7 +674,7 @@ privacy statement. No other WoW Sync network call exists (D-23).
 
 **Maintenance caveat.** ureq 2.x is in maintenance mode upstream; 3.x is
 current. That is acceptable for one pinned, deny-checked GET. Revisit before
-release (Q-61).
+release (Q-66).
 
 **Architecture guard.** Only `wow-sync-adapters/src/update_http.rs` may name
 `ureq` or `native_tls`. A test in the adapters crate scans the workspace
@@ -701,7 +701,7 @@ sources (like core `arch.rs`) and fails on any other use. It also fails on any
    - the never-included list (§5.4);
    - the warning "Anyone you send this to can read it. Do not save it in your
      shared Dropbox folder: everyone in the group can read that folder."
-4. **Option.** **Include add-on names** is a checkbox, on by default (Q-59).
+4. **Option.** **Include add-on names** is a checkbox, on by default (Q-64).
    Toggling it rebuilds the preview.
 5. **Save.** **Save…** opens the OS save dialog (GPUI `prompt_for_new_path`).
    The default name is `wowsync-diagnostics-<yyyymmdd-hhmm>.txt` in Documents.
@@ -855,7 +855,7 @@ production function, observe the named test fail (exit 101), then restore.
 | T-26-11 | Journal **Keep the new version** is not offered when the staged tree fails re-hash | Neg |
 | T-26-12 | UQ-2: an unresolved journal → `HoldScope::AllApplies(UnresolvedJournal)`; one NeedsDecision → `Packages([p])`; the app sentence matches | positive |
 | T-26-13 | UQ-1: reconfirm pending + Paused → headline `ReviewNeeded`; reconfirm pending + NeedsHelp → `NeedsHelp`; pause + Error → Error | positive / Neg |
-| T-26-14 | NeedsDecision alone does not produce `ReviewNeeded` (Q-54 default) | Neg |
+| T-26-14 | NeedsDecision alone does not produce `ReviewNeeded` (Q-59 default) | Neg |
 | T-26-15 | GUI: Decision page keyboard flow (Tab to options, Space to select, Enter to confirm); screenshots with interaction evidence | manual A-26 |
 
 ### A-45: retirement (core `retire`, `admit`, `status`; runtime e2e)
@@ -935,5 +935,5 @@ production function, observe the named test fail (exit 101), then restore.
 
 ## 9. Open questions
 
-Q-54 to Q-61 in [questions.md](questions.md). Implementers follow the safe
+Q-59 to Q-66 in [questions.md](questions.md). Implementers follow the safe
 defaults until a decision is recorded.

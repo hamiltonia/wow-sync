@@ -20,7 +20,7 @@ This packet is design only. No product code changed.
 - **[docs/design/ui/questions.md](../../../design/ui/questions.md):** UQ-1 and
   UQ-2 are marked decided yes by D-23, with links to the design.
 - **[docs/design/questions.md](../../../design/questions.md):** a new section
-  appends Q-54 to Q-61.
+  appends Q-59 to Q-66.
 
 ## Requirement-to-section map
 
@@ -80,12 +80,12 @@ to the workspace by this packet.
 | Crate | Licence | Why needed | Maintenance | deny |
 |---|---|---|---|---|
 | `notify-rust =4.19.0` | MIT OR Apache-2.0 | OS notifications on Windows (WinRT toast) and macOS behind one API (P4-2) | Active 4.x line; already a GPUI Linux dependency | PASS |
-| `ureq =2.12.1` (no default features, `native-tls`) | MIT OR Apache-2.0 | One small blocking HTTPS GET per day (P4-1) without an async runtime | Maintenance mode upstream (3.x current). Q-61 | PASS |
+| `ureq =2.12.1` (no default features, `native-tls`) | MIT OR Apache-2.0 | One small blocking HTTPS GET per day (P4-1) without an async runtime | Maintenance mode upstream (3.x current). Q-66 | PASS |
 | `native-tls =0.2.18` | MIT OR Apache-2.0 | OS TLS (SChannel, Security.framework); no C toolchain, ring, aws-lc or bundled roots | Mature, widely used | PASS |
 
 ## Limits and open issues
 
-- **Native verification required** (Q-57, Q-58) for:
+- **Native verification required** (Q-62, Q-63) for:
   - Windows toast delivery with an HKCU AUMID;
   - the macOS `NSUserNotificationCenter` delivery;
   - click-through behaviour.
@@ -100,5 +100,5 @@ to the workspace by this packet.
   not link `ops.md` yet. The orchestrator may add the link on merge.
 - **No A-38 negative controls.** No behaviour code changed in this packet.
   The controls are planned per test in ops.md §7.
-- **Open questions:** Q-54 to Q-61 in
+- **Open questions:** Q-59 to Q-66 in
   [docs/design/questions.md](../../../design/questions.md).
