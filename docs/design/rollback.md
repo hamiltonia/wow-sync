@@ -123,11 +123,14 @@ validity (contracts.md §1.3, §1.4, §1.11). Neither has an `id` field.
 
 - `folders`: F = the union of R1's and R0's folder keys. It is the scope
   for coverage and constraint composition, per folder (contracts.md §1.8,
-  §4.2).
+  §4.4), and the scope over which `rejected`, `recovered` and
+  `considered` record complete content (a key of F an entry does not list
+  was absent from that copy, contracts.md §4.2).
 - `rejected`: the exact content rejected (Q-78 PENDING OWNER). Its
   `version_label` is the untrusted display string allowed by contracts.md
   §1.4. It is used for display and for the look-alike hold only (§3.3).
-  Level 2 uses contracts.md §4.2 `matches` against it.
+  Level 2 compares every source with it by contracts.md §4.2
+  `same_release` over F.
 - `recovered`: the exact content the user chose (§3.1), possibly with
   fewer or other folders than `rejected`.
 - `considered`: every candidate for `folders` that the issuer knew at the
@@ -213,12 +216,17 @@ rejections' `folders`.
 
 Rollback fills two levels of `target::compose` (contracts.md §4.1):
 
-- **Level 2, rejection.** A candidate that `matches` (contracts.md §4.2)
+- **Level 2, rejection.** A source whose complete content is `Same`
+  (contracts.md §4.2 `same_release`, over the rejection's `folders`) as
   `rejected` of an active rejection is never a candidate, never a source
-  and never kept as a target for the common folders. A computer whose
-  installed copy is rejected is never a source of it.
+  and never kept as a target. Equal trees on some folders never make a
+  source rejected: R0 `{details:U}` is `Different` from R1 `{details:U,
+  details_extra:BAD}` because R0 lacks `details_extra`
+  (T-R4D23-added-folder-rollback). A source that is `Unknown` against a
+  rejection waits (contracts.md §4.2). A computer whose installed copy is
+  rejected is never a source of it.
 - **Level 6, recovered target**, composed per folder with code choices by
-  contracts.md §4.2 and defined below.
+  contracts.md §4.4 and defined below.
 
 ### 3.1 The recovered-target constraint
 
@@ -231,16 +239,25 @@ removed by the rollback removal (§1) instead.
 
 - **Live constraints, per folder.** X's constraint is live for f unless
   another valid code choice, rejection or re-add that names f covers X
-  through its `known` (contracts.md §4.2). A record covering X for some
+  through its `known` (contracts.md §4.4). A record covering X for some
   folders leaves X live for the others (R4D-21). A resume therefore ends
   the recovered target for its folders but not the rejection itself.
-- **Recovered chain.** If `X.recovered` is itself rejected for f by active
-  rejections Y1…Yn, X's constraint for f stands for their recovered trees
-  instead, repeated with a visited set (no cycles). Rejected contents are
-  dropped. If nothing remains, X imposes no constraint on f and ordinary
-  selection among non-rejected candidates applies.
+- **Recovered chain.** The chain compares whole releases, never single
+  folders. If `X.recovered` is `Same` (contracts.md §4.2) as `rejected`
+  of active rejections Y1…Yn, X's constraint stands for their recovered
+  releases instead, repeated with a visited set (no cycles). Rejected
+  releases are dropped. If the comparison is `Unknown` (Yi's scope has a
+  folder X does not record), the sources decide: the copies of
+  `X.recovered` are the sources `Same` as it over X's `folders`; if
+  every such copy is rejected at level 2 (it is `Same` as some
+  `Yi.rejected` over Yi's scope), the chain advances to those Yi; if some
+  copy is not rejected, X's constraint stands and only that copy is a
+  source. If nothing remains, X imposes no constraint and the whole
+  ordinary result applies (contracts.md §4.3). In
+  T-R4D23-added-folder-rollback, R0 is `Different` from R1, so the chain
+  stops at R0 and R0 is installed.
 - **Composition.** The resulting trees of all live constraints for f are
-  composed by contracts.md §4.2: one tree installs it; several
+  composed by contracts.md §4.4: one tree installs it; several
   different trees give `NeedsDecision(RollbackTargetsDiffer)`.
 - **Unavailable target.** If the constrained content has no source (no
   local recovery point, no member's admitted state and no §7 upload), the
@@ -257,8 +274,8 @@ removed by the rollback removal (§1) instead.
   raises the non-blocking notice `NewerAfterRollback` (contracts.md §5.1):
   "Details 2.2 is available. You went back to 2.0 on <date>." Options:
   "Use 2.2" (a keep whose `known` covers X) or "Stay on 2.0" (a local
-  dismissal of that candidate only). Candidates that match a `considered`
-  entry never raise the notice.
+  dismissal of that candidate only). A source that is `Same` (contracts.md
+  §4.2) as a `considered` entry never raises the notice.
 
 ### 3.2 Concurrent, late and conflicting records (R4D-9)
 
@@ -277,7 +294,7 @@ any arrival order.
 | Two lifts of the same rejection, concurrently | one lift effect |
 | A lifts X while B writes a new rejection X′ of the same content | X′ is not named by the lift and stays active (Q-79) |
 | Rollback on A, removal of the same folders on B, concurrently | removal (level 4) beats the constraint (level 6): the folders are removed into recovery everywhere. The rejection stays. A later re-add ends the constraints its `known` covers; ordinary selection among non-rejected candidates follows |
-| Rollback and code choice on overlapping folders | coverage decides. Concurrent ones with different contents give a decision (contracts.md §4.2). A keep of rejected content is inert (level 2) |
+| Rollback and code choice on overlapping folders | coverage decides. Concurrent ones with different contents give a decision (contracts.md §4.4). A keep of rejected content is inert (level 2) |
 | Rejection issued by a computer later retired | valid iff `issued_at_seq ≤ Cutoff` (contracts.md §1.10) |
 
 ### 3.3 Offline and late peers, look-alikes (A-18, A-20)
@@ -328,11 +345,21 @@ For each settings unit of the folders F on the issuing computer
    only."
 4. If none is found: the unit's current settings are not touched.
 
-The recovery point's `paired` value is **derived** from its code and
-settings roots (contracts.md §2.3), never set by this flow; the
-rejection's `settings` field copies it: `paired` (every unit restored),
-`partial` (some), `code_only` (none) or `not_applicable` (the addon has no
-settings units).
+The rejection's `settings` field and the summary describe the **target**
+side: what happened to the settings saved with R0 (S0), unit by unit, in
+steps 1–4 above. They are computed from paired selection when the
+operation is planned (the bytes are reserved in `pending_records`):
+`paired` (every unit has an S0 to restore), `partial` (some), `code_only`
+(none) or `not_applicable` (the addon has no settings units). The
+operation either restores every selected S0 or rolls back entirely and
+writes no record, so the recorded value is the restore result. The recovery point's `paired` value is a different
+fact: it is derived from the **source** side, the R1 code and the S1
+settings captured from it (contracts.md §2.3), and is never copied into
+the rejection or the summary (R4D-27). With S1 readable and S0 missing, the
+recovery point is `paired` while the outcome is `code_only`, and the A-19
+warning is shown (T-R08); with no current S1 files for a unit (nothing to
+capture) but S0 restored for every unit, the outcome is `paired`,
+whatever the recovery point's value.
 
 **Afterwards** the app shows a summary that keeps the outcomes apart
 (R-10, A-19):
@@ -434,8 +461,8 @@ code-choice family (contracts.md §5.1); this packet produces the items.
 | T-R05 | the issuer's folder deleted after mirroring: rejection still active | A-20 |
 | T-R06 | 2.1.5 known at the rollback is never chosen; a later unknown 2.2 raises `NewerAfterRollback` and does **not** install; "Use 2.2" installs it; "Stay on 2.0" keeps R0 (Q-81 default) | A-18 |
 | T-R07 Neg | same label, different content: `LookalikeOfRejected`, not installed; "Block this copy too" writes a rejection | A-18, A-23 |
-| T-R08 | no paired settings: code-only rollback, current settings byte-identical, warning differs from the paired summary | A-19 |
-| T-R09 | paired for one unit, missing for another: partial warning lists the missing unit; recovery point `paired = partial` | A-19 |
+| T-R08 | no paired settings (current S1 readable and captured, S0 missing for every unit): code-only rollback, current settings byte-identical, rejection `settings = code_only`, the A-19 warning differs from the paired summary, although the recovery point holding R1 and S1 is `paired`; and the converse, a unit with no current S1 files but S0 restored for every unit: outcome `paired` (R4D-27) | A-19 |
+| T-R09 | S0 found for one unit, missing for another, S1 readable for both: partial warning lists the missing unit; rejection `settings = partial`, computed from the restore results, not from the recovery point's `paired` | A-19 |
 | T-R10 | lift then restore R1; a concurrent new rejection not named by the lift stays active | A-18, A-20 |
 | T-R11 | a removed addon offers "Undo removal" with only non-rejected states; a removal cannot be rejected | A-18 |
 | T-R12 | rejections and removal records are independent; a re-add does not lift | A-20 |
@@ -448,6 +475,8 @@ code-choice family (contracts.md §5.1); this packet produces the items.
 | T-R19 Neg | Q-84 default: a non-retired member without `rejection/1` (or, for a folder-changing rollback, without `removal/1`) disables group rollback with the named reason; no record is written; a downgraded member after a rollback is never counted as confirmed | A-18 |
 | **T-R4D20-rollback-added-folder** | R1 = {details, details_extra} (2.1 added a folder), R0 = {details}; roll back on A; B and C hold R1; crash at every slot of the `rollback` journal | one journal: replace `details`, remove `details_extra`; after verify the rejection, a `rollback` removal of `details_extra` and A's own ack are written from `pending_records`, none if the op rolled back; B and C end with R0 and `details_extra` in recovery; "Allow again…" writes a lift plus a re-add of `details_extra`, and R1 becomes eligible and complete | A-18, A-20, A-22 |
 | **T-R4D20-rollback-dropped-folder** | R1 = {details} (2.1 dropped `details_old` with a `folder_drop` removal), R0 = {details, details_old}; roll back on A; crash at every slot | one journal: replace `details`, install `details_old`; a `rollback` re-add of `details_old` covering the drop removal; every computer reinstalls `details_old` with R0's tree; a later unrelated removal of `details_old` still wins | A-18, A-20, A-22 |
+| **T-R4D23-added-folder-rollback** | contracts.md §4.2: rejection scope {core, extra}; R1 `{core:U, extra:BAD}` rejected, R0 `{core:U}` recovered (byte-identical core); B holds R0, C holds R1 | R0 is `Different` from R1: A installs R0, B keeps R0 and is a source, C replaces R1 with R0; the chain stops at R0; no computer labels R0 as blocked; the same with the computers' local groupings swapped | A-18, A-20 |
+| **T-R4D23-dropped-folder-rollback** | scope {core, old}; R1 `{core:U}` rejected, R0 `{core:U, old:O}` recovered (identical common folder) | R0 installed with `old`; a source `{core:U}` without `old` is rejected; a source `{core:U, old:O2}` is not rejected (look-alike if its label is 2.1) | A-18, A-20 |
 | **T-R4D21-choice-over-rollback** | contracts.md §10: rejection on {a, b}; a later keep on {a} covering it | a follows the keep; b keeps the recovered tree; same result with a and b grouped or separate locally | A-18, A-20 |
 | **T-R4D9-concurrent-rollbacks** | each row of §3.2 in both delivery orders on three computers: same target; different targets (decision, R1 spreads nowhere); chain R2→R1→R0; opposite rejections (ordinary or only-blocked hold); late delivery of the covered rejection; unavailable target (`RecoveredUnavailable`, nothing changed on disk); concurrent lifts; lift vs new rejection; rollback vs removal (removed everywhere, rejection kept, re-add selects non-rejected). Same target on every computer in every order | A-18, A-20 |
 | **T-R4D9-choice-vs-rollback** | a keep that covers a rejection replaces the recovered target; a rollback that covers a keep replaces it; concurrent keep and rollback with different contents give a decision; a keep of rejected content is inert; resume ends the recovered target and R1 stays rejected | A-18, A-20 |
@@ -455,6 +484,9 @@ code-choice family (contracts.md §5.1); this packet produces the items.
 A-38 controls to include: skip level 2 in `compose` (T-R02 must fail);
 pick the higher version label over the rejection (T-R02); install an
 unconsidered newer release automatically (T-R06); report a code-only
-rollback as paired (T-R08); let a lift remove a rejection it does not name
+rollback as paired, or copy the recovery point's `paired` into the
+rejection's `settings` (T-R08 must fail); compare rejected releases by
+equal trees on common folders only (T-R4D23-added-folder-rollback must
+fail); let a lift remove a rejection it does not name
 (T-R10); order concurrent rollbacks by `written_unix_ms`
 (T-R4D9-concurrent-rollbacks must fail).

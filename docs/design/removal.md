@@ -340,7 +340,7 @@ enrollment_id, issued_at_seq}`, `written_unix_ms`) are
   issuer had admitted, plus itself (§3.4).
 - `settings` is `{ "kind": "none" }` (settings not handled by this record)
   or `{ "kind": "checkpoints", "roots": [SettingsRoot] }`, where
-  `SettingsRoot { unit, checkpoint, location }` is
+  `SettingsRoot { unit, state: RootState }` is
   [contracts.md](contracts.md) §2.3 and the unit is the folder-keyed
   `SettingsUnit` of contracts.md §3.2 (§6).
 
@@ -604,8 +604,9 @@ Per local package P, the levels of the shared precedence
 levels 3 (its holds), 4, 5 and 7:
 
 1. **Unresolved journal** (contracts level 1).
-2. **Rejections** (rollback.md, contracts level 2) exclude rejected
-   content from every level below.
+2. **Rejections** (rollback.md, contracts level 2) exclude every source
+   whose complete content is a rejected release (contracts.md §4.2
+   `same_release`) from every level below.
 3. **Local hold:** `Held(RemovalObserved | RemovalUnclear |
    ReinstallObserved)` for P. Nothing for P is applied here.
 4. **Merged removal:** some live local folder of P is in M →
@@ -614,13 +615,14 @@ levels 3 (its holds), 4, 5 and 7:
    computer owes `(r, x)` for some r (§3.4) →
    `Remove { folders, removals, reason: StaleCopy }`.
 6. **Constraints** (code choice, rollback recovered target; contracts.md
-   §4.2, §5) for the remaining folders.
+   §4.4, §5) for the remaining folders.
 7. **Pending removal information:** a folder of P that would be installed or
    replaced is in the hint of a pending removal that is not dismissed →
    `Unavailable(WaitingForRemovalInfo)` for P on this computer (§4.4).
    Removals at levels 4–5 are never deferred by this level.
 8. **Ordinary** [domain.md](domain.md) §6 selection over the stripped
-   observations.
+   observations, whole-addon, projected per folder only after selection
+   (contracts.md §4.3).
 
 When levels 4 or 5 match, folders of P outside M stay and are evaluated by
 levels 6–8 in the next cycle as their own (stripped) package.
