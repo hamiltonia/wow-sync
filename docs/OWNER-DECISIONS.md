@@ -185,14 +185,17 @@ closed.
   - diagnostics export.
 
   The Windows installer is not in scope.
-- **Ceiling:** 10,000 AIU for run-004. The run plan itself still needs owner
-  approval before the swarm launches.
+- **Ceiling:** 20,000 AIU for run-004. The owner first set 10,000, then
+  added another 10,000 instead of dropping scope; no items are dropped. The
+  run plan itself still needs owner approval before the swarm launches.
 - **R3D-13:** simplify. Under D-21, any removal wins and conflicting
   removal records merge into one removal. The simplified design must be
   independently re-reviewed before it is implemented.
 - **Real-PC checks (Q-3, Q-23):** later. Run-004 must not depend on them.
 - **DA-1:** yes. All of the owner's computers use the same Dropbox account.
-- **DA-2 to DA-4:** still open. The owner asked for more explanation.
+- **DA-2 to DA-4:** deferred. Version 1 uses the desktop folder only, with
+  no Dropbox app registration and no API calls. Revisit after the Q-23
+  check.
 - **UQ-1:** yes. When a guided reconfirmation is pending, promote the
   dashboard headline to "Review needed".
 - **UQ-2:** yes. Core exposes a typed scope for a pending decision.
@@ -345,4 +348,4 @@ phase D barrier.
 | 2026-11-17 | D-21 | Prototype approved; Q-21 no interface gating; removal wins; UI defaults; Dropbox API spike | `f92a61a` |
 | 2026-11-17 | D-20 | Restored the D-20 heading that `f92a61a` accidentally deleted (R3-review RV-10) | `ee244ef` |
 | 2026-11-17 | D-22 | App icon art committed and used as is; owner accepts trademark risk | `8601907` |
-| 2026-11-17 | D-23 | Run-004 scope and 10,000 AIU ceiling; R3D-13 simplify; DA-1 yes; UQ-1/UQ-2 yes; A-31 deferred; Mac available | this commit |
+| 2026-11-17 | D-23 | Run-004 scope and 20,000 AIU ceiling; R3D-13 simplify; DA-1 yes, DA-2 to DA-4 deferred; UQ-1/UQ-2 yes; A-31 deferred; Mac available | this commit |
