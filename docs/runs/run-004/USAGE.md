@@ -11,8 +11,10 @@ Baseline: the cumulative orchestrator-session total at run-004 start is
 | 1 | R4-removal-design | design / claude-opus-5.5 | `17391135` | 346.6 | Merged; R3D-13 closure claimed (review pending); Q-54..58 |
 | 2 | R4-settings-design | design / claude-opus-5.5 | `4c649513` | 397.1 | Merged; settings.md + rollback.md; Q renumbered to Q-67..84 |
 | 3 | R4-ops-design | design / claude-opus-5.5 | `07b3d707` | 394.3 | Merged; ops.md; Q renumbered to Q-59..66 |
-| 4 | R4-design-review | verification / gpt-6.1-sol | — | — | Running |
+| 4 | R4-design-review | verification / gpt-6.1-sol | `07fd2769` | 75.7 | Merged; FAIL (blockers R4D-1, R4D-10; 11 majors; 1 minor) |
+| 5 | R4-design-fix | design / claude-opus-5.5 | — | — | Running; owner unavailable, so conservative defaults are marked PENDING OWNER |
 
 | Checkpoint | Cumulative | Run-004 |
 |---|---|---|
 | Phase A merged | 18,873.7 | 1,460.7 |
+| Review merged | 19,058.2 | 1,645.2 |
