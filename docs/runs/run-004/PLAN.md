@@ -64,19 +64,28 @@ Status: **approved** (D-24). Active. Scope and ceiling are from D-23.
 | A | R4-ops-design | Design / opus-5.5 | Retire, decision resolution actions (UQ-1/UQ-2), notifications, update notice and diagnostics export (redaction rules, bounds, preview) |
 | B | R4-design-review | Verification / gpt-6.1-sol | Independent review of all three designs. One fix round per design (retries) |
 | B | — | **Owner barrier, only if needed** | Only if the designs raise new product questions. Otherwise phase C starts after the review passes |
-| C | R4-core-removal | Implementation / sonnet-5.5 | Core and runtime removal plus recovery, with tests |
-| C | R4-core-settings | Implementation / sonnet-5.5 | Core and runtime settings sync plus rollback, with tests |
-| C | R4-core-ops | Implementation / sonnet-5.5 | Core retire, decision actions, typed scope (UQ-2) |
-| D | R4-app | Implementation / sonnet-5.5 | GUI: resolve decisions, UQ-1 headline, retire, rollback, settings master/exceptions/push, removal and recovery screens |
-| D | R4-notify-diag | Implementation / sonnet-5.5 | OS notifications, update notice (per P4-1), diagnostics export |
+| C1 | R4-core-contracts | Implementation / sonnet-5.5 | Foundation, merged alone. Shared kinds, DTOs (incl. `decision.rs`), journal, authority, hooks, fixtures; registers every later module in core/adapters/runtime `lib.rs` with typed stubs; sectioned `tests\required-cases.toml`. File set: [contracts.md §9.1](../../design/contracts.md) |
+| C2 | R4-core-removal | Implementation / sonnet-5.5 | Core and runtime removal plus recovery, with tests. Files: contracts.md §9.2 |
+| C2 | R4-core-settings | Implementation / sonnet-5.5 | Core and runtime settings sync plus rollback, with tests. Files: contracts.md §9.2 |
+| C2 | R4-core-ops | Implementation / sonnet-5.5 | Core retire, decision actions, typed scope (UQ-2). Files: contracts.md §9.2 |
+| D | R4-app | Implementation / sonnet-5.5 | GUI: resolve decisions, UQ-1 headline, retire, rollback, settings master/exceptions/push, removal and recovery screens. Files: contracts.md §9.3 |
+| D | R4-notify-diag | Implementation / sonnet-5.5 | OS notifications, update notice (per P4-1), diagnostics export. Files: contracts.md §9.3; receives `Cargo.lock` after C1 |
 | D | R4-mac-kit | Implementation / sonnet-5.5 | Mac build, run and memory script plus owner instructions |
 | E | R4-check | Verification / gpt-6.1-sol | Independent drive through the GUI, negative and failure cases, CI evidence, memory re-run |
 | E | R4-review | Integration / opus-5.5 | E-06/E-08 review; the orchestrator writes the report |
 
-Phase C packets own disjoint core modules. Integration conflicts are
+Phase C is staged (R4D-17/R4D-26). C1 merges alone and creates every
+shared type, stub and module registration. The C2 packets then run in
+parallel on pairwise-disjoint files. No step-2 or step-3 packet creates a
+new file or edits a `lib.rs`. The only cross-owner file is
+`tests\required-cases.toml`. Each packet appends only inside its own
+section markers, and the merge gate checks that: outside the packet's
+markers the file equals the base, the markers are unchanged, and every
+added case id is new. Step 2 adds no dependency; `Cargo.lock` passes
+serially from C1 to R4-notify-diag. Remaining integration conflicts are
 resolved by the orchestrator when it merges, or by a retry.
 
-Planned workers: 13. Up to 7 more for fixes and rechecks under the D-05
+Planned workers: 14 (C1 added after the design review). Up to 6 more for fixes and rechecks under the D-05
 limits: 5 concurrent, 20 total, no nesting, 2 retries per task.
 
 ## 4. Budget estimate
