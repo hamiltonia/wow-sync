@@ -23,7 +23,10 @@ or orchestrator records otherwise.
 | [apply.md](apply.md) | Apply algorithm, safety gates, staging/commit/recovery, crash recovery, status and audit | R2-core, R2-adapters |
 | [tests.md](tests.md) | Required behavioral test names per packet, fixtures, end-to-end and provider tests | all, R2-check |
 | [questions.md](questions.md) | Owner and design questions with recommended defaults | owner, orchestrator |
-| [removal.md](removal.md) | Removal/uninstall design (run-003, not yet implemented): tombstones, intent evidence, apply, recovery. **Open major R3D-13** ([recheck2](../runs/run-003/evidence/R3-design-recheck2.md)) must be resolved before implementation | later runs |
+| [removal.md](removal.md) | Removal/uninstall design, rewritten in run-004 for D-21/D-23: any removal wins, conflicting removals merge, recovery. R3D-13 is closed by the author; this awaits the R4-design-review | run-004 implementers |
+| [settings.md](settings.md) | Settings sync design (run-004): settings master, per-addon exceptions, explicit push, non-master yield with recovery, three states | run-004 implementers |
+| [rollback.md](rollback.md) | Rollback design (run-004): group-wide rejection, offline peers cannot reinstall a rejected release, code-only fallback | run-004 implementers |
+| [ops.md](ops.md) | Operations design (run-004): decision actions (UQ-1/UQ-2), retire, notifications, update notice, diagnostics export | run-004 implementers |
 | [dropbox-api.md](dropbox-api.md) | Research spike (run-003, D-21): desktop-client folder vs Dropbox HTTP API vs hybrid; comparison, risks, recommendation (keep the folder; optional read-only hybrid later), owner questions DA-1..DA-4, trial plan needing approval | owner, orchestrator |
 | [ui/README.md](ui/README.md) | GUI design (run-003): information architecture, screens, style, interaction, wireframes, prototype brief | R3-proto, later UI build |
 
