@@ -349,9 +349,22 @@ A policy is a full snapshot each time:
   revision of a unit. Partable (`revision_parents`, contracts.md §1.9):
   any number of heads is written with parts, never refused, and there is
   no `TooManySettingsHeads` state (R4D-4).
-- `policy` = the policy heads under which the issuer acted (≤ 8). An
-  `auto` revision is valid only if the issuer is the unit's authority
-  under **every** listed policy head and those heads agree on it (§5.1).
+- `policy` = a bounded **witness** of the policy heads under which the
+  issuer acted (1–8 entries). The writer lists every current policy head
+  when there are at most 8; with more, it lists the 8 with the smallest
+  hashes (they all agree on this unit's authority, or the issuer would be
+  in `PolicyConflict` and write no `auto`). An `auto` revision is valid
+  only if the issuer is the unit's authority under **every** listed head.
+  The witness only proves the issuer once had authority; it never
+  overrides the reader's own view: the reader applies the revision only
+  if the issuer is also the authority under **all** policy heads the
+  reader currently knows (§5.1). If any current head the reader knows
+  disagrees, the folder is `PolicyConflict` (§5.2), and the revision
+  stays a valid node that is not applied automatically: held for the
+  user's policy choice, never silently dropped and never silently
+  applied. A listed head the reader lacks is `pending(missing_reference)`
+  as usual. No wire change: the field is the existing ≤ 8 list
+  (T-R4D4-nine-policy-heads).
 - There is no `rejects` field: settings-checkpoint rejection is not part
   of this design (Q-82 PENDING OWNER, [rollback.md](rollback.md) §5).
 - V-REVISION rules (V-KIND): `parents` and `policy` sorted and unique;
@@ -873,6 +886,7 @@ this section says what each part contains.
 | core `status.rs`, `explain.rs`, `view.rs` | `SettingsStatus` per unit (§9.1) including `LocalDifferent(BasisNotShared | ConcurrentPush | EpochNotClean)`, group roll-up, `Explanation` variants for §9.1 and §9.2, `NextAction::{ChooseSettings, ChooseMaster, ReviewResume, ConfirmSettingsHere, FixSettingsScope}` |
 | core `hooks.rs` | `SettingsHooks` (contracts.md §9.4) |
 | adapters `fs_safe.rs`, `fs_install.rs`, `provider.rs` | the `WtfScope` root with the reparse policy and writes restricted to an approved plan; settings staging and recovery slots; settings stream (`write_atomic`) and checkpoint manifest and blob upload (write-if-absent) |
+| `lib.rs` of core, adapters and runtime; stubs | the module declarations and empty stubs of every §10.2 file (contracts.md §9.1); R4-core-settings fills them and edits no `lib.rs` |
 | runtime `activity.rs`, `control.rs`, `service.rs` | the session-end event; the commands `SetPolicy`, `ShareSettings`, `PauseSettings`, `ResumeSettings(ResumeChoice)`, `ChooseSettings`, `RestoreSettings`, `ConfirmSettingsHere`, `UseSharedSettings` and the `SettingsHistory` query; the cycle steps below calling `SettingsHooks` |
 
 ### 10.2 Built by step 2, R4-core-settings
@@ -949,10 +963,11 @@ deliberate break that makes it fail).
 | T-R4D8-retired-basis | this computer's basis revision is from a master later retired with a cutoff below it; a valid push descends from it | the basis is invalid; the push stays a node; target is `LocalDifferent(BasisNotShared)` with "Use shared settings", never a silent overwrite | A-20, A-45 |
 | T-R4D8-undo-then-next-session | a `restore` revision, then the master's next session | the restore parents the basis set; the next `auto` parents the restore; one head state | A-18, A-20 |
 | T-R4D8-zero-heads | policy set, no valid revision; and every revision invalid | `NoSharedCopy`; nothing applied or deleted; first `auto`/`push` creates the root | A-20 |
-| T-R4D19-epoch-equal-seq | last complete capture has `local_seq` 5; app closed; the laptop's file changes (experiment); the laptop is made master elsewhere; app starts (`authority_since` = 5, `found_at_start` compared with 5); also: WoW running at activation; and a later genuine session | the experiment is not published: the activation capture differs from the basis, `epoch_clean = false`, `LocalDifferent(EpochNotClean)` with "Share my settings" / "Use shared settings"; the session running at activation is not published; after the user's choice, the next completed session (compared with a capture above 5) publishes; the A-38 control `>=` instead of `>` makes it fail | A-11, A-12, A-20 |
+| T-R4D19-epoch-equal-seq | last complete capture has `local_seq` 5; app closed; the laptop's file changes (experiment); the laptop is made master elsewhere; app starts (`authority_since` = 5, `found_at_start` compared with 5); also: WoW running at activation; and a later genuine session | the experiment is not published: the activation capture differs from the basis, `epoch_clean = false`, `LocalDifferent(EpochNotClean)` with "Share my settings" / "Use shared settings"; the session running at activation is not published; after the user's choice, the next completed session (compared with a capture above 5) publishes; A-38 controls as listed below the table (ignoring the dirty-epoch hold fails this scenario; `>=` instead of `>` fails the isolated clean-epoch equal-seq fixture) | A-11, A-12, A-20 |
 | T-R4D18-unchanged-head-local-change | one head h, basis {h}, laptop (non-authority) changes its file; no new revision; then the master publishes h2 descending from h | before h2: `LocalDifferent` (case 6), file untouched, nothing published; after h2: yield (case 7) with the laptop's file kept in recovery and the notice; with the laptop as authority instead: `LocalDifferent(ConcurrentPush)`, nothing applied | A-12, A-14, A-20 |
 | T-R4D18-invalidated-basis | basis {r}, r later invalid (issuer retired below r); valid head h not descending from any valid basis element; live differs from h | case 5 `LocalDifferent(BasisNotShared)`; never first adoption (§5.4), never a silent overwrite; "Use shared settings" yields with recovery | A-20, A-45 |
 | T-R4D4-policy-parts | a policy with 1 000 folder exceptions and a choice revision with 100 parents | written with `policy_folders` / `revision_parents` parts, valid on every peer, never refused; a folder repeated in two parts is `invalid(policy_body)` | A-11, A-14, A-20 |
+| T-R4D4-nine-policy-heads | nine concurrent policy heads that all make the laptop master of folder a; the laptop's `auto` revision; then a tenth head that makes the den master of a, known only to one reader | the revision lists the 8 smallest head hashes and is valid everywhere; readers that know only the nine apply it; the reader that knows the tenth shows `PolicyConflict` for a and does not apply it, and it is neither invalid nor dropped; after a policy choice for the laptop it applies; A-38 control: validate only the listed heads (the tenth-head reader applies, test fails) | A-11, A-20 |
 | T-S-paired-selection | restore code X with: an exact `/2` pairing; only local history with X's hash; two unordered remote revisions with X's hash; none | exact pairing; newest local; code-only with both offered explicitly; code-only with the A-19 warning. Never by comparing peers' `local_seq` or clocks | A-18, A-19 |
 | T-S-retention-roots | paired recovery roots, unresolved-choice heads, live removal roots and provider-location roots across prune and restart; a 16 MiB+ ledger (contracts.md T-C09) | no root pruned; unrooted checkpoints become collector candidates only; nothing claims provider recovery for them | A-16, A-17 |
 | T-S-capture-failures | read error, disk full while storing blobs, crash between blob and manifest | no partial state recorded; previous three states intact; `CaptureFailed` shown | A-17, A-22 |
@@ -964,7 +979,14 @@ automatically (T-S06 must fail); pick the newer timestamp for a choice
 settings rename (T-S23); auto-elect a master on retirement (T-S25);
 collapse equal heads to one representative parent (T-R4D7); treat a
 missing parent as a root (T-R4D8-child-before-parent); key policy by
-package key (T-R4D6); publish captures compared with a pre-activation
-capture (T-R4D19-epoch-equal-seq); yield on an unchanged head
+package key (T-R4D6); for T-R4D19-epoch-equal-seq, two separate
+controls: (1) ignore the dirty-epoch hold (publish while
+`epoch_clean = false`) must fail the main scenario, which is what
+directly guards the experiment; (2) an isolated fixture with
+`epoch_clean = true`, an activation capture **equal** to the basis and a
+later capture with the same `local_seq` as `authority_since` must not
+publish, so mutating the strict `>` to `>=` fails it on its own; yield on
+an unchanged head
 (T-R4D18-unchanged-head-local-change); shrink an invalid basis to empty
-(T-R4D18-invalidated-basis).
+(T-R4D18-invalidated-basis); validate only the listed policy witness
+(T-R4D4-nine-policy-heads).

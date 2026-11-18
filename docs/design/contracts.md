@@ -246,7 +246,7 @@ instead of an unbounded list of hashes:
 
 Supersession in every family uses coverage: "X supersedes Y" means X is
 valid, X and Y concern the same scope element (a **folder key** for code
-records, §4.2; a settings unit for revisions; the group for policies), and
+records, §4.4; a settings unit for revisions; the group for policies), and
 X's `known` covers Y. It is evaluated **per scope element**: X ends Y only
 for the folders both name, never for Y's other folders (R4D-21). A record
 written concurrently with Y (X's writer had not learned Y) does not cover
@@ -365,29 +365,93 @@ references never form a cycle.
 
 **The barrier.** For enrollment E:
 
-1. A retirement record R is **effective** iff it passes V-BYTES, V-GROUP,
-   V-ISSUER and V-REF, and it is **not void**. R is void iff
-   `R.retirements_known` names an effective retirement of R's issuer, that
-   is, R's issuer wrote it while knowing it was itself retired. This is
-   evaluated over the hash DAG of `retirements_known`, so it is a total,
-   order-independent function of the ledger.
-2. **Retired(E)** iff the ledger holds an effective retirement of E.
-   Effectiveness of R never depends on whether R's issuer is retired
-   **later** (only on what R's writer knew), so Retired(E) is monotone:
-   once true it stays true, whatever arrives later (R4D-11).
-3. **Cutoff(E)** = the **minimum** `cutoff_seq` over the effective
+1. **Status of a retirement record R** is three-valued and is a pure
+   function of the ledger (no stored bit, no arrival order). Records R
+   that fail V-BYTES are not known at all (their subject is unknown); an
+   R that fails V-GROUP, V-ISSUER or a V-REF kind check is `invalid` and
+   has no effect. For every other R, over D = `R.retirements_known`
+   (each a retirement of R's issuer):
+
+   | Status | Condition |
+   |---|---|
+   | **Void** | some d ∈ D is **Effective** (R's issuer wrote R knowing it was itself retired) |
+   | **Effective** | every d ∈ D is **settled not effective**: Void, or `invalid` |
+   | **Unresolved** | otherwise: no d is Effective and some d is missing (`pending(missing_reference)`), unreadable, or Unresolved |
+
+   A dependency d that is `invalid(not_a_member)` counts as Unresolved,
+   not as settled, because membership facts can still arrive (§1.10
+   historical membership is grow-only). Plain hashes only name earlier
+   records, so D is a finite acyclic DAG and the status is well defined
+   by induction over it.
+2. **Monotonicity (R4D-25).** Learning a record can only turn a missing
+   or Unresolved dependency into a settled one, so a status only moves
+   Unresolved → Effective or Unresolved → Void, never Effective ↔ Void.
+   By induction: a settled status depends only on settled statuses of
+   its dependencies, which never change.
+3. **Retired(E)** ∈ {Yes, No, Unresolved}: **Yes** iff some retirement of
+   E is Effective; otherwise **Unresolved** iff some retirement of E is
+   Unresolved; otherwise **No**. Yes is final: an Effective retirement
+   stays Effective (rule 2), so nothing later un-retires E (R4D-11). An
+   Unresolved E is **never shown or treated as retired** and never as
+   free of retirement; it is *held* (rule 6).
+4. **Cutoff(E)** = the **minimum** `cutoff_seq` over the Effective
    retirements of E. Learning another retirement can only lower it. Every
    record of E is therefore only ever valid → invalid, never invalid →
    valid: a record above any effective cutoff is never authority, however
    many later retirements with higher cutoffs arrive (R4D-16, D-21 kept
    Q-52: post-retirement actions are not authority).
-4. Every record of E other than a retirement is valid only if
+5. Every record of E other than a retirement is valid only if
    `issued_at_seq ≤ Cutoff(E)` (V-RET, §1.11). A retirement record of E
    is governed by rule 1 instead, so a retirement E wrote before learning
    of its own retirement stays effective. E's states with
    `seq > Cutoff(E)` are not admitted (§6).
-5. A retired enrollment only becomes active again through explicit
+6. **Held (Unresolved).** Let HoldCut(E) = the minimum `cutoff_seq` over
+   E's Effective **and** Unresolved retirements. Records and states of E
+   with seq > HoldCut(E) are `pending(retirement_unresolved)`: not
+   authority, not candidates, not confirmations, and the admission
+   watermark does not advance past HoldCut(E) for them, so they can still
+   be admitted if every Unresolved retirement turns Void. Everything else
+   about E stays as if it were a member: currentness still **awaits** E
+   (it counts in `awaiting`, removal settling and confirmation counts, so
+   holding only delays), E is not listed under Retired, and no decision
+   that depends on E being retired is made (no master reassignment
+   prompt, no dropping of E from awaited sets). Content already applied
+   from E's earlier admitted states stays installed with its recovery
+   points, exactly as for Q-52; holding never removes anything. A
+   computer whose own enrollment is held stops publishing and applying
+   group changes until it is resolved, like a retired one (ops.md §2.4,
+   Q-60 PENDING OWNER default), and shows "Another computer may have
+   retired this one. Waiting for the rest of the group history."
+7. A retired enrollment only becomes active again through explicit
    re-enrollment, which is a new enrollment id (A-45, R-03).
+
+**R4D-25 trace** (T-R4D25-partial-retirement-dag). All issuers and
+subjects are historical members; each reference correctly names a
+retirement of its issuer:
+
+| Record | Issuer → subject | `cutoff_seq` | `retirements_known` |
+|---|---|---|---|
+| R | A → B | 10 | S |
+| S | C → A | 20 | T |
+| T | D → C | 30 | U |
+| U | E → D | 40 | ∅ |
+
+| Step (delivery) | Statuses | Retired / held | Currentness and publishing |
+|---|---|---|---|
+| Complete-first: R, S, T, U together | U Effective; T Void; S Effective; R Void | B **No**; A **Yes**, cutoff 20; C No; D **Yes**, cutoff 40 | B fully admitted and awaited; A's records > 20 invalid, A not awaited, A stops publishing when it learns S; D likewise above 40 |
+| Partial 1: R and S only | S Unresolved (T missing); R Unresolved (S Unresolved) | B **Unresolved**, HoldCut 10; A **Unresolved**, HoldCut 20 | B's states > 10 and A's > 20 held, both still awaited; neither shown retired; no master reassignment; B and A themselves pause publishing; nothing is uninstalled |
+| Partial 2: + T | T Unresolved (U missing); S, R Unresolved | C **Unresolved**, HoldCut 30; A, B as before | as partial 1, plus C's records > 30 held |
+| Partial 3: + U | U Effective → T Void → S Effective → R Void | B **No** (its held states are admitted); A **Yes**, cutoff 20 (its held records become invalid); C **No** (released); D **Yes**, cutoff 40 | identical to complete-first |
+| Restart after partial 1 | recomputed from the ledger: same as partial 1 | same | same; the held seqs are still admissible because the watermark did not pass them |
+| Other order: T, U first, then R, S | U Effective, T Void at once; then S Effective, R Void on arrival | B never Unresolved or Yes; A Yes | identical final result |
+
+At no step is B Retired = Yes, and no status flips between Effective and
+Void; R moves only Unresolved → Void and S only Unresolved → Effective.
+A missing dependency never settles by itself: if T never arrives, B and A
+stay held and Details explains "Waiting for a retirement record from
+<computer>". The user can still act: re-enrollment, or a new retirement
+of A or B from another computer (empty `retirements_known`, so it is
+Effective at once).
 
 **Consequences, all deterministic:**
 
@@ -414,14 +478,16 @@ to these and are named `V-<KIND>-n` in the owning design.
 | V-GROUP | `group_id` is this group | `invalid(other_group)` |
 | V-ISSUER | the issuer pair (and for a retirement also the `retired` pair) is in historical membership (§1.10) | `invalid(not_a_member)` |
 | V-REF | every referenced hash (including parts, §1.9) is in the ledger with the kind the field requires | absent: `pending(missing_reference)`; wrong kind: `invalid(wrong_reference)` |
-| V-RET | the record **is a retirement** (governed by §1.10 rule 1: void retirements are `invalid(void_retirement)`), **or** its issuer is not Retired, **or** `issued_at_seq ≤ Cutoff(issuer)` | `invalid(after_retirement)` |
+| V-RET | the record **is a retirement** (governed by §1.10 rule 1: void retirements are `invalid(void_retirement)`, unresolved ones `pending(retirement_unresolved)`), **or** Retired(issuer) = No, **or** `issued_at_seq ≤` Cutoff(issuer) when Retired = Yes, **or** `issued_at_seq ≤` HoldCut(issuer) when Retired = Unresolved | Retired = Yes: `invalid(after_retirement)`; Retired = Unresolved: `pending(retirement_unresolved)` (§1.10 rule 6) |
 | V-KIND | the owning design's kind rules | `invalid(<kind reason>)` |
 
 V-RET is evaluated after V-REF because voidness reads `retirements_known`.
-The boolean is the exact predicate the implementation tests
+The predicate is the exact one the implementation tests
 (T-R4D15-vret-predicate): an ordinary record of a retired issuer above the
 cutoff is invalid; the same record at or below the cutoff is valid; a
-retirement of a retired issuer is valid unless void.
+retirement of a retired issuer is valid unless void; an ordinary record
+of an issuer whose retirement is Unresolved is pending above HoldCut and
+valid at or below it.
 
 | Status | Effect |
 |---|---|
@@ -755,22 +821,120 @@ decides the folder's target on this computer:
 | # | Level | Owner | Effect |
 |---|---|---|---|
 | 1 | Unresolved journal | slice | `AllApplies` hold (ops §1.6) |
-| 2 | Rejection | rollback.md | rejected exact content is never a candidate, never kept as a target |
+| 2 | Rejection | rollback.md | a source whose content is the same release as an active rejection's `rejected` (§4.2 `same_release`) is never a candidate, never kept as a target |
 | 3 | Local hold (`Held(RemovalObserved \| RemovalUnclear \| ReinstallObserved)`, settings hold) | removal.md, settings.md | nothing installed, replaced or removed |
 | 4 | Merged removal | removal.md §3 | folder removed into recovery |
 | 5 | Stale copy (owed removal) | removal.md §3.4 | that copy is never a candidate |
-| 6 | Constraint: live code choice or recovered rollback target **for this folder** | §4.2, §5, rollback.md §3 | install exactly the constrained tree for this folder |
+| 6 | Constraint: live code choice or recovered rollback target **for this folder** | §4.4, §5, rollback.md §3 | install exactly the constrained tree for this folder |
 | 7 | Pending removal information | removal.md §4.4 | installs of hinted folders deferred |
-| 8 | Ordinary selection | domain.md §6 | newest demonstrable version among candidates not excluded (§5.3) and not rejected |
+| 8 | Ordinary selection | domain.md §6 | **whole-addon** selection (domain.md §6, `compare_package`, completeness) among sources not excluded (§5.3) and not rejected; the chosen whole result is projected per folder afterwards (§4.3) |
 
 The settings master is **not** code authority. No settings record affects
 levels 2 to 8.
 
-### 4.2 Constraint composition, per folder (R4D-9, R4D-21)
+### 4.2 Release identity and matching (R4D-23)
 
-Every rule here is evaluated **per folder key f**, never per package or
-per record. Local groupings (which folders form a package on this
-computer) differ between computers and never change the result.
+Two different questions use two different rules:
+
+- **Which exact release is this?** (rejection, exclusion, `considered`,
+  look-alike, recovered chain): **complete-content identity**, below.
+  It never compares single folders.
+- **Which record governs folder f?** (liveness, coverage, routing of a
+  constraint's tree to f): **per folder**, §4.4.
+
+**Content over a scope.** A recorded release entry E (a `keep`,
+`considered`, `exclude`, `rejected` or `recovered` entry) belongs to a
+record whose `folders` list is its **scope** S; an `exclude` entry
+carries its own `scope` instead, because it is carried between records
+(§5.2). The writer records E's
+complete content over S: every key of S that E's copy had, with its
+tree; a key of S that E does not list was **absent** from that copy
+(V-CHOICE and V-REJECTION already require the entries' keys ⊆ `folders`;
+E's `package_hash` is the package hash of exactly its listed folders). So
+`content(E, k)` is a tree or `Absent` for every k ∈ S, and **unknown**
+for k ∉ S.
+
+A **source** m is one computer's complete installed copy: a member's
+admitted state or the local inventory. `content(m, k)` is the folder's
+tree, `Absent` if m does not have folder k, and **unknown** if m's folder
+k is not `Ok` (unreadable, unstable, unsafe) or m's state is not
+admitted. Sources are taken from complete states, never from a local
+package grouping, so a computer that groups the folders differently
+computes the same content.
+
+**`same_release(X, Y)`** for two entries or sources, over the keys K =
+scope(X) ∪ scope(Y) (a source's scope is every key):
+
+| Result | Condition |
+|---|---|
+| `Same` | for **every** k ∈ K both contents are known and equal (`Absent` = `Absent`, tree = same tree) |
+| `Different` | for **some** k ∈ K both contents are known and differ (`Absent` ≠ any tree) |
+| `Unknown` | otherwise: some content is unknown and nothing known differs |
+
+Equal trees on common keys therefore never prove equality: a folder one
+side has and the other lacks is a difference. `Unknown` is never treated
+as `Same`; each user states what it does with it:
+
+| User | `Same` | `Different` | `Unknown` |
+|---|---|---|---|
+| Level 2 rejection (rollback.md §3) | source never a candidate or a target | not rejected by this record | source **waits**: not a candidate, not rejected, shown "Checking against a blocked version" |
+| Exclusion (§5.3) | source never selected | not excluded | source waits, as above |
+| `considered` (Q-49, `NewerAfterRollback`) | already considered: raises nothing | not considered | no decision or notice yet; waits |
+| Recovered chain (rollback.md §3.1) | the recovered entry is rejected: follow the chain | not rejected | decided by the actual copies of the recovered release: the chain advances only if every copy is rejected at level 2 |
+| Look-alike (rollback.md §3.3) | — (that is level 2) | look-alike if the label also matches | waits |
+
+A source that waits is held exactly like an ineligible candidate
+(domain.md §6): it never falls back to a lesser candidate and installs
+nothing. Recorded entries are never compared through a local package
+hash, so changed local grouping cannot change any result.
+
+**Counterexamples (named tests, §10):**
+
+| Test | Facts | Result |
+|---|---|---|
+| T-R4D23-added-folder-rollback | rejection scope {core, extra}; R1 `{core:U, extra:BAD}` rejected, R0 `{core:U}` recovered | R0 = `{core:U, extra:Absent}` is `Different` from R1: R0 is installed and is a source; the chain does not visit R0 again; a source with exactly `{core:U, extra:BAD}` is rejected |
+| T-R4D23-dropped-folder-rollback | scope {core, old}; R1 `{core:U}` rejected (2.1 dropped `old`), R0 `{core:U, old:O}` recovered | R0 is `Different` (old: O ≠ Absent) and is installed with `old`; a source with `{core:U}` and no `old` is rejected; a source `{core:U, old:O2}` is `Different` and can only be a look-alike |
+| T-R4D23-keep-resume-shared-component | keep V2 `{a:2, b:U}` declining V3 `{a:3, b:U}`, then resume (no allow-again); run with a and b grouped, ungrouped, and regrouped between keep and resume (a new folder c joins the package, so the resume's `folders` = {a, b, c} while the carried V3 entry keeps `scope` {a, b}) | the source holding V2 is `Different` from the exclude entry V3 and stays eligible; the target is V2 (a:2 and b:U); the V3 source is `Same` over {a, b} and is never selected, with or without c; identical on every grouping |
+| T-R4D23-unknown-waits | as the first row, but the candidate's `extra` folder is `Unstable` | `Unknown`: neither installed nor rejected; it waits; once stable it resolves |
+
+### 4.3 Ordinary selection is whole-addon (R4D-24)
+
+Ordinary selection (level 8) is exactly domain.md §6 on the **whole
+package**: candidates are the sources' complete package versions over the
+package's full membership, minus sources that level 2 rejects, level 5
+marks stale or §5.3 excludes (or that wait, §4.2), compared by
+`compare_package` with the completeness predicate. Its result is decided
+**before** any per-folder step:
+
+- `Chosen(c)`: the whole release c is the ordinary target. Only then is c
+  **projected** per folder: f's ordinary tree is `content(c, f)`.
+- `NeedsDecision(Ambiguous(MembersDisagree))`, `PartialCandidate` or any
+  other reason: an **addon-level** decision (§5.1). No folder of the
+  package gets an ordinary tree; installed copies stay.
+
+Per-folder liveness never picks folders from different sources. A
+package can mix trees from different releases only through an explicit
+record that names exactly those folders (a keep or a rollback whose scope
+is a subset of the package, R4D-21): each such folder takes the
+constraint's tree at level 6, the other folders take the projection of
+the whole ordinary result. Such a deliberate partial override goes
+through the normal apply with a recovery point and is undone by its own
+"Change decision" (ops.md §1.5) or "Allow again…" (rollback.md §2.2).
+
+Counterexample T-R4D24-no-hybrid (neutral hooks, no records): sources X
+`{a:3.0, b:1.0}` and Y `{a:2.0, b:2.0}`, every folder `Ok`, all trees
+different. `compare_package(X, Y)` = `Ambiguous(MembersDisagree)` →
+`NeedsDecision(Ambiguous)` for the addon, with the two whole copies as
+options. `{a:3.0, b:2.0}` is never planned; nothing is installed. Every
+computer reaches this result, because packages come from grouping over
+the union of all observations (domain.md §5), not from one computer's
+local view.
+
+### 4.4 Constraint composition, per folder (R4D-9, R4D-21)
+
+Liveness and routing are evaluated **per folder key f**, never per
+package or per record. Which release a source holds is never decided per
+folder (§4.2).
 
 **Constraint records** are valid code choices with `action = keep` and
 active rejections (their `recovered` target). For each, `trees(X, f)` is
@@ -784,12 +948,12 @@ folders does not end X for the folders it does not name (R4D-21).
 
 **The target of f:**
 
-- **No live constraint for f:** ordinary selection (level 8) over the
-  projection of each candidate onto f, minus copies excluded by a live
-  resume or keep (§5.3) and minus rejected content (level 2).
-- **One distinct tree:** install exactly that tree for f, unless it is
-  rejected. Then follow the recovered chain (rollback.md §3.1) for f to
-  the first non-rejected recovered tree, else ordinary selection.
+- **No live constraint for f:** f takes the projection of the whole
+  ordinary result (§4.3); if that result is a decision, f is unchanged.
+- **One distinct tree:** install exactly that tree for f, unless the
+  constraint's release is rejected (§4.2 `Same`). Then follow the
+  recovered chain (rollback.md §3.1) to the first non-rejected recovered
+  release, else the projection of the whole ordinary result (§4.3).
 - **A live constraint names f without a tree** (a keep or recovered target
   that lacked f, for example after a folder change): f has no constrained
   content; if it is installed it stays, and if a candidate supplies it the
@@ -800,10 +964,9 @@ folders does not end X for the folders it does not name (R4D-21).
   set over the affected folders. The current copy stays installed
   meanwhile. Choosing writes one keep whose `known` covers all of them.
 
-**Projection and matching.** Candidate C **matches** a recorded entry E
-(a `considered`, `exclude`, `keep` or rejected entry with `{key, tree}`
-folders) iff `keys(E) ∩ keys(C) ≠ ∅` and the trees are equal on every
-common key. Code choice and rejection level 2 use this same `matches`.
+**Sources for a constrained tree.** A source supplies f's constrained
+tree only if it is not rejected or waiting at level 2 as a whole (§4.2);
+a rejected installed copy is never a source, even of an unchanged folder.
 
 Constraints never order by clock. Tests: T-R4D9-concurrent-rollbacks and
 T-R4D9-choice-vs-rollback (rollback.md §10); T-R4D21-partial-choice-over-choice,
@@ -828,11 +991,11 @@ metadata** (`target::folder_problem`: a non-`Ok` `FolderStatus`, or a
 |---|---|---|
 | `Ambiguous` | copies cannot be ordered but differ (domain.md §6) | one **Keep this copy** per distinct copy; **Decide later** |
 | `PartialCandidate` | one copy of a version lacks folders another has | **Keep the complete copy**; **Keep the smaller copy**; **Decide later** |
-| `ChoicesDiffer`, `RollbackTargetsDiffer` | §4.2 | one option per constrained content; **Decide later** |
+| `ChoicesDiffer`, `RollbackTargetsDiffer` | §4.4 | one option per constrained content; **Decide later** |
 | `RecoveredUnavailable` | a live recovered rollback target has no source left (rollback.md §3.1) | one **Use <version>** per available non-rejected candidate; **Decide later** |
 | `LookalikeOfRejected` | a candidate has the version label of an active rejection but different content (rollback.md §3.3) | **Use this copy**; **Block this copy too** (a rejection, not a choice); **Decide later** |
-| `NewerAfterRollback` (notice, not blocking) | a non-rejected candidate not in the rejection's `considered` is demonstrably newer than the recovered target (rollback.md §3.1) | **Use <version>** (a keep covering the rejection); **Stay on <recovered>** (dismiss) |
-| `NewVersionAfterDecision` | a candidate that no `considered` entry of a live keep matches is demonstrably newer than, or unordered against, the kept copy (§5.3, Q-49) | **Keep <kept>** (a new keep that lists the new copy in `considered`); **Use <new>** (a keep of the new copy); **Follow newest again** (resume); **Decide later**. The kept copy stays installed meanwhile |
+| `NewerAfterRollback` (notice, not blocking) | a non-rejected source that is `Different` (§4.2) from every entry of the rejection's `considered` and is demonstrably newer than the recovered target (rollback.md §3.1) | **Use <version>** (a keep covering the rejection); **Stay on <recovered>** (dismiss) |
+| `NewVersionAfterDecision` | a source that is `Different` (§4.2) from every `considered` entry of a live keep and is demonstrably newer than, or unordered against, the kept copy (§5.3, Q-49) | **Keep <kept>** (a new keep that lists the new copy in `considered`); **Use <new>** (a keep of the new copy); **Follow newest again** (resume); **Decide later**. The kept copy stays installed meanwhile |
 | `UnusableMetadata(kind)` | `FolderStatus` `Unreadable`, `Unsafe`, `Unsupported`, `Unstable`, or `TocKind` `None`, `Ambiguous`, `Error` | **no override.** "This copy can't be used: <reason>. Reinstall or fix it on <computer>." Waits for a usable copy |
 | `DifferentTocMapping`, `UnvalidatedTocMapping` | safe-scope validation (R-02) | **no override.** "Waiting for a WoW Sync update that knows this game version" |
 
@@ -855,6 +1018,7 @@ No option ever makes unvalidated, unsafe or unreadable content installable
                     "folders": [ { "key": "weakauras", "tree": "<sha256>" } ],
                     "holders": ["<enrollment id>"] } ],
   "exclude": [ { "package_hash": "<sha256>",
+                 "scope": ["weakauras", "weakauras_options"],
                  "folders": [ { "key": "weakauras", "tree": "<sha256>" } ] } ],
   "allow_again": [ "<package_hash of an inherited exclude entry>" ],
   "known": { "seen": [], "extra": [], "parts": [] },
@@ -865,12 +1029,24 @@ No option ever makes unvalidated, unsafe or unreadable content installable
 
 `considered`, `exclude`, `allow_again` and `known` are partable (§1.9).
 
+**Exclude scope (R4D-23).** An exclusion is carried from record to record
+(Q-50), possibly into a record whose `folders` differ because grouping
+changed. Each `exclude` entry therefore keeps the `scope` it was first
+written with (the `folders` of that record), and §4.2 compares it over
+that scope only: a key of `scope` it does not list was `Absent`, a key
+outside `scope` is unknown. This is the only wire addition of
+R4-design-fix3; `considered`, `keep`, `rejected` and `recovered` entries
+are always written fresh over their own record's `folders`.
+
 **The writer computes `exclude`** (Q-50: declined copies stay declined):
 
-- *inherited* = the union of `exclude` over the choices this record's
-  `known` covers, restricted to entries naming a folder in `folders`;
-- **keep:** `exclude` = (inherited ∪ (`considered` − `keep`)) − `keep`.
-  Every copy the user saw and did not keep is declined;
+- *inherited* = the union of `exclude` entries over the choices this
+  record's `known` covers whose `scope` intersects `folders`, carried
+  verbatim with their `scope`;
+- **keep:** `exclude` = inherited ∪ (`considered` − `keep`, each with
+  `scope` = `folders`), minus every entry that is `Same` (§4.2) as the
+  kept source's complete content. Every copy the user saw and did not
+  keep is declined, and the kept copy is never declined;
 - **resume:** `exclude` = inherited − `allow_again`, with `allow_again` ⊆
   inherited package hashes. Resume keeps previous exclusions unless the
   user explicitly ticks "Allow <version> again".
@@ -882,9 +1058,9 @@ No option ever makes unvalidated, unsafe or unreadable content installable
 | `folders` non-empty, sorted, unique | ✓ | ✓ |
 | `keep` | present; `keep.package_hash` = package hash of `keep.folders`; keys ⊆ `folders` | **absent** |
 | `considered` | sorted, unique, **contains** the kept entry | sorted, unique, may be empty |
-| `exclude` | sorted, unique; no entry equal to `keep` | sorted, unique |
+| `exclude` | sorted, unique by (`scope`, `package_hash`); `scope` non-empty, sorted, unique, ≤ 256; entry keys ⊆ its `scope`; no entry with `scope` = `folders` equal to `keep` | sorted, unique by (`scope`, `package_hash`); same `scope` rules |
 | `allow_again` | **absent** | sorted, unique; disjoint from `exclude` hashes |
-| every tree a plain hash, every `considered`/`exclude` folder key ∈ `folders` | ✓ | ✓ |
+| every tree a plain hash, every `considered` folder key ∈ `folders`, every `exclude` `scope` intersects `folders` | ✓ | ✓ |
 
 Violations are `invalid(choice_shape)` (T-R4D10-vchoice-per-action). The
 validator cannot recompute *inherited* without the ledger, so `exclude`
@@ -894,31 +1070,37 @@ unsafe content (§5.1).
 ### 5.3 Semantics
 
 For each folder f, the choices **live for f** are those no later choice,
-rejection or re-add naming f covers (§4.2).
+rejection or re-add naming f covers (§4.4).
 
 - **Live keep:** a constraint (level 6) on f: install exactly the kept
-  tree. Candidates that match a `considered` entry (§4.2 `matches`) never
-  end it, whatever their version, and older candidates are ignored.
-- **New information (Q-49):** a candidate that matches **no**
+  tree. Sources whose content over the choice's scope is the same release
+  as a `considered` entry (§4.2 `same_release` = `Same`) never end it,
+  whatever their version, and older candidates are ignored.
+- **New information (Q-49):** a source that is `Different` from **every**
   `considered` entry and is demonstrably newer than, or unordered
-  against, the kept copy raises `NeedsDecision(NewVersionAfterDecision)`.
+  against, the kept copy (`compare_package` over the choice's scope)
+  raises `NeedsDecision(NewVersionAfterDecision)`. A source that is
+  `Unknown` against some entry raises nothing yet and waits (§4.2).
   The keep **stays**: the kept copy remains the target until the user
   chooses. Nothing is installed automatically and no record is written
   until then.
-- **Live resume:** imposes no target. Ordinary selection for f applies,
-  **filtered by its `exclude`**: a candidate matching an exclude entry is
-  never selected (Q-50), whatever its version, until a later choice that
-  covers this resume drops it via `allow_again`.
+- **Live resume:** imposes no target. Whole-addon ordinary selection
+  (§4.3) applies, **filtered by its `exclude`**: a source that is `Same`
+  as an exclude entry is never selected (Q-50), whatever its version,
+  until a later choice that covers this resume drops it via
+  `allow_again`. A source that only shares some folders' trees with an
+  exclude entry is `Different` and stays eligible (the kept V2 of
+  T-R4D23-keep-resume-shared-component).
 - A live keep also filters by its `exclude` (relevant only if its kept
-  tree becomes unavailable and §4.2 falls back to ordinary selection).
+  tree becomes unavailable and §4.4 falls back to the ordinary result).
 - **Rejection is separate:** exclusions are per-choice declines, ended by
   a later covering choice. Rejection (rollback.md) blocks exact content
   for the group until an explicit lift. "Allow again" on a rejection is
   the lift (rollback.md §2.2); "Allow again" on an exclusion is a resume
   with `allow_again`.
-- **Supersession:** per folder (§4.2): X ends Y for f iff both name f and
+- **Supersession:** per folder (§4.4): X ends Y for f iff both name f and
   X's `known` covers Y.
-- **Concurrent choices:** §4.2.
+- **Concurrent choices:** §4.4.
 - **Precedence:** rejection > removal > choice > ordinary (§4.1). A keep of
   rejected content is inert; a removal removes the folder whatever the
   choice; a valid re-add ends the choices it covers for its folders.
@@ -934,10 +1116,11 @@ No trace adds a rejection; every exclusion below is a code-choice
 | 2 | Same, then an unconsidered V4 appears, newer than V2 | `NeedsDecision(NewVersionAfterDecision)`; V2 stays installed (T-R4D10-new-version-after-keep) |
 | 3 | Keep V2 declining V3, then resume (no allow-again) | the resume's `exclude` inherits V3; target V2, the newest non-excluded candidate (T-R4D10-resume-keeps-exclusions) |
 | 4 | Trace 3, plus a new V4 | target V4 (ordinary, not excluded) |
-| 5 | Trace 3, plus a replay of V3's exact content | V3 matches the exclude entry: never selected |
+| 5 | Trace 3, plus a replay of V3's exact content | that source is `Same` as the exclude entry: never selected |
 | 6 | Trace 3, but resume with `allow_again = {V3}` | V3 is eligible again; target V3 (T-R4D10-resume-allow-again) |
 | 7 | R3D-10: user wants V2 although V3 is demonstrably newer | that is a rollback (rejection of V3, recovered V2), or a keep listing V3 in `considered`; both hold until an explicit choice |
 | 8 | A later unconsidered V4 after a **rollback** | V4 does not end the recovered constraint by itself (Q-81 PENDING OWNER default); `NewerAfterRollback` notice offers "Use 2.2" |
+| 9 | Trace 3 where V2 `{a:2, b:U}` and V3 `{a:3, b:U}` share b (R4D-23) | V2's source is `Different` from V3 (a differs): eligible, target V2; the shared b:U never excludes V2 (T-R4D23-keep-resume-shared-component) |
 
 Tests T-R4D10-new-version-after-keep, T-R4D10-resume-keeps-exclusions,
 T-R4D10-resume-allow-again, T-R4D10-vchoice-per-action,
@@ -960,9 +1143,13 @@ stale UI values is not enough (cross-packet table).
 `admit` runs in this order for every member enrollment:
 
 1. Historical membership update (§1.10).
-2. Retirement barrier: Retired(E) and Cutoff(E) from the ledger.
-3. Code-state admission (slice watermarks), skipping seqs > Cutoff(E).
-4. Settings-state admission with its own watermark, the same cutoff.
+2. Retirement barrier: Retired(E) ∈ {Yes, No, Unresolved}, Cutoff(E) and
+   HoldCut(E) from the ledger (§1.10).
+3. Code-state admission (slice watermarks), skipping seqs > Cutoff(E)
+   and holding seqs > HoldCut(E) without advancing the watermark past
+   them.
+4. Settings-state admission with its own watermark, the same cutoff and
+   hold.
 5. Currentness, confirmations, candidates and targets use only the result.
 
 Retirement is therefore validated before any currentness, publication or
@@ -1028,44 +1215,64 @@ creates.
 | core | `src\records.rs` | `record!` majors (§2.1), `ApplyJournal/2`, `RecoveryPoint/2`, `PendingReport/2`, `SettingsFileOp`, `SettingsRoot`, `RootState`, `MissingReason`, V-JRN, V-POINT, derived `paired` (§2); the settings records `SettingsCheckpointManifest`, `SettingsState`, `SettingsLocal` (settings.md §3) |
 | core | `src\ids.rs` | `SettingsUnit`, `Identity` (NFC, collision and case diagnoses), `CheckpointRef`, `SettingsRoot` re-export (§3) |
 | core | `src\toc.rs`, `src\paths.rs` | `TocInfo.saved_variables{,_per_character}` (removal.md and settings.md §1); the two WTF path builders and `classify_wtf_rel` (settings.md §1.1) |
-| core | new `src\authority.rs` | envelope, decode/dispatch, `AuthorityRef`, `Known` and coverage, parts and V-PART, V-BYTES…V-REF, historical membership, retirement barrier and V-RET (§1.10, §1.11), learning, mirroring, repair plan (§1.12), capabilities (§1.13) |
+| core | new `src\authority.rs` | envelope, decode/dispatch, `AuthorityRef`, `Known` and coverage, parts and V-PART, V-BYTES…V-REF, historical membership, the three-valued retirement barrier (Effective / Void / Unresolved, `Retired`, Cutoff, HoldCut) and V-RET (§1.10, §1.11), learning, mirroring, repair plan (§1.12), capabilities (§1.13) |
 | core | new `src\kinds.rs` | DTOs and **all** V-KIND rules of every kind, as the owning design defines them: V-REMOVAL-1…4, V-CHOICE (§5.2), V-REJECTION, V-LIFT, V-POLICY, V-REVISION, the checkpoint manifest rules, retirement shape, V-PART |
 | core | new `src\ledger.rs` | ledger entries, states, segment encoding (§1.7) |
 | core | new `src\hooks.rs` | extension-point traits (§9.4) and their neutral defaults |
 | core | `src\layout.rs` | `authority\`, ledger, settings-local and recovery paths |
-| core | `src\admit.rs` | admission order (§6), cutoff-skipping, settings watermark |
-| core | `src\target.rs` | `compose` skeleton per folder (§4.1), level traits, `matches` (§4.2), all `DecisionReason` variants including the rename (§5.1) and `NewVersionAfterDecision` |
+| core | `src\admit.rs` | admission order (§6), cutoff-skipping, the retirement hold (`pending(retirement_unresolved)`), settings watermark |
+| core | `src\target.rs` | `compose` skeleton per folder (§4.1), level traits, `Source`, `Content`, `ScopeMatch` and `same_release` (§4.2), whole-addon ordinary selection and projection (§4.3), per-folder constraint composition (§4.4), all `DecisionReason` variants including the rename (§5.1) and `NewVersionAfterDecision` |
 | core | `src\plan.rs` | `FolderAction::Remove`, `PackageApply { kind, removals, settings_ops, pending_records }`, planner hook calls |
 | core | `src\exec.rs`, `src\exec_tests.rs` | full C-JRN execution: every slot table (install/replace, remove, settings ops), `pending_records` reservation and finalize, `recover_interrupted` for every kind (§2.2) |
 | core | `src\status.rs`, `src\view.rs`, `src\explain.rs` | every new status, hold, decision and notice enum variant, with hook calls for feature text |
-| core | `src\lib.rs`, `src\testkit.rs` | module list (including step-2 stubs), shared fixtures builders |
-| core | new stubs `src\removal.rs`, `src\settings.rs`, `src\reject.rs`, `src\choice.rs`, `src\decide.rs`, `src\retire.rs` | neutral implementations of the §9.4 traits, **handed over** to their step-2 owner at merge |
+| core | new `src\decision.rs` | **every** type named in a §9.4 signature or exchanged between core, runtime and app for decisions: `DecisionId`, `DecisionScope`, `DecisionItem`, `DecisionOption`, `OptionId`, `OptionLabel`, `Consequence`, `OptionWarning`, `EvidenceToken`, `FreshEvidence`, `DecisionEffect`, `LocalResolution`, `DecideError`, `DecideOutcome`, `RetirePlan`, `Constraint`, `RemovalView`, `AckItem`, `CleanupClass`, `SettingsTarget`, `CycleCx` (ops.md §1.1) |
+| core | `src\lib.rs`, `src\testkit.rs` | the complete module list: every step-1 module and **every step-2 and step-3 module and test module below**, so no later packet edits a `lib.rs`; shared fixture builders |
+| core | new stubs `src\removal.rs`, `src\removal_tests.rs`, `src\settings.rs`, `src\settings_tests.rs`, `src\reject.rs`, `src\reject_tests.rs`, `src\choice.rs`, `src\choice_tests.rs`, `src\decide.rs`, `src\decide_tests.rs`, `src\retire.rs`, `src\retire_tests.rs` | neutral implementations of the §9.4 traits and empty test modules, **handed over** to their step-2 owner at merge |
+| core | new stubs `src\notice.rs`, `src\update.rs`, `src\diagnostics.rs` | empty modules (types only where §9.4 or `control.rs` needs them), handed over to R4-notify-diag |
 | core | new `fixtures\contracts\` | golden bytes of every kind, part, index chunk, journal and point (`/1` and `/2`) |
 | adapters | `src\provider.rs`, `src\fs_install.rs`, `src\fs_safe.rs`, `src\testkit.rs`, new `src\authority_store.rs` | authority and index IO, settings stream and checkpoint upload, own-copy repair, ledger segment files, remove action, settings file moves, the `WtfScope` root |
-| runtime | `src\service.rs`, `src\effects.rs`, `src\control.rs`, `src\activity.rs`, `src\lib.rs` | cycle skeleton calling the hooks in order, `UnknownJournal` listing (§2.4), every control command and query variant (including `SettingsHistory`), the session-end event |
-| runtime | new stubs `src\removal_cycle.rs`, `src\settings_cycle.rs`, `src\rollback_flow.rs`, `src\decisions.rs` | neutral hook implementations, handed over at merge |
-| repo | `tests\required-cases.toml` | its own block plus one empty, commented section header per step-2/3 packet |
+| adapters | `src\lib.rs`; new stubs `src\wtf.rs`, `src\settings_store.rs` (to R4-core-settings), `src\notify.rs`, `src\update_http.rs` (to R4-notify-diag) | module declarations and re-exports for every adapters module; stubs compile with no behaviour and no new dependency |
+| runtime | `src\service.rs`, `src\effects.rs`, `src\control.rs`, `src\activity.rs`, `src\lib.rs` | cycle skeleton calling the hooks in order, `UnknownJournal` listing (§2.4), every control command and query variant (including `SettingsHistory`, `ExportDiagnostics`, `CheckUpdates`, `AppSettings`), the session-end event; `lib.rs` declares every runtime module below |
+| runtime | new stubs `src\removal_cycle.rs`, `src\settings_cycle.rs`, `src\rollback_flow.rs`, `src\decisions.rs` (to their step-2 owner), `src\notices.rs`, `src\updates.rs`, `src\diag.rs` (to R4-notify-diag) | neutral hook implementations, handed over at merge |
+| repo | `tests\required-cases.toml` | its own block plus one section per later packet, delimited by `# >>> section: <packet>` and `# <<< section: <packet>` comment lines (the shared-append exception, §9.2) |
 
 Tests: T-C01…T-C14 and T-C06b, T-C06c (§10), plus T-R4D1-*, T-R4D4-*,
-T-R4D15-* and T-R4D16-*. T-C11 is offline-fixture only.
+T-R4D15-*, T-R4D16-*, T-R4D23-unknown-waits, T-R4D23-same-release-table,
+T-R4D24-no-hybrid and T-R4D25-partial-retirement-dag. T-C11 is
+offline-fixture only.
+
+**Handover.** At step-1 merge every stub file above passes to the packet
+named in its row, and `Cargo.lock` passes to R4-notify-diag for step 3
+(no step-2 packet adds a dependency). These are serial transfers: the
+file never has two owners at once.
 
 ### 9.2 Step 2: three packets in parallel, after step 1 merges
 
 | Packet | Files owned (all under `crates\`) | Behaviour |
 |---|---|---|
-| **R4-core-removal** | `wow-sync-core\src\removal.rs`, new `wow-sync-core\src\removal_tests.rs`; `wow-sync-runtime\src\removal_cycle.rs`, `wow-sync-runtime\src\detail.rs` | removal.md: observation, settle, merge, stale copies, acks, re-add, removal cycle steps (removal.md §1.6), absent-ack/cleanup planning (R4D-5) |
-| **R4-core-settings** (settings and rollback) | `wow-sync-core\src\settings.rs`, new `settings_tests.rs`, `wow-sync-core\src\reject.rs`, new `reject_tests.rs`; new `wow-sync-adapters\src\wtf.rs`, new `wow-sync-adapters\src\settings_store.rs`; `wow-sync-runtime\src\settings_cycle.rs`, `wow-sync-runtime\src\rollback_flow.rs` | settings.md and rollback.md: WTF scan, capture, local blob/manifest/`SettingsLocal` store, target (settings.md §4.2), epoch, revisions, policy, settings history query, rejection/lift behaviour, recovered chain, folder-changing rollback (R4D-20) |
-| **R4-core-ops** | `wow-sync-core\src\choice.rs`, new `choice_tests.rs`, `wow-sync-core\src\decide.rs`, new `decide_tests.rs`, `wow-sync-core\src\retire.rs`, new `retire_tests.rs`; `wow-sync-runtime\src\decisions.rs` | ops.md §1–§2: code-choice semantics (§5.3), `decide` freshness (T-C15), retirement command and master reassignment flow |
+| **R4-core-removal** | `wow-sync-core\src\removal.rs`, `wow-sync-core\src\removal_tests.rs`; `wow-sync-runtime\src\removal_cycle.rs`, `wow-sync-runtime\src\detail.rs` | removal.md: observation, settle, merge, stale copies, acks, re-add, removal cycle steps (removal.md §1.6), absent-ack/cleanup planning (R4D-5) |
+| **R4-core-settings** (settings and rollback) | `wow-sync-core\src\settings.rs`, `settings_tests.rs`, `wow-sync-core\src\reject.rs`, `reject_tests.rs`; `wow-sync-adapters\src\wtf.rs`, `wow-sync-adapters\src\settings_store.rs`; `wow-sync-runtime\src\settings_cycle.rs`, `wow-sync-runtime\src\rollback_flow.rs` | settings.md and rollback.md: WTF scan, capture, local blob/manifest/`SettingsLocal` store, target (settings.md §4.2), epoch, revisions, policy, settings history query, rejection/lift behaviour, recovered chain, folder-changing rollback (R4D-20) |
+| **R4-core-ops** | `wow-sync-core\src\choice.rs`, `choice_tests.rs`, `wow-sync-core\src\decide.rs`, `decide_tests.rs`, `wow-sync-core\src\retire.rs`, `retire_tests.rs`; `wow-sync-runtime\src\decisions.rs` | ops.md §1–§2: code-choice semantics (§5.3), `decide` freshness (T-C15), retirement command and master reassignment flow |
 
-Each appends only under its own section header in
-`tests\required-cases.toml`. The three file sets are disjoint.
+All these files exist as step-1 stubs and are already declared in their
+crate's `lib.rs`; no step-2 packet creates a module or edits a `lib.rs`,
+`Cargo.toml` or `Cargo.lock`. The three code file sets are disjoint.
+
+**Shared-append exception: `tests\required-cases.toml`.** It is the one
+file every later packet changes. Each packet may change only the lines
+strictly between its own `# >>> section: <packet>` and
+`# <<< section: <packet>` markers, which step 1 creates. The gate
+(T-R4D17-file-ownership) checks it: outside the packet's own section the
+file is byte-identical to the base, the markers are unchanged, and every
+case id added inside the section is new in the file. Concurrent appends
+in different sections merge without conflict.
 
 ### 9.3 Step 3: after all of step 2 merges
 
 | Packet | Files owned |
 |---|---|
-| **R4-notify-diag** | core new `src\notice.rs`, `src\update.rs`, `src\diagnostics.rs` and their `lib.rs` lines (one-line additions; the only step-3 touch of a step-1 file, pre-agreed); adapters new `src\notify.rs`, `src\update_http.rs`, plus `src\winproc.rs`, `src\localstate.rs`, `wow-sync-adapters\Cargo.toml`, `Cargo.lock`; runtime new `src\notices.rs`, `src\updates.rs`, `src\diag.rs` |
-| **R4-app** | every file of `crates\wow-sync-app` |
+| **R4-notify-diag** | core `src\notice.rs`, `src\update.rs`, `src\diagnostics.rs` (step-1 stubs, already declared); adapters `src\notify.rs`, `src\update_http.rs` (step-1 stubs), `src\winproc.rs`, `src\localstate.rs`, `wow-sync-adapters\Cargo.toml`, `Cargo.lock`; runtime `src\notices.rs`, `src\updates.rs`, `src\diag.rs` (step-1 stubs); its section of `tests\required-cases.toml`. No `lib.rs` |
+| **R4-app** | every file of `crates\wow-sync-app`; its section of `tests\required-cases.toml` |
 
 R4-notify-diag and R4-app may run in parallel if R4-app consumes only the
 runtime control API; otherwise R4-app follows R4-notify-diag.
@@ -1082,8 +1289,9 @@ pub trait RemovalHooks {   // filled in removal.rs
 }
 pub trait ConstraintHooks { // choice.rs (keep/resume) and reject.rs (rejection)
     fn live_constraints(&self, l: &Ledger, f: &FolderKey) -> Vec<Constraint>;
-    fn excluded(&self, l: &Ledger, f: &FolderKey, c: &Candidate) -> bool;
-    fn rejected(&self, l: &Ledger, f: &FolderKey, c: &Candidate) -> bool;
+    // whole-source checks by `same_release` (§4.2); never per folder
+    fn excluded(&self, l: &Ledger, p: &Package, s: &Source) -> ScopeMatch;
+    fn rejected(&self, l: &Ledger, p: &Package, s: &Source) -> ScopeMatch;
 }
 pub trait SettingsHooks {  // settings.rs
     fn settings_target(&self, cx: &CycleCx, u: &SettingsUnit) -> SettingsTarget;
@@ -1109,7 +1317,8 @@ Runtime calls them from `service.rs` in cycle order (removal.md §1.6), and
    fixtures committed, every step-2 stub compiles and keeps slice
    behaviour.
 2. **R4-core-removal**, **R4-core-settings**, **R4-core-ops** in parallel.
-   Gate per packet: its tests green; no file outside its set touched.
+   Gate per packet: its tests green; no file outside its set touched,
+   except its own section of `tests\required-cases.toml` (§9.2).
 3. **R4-notify-diag**, then (or with) **R4-app**; cross-feature tests last.
 
 ---
@@ -1139,7 +1348,7 @@ fixed bytes where stated.
 | T-R4D4-full-policy | a policy naming 5,000 folders is written in parts and read back identical; a duplicate folder in two parts is `invalid(policy_body)` |
 | T-C09-ledger-segments | a ledger past 16 MiB in 4 MiB segments reloads, re-derives validity and keeps every entry; memory per entry measured |
 | T-C10-retirement-barrier | three issuers: A retires B, C retires A with lower cutoff; both delivery orders; B stays retired, A retired, B's states above cutoff never admitted; master and stale decisions included |
-| T-R4D15-vret-predicate | V-RET truth table: ordinary record of a retired issuer above/at cutoff; retirement by a retired issuer, void and not void; issuer not retired |
+| T-R4D15-vret-predicate | V-RET truth table: ordinary record of a retired issuer above/at cutoff; retirement by a retired issuer, void and not void; issuer not retired; issuer `Retired = Unresolved` above its HoldCut → `pending(retirement_unresolved)`, never invalid and never admitted |
 | T-R4D16-later-cutoff-no-reauth | A retires B at cutoff 10; B's seq-11 record is invalid; C's retirement of B at cutoff 12 arrives: still invalid; a third retirement at cutoff 8 makes B's seq 9–10 records invalid |
 | T-R4D16-retired-issuer-retirement-void | B, knowing its own retirement (non-empty `retirements_known`), retires A: void, A not retired, in both delivery orders |
 | T-C11-identity-collisions | NFC collision and case-only difference in **offline fixtures** give the named diagnoses; neither identity is synced. Native NTFS/APFS: NOT RUN (R4D-22) |
@@ -1150,4 +1359,10 @@ fixed bytes where stated.
 | T-R4D21-choice-over-rollback | rejection on {a, b}; keep on {a} covering it: a follows the keep, b keeps the recovered tree (owner: R4-core-settings) |
 | T-R4D21-readd-over-rollback | rejection on {a, b}; re-add of {b} covering it: b leaves the constraint, a stays constrained (owner: R4-core-removal) |
 | T-C15-decide-fresh | a record learned between showing and choosing gives `Changed`; no write happens (owner: R4-core-ops) |
-| T-R4D17-file-ownership | merge gate run by the orchestrator for every phase C packet: `git diff --name-only <base>..<packet head>` lists only files of that packet's §9 row; a step-2 packet touching a step-1 file or another packet's file fails the gate. Counterexample: a removal packet editing `kinds.rs` is refused |
+| T-R4D17-file-ownership | merge gate run by the orchestrator for every phase C packet: `git diff --name-only <base>..<packet head>` lists only files of that packet's §9 row, plus `tests\required-cases.toml` when the section check passes (outside the packet's own `# >>> section` / `# <<< section` markers the file equals the base, markers unchanged, added case ids new); a step-2 or step-3 packet touching a step-1 file (including any `lib.rs`) or another packet's file fails the gate. Counterexamples: a removal packet editing `kinds.rs` is refused; a settings packet adding a case inside the R4-core-ops section is refused; R4-notify-diag editing `wow-sync-core\src\lib.rs` is refused |
+| T-R4D23-same-release-table | `same_release` truth table (§4.2): equal on all keys; a key `Absent` on one side and a tree on the other; disjoint scopes; unknown key with nothing different (`Unknown`); unknown key plus a known difference (`Different`); the same entries under two local groupings give identical results; A-38 control: compare common keys only (T-R4D23-added-folder-rollback fails) |
+| T-R4D23-unknown-waits | §4.2 last row: a source with an `Unstable` folder in scope is neither a candidate nor rejected; ordinary selection does not fall back to a lesser candidate; it resolves once stable |
+| T-R4D23-added-folder-rollback, T-R4D23-dropped-folder-rollback | §4.2 rows (owner: R4-core-settings, rollback.md §10) |
+| T-R4D23-keep-resume-shared-component | §4.2 row (owner: R4-core-ops, ops.md §7) |
+| T-R4D24-no-hybrid | §4.3 with neutral hooks: X `{a:3.0, b:1.0}` vs Y `{a:2.0, b:2.0}` gives `NeedsDecision(Ambiguous(MembersDisagree))` for the addon; no plan contains `{a:3.0, b:2.0}`; also with X complete and Y missing b: `PartialCandidate`, nothing installed; A-38 control: per-folder ordinary selection (hybrid planned, test fails) |
+| T-R4D25-partial-retirement-dag | the §1.10 R/S/T/U trace in every listed delivery order and after a restart at each partial step: each record's status, `Retired`/Cutoff/HoldCut per enrollment, held vs admitted seqs, `awaiting`, master prompts and own-publish pause exactly as the tables; no status ever flips between Effective and Void; final state identical in every order (ops.md §7 repeats the user-facing checks) |

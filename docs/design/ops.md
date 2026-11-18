@@ -56,7 +56,8 @@ builds options itself. It renders what core returns and passes the chosen
 option back.
 
 ```rust
-// wow-sync-core::decide
+// wow-sync-core::decision (types, step 1: R4-core-contracts); the two
+// functions are filled in wow-sync-core::decide (step 2: R4-core-ops)
 pub enum DecisionScope { Folders(Vec<FolderKey>), Settings(SettingsUnit) }  // contracts.md §3
 pub struct DecisionItem {
     pub scope: DecisionScope,         // the identity; the package name is display only
@@ -161,10 +162,13 @@ game's ("Lists Interface 110000; this game is 110002") as information only.
   version becomes eligible again only when the user ticks it under
   **Allow these again** in the same resume choice (`allow_again`). The
   kept version and any version the user has not yet seen are never
-  excluded by a resume.
+  excluded by a resume; a version that only shares some unchanged
+  folders with a declined one is not the declined version (exclusions
+  compare complete content, contracts.md §4.2).
 - **A newer version after a keep (Q-49, owner-accepted).** While a keep is
   live it pins the kept version. A candidate that the keep did not
-  consider (not in its `considered`), whether demonstrably newer or
+  consider (its source is `Different` from every `considered` entry by
+  complete content, contracts.md §4.2), whether demonstrably newer or
   unordered, raises `NeedsDecision(NewVersionAfterDecision)`; the kept
   version stays installed until the user chooses explicitly (contracts.md
   §5.1, §5.3). Nothing is installed automatically past a keep.
@@ -244,13 +248,20 @@ barrier are contracts.md §1.10. In short:
 - `cutoff_seq` is the issuer's admitted watermark for the retired
   enrollment (its last admitted seq). Self-retirement uses `cutoff_seq =
   issued_at_seq − 1`.
-- **Retired(E)** is true once any **effective** retirement of E exists: it
-  passes V-BYTES, V-GROUP, V-ISSUER and V-REF and is not **void**. A
-  retirement is void iff its `retirements_known` names an effective
-  retirement of its own issuer (the issuer wrote it knowing it was
-  retired). Effectiveness never depends on a later retirement of the
-  issuer, so Retired(E) is monotone. **Cutoff(E)** is the **minimum**
-  cutoff over the effective retirements of E: a further record can only
+- **Retired(E)** is Yes once any **Effective** retirement of E exists: it
+  passes V-BYTES, V-GROUP, V-ISSUER and V-REF, and every retirement named
+  in its `retirements_known` is settled as not effective (Void or
+  invalid). It is **Void** if one of them is Effective (the issuer wrote
+  it knowing it was retired), and **Unresolved** while one of them is
+  missing or itself Unresolved (contracts.md §1.10 rule 1). Statuses only
+  move Unresolved → Effective or Unresolved → Void, so Retired(E) = Yes is
+  final and partial delivery never retires and then un-retires anyone
+  (R4D-25, T-R4D25-partial-retirement-dag). While E's only candidate
+  retirements are Unresolved, E is **held**, not retired: its records
+  and states above the lowest such cutoff are pending, it is still
+  awaited, and nothing that assumes E is retired happens (contracts.md
+  §1.10 rule 6). **Cutoff(E)** is the **minimum**
+  cutoff over the Effective retirements of E: a further record can only
   lower it, so E's records only ever go valid → invalid, and no later
   retirement with a higher cutoff re-authorizes a post-retirement action
   (R4D-16, Q-52).
@@ -275,7 +286,10 @@ retires A with a lower cutoff) leaves B retired in every delivery order
 ### 2.2 Effects for every reader
 
 `admit` applies the barrier before any currentness, publication or target
-use (contracts.md §6). Once Retired(E):
+use (contracts.md §6). A held enrollment (Retired = Unresolved) gets none
+of the effects below; only its records above the hold cutoff wait
+(contracts.md §1.10 rule 6), and Details says "Waiting for a retirement
+record from <computer>". Once Retired(E) = Yes:
 
 1. **Stale and offline publications are ignored.** E's code and settings
    states with `seq > Cutoff(E)` are not admitted. They are neither
@@ -307,7 +321,9 @@ There is no "conflicted retirement" state.
 ### 2.4 On the retired computer itself (Q-60)
 
 **Q-60 PENDING OWNER default: stop publishing and stop applying.** When a
-computer admits Retired(own enrollment):
+computer admits Retired(own enrollment) = Yes, or its own enrollment is
+held (Unresolved, contracts.md §1.10 rule 6; it resumes by itself if the
+retirement turns out Void):
 
 - It **stops publishing** immediately: no state, record, index chunk or
   mirror is written, and nothing is uploaded on its behalf.
@@ -715,22 +731,29 @@ File ownership and build order are [contracts.md](contracts.md) §9 only;
 this section says what each part contains.
 
 **Built by step 1, R4-core-contracts:** historical membership, the
-retirement DTO with `retirements_known`, the barrier, voidness and V-RET
-(`authority.rs`, `kinds.rs`); the code-choice DTO and V-CHOICE
-(`kinds.rs`); the admission order with cutoff skipping (`admit.rs`); the
+retirement DTO with `retirements_known`, the three-valued barrier
+(Effective / Void / Unresolved, Retired Yes / No / Unresolved, Cutoff,
+HoldCut), voidness and V-RET (`authority.rs`, `kinds.rs`); the
+code-choice DTO with the exclude `scope` and V-CHOICE (`kinds.rs`); the
+admission order with cutoff skipping and the hold (`admit.rs`); the
 `DecisionReason` rename to `UnusableMetadata(kind)` and
-`NewVersionAfterDecision` (`target.rs`); every status, view and explain
-variant below (`status.rs`, `view.rs`, `explain.rs`); `DecisionHooks`,
-`RetireHooks` and the code-choice half of `ConstraintHooks` (`hooks.rs`);
-the runtime cycle, the `decide`, `retire` and `AppSettings` control
-variants (`service.rs`, `control.rs`).
+`NewVersionAfterDecision`, `same_release` and whole-addon ordinary
+selection (`target.rs`); **every decision DTO** of §1.1 —
+`DecisionScope`, `DecisionItem`, `DecisionOption`, `OptionId`,
+`OptionLabel`, `Consequence`, `OptionWarning`, `EvidenceToken`,
+`FreshEvidence`, `DecisionEffect`, `LocalResolution`, `DecideError`,
+`DecideOutcome`, `RetirePlan` (new `decision.rs`); every status, view and
+explain variant below (`status.rs`, `view.rs`, `explain.rs`);
+`DecisionHooks`, `RetireHooks` and the code-choice half of
+`ConstraintHooks` (`hooks.rs`); the runtime cycle, the `decide`, `retire`
+and `AppSettings` control variants (`service.rs`, `control.rs`).
 
 **Built by step 2, R4-core-ops:**
 
 | File | Contents | Notes |
 |---|---|---|
-| core `choice.rs`, `choice_tests.rs` | `ConstraintHooks::{live_constraints, excluded}` for code choices: live keeps per folder, `NewVersionAfterDecision` detection, resume exclusions, the writer's `exclude` formula (contracts.md §5.2–§5.3) | consumed by `target::compose` levels 6 and 8 |
-| core `decide.rs`, `decide_tests.rs` | `DecisionScope`, `DecisionItem`, `DecisionOption`, `OptionId`, `OptionLabel`, `Consequence`, `EvidenceToken`, `FreshEvidence`, `DecisionEffect`, `LocalResolution`, `DecideError`; `decision_items`, `DecisionHooks::decide` | pure; freshness contracts.md §5.5 |
+| core `choice.rs`, `choice_tests.rs` | `ConstraintHooks::{live_constraints, excluded}` for code choices: live keeps per folder, `NewVersionAfterDecision` detection, resume exclusions by `same_release` over each entry's `scope`, the writer's `exclude` formula (contracts.md §5.2–§5.3) | consumed by `target::compose` levels 6 and 8 |
+| core `decide.rs`, `decide_tests.rs` | the functions `decision_items` and `DecisionHooks::decide` over the step-1 `decision.rs` types; no type is defined here | pure; freshness contracts.md §5.5 |
 | core `retire.rs`, `retire_tests.rs` | `RetireHooks::plan_retirement`: `build_retirement` with the cutoff and `retirements_known`, the master consequence (§2.6) | the barrier itself is step 1 |
 | runtime `decisions.rs` | bodies of the decide and retire commands (under the cycle lock), record write through the shared authority path | |
 
@@ -741,7 +764,10 @@ variants (`service.rs`, `control.rs`).
 `awaiting`/confirmations (§1.6, §1.7); `NextAction::{ReviewSetup,
 JoinAgain, ChangeMaster}`.
 
-**Built by step 3, R4-notify-diag:**
+**Built by step 3, R4-notify-diag.** Every module below already exists as
+a step-1 stub, declared in its crate's `lib.rs` by R4-core-contracts
+(contracts.md §9.1); step 3 fills the stub files and never edits a
+`lib.rs`.
 
 | Crate / module | Adds | Notes |
 |---|---|---|
@@ -799,6 +825,7 @@ marks a negative case.
 | T-26-14 | GUI: Decision page keyboard flow (Tab, Space, Enter); screenshots with interaction evidence | manual A-26 |
 | **T-R4D10-new-version-after-keep** | keep V2 among unordered V2/V3 (V3 in `considered`): V3 never ends it; an unconsidered demonstrably newer V4 → `NeedsDecision(NewVersionAfterDecision)`, V2 stays installed until the user chooses; an unconsidered unordered V4′ → the same; A-38 control: auto-install V4 makes it fail (Q-49) | Neg |
 | **T-R4D10-resume-keeps-exclusions** | keep V2 declining V3, then resume without allow-again: the resume's `exclude` inherits V3; target V2; with a new V4: V4; a replay of V3's exact content: never selected (Q-50) | Neg |
+| **T-R4D23-keep-resume-shared-component** | contracts.md §4.2: kept V2 `{a:2, b:U}`, declined V3 `{a:3, b:U}`, then resume; with a and b grouped, ungrouped, and regrouped (folder c joins) between keep and resume: V2's source stays eligible and is the target; the V3 source is never selected; the carried exclude entry keeps `scope` {a, b}; A-38 control: compare on common folders only (V2 becomes excluded, test fails) | Neg |
 | **T-R4D10-resume-allow-again** | same, but resume with `allow_again = {V3}`: V3 eligible again, target V3; `allow_again` naming a hash not inherited → the writer refuses to write it | positive / Neg |
 | **T-R4D10-vchoice-per-action** | V-CHOICE per action (contracts.md §5.2): a keep without `keep` or with `allow_again`, a keep whose `considered` lacks the kept entry, `exclude` containing `keep`, a resume with `keep`, `allow_again` overlapping `exclude`, unsorted lists, folder keys outside `folders` → each `invalid(choice_shape)`; the valid forms of each action pass | Neg |
 | **T-R4D21-partial-choice-over-choice** | contracts.md §10: keep X on {a, b}; a later keep Y on {a} covering X → a follows Y, b still follows X; same result whether a and b are grouped locally or not | positive / Neg |
@@ -813,14 +840,15 @@ marks a negative case.
 | T-45-2 | B's history ≤ 10, its member directory and blobs are untouched (listing before = after) | Neg |
 | T-45-3 | B's record with `issued_at_seq` 12 → `invalid(after_retirement)`; one at 9 stays valid | Neg |
 | T-45-4 | Retire the settings master with one active computer left → `MasterState::Absent`; no computer becomes master | Neg |
-| T-45-5 | Mutual retirement A↔B → both retired on every reader, in every read order (property test) | positive |
+| T-45-5 | Mutual unknowing retirement A↔B (empty `retirements_known`) → both retired on every reader, in every read order (property test); with references whose targets arrive late, the intermediate states are held, never retired or un-retired (T-R4D25-partial-retirement-dag) | positive |
 | T-45-6 | B re-enrolls (new enrollment id) → joining member; the old enrollment stays retired; its old valid records stay valid via historical membership | positive |
 | T-45-7 | Retired-self: no file written to its member directory in later cycles; no apply; local addons unchanged (Q-60 default) | Neg |
 | **T-R4D11-late-retirement-three-issuers** | A retires B (cutoff 10) at A's seq 20; D learns it; then C retires A with cutoff 15 (< 20). Both delivery orders, and with a restart between. B stays retired on D; A is retired; B's states > 10 and B's records > 10 never admitted; a stale B settings revision and a stale B removal stay invalid; B never becomes master again. Same trace as contracts T-C10 | Neg |
 | T-45-8 | Two different effective retirement records of B with cutoffs 8 and 12 → Cutoff(B) = 8 in either order (MIN); a record of B at 11 is invalid in both orders, and a third retirement with cutoff 20 re-validates nothing | Neg |
 | **T-R4D16-later-cutoff-no-reauth** | contracts.md §10: A retires B at cutoff 10; B's seq-11 removal is invalid; C's retirement of B with cutoff 12 arrives later, in both orders and across a restart → the removal stays invalid; nothing B wrote above 10 is ever authority | Neg |
 | **T-R4D16-retired-issuer-retirement-void** | contracts.md §10: B is retired; B (an old app) writes a retirement of A listing its own retirement in `retirements_known` → void; A is not retired; Details lists it as ignored | Neg |
-| **T-R4D15-vret-predicate** | contracts.md §10: V-RET over retirement / non-retirement, retired / not-retired issuer, `issued_at_seq` below, at and above the cutoff → exactly the contracts.md §1.11 table | Neg |
+| **T-R4D15-vret-predicate** | contracts.md §10: V-RET over retirement / non-retirement, retired / not-retired / held issuer, `issued_at_seq` below, at and above the cutoff → exactly the contracts.md §1.11 table | Neg |
+| **T-R4D25-partial-retirement-dag** | contracts.md §1.10 R/S/T/U trace: complete-first; R, S then T then U; T, U then R, S; a restart after each partial step. Every intermediate step checks each record's status, Retired/HoldCut of A, B, C and D, admitted vs held seqs, `awaiting`, master prompts and whether A/B publish. B is never Retired = Yes; no status flips Effective ↔ Void; the final result is identical in every order; A-38 control: treat Unresolved dependencies as not effective (B retired at partial 1, test fails) | Neg |
 | T-45-9 | GUI: retire sheet disabled until the checkbox; 72-hour warning; Cancel default focus | manual A-45 |
 
 ### A-27: notifications (core `notice`; runtime with `RecordingNotifier`)
