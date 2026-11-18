@@ -1,209 +1,297 @@
 # Rollback and rejected releases
 
-Status: **design for a later run** (run-004 packet
-[R4-settings-design](../runs/run-004/packets/R4-settings-design.md)). Not
-yet implemented and not yet independently reviewed. Nothing here changes the
-running slice. The slice's recovery points stay local (Q-18) and its target
-has no rejection step.
+Status: **run-004 design, revised by packet
+[R4-design-fix](../runs/run-004/packets/R4-design-fix.md).** It fixes R4D-9
+and the rollback parts of R4D-1, R4D-4 and R4D-10 of the
+[R4-design-review](../runs/run-004/evidence/R4-design-review.md). **Not
+implemented.** Nothing here changes the running slice: its recovery points
+stay local (Q-18) and its target has no rejection step. Choices marked
+**PENDING OWNER** use the conservative default in
+[questions.md](questions.md). They are not owner decisions.
+
+**Contract.** [contracts.md](contracts.md) alone defines:
+- the record envelope, identity (`sha256` of the exact bytes), references,
+  `Known` coverage, validity, learning, mirroring and capabilities (§1);
+- the apply journal and recovery point, including the `rollback` kind and
+  the `paired` field (§2);
+- folder-keyed addon identity (§3);
+- target precedence and constraint composition (§4);
+- the code-choice family and its decision reasons (§5).
+
+This file defines only the bodies of the `rejection` and `lift` kinds, the
+recovered-target constraint and the rollback behaviour. Where it seems to
+differ from contracts.md, contracts.md wins. Phase C owner:
+**R4-core-settings**, after the C-AUTH, C-JRN, admission and compose
+foundations are merged (contracts.md §9).
 
 Product authority: SPEC R-10, R-11 and R-12 ([SPEC.md](../../SPEC.md)).
 Acceptance: A-16 to A-20, A-23, A-25, A-26 and A-45
-([ACCEPTANCE.md](../../ACCEPTANCE.md)). Settings parts use
-[settings.md](settings.md). Removal parts use the removal design
-([removal.md](removal.md), its "rejection and rollback" and "history and
-recovery" sections). Formats and the authority-object family follow
-[publication.md](publication.md) and the removal design's "immutable
-authority objects" and "authority ledger" sections. Open choices are
-**(Q-n)** in [questions.md](questions.md).
+([ACCEPTANCE.md](../../ACCEPTANCE.md)). Settings parts consume
+[settings.md](settings.md); removal parts consume [removal.md](removal.md).
+Open choices are **(Q-n)** in [questions.md](questions.md).
 
 ## 0. Vocabulary
 
 | Term | Meaning |
 |---|---|
-| release | one exact package content: the package hash over its folder trees ([publication.md](publication.md) §3). A version label ("2.1") is display, not identity |
+| release | one exact content of a set of addon folders: the package hash over its folder trees ([publication.md](publication.md) §3), keyed by **folder keys** (contracts.md §3.1). A version label ("2.1") is display text, not identity |
 | rollback | the user action "this release is bad, go back to an earlier one" for one addon in one group |
-| rejection | the group-visible, immutable record that a release must not be installed in the group. Also the "tombstone" of a release |
-| recovered release | the earlier release that the rollback installs and distributes |
-| lift | the explicit user action "allow this release again", recorded as its own object |
-| paired restore | rollback that also restores the settings checkpoint taken with the recovered release, for each identity |
-| code-only rollback | rollback where some or all identities have no such checkpoint; current settings stay and a warning follows |
+| rejection | the group-visible record that a release must not be installed in the group (the "tombstone" of a release) |
+| recovered target | the earlier release that the rollback installs and distributes |
+| lift | the explicit user action "allow this release again", recorded as its own record |
+| paired restore | a rollback that also restores, per settings unit, the settings saved with the recovered target |
+| code-only rollback | a rollback where some or all units have no such settings; current settings stay and a warning follows |
 
 ## 1. What rollback does (R-10, A-18)
 
-On one computer, for package P, from the Add-on detail history:
+On one computer, for the addon with folder keys F, from the Add-on detail
+history:
 
-1. The user picks an earlier history state R0 of P (current plus two
-   previous, [apply.md](apply.md) §2.4) and chooses "Go back to this
-   version…". The confirmation names the current release R1 and says:
-   "Version 2.1 will be blocked on all your computers for <variant>.
-   Version 2.0 will be installed everywhere." It also states which
-   settings will be restored (§4) before the user confirms.
-2. The app writes a **rejection** of R1 (§2) and, for each identity with
-   shared settings, the settings restore revisions (§4).
-3. It restores R0 locally from its local recovery point, or from provider
-   trees if some member's published state still has R0, using the normal
-   apply operation (WoW-not-running gate, journal, `G` before every live
-   rename). R1 moves into a recovery slot as an ordinary previous state,
-   marked rejected.
-4. It publishes its code state (R0, with R1's rejection referenced) and
-   settings state.
-5. Every other computer learns the rejection, computes target R0 (§3), and
-   applies R0 when WoW is not running there.
+1. The user picks an earlier history state R0 (current plus two previous,
+   [apply.md](apply.md) §2.4) and chooses "Go back to this version…". The
+   option is shown only if the group-wide preconditions hold (§2.3) and R0
+   has the same folder keys as the current release R1. Otherwise the GUI
+   explains why ("Version 2.0 used different folders, so it can't be
+   restored for the whole group").
+2. The confirmation names R1 and R0 and the scope: "Version 2.1 will be
+   blocked on all your computers for <variant>. Version 2.0 will be
+   installed everywhere." It also says which settings will be restored
+   (§4).
+3. On confirmation the app writes a **rejection** of R1 (§2.1) and, per
+   settings unit to restore, a settings `restore` revision (§4).
+4. It installs R0 with one `rollback` operation (`apply-journal/2`,
+   contracts.md §2.2): the WoW-not-running gate, the journal and the game
+   check before every live rename apply as for any apply. R1 moves into a
+   `/2` recovery point with the right `paired` value (contracts.md §2.3).
+   R0 comes from the local recovery point, or from provider trees if some
+   member's state or a §7 upload still has it.
+5. It publishes its code state, whose authority index lists the rejection,
+   and its settings state.
+6. Every other computer learns the rejection (contracts.md §1.12),
+   computes target R0 (§3), and applies R0 when WoW is not running there.
 
-Rollback never touches other packages, and never another variant: the
-rejection lives in the group folder, and one group is one variant (A-18).
+Rollback never touches other folders, and never another variant: records
+live in the group folder, and one group is one variant (A-18).
 
 ## 2. Records
 
-### 2.1 Rejection (`wowsync.rejection/1`)
+Both kinds use the contract envelope, identity, references, size limit and
+validity (contracts.md §1.3, §1.4, §1.11). Neither has an `id` field.
 
-An immutable authority object in
-`groups\<g>\members\<computer>\authority\<id>.json`, with the common fields
-and object-hash rule of the removal design's authority objects
-(write-if-absent, verbatim mirrors, durable grow-only local ledger):
+### 2.1 Rejection (`wowsync.rejection/1`)
 
 ```json
 {
   "schema": "wowsync.rejection/1",
-  "id": "<32 hex>",
+  "group_id": "…",
   "issuer": { "computer_id": "…", "enrollment_id": "…", "issued_at_seq": 60 },
-  "kind": "code",
-  "package_key": "details",
+  "folders": ["details"],
   "rejected": { "package_hash": "<sha256>", "version_label": "2.1",
-                "folders": [{ "key": "details", "tree": "<sha256>" }] },
-  "recovered": { "package_hash": "<sha256>", "version_label": "2.0" },
-  "considered": ["<package hash of every candidate of P the issuer knew>"],
-  "settings": { "kind": "paired|partial|code_only|not_shared",
-                "restores": [{ "id": "…", "hash": "…" }] },
-  "knows": [{ "id": "…", "hash": "…" }],
-  "note": "",
+                "folders": [ { "key": "details", "tree": "<sha256>" } ] },
+  "recovered": { "package_hash": "<sha256>",
+                 "folders": [ { "key": "details", "tree": "<sha256>" } ] },
+  "considered": [ "<package hash>" ],
+  "settings": "paired|partial|code_only|not_applicable",
+  "known": { "seen": [], "extra": [] },
   "written_unix_ms": 1767225600000
 }
 ```
 
-- The rejection is of the **exact package hash** (Q-78). A version label is
-  kept only to explain and to detect look-alikes (§3.2).
-- `recovered` is the release the user chose. With `considered` it forms
-  the selection constraint of §3.1.
-- `settings.restores` references the settings `restore` revisions issued
-  with the rollback ([settings.md](settings.md) §3.2).
-- `knows` lists every rejection and lift for P in the issuer's ledger.
-- `note` is optional user text, at most 200 characters, shown escaped as
-  plain text, never interpreted (A-23).
+- `folders`: the folder keys of the addon. It is the overlap scope for
+  coverage and constraint composition (contracts.md §1.8, §4.2).
+- `rejected`: the exact content rejected (Q-78 PENDING OWNER). Its
+  `version_label` is the untrusted display string allowed by contracts.md
+  §1.4. It is used for display and for the look-alike hold only (§3.3).
+- `recovered`: the exact content the user chose (§3.1).
+- `considered`: the package hash of every candidate for `folders` that the
+  issuer knew at the time. Used by the newer-release notice (§3.1).
+- `settings`: the outcome of §4, shown in history and audit. The
+  restore revisions are ordinary settings revisions and are not referenced.
+- `known`: what the issuer had learned (contracts.md §1.8). It decides
+  which earlier constraints this rollback covers (§3.2).
+- There is no free-text note (contracts.md §1.4).
 
-**Settings rejection** uses `kind: "settings"` with
-`unit {package_key, identity}`, `rejected {checkpoint}` and `recovered
-{checkpoint}` instead of the package fields (§5).
+**V-REJECTION** (V-KIND):
+1. `folders` non-empty, sorted, unique, ≤ 256.
+2. The folder keys of `rejected.folders` and of `recovered.folders` both
+   equal `folders`.
+3. Each `package_hash` is the package hash of its folder trees, and
+   `rejected.package_hash ≠ recovered.package_hash`.
+4. `considered` ≤ 64 entries (technical cap, contracts.md §1.9), sorted,
+   unique, containing both package hashes.
+5. `version_label` ≤ 128 bytes of valid UTF-8.
 
 ### 2.2 Lift (`wowsync.rejection-lift/1`)
 
 ```json
-{ "schema": "wowsync.rejection-lift/1", "id": "<32 hex>",
-  "issuer": { "…": "…" }, "package_key": "details",
-  "lifts": [{ "id": "<rejection id>", "hash": "<object hash>" }],
-  "written_unix_ms": 1767225600000 }
+{
+  "schema": "wowsync.rejection-lift/1",
+  "group_id": "…",
+  "issuer": { "computer_id": "…", "enrollment_id": "…", "issued_at_seq": 75 },
+  "folders": ["details"],
+  "lifts": [ "<rejection hash>" ],
+  "known": { "seen": [], "extra": [] },
+  "written_unix_ms": 1767225600000
+}
 ```
 
-A lift names exact rejection objects. It never lifts a rejection it does
-not name, so a concurrent new rejection of the same release stays in force
-(Q-79).
+**V-LIFT** (V-KIND): `lifts` non-empty, ≤ 64, sorted, unique; V-REF with
+kind `rejection` for each; `folders` is the sorted union of the named
+rejections' `folders`.
 
-### 2.3 Validity and lifetime
+- A lift names exact rejection records (plain hashes). It never lifts a
+  rejection it does not name, so a concurrent new rejection of the same
+  content stays in force (Q-79).
+- Two lifts naming the same rejection are harmless: the rejection is
+  lifted once.
+- A lift ends only the named rejections and their recovered-target
+  constraints. It affects no removal, choice or settings record.
+- "Allow again…" is the only GUI action that writes a lift. Any
+  non-retired member may write one (Q-79).
 
-- Valid if: schema and size checks pass; the issuer was a valid member at
-  `issued_at_seq` (retirement rules in `ops.md`: objects a retired computer
-  issued before retirement stay valid, later ones do not); `package_key`
-  and hashes are well-formed.
-- **Grow-only.** Rejections and lifts are never deleted or rewritten while
-  the group exists, like removal authority. A rejection is **active** when
-  valid and not named by a valid lift.
-- Every computer that learns a rejection or lift mirrors it into its own
-  `authority\` folder (Q-51 applies), so the rejection survives the
-  issuer's folder becoming unusable or the issuer being retired.
-- Old readers: an app without rejection support does not know the schema.
-  Those apps must not be in a group that uses rollback, so the first
-  rejection in a group requires every non-retired member's newest settings
-  state to list `"rejection/1"` in its `capabilities` field
-  ([settings.md](settings.md) §3.2); otherwise the
-  rollback is offered as "local only" (restore on this computer, no group
-  rejection) and the GUI says why (Q-84).
+### 2.3 Lifetime and group-wide preconditions (Q-84)
 
-## 3. Target: rejections come first
+- A rejection is **active** iff it is `valid` (contracts.md §1.11) and no
+  valid lift names it. Records are grow-only and mirrored (contracts.md
+  §1.2, §1.12), so a rejection survives its issuer's folder becoming
+  unusable and its issuer's later retirement (if it was issued at or below
+  the cutoff, contracts.md §1.10).
+- **Q-84 PENDING OWNER default: block group rollback** when any
+  non-retired member's newest admitted code state does not list
+  `rejection/1` in `features` (contracts.md §1.13). "Go back to this
+  version…" is then disabled with "Laptop runs an older WoW Sync that
+  can't block versions. Update WoW Sync on Laptop first." There is no
+  "this computer only" variant: ordinary selection would reinstall R1 at
+  the next cycle.
+- A member that is downgraded after a rollback publishes states without
+  `rejection/1`. It may reinstall R1 locally, because it ignores
+  rejections. It is shown as "runs an older WoW Sync that does not apply
+  blocked versions", never counts as confirmed for R0, and every
+  up-to-date member still drops R1 (§3). Nothing is installed from it.
 
-In `compute_target` the order for each package is (the removal design's
-cycle precedence, with this design filling the first step):
+## 3. Target
 
-1. **Rejections.** Drop every candidate whose package hash is rejected by
-   an active rejection. A computer whose installed release is rejected is
-   never a source.
-2. Held/pending items, ledger removal authority, selection constraints
-   (including §3.1), ordinary ordering, as in the removal design.
+Rollback fills two levels of `target::compose` (contracts.md §4.1):
 
-### 3.1 The recovered release as a selection constraint
+- **Level 2, rejection.** A candidate whose package hash equals
+  `rejected.package_hash` of an active rejection over overlapping folders
+  is never a candidate, never a source and never kept as a target. A
+  computer whose installed copy is rejected is never a source of it.
+- **Level 6, recovered target**, composed with code choices by contracts.md
+  §4.2 and defined below.
 
-Rejecting R1 alone would let ordinary ordering pick another release newer
-than R0 that the user also saw and did not choose (for example R1.5 on a
-third computer). So an active rejection with `recovered = R0` adds a
-**selection constraint**: the target is R0 while the only candidates newer
-than R0 are releases in `considered`. A release that is **not** in
-`considered` and newer by ordinary ordering (a genuinely new release that
-appears later) ends the constraint, and ordinary ordering resumes (Q-81).
-If R0 itself becomes unavailable (no recovery point and no published copy)
-the package is held with "Version 2.0 is no longer available on any
-computer" and the user chooses.
+### 3.1 The recovered-target constraint
 
-### 3.2 Offline and late peers (A-18, A-20)
+Rejecting R1 alone would let ordinary selection pick another release newer
+than R0 that the user saw and did not choose (for example 2.1.5 on a third
+computer). So each active rejection X adds the constraint "install
+`X.recovered`" on `X.folders`.
 
-- A peer that was offline still has R1. Its published state lists R1; R1
-  is not a candidate (step 1). It learns the rejection, its target is R0,
-  and it replaces R1 with R0, keeping R1 as a rejected previous state. It
-  cannot reintroduce R1, however high R1's version label is.
+- **Live constraints.** X's constraint is live unless another valid
+  constraint record on overlapping folders covers X through its `known`
+  (contracts.md §4.2): a later rejection, a code choice (keep or resume) or
+  a re-add. A resume therefore ends the recovered target but not the
+  rejection itself.
+- **Recovered chain.** If `X.recovered` is itself rejected by active
+  rejections Y1…Yn, X's constraint stands for their recovered targets
+  instead, repeated with a visited set (no cycles). Rejected contents are
+  dropped. If nothing remains, X imposes no constraint and ordinary
+  selection among non-rejected candidates applies.
+- **Composition.** The resulting contents of all live constraints are
+  composed by contracts.md §4.2: one content installs it; several
+  different contents give `NeedsDecision(RollbackTargetsDiffer)`.
+- **Unavailable target.** If the constrained content has no source (no
+  local recovery point, no member's admitted state and no §7 upload), the
+  folders get `NeedsDecision(RecoveredUnavailable)` (contracts.md §5.1):
+  "Version 2.0 is no longer available on any computer." Options: one "Use
+  <version>" per available non-rejected candidate (a code choice whose
+  `known` covers X), or "Decide later". Meanwhile nothing is changed on
+  disk. A rejected copy that is still installed stays installed with the
+  status "Blocked version still installed", and is never a source.
+- **Newer releases (Q-81 PENDING OWNER default).** Only an explicit lift
+  ("Allow again…") or an explicit code choice ends the constraint. A
+  non-rejected candidate **not** in `X.considered` that is demonstrably
+  newer than the recovered target (domain.md §6) does not install. It
+  raises the non-blocking notice `NewerAfterRollback` (contracts.md §5.1):
+  "Details 2.2 is available. You went back to 2.0 on <date>." Options:
+  "Use 2.2" (a keep whose `known` covers X) or "Stay on 2.0" (a local
+  dismissal of that candidate only). Candidates in `considered` never raise
+  the notice.
+
+### 3.2 Concurrent, late and conflicting records (R4D-9)
+
+Validity and coverage are pure functions of the ledger (contracts.md
+§1.11), so every computer with the same ledger reaches the same target in
+any arrival order.
+
+| Situation | Result |
+|---|---|
+| A and B both reject R1 and both recover R0, concurrently | two rejections, one constrained content R0. Target R0 |
+| A rejects R1 → R0, B rejects R1 → R0′, concurrently | `NeedsDecision(RollbackTargetsDiffer)` with "Use 2.0" and "Use 2.0.1". R1 is rejected and spreads nowhere. Copies stay as they are until the choice |
+| A rejects R2 → R1, B concurrently rejects R1 → R0 | R2 and R1 rejected; A's target follows the chain to R0. Target R0 |
+| A rejects R1 → R0, B concurrently rejects R0 → R1 | both rejected, the chain is empty. Ordinary selection among non-rejected candidates. If none exists: "The only copies of Details are blocked versions" with "Allow again…" |
+| Y (whose `known` covers X) delivered before X | X's constraint is covered by Y as soon as both are known, so Y's target wins. Before X arrives, Y's target already applies. X's rejection is still active at level 2 |
+| Recovered target unavailable | `RecoveredUnavailable` (§3.1) |
+| Two lifts of the same rejection, concurrently | one lift effect |
+| A lifts X while B writes a new rejection X′ of the same content | X′ is not named by the lift and stays active (Q-79) |
+| Rollback on A, removal of the same folders on B, concurrently | removal (level 4) beats the constraint (level 6): the folders are removed into recovery everywhere. The rejection stays. A later re-add ends the constraints its `known` covers; ordinary selection among non-rejected candidates follows |
+| Rollback and code choice on overlapping folders | coverage decides. Concurrent ones with different contents give a decision (contracts.md §4.2). A keep of rejected content is inert (level 2) |
+| Rejection issued by a computer later retired | valid iff `issued_at_seq ≤ Cutoff` (contracts.md §1.10) |
+
+### 3.3 Offline and late peers, look-alikes (A-18, A-20)
+
+- A peer that was offline still has R1. R1 is not a candidate (level 2).
+  When it learns the rejection, its target is R0 and it replaces R1 with
+  R0, keeping R1 as a blocked previous state. It cannot reintroduce R1,
+  however high R1's version label is.
 - A peer that publishes R1 **before** it learns the rejection still cannot
-  win: every computer that has the rejection drops R1, and the peer's next
-  cycle learns the rejection from any member folder.
-- A peer whose copy has the **same version label but a different hash**
-  than R1 (a different build, or local edits) is not covered by the exact
-  hash. Ordinary ordering would treat it as new. Safe default: a candidate
-  whose version label equals the label of an active rejection of P is
-  held as an addon-level decision ("This looks like the blocked version
-  2.1 but its files differ") (Q-78).
-- A joining computer with R1 replaces it with R0, as any member does.
-- A user who installs R1 again by hand on a computer: WoW Sync replaces it
-  with R0 (keeping R1 in recovery) and the Activity entry says "Version 2.1
-  is blocked for this group. To use it again, choose Allow again."
+  win: every computer that has the rejection drops R1, and the peer learns
+  the rejection from any member folder at its next cycle.
+- **Look-alike (Q-78 PENDING OWNER default).** A candidate whose version
+  label equals `rejected.version_label` of an active rejection over the
+  same folders, but whose content differs, gets
+  `NeedsDecision(LookalikeOfRejected)`: "This looks like the blocked
+  version 2.1, but its files differ." Options: "Use this copy" (a keep),
+  "Block this copy too" (a new rejection with the same recovered target),
+  "Decide later". Until then the constraint stays.
+- A joining computer with R1 replaces it with R0, like any member.
+- A user who reinstalls R1 by hand: WoW Sync replaces it with R0, keeping
+  R1 in recovery, and Activity says "Version 2.1 is blocked for this group.
+  To use it again, choose Allow again."
 
-### 3.3 Different variants
+### 3.4 Different variants
 
-Rejections are group objects and one group is one variant, so another
-variant's group never sees them (A-18). Rejecting the same release in two
-variants is two rollbacks.
+One group is one variant, so another variant's group never sees these
+records (A-18). Rejecting the same release in two variants is two
+rollbacks.
 
 ## 4. Settings during a code rollback (R-10, A-18, A-19)
 
-For each **included identity** I of the package on the issuing computer:
+For each settings unit of the folders F on the issuing computer
+([settings.md](settings.md) §1.1):
 
-1. Find the **paired checkpoint**: the newest capture (by `local_seq`) of
-   unit `(P, I)` with `code_package_hash == R0`, in local settings history,
-   or a revision in the ledger whose `code_package_hash == R0` and whose
-   checkpoint's blobs are present in the provider (Q-80).
-2. If found and the addon is shared ([settings.md](settings.md) §5.1):
-   capture the current files (`before_change`), issue a `restore` revision
-   with that checkpoint and parent = current head, apply it locally after
-   the code (same WoW-not-running window, separate settings op). Every
-   other computer receives it as a normal revision: it yields its current
-   settings into recovery and applies it. A `restore` that competes with
-   another intentional revision is a settings choice, as any other
-   ([settings.md](settings.md) §4.4).
-3. If found but the addon is not shared (no master yet, `not_shared`, or
-   settings off on this computer): restore locally only. The summary says
-   "Settings were restored on this computer only."
-4. If **not found**: do not touch the current settings for I. The unit is
-   `code_only`.
+1. Pick the settings saved with R0 by paired selection
+   ([settings.md](settings.md) §4.6). Different computers' counters and
+   clocks are never compared.
+2. If one is found and the unit is shared ([settings.md](settings.md)
+   §5.1): capture the current files first, then write a `restore` revision
+   ([settings.md](settings.md) §3.3) with that checkpoint,
+   `code_package_hash` = R0 and the issuer's basis set as parents. Apply
+   it in the same WoW-not-running window as the code, inside the same
+   `rollback` operation. Other computers receive it as a normal revision.
+   A restore that competes with another intentional revision is a settings
+   choice ([settings.md](settings.md) §4.4).
+3. If one is found but the unit is not shared on this computer: restore it
+   locally only. The summary says "Settings were restored on this computer
+   only."
+4. If none is found: the unit's current settings are not touched.
 
-The rejection records `settings.kind`: `paired` (every identity restored),
-`partial` (some), `code_only` (none) or `not_shared`.
+The rejection's `settings` field and the recovery point's `paired` field
+(contracts.md §2.3) record `paired` (every unit restored), `partial`
+(some), `code_only` (none) or `not_applicable` (the addon has no settings
+units).
 
-**Afterwards** the app shows a summary that distinguishes the outcomes
+**Afterwards** the app shows a summary that keeps the outcomes apart
 (R-10, A-19):
 
 - Paired: "Details is back to version 2.0, with the settings you had with
@@ -214,111 +302,106 @@ The rejection records `settings.kind`: `paired` (every identity restored),
   kept. They were made with 2.1 and may not work with 2.0." with "Show
   settings history" and "OK".
 
-The same distinction is recorded in the local recovery point
-(`paired: paired|code_only|settings_not_applicable`, as the removal design
-introduces) and in the audit.
+## 5. Settings changes are not rejected (Q-82)
 
-## 5. Rejecting settings
+**Q-82 PENDING OWNER default: there is no settings-checkpoint rejection.**
+"Undo this settings change" on a shared unit writes a `restore` revision of
+the earlier checkpoint ([settings.md](settings.md) §3.3). If the master's
+game later saves the same bytes again, its next completed session shares
+them again like any capture. The unit's history explains it ("Undone on
+Laptop; the master's later session changed it again"). A code rollback
+does not reject settings; it restores them (§4).
 
-"Undo this settings change" on a settings history entry of a shared unit
-means "go back to the previous shared copy and do not let the bad one
-return":
-
-- a `restore` revision with the earlier checkpoint (parent = head);
-- a `wowsync.rejection/1` with `kind: "settings"` naming the bad checkpoint
-  hash. In the settings target, a revision whose checkpoint is rejected is
-  invalid ([settings.md](settings.md) §4.2 step 1). An `auto` capture on the
-  master whose content equals the rejected checkpoint is not published,
-  and shows "This copy was undone on <computer>; it is not shared again."
-  (Q-82).
-
-A settings rejection does not touch code. A code rollback does not reject
-settings; it restores (§4).
-
-## 6. Removal, re-add and keep decisions
-
-These keep the removal design's rollback hooks:
+## 6. Removal, re-add and code choices
 
 | Situation | Rule |
 |---|---|
-| Rollback of a removed package | It is a restore ("undo removal"), offering only non-rejected states |
-| A removal | is not a release and cannot be rejected. Undo it with "undo removal" |
-| A rejected release and removal coverage | A rejected release counts as covered for removal: a removal of P is not contested by a computer that only has the rejected R1 |
-| Rejections vs removal authority | Independent grow-only sets keyed by package. Neither expires the other. A re-add supersession does not lift a rejection; a lift does not affect removal |
-| Re-adding P after removal | Ordinary ordering among non-rejected candidates. If the only copies are R1, P is held: "The only copies of Details are version 2.1, which is blocked." with "Allow again…" |
-| A keep decision (user kept a release) | Rejecting the kept release ends that selection constraint; the rejection's own constraint (§3.1) applies |
-| Restore from history | Offers rejected states only behind "Allow again…", which issues a lift first |
+| Rollback of a removed addon | not offered. Use "Undo removal" ([removal.md](removal.md)), which offers only non-rejected states |
+| A removal | is not a release and cannot be rejected |
+| Rejected content and removal coverage | a copy that is only rejected content counts as covered for removal; a removal is not contested by a computer that has only the rejected R1 |
+| Rejections vs removal records | independent. Neither expires the other. A re-add does not lift a rejection; a lift does not affect removal |
+| Re-adding after removal | ordinary selection among non-rejected candidates. If the only copies are rejected: "The only copies of Details are version 2.1, which is blocked." with "Allow again…" |
+| Code choices | contracts.md §5. A keep of rejected content is inert. "Resume automatic updates" ends recovered-target constraints it covers, never a rejection |
+| Restore from history | rejected states are offered only behind "Allow again…", which writes a lift first |
 
 ## 7. Three-state history (R-10, A-16, A-17)
 
 - A rejected release stays in its computer's code history as an ordinary
   previous state, labelled "Blocked", and counts toward current plus two
-  previous. It is pruned like any other state. Its rejection record stays
-  (grow-only), so pruning the files never lifts the rejection.
-- The recovery point of R0 used for the rollback becomes the current state.
-  The paired settings checkpoint stays pinned while the code recovery point
-  that promises it is retained ([settings.md](settings.md) §7).
-- If R0's local recovery point is the only copy anywhere and the rollback
-  is still distributing it (some non-retired computers have not reported
-  `applied` R0), R0's trees and blobs are uploaded and kept in the provider
-  until every non-retired member confirms R0 or a newer non-rejected
-  release; the GUI shows this as a temporary exception with its size
-  (A-17). This is the only case where a recovery point's content is
-  uploaded (Q-18 otherwise stands).
+  previous. It is pruned like any other state. Its rejection record stays,
+  so pruning the files never lifts it.
+- R0's recovery point becomes the current state. Settings paired with a
+  retained recovery point stay pinned with it ([settings.md](settings.md)
+  §7).
+- If R0's local recovery point is the only copy anywhere and some
+  non-retired member has not yet confirmed R0, R0's trees and blobs are
+  uploaded and kept in the provider until every non-retired member
+  confirms R0 or a newer non-rejected release. The GUI shows this as a
+  temporary exception with its size (A-17). This is the only case where a
+  recovery point's content is uploaded (Q-18 otherwise stands).
 
 ## 8. GUI recovery actions (R-12, R-13, A-25, A-26)
 
 | Screen ([ui/screens.md](ui/screens.md)) | Action / view |
 |---|---|
-| Add-on detail, history | "Go back to this version…" on each non-current, non-blocked state; "Allow again…" on blocked ones; settings history with "Undo this settings change…" and "Restore" |
-| Rollback confirmation | current and recovered versions, the group scope ("all your computers for <variant>"), which identities get paired settings and which stay as they are |
-| Rollback summary | paired / partial / code-only as in §4, with the warning style for partial and code-only |
-| Add-ons list | "Blocked: 2.1" chip on the addon row while a rejection is active |
+| Add-on detail, history | "Go back to this version…" on each non-current, non-blocked state (disabled with the reason when §1 or §2.3 does not hold); "Allow again…" on blocked ones; settings history with "Undo this settings change…" and "Restore" |
+| Rollback confirmation | current and recovered versions, the group scope, which units get paired settings and which stay as they are |
+| Rollback summary | paired / partial / code-only as in §4, warning style for partial and code-only |
+| Add-ons list | "Blocked: 2.1" chip while a rejection is active |
 | Activity | "You went back to Details 2.0 and blocked 2.1", "Laptop replaced blocked Details 2.1 with 2.0", lifts |
-| Needs attention | recovered release unavailable; look-alike of a blocked version (§3.2); only blocked copies on re-add; rollback not possible group-wide (Q-84) |
-| Decision | the look-alike decision (§3.2) |
+| Needs attention | `RollbackTargetsDiffer`, `RecoveredUnavailable`, `LookalikeOfRejected`; only blocked copies on re-add; group rollback blocked by an older member (§2.3) |
+| Notices | `NewerAfterRollback` (§3.1) |
 
 All of these are GUI flows; none needs a terminal (A-26).
 
-## 9. Implementation map
+## 9. Implementation map (owner R4-core-settings)
 
-| Crate / module | Additions |
-|---|---|
-| core `records` | `RejectionObject`, `RejectionLiftObject` via `record!`; rejection kinds `Code`, `Settings` |
-| core **new `reject`** | `active_rejections(&Ledger, &PackageKey, &Validity) -> Rejections`; `is_rejected(&Rejections, &PackageHash) -> bool`; `lookalike(&Rejections, &VersionLabel, &PackageHash) -> bool`; `selection_constraint(&Rejections, &Candidates) -> Option<Constraint>` |
-| core `target` | `compute_target` step 1 drops rejected candidates and applies the constraint; new `DecisionReason::{LookalikeOfRejected, RecoveredUnavailable, OnlyRejectedCopies}` |
-| core `settings` | `paired_checkpoint(&SettingsLocal, &Ledger, unit, &PackageHash) -> Option<CheckpointRef>`; rejected checkpoints in the revision validity check |
-| core `plan` / `exec` | rollback is a normal apply op plus a settings op; recovery point `paired` flag |
-| core `status` / `explain` / `view` | `PackageStatus::Blocked`, rollback summary `Explanation`s (paired, partial, code-only), `NextAction::{AllowAgain, ChooseRecovered}` |
-| adapters `provider` | write/list rejection and lift objects; upload a recovery point's trees for §7 |
-| runtime `control.rs` | `Rollback { package, to }`, `UndoSettingsChange { unit, revision }`, `AllowAgain { rejection }` |
-| runtime `service.rs` | step 2a learns rejections/lifts; step 5 uses them |
-| app | screens of §8 |
+| Crate / module | Additions | Consumes |
+|---|---|---|
+| core `records` | `RejectionRecord`, `RejectionLiftRecord` bodies via `record!`, V-REJECTION, V-LIFT | C-AUTH dispatch (R4-core-removal) |
+| core **new `reject`** | `active_rejections(&Ledger, &[FolderKey]) -> Rejections`; `is_rejected(&Rejections, &PackageHash) -> bool`; `recovered_constraints(&Rejections, &Ledger) -> Vec<Constraint>` (chain, coverage); `lookalike(&Rejections, &str, &PackageHash) -> bool`; `newer_after_rollback(...)` | `authority::Known`, ledger |
+| core `target` | the level-2 and level-6 rows of `compose` call `reject` | `target::compose` (R4-core-removal) |
+| core `settings` | the rollback caller of paired selection and `restore` revisions | settings module (same owner) |
+| core `plan` / `exec` | a `rollback` operation that bundles code and settings moves | C-JRN (R4-core-removal) |
+| core `status` / `explain` / `view` | `PackageStatus::Blocked`, rollback summaries, `NextAction::{AllowAgain, GoBack}` | the integration of R4-core-ops |
+| adapters `provider` | §7 upload of a recovery point's trees | authority I/O (R4-core-removal) |
+| runtime `control.rs` | `Rollback { folders, to }`, `AllowAgain { rejections }`, `UndoSettingsChange { unit, revision }` | runtime cycle and `decide` (R4-core-ops) |
+| app | screens of §8 | — |
+
+The decision reasons of §3 are part of the code-choice family owned by
+R4-core-ops (contracts.md §5.1). This packet produces the items; it does
+not extend the family's record.
 
 ## 10. Test obligations
 
 | ID | Test | A-ID |
 |---|---|---|
 | T-R01 | rollback on A with paired settings: B and C install R0 and the restored settings; R1 is a blocked previous state everywhere | A-18 |
-| T-R02 Neg | offline C returns with R1 and a higher version label: C does not republish R1 as a candidate; target stays R0; C replaces R1 | A-18, A-20 |
+| T-R02 Neg | offline C returns with R1 and a higher version label: C never offers R1 as a source; target stays R0; C replaces R1 | A-18, A-20 |
 | T-R03 Neg | C publishes R1 before learning the rejection: no other computer installs R1 | A-18, A-20 |
-| T-R04 Neg | other variant's group with the same R1 is unaffected | A-18 |
+| T-R04 Neg | another variant's group with the same R1 is unaffected | A-18 |
 | T-R05 | the issuer's folder deleted after mirroring: rejection still active | A-20 |
-| T-R06 | R1.5 known at rollback is not chosen; a later unknown R2 ends the constraint | A-18 |
-| T-R07 Neg | same label, different hash: decision, not install | A-18, A-23 |
-| T-R08 | no paired checkpoint (deleted): code-only rollback, current settings byte-identical, warning differs from paired summary | A-19 |
-| T-R09 | paired for one identity, missing for another: partial warning lists the missing identity | A-19 |
+| T-R06 | 2.1.5 known at the rollback is never chosen; a later unknown 2.2 raises `NewerAfterRollback` and does **not** install; "Use 2.2" installs it; "Stay on 2.0" keeps R0 (Q-81 default) | A-18 |
+| T-R07 Neg | same label, different content: `LookalikeOfRejected`, not installed; "Block this copy too" writes a rejection | A-18, A-23 |
+| T-R08 | no paired settings: code-only rollback, current settings byte-identical, warning differs from the paired summary | A-19 |
+| T-R09 | paired for one unit, missing for another: partial warning lists the missing unit; recovery point `paired = partial` | A-19 |
 | T-R10 | lift then restore R1; a concurrent new rejection not named by the lift stays active | A-18, A-20 |
-| T-R11 | rollback of a removed package is a restore offering only non-rejected states; removal cannot be rejected | A-18 |
-| T-R12 | rejections and removal authority are independent; re-add does not lift | A-20 |
-| T-R13 | history after rollback: current plus two previous, blocked state labelled, paired checkpoint pinned while its recovery point exists | A-16, A-17 |
-| T-R14 | settings rejection: master's capture equal to the rejected checkpoint is not published | A-18 |
-| T-R15 Neg | rejection issued by a retired computer after retirement: invalid | A-45 |
-| T-R16 Neg | malformed rejection, oversize `note`, note text with markup or Lua: refused or shown as plain text | A-23 |
-| T-R17 | WoW starts during a rollback apply: stops before next rename; no process killed | A-21, A-22 |
-| T-R18 (GUI) | go back, summary (paired and code-only), allow again, undo settings change, all without a terminal | A-25, A-26 |
+| T-R11 | a removed addon offers "Undo removal" with only non-rejected states; a removal cannot be rejected | A-18 |
+| T-R12 | rejections and removal records are independent; a re-add does not lift | A-20 |
+| T-R13 | history after rollback: current plus two previous, blocked state labelled, paired settings pinned while their recovery point exists | A-16, A-17 |
+| T-R14 | "Undo this settings change" writes a `restore` revision and no rejection; the master's later identical capture is shared and explained (Q-82 default) | A-18 |
+| T-R15 Neg | rejection issued after its issuer's retirement cutoff: invalid; one issued before it stays valid | A-45 |
+| T-R16 Neg | malformed rejection, `version_label` over 128 bytes, a label with markup, colour codes or Lua: refused, or shown as plain text; folder sets that differ between `rejected` and `recovered`: invalid | A-23 |
+| T-R17 | WoW starts during a rollback apply: stops before the next rename; no process killed | A-21, A-22 |
+| T-R18 (GUI) | go back, summary (paired and code-only), allow again, undo settings change, the three decisions, all without a terminal | A-25, A-26 |
+| T-R19 Neg | Q-84 default: a non-retired member without `rejection/1` disables group rollback with the named reason; no record is written; a downgraded member after a rollback is never counted as confirmed | A-18 |
+| T-R20 | R0 with different folder keys than R1: "Go back" not offered, with the reason | A-18 |
+| **T-R4D9-concurrent-rollbacks** | each row of §3.2 in both delivery orders on three computers: same target; different targets (decision, R1 spreads nowhere); chain R2→R1→R0; opposite rejections (ordinary or only-blocked hold); late delivery of the covered rejection; unavailable target (`RecoveredUnavailable`, nothing changed on disk); concurrent lifts; lift vs new rejection; rollback vs removal (removed everywhere, rejection kept, re-add selects non-rejected). Same target on every computer in every order | A-18, A-20 |
+| **T-R4D9-choice-vs-rollback** | a keep that covers a rejection replaces the recovered target; a rollback that covers a keep replaces it; concurrent keep and rollback with different contents give a decision; a keep of rejected content is inert; resume ends the recovered target and R1 stays rejected | A-18, A-20 |
 
-A-38 controls to include: skip the rejection step in `compute_target`
-(T-R02 must fail); pick the higher version label over the rejection
-(T-R02); report a code-only rollback as paired (T-R08); let a lift remove a
-rejection it does not name (T-R10).
+A-38 controls to include: skip level 2 in `compose` (T-R02 must fail);
+pick the higher version label over the rejection (T-R02); install an
+unconsidered newer release automatically (T-R06); report a code-only
+rollback as paired (T-R08); let a lift remove a rejection it does not name
+(T-R10); order concurrent rollbacks by `written_unix_ms`
+(T-R4D9-concurrent-rollbacks must fail).

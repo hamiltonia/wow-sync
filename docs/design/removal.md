@@ -9,6 +9,18 @@ in full. **Not implemented.** It must pass the independent run-004 design
 review (R4-design-review) before phase C implements it. Nothing here changes
 the running slice, whose rule "absence never removes" stays the safety base.
 
+**Contract.** Revised by packet
+[R4-design-fix](../runs/run-004/packets/R4-design-fix.md) for the
+[R4-design-review](../runs/run-004/evidence/R4-design-review.md) findings.
+Record identity, file naming, hashing, references, the authority index,
+the ledger, `Known` coverage, validation (V-BYTES to V-KIND), historical
+membership, the retirement barrier, mirroring, repair, capabilities,
+journals, recovery points, identities and target precedence are defined
+**only** in [contracts.md](contracts.md). This document defines the removal,
+re-add and ack bodies, their kind rules (V-REMOVAL), the merge, observation
+and the remove operation. Choices marked PENDING OWNER use the conservative
+default in [questions.md](questions.md); they are not owner decisions.
+
 Product authority: SPEC R-03, R-04, R-05, R-06, R-07, R-09, R-10, R-11,
 R-12 and R-13. Acceptance: A-04, A-09, A-10, A-16, A-17, A-18, A-19, A-20,
 A-21, A-22, A-23, A-24, A-25, A-26 and A-45. Builds on
@@ -26,21 +38,29 @@ cannot lose, so those decisions and everything that served them go away.
 
 | Run-003 mechanism | Run-004 |
 |---|---|
-| Random object `id` plus content hash; a `conflicted` status when one id had two hashes; `InconsistentRemovalRecord` decision (R3D-13) | **Removed.** A record's identity **is** the SHA-256 of its exact bytes, which is also its file name (§2.2). Two different contents are two records, both counted. "Same id, different content" cannot be expressed |
-| Records scoped by one `package_key`, validation V7 "same package" | **Replaced.** Records name **folder keys**. Merging and superseding are evaluated per folder key (§3), so records with different package sets or spanning packages merge without any package-scope rule. New V7 checks only listing well-formedness (§2.6) |
+| Random object `id` plus content hash; a `conflicted` status when one id had two hashes; `InconsistentRemovalRecord` decision (R3D-13) | **Removed.** A record's identity **is** the SHA-256 of its exact bytes, which is also its file name (§2.1, [contracts.md](contracts.md) §1.3). Two different contents are two records, both counted. "Same id, different content" cannot be expressed |
+| Records scoped by one `package_key`, validation V7 "same package" | **Replaced.** Records name **folder keys**. Merging and superseding are evaluated per folder key (§3), so records with different package sets or spanning packages merge without any package-scope rule. The removal kind rules (V-REMOVAL-1 to V-REMOVAL-4) check only listing well-formedness (§2.6) |
 | Coverage (`covers`, `basis`), "uncovered" copies, `NeedsDecision(RemovalVsUpdate)` | **Removed** (D-21). Every copy is removed; the copy goes to recovery and is named (§5) |
-| Removal decisions, `chose`/`declined`, selection constraint, `NewVersionAfterDecision`, `OnlyDeclinedVersions`, `CompetingRemovalDecisions` (R3D-10, R3D-16) | **Removed.** Removal never chooses a version. Pinning or rejecting a version is rollback (`rollback.md`, written by R4-settings-design) |
-| `RemovalScopeDiffers`, `RemovalBreaksDependency`, `DroppedFolderDiffers` per-computer decisions | **Removed.** Named folders are removed; unnamed folders stay; broken hard dependencies are a warning (§5.4, Q-54, Q-58) |
+| Removal decisions, `chose`/`declined`, selection constraint, `NewVersionAfterDecision`, `OnlyDeclinedVersions`, `CompetingRemovalDecisions` (R3D-10, R3D-16) | **Removed.** Removal never chooses a version. Rejecting a version is [rollback.md](rollback.md); keeping or resuming a version is the code-choice family ([contracts.md](contracts.md) §5) |
+| `RemovalScopeDiffers`, `RemovalBreaksDependency`, `DroppedFolderDiffers` per-computer decisions | **Removed.** Named folders are removed; unnamed folders stay (Q-58 PENDING OWNER); broken hard dependencies are a warning (§5.4, Q-54) |
 | E7 mass-removal confirmation (Q-42) | **Removed** (D-21 rejected Q-42) |
 | `Unavailable(AuthorityPending)` for a whole package | **Narrowed.** Unreadable referenced information only defers **installs** of the folders it names, and the GUI can dismiss it (§4.4) |
-| `wowsync.code-state/2` new major (Q-40) | **Replaced** by additive `serde(default)` fields in `code-state/1` (§11, Q-56) |
+| `wowsync.code-state/2` new major (Q-40) | **Replaced** by additive `authority_index` and `features` fields in `code-state/1` (contracts.md §1.6, §11, Q-56) |
 
 Kept, with their run-003 review fixes: the presence baseline with
 per-package snapshots (R3D-7, R3D-14), the settle wait (Q-41), the durable
-grow-only ledger with mirroring on learning (R3D-8, Q-51), immutable hashed
-records (R3D-9), bounded payload retention (R3D-15, Q-53), the remove
-operation with its crash table, code **and** settings removal, the
-three-state history, GUI restore, the WoW gate and the retirement cutoff.
+grow-only ledger with mirroring on learning (R3D-8, Q-51; now
+contracts.md §1.7, §1.12), immutable hashed records (R3D-9), bounded
+payload retention (R3D-15, Q-53), the remove operation with its crash
+table, code **and** settings removal, the three-state history, GUI restore,
+the WoW gate and the retirement barrier (contracts.md §1.10).
+
+Changed for the R4-design-review: re-adds and other overriding records use
+`Known` coverage instead of unbounded `supersedes` lists (R4D-4); acks and
+obligations are per `(enrollment, removal, folder)` (R4D-2); a discharged
+obligation releases only states at or after the ack (R4D-3); the observing
+computer removes its own settings (R4D-5); a reappearance only offers an
+explicit add-back (Q-55 PENDING OWNER).
 
 Vocabulary:
 
@@ -49,9 +69,9 @@ Vocabulary:
 | package | the addon unit of [domain.md](domain.md) §5: folders grouped together. Packages are a **local** grouping; records do not depend on it |
 | folder key | `paths::FolderKey`, the case-folded folder name. The unit of removal |
 | removal record | an immutable, content-addressed group record: "this computer deliberately removed these folders, as these trees" (§2.3). The tombstone |
-| re-add record | an immutable record: "this computer explicitly brought these folders back", superseding named removal records (§2.3, §3.5) |
-| ack | an immutable record: "this enrollment applied these removals" (`removed`) or "had none of their folders" (`absent`) (§2.3) |
-| ledger | this computer's durable, grow-only, validated set of learned records (§2.5) |
+| re-add record | an immutable record: "this computer explicitly brought these folders back", superseding the removals of those folders that its `known` covers (§2.3, §3.5) |
+| ack | an immutable record: per `(removal, folders)` item, "this enrollment removed these folders" (`removed`) or "never had them" (`absent`) (§2.3) |
+| ledger | this computer's durable, grow-only, validated set of learned records ([contracts.md](contracts.md) §1.7) |
 | merged removal | the set of folder keys that are removed for the group, computed from the ledger only (§3.1) |
 | audience | the member enrollments the issuer had admitted when it wrote a removal record. Used only to decide which leftover copies are stale (§3.4) |
 | presence baseline | this computer's durable record of the last complete scan in which a package was fully present (§1.6) |
@@ -114,7 +134,7 @@ record timestamps, file times or display names.
 | Unreadable folder | listed as `unreadable`; E2 fails; shown as a folder problem |
 | Non-ASCII rename (Q-14) | E6 fails: `Held(RemovalUnclear)` and a GUI question |
 | Provider offline or stale here | the record is formed from local evidence, kept locally, published when possible |
-| Provider offline or stale on a receiver | a receiver that has not learned the record changes nothing for it; a record it has learned stays in its ledger (§2.5) |
+| Provider offline or stale on a receiver | a receiver that has not learned the record changes nothing for it; a record it has learned stays in its ledger ([contracts.md](contracts.md) §1.7) |
 | Updater mid-update (delete then extract) | E4 resets on reappearance; new content is an ordinary update |
 | User renames ASCII to ASCII | the old package is removed; the new name is a new addition; the GUI groups both in the summary |
 | Our apply or recovery moved folders | E5 fails |
@@ -143,8 +163,11 @@ The computer then writes a removal record with `evidence: folder_drop`
 naming only the dropped folders. It merges like any other removal (§3). A
 receiver removes X into recovery whatever its local tree of X is, and when
 the update of P is planned in the same cycle the planner puts both into one
-operation (§5.1). If the author later ships X again, the reinstall is
-observed as a re-add (§1.7).
+operation (§5.1). If the author later ships X again while X is removed, the
+reappearance is held and offers an explicit add-back (§1.7).
+
+The computer that observed the drop also moves X's owned settings in its
+own settings-cleanup operation before its ack (§6.3, R4D-5).
 
 Because X is in the merged removal, grouping and completeness exclude it
 (§4.1). The new version of P is therefore complete, which replaces the
@@ -163,16 +186,22 @@ is a separate, local, durable record, `wowsync.presence-baseline/1` (§11).
   and complete, the variant and mapping are the enrolled ones, no journal
   names P, and every folder of P is present, `ok`, not unstable and
   transfer-eligible. The entry holds P's folder keys, names and trees, the
-  package hash, the local scan counter, and a reference to that scan's
-  **top-level snapshot** (every top-level name with its status).
+  package hash, the local scan counter, a reference to that scan's
+  **top-level snapshot** (every top-level name with its status), and each
+  folder's **settings declarations**: the `SavedVariables` and
+  `SavedVariablesPerCharacter` names parsed (never executed) from its
+  selected `.toc`. These are the ownership evidence for the settings
+  cleanup after the folder is gone (§6.3, R4D-5).
 - **Snapshots** are kept while at least one package entry references them.
   Refreshing package Q never replaces the snapshot that a still-absent
   package P references (R3D-14).
 - **Persisted** with temp + flush + rename before the cycle publishes.
 - **Refreshed** when P is again fully present. A refresh replaces the folder
   list; it never merges absent folders in.
-- **Cleared** for P when P's removal record and own ack are written, when
-  a folder drop is recorded (for those folders), when "Keep it" is chosen
+- **Cleared** for P when P's removal record is written **and** the
+  settings cleanup for P is verified (or not applicable) **and** the own ack
+  is written (§6.3); when a folder drop is recorded and cleaned up (for
+  those folders); when "Keep it" is chosen
   for an unclear observation and P is present again, or when P is removed
   here by the merged removal. The **whole** baseline is discarded on a new
   enrollment, a variant change or a directory-identity change.
@@ -182,19 +211,22 @@ is a separate, local, durable record, `wowsync.presence-baseline/1` (§11).
 **Cycle.** New steps 2a, 3a and 3b extend apply.md §1:
 
 ```text
-1  recover_interrupted
-2  admit member states; persist watermarks
-2a learn records into the ledger (§2.5); persist; validate (§2.6);
-   mirror newly valid records into own authority\; repair own authority\
+1  recover_interrupted (apply-journal /1 and /2, contracts.md §2)
+2  read member states; learn records and index chunks into the ledger,
+   validate, mirror, repair own authority\ (contracts.md §1.12)
+2a admit member states in contracts.md §6 order (retirement barrier first);
+   persist watermarks
 3  scan AddOns → build_inventory   (listing unstable → stop, as today)
 3a observe: update/persist baselines and observations (E1–E8, §1.7);
-   a matured observation writes its record (+ own ack) and ledger entry
-3b acknowledge: write `absent` acks that are due (§5.6)
-4  publish (inventory, authority_refs, features) if anything changed;
-   every record a state references is written and read back first
-5  merge_removals (§3) → compute_target (precedence §4.1)
-6  activity gate → plan_apply (removes, installs, replaces)
-7  run_apply (a remove finalize writes its `removed` ack); rescan; 3a, 3b, 4 again
+   a matured observation writes its removal record and ledger entry, then
+   plans the origin settings cleanup (§6.3); its own ack follows that
+3b acknowledge: write `absent` ack items that are due (§5.6)
+4  publish (inventory, authority_index, features) if anything changed;
+   every record and index chunk a state references is written and read
+   back first
+5  merge_removals (§3) → target::compose (contracts.md §4)
+6  activity gate → plan_apply (removes, settings cleanups, installs, replaces)
+7  run_apply (a remove or cleanup finalize writes its ack); rescan; 3a, 3b, 4 again
 8  derive_status
 ```
 
@@ -207,72 +239,68 @@ hold and undo the user's uninstall. The observation ends by reappearance
 target then comes from the merged removal, §4), by "Keep it" (§9), or by a
 baseline discard.
 
-### 1.7 Reinstall observation: an explicit re-add by the user
+### 1.7 Reappearance after a removal: offer an explicit add-back (Q-55 PENDING OWNER)
 
-After this computer applied a removal (it holds a valid own `removed` or
-`absent` ack for every live removal naming the folders), the merged removal
-would remove any copy that appears again. A user who reinstalls the addon
-with an updater or Explorer is therefore observed, not fought:
+After this computer applied a removal (it holds valid own ack items for
+every live removal naming the folders), the merged removal would remove any
+copy that appears again. A user who reinstalls the addon with an updater or
+Explorer is therefore held, not fought, and **not** silently re-added:
 
 - If any folder in the merged removal becomes present here and E3 and E5
   hold, the local target for its package is `Held(ReinstallObserved)`.
-  Nothing is removed during the hold.
-- After the same settle rule as E4 (two complete stable scans at least 30 s
-  apart; any disappearance resets), this computer writes a re-add record
-  with `evidence: observed_reinstall` (§2.3) that supersedes the live
-  removals of those folders, and publishes the package present.
-- If this computer does **not** hold own acks for those removals (it never
-  applied them, for example an offline peer), a present copy is not a
-  re-add. It is removed into recovery (§3.4). This is the line between an
-  explicit re-add and an offline peer resurrecting an addon (R-06, R-10).
+  Nothing is removed and nothing is published as a re-add during the hold.
+- Needs attention shows "*X* was installed again on this computer, but it
+  was removed from all computers" with two actions:
+  - **Add back to all computers**: writes a `user_add_back` re-add (§2.3)
+    for the present folders, after the same settle rule as E4 (two complete
+    stable scans at least 30 s apart). The live copy is the re-added
+    version.
+  - **Remove again**: the hold ends; the copy is removed into recovery like
+    any receiver's copy (§5).
+- The hold persists across restarts. It is never converted into a re-add
+  automatically, because a reappearance may come from an updater rather
+  than a deliberate user action (Q-55 conservative default). The run-004
+  draft's `observed_reinstall` evidence is removed.
+- If this computer does **not** hold own ack items for those removals (it
+  never applied them, for example an offline peer), a present copy is not
+  a reappearance. It is a stale copy and is removed into recovery (§3.4).
+  This is the line between an explicit re-add and an offline peer
+  resurrecting an addon (R-06, R-10).
 
-Whether an observed reinstall counts as explicit is Q-55 (default: yes,
-otherwise the app would remove the addon the user just reinstalled, in a
-loop with the updater). The GUI restore (§7.4) is the other explicit re-add.
+The GUI restore (§7.4) is the other explicit re-add.
 
 ## 2. Records and the ledger
 
-### 2.1 Where they live
+### 2.1 Where they live, identity, refs and the ledger
 
-```text
-groups\<group_id>\members\<computer_id>\
-  member.json                          unchanged
-  state\<enrollment_id>-<seq:010>.json wowsync.code-state/1 (+ authority_refs, §2.4)
-  authority\<sha256 hex>.json          immutable records written by this computer:
-                                       its own and verbatim mirrors of learned ones
-```
+All of this is the shared contract, not removal-specific:
 
-- Single writer per member directory, unchanged (publication.md §1). A
-  record file is written **write-if-absent** with temp + flush + rename, then
-  read back and hash-checked before any state that references it is
-  published. It is never rewritten or deleted while the group exists (Q-44).
-- A reader lists `authority\` of **every** member directory of the group,
-  including members whose newest state is `Unusable` or `Regressed`, and
-  retired members. Records are immutable facts validated one by one (§2.6),
-  not "the last good inventory". Inventory (code candidates) still comes
-  only from admitted states (publication.md §6 no-fallback rule).
+| Topic | Defined in |
+|---|---|
+| Location under `members\<computer_id>\authority\`, write-if-absent, single writer | [contracts.md](contracts.md) §1.2 |
+| Identity = SHA-256 of the exact bytes = file name; bad copies | [contracts.md](contracts.md) §1.3, §1.4 |
+| Envelope (`schema`, `group_id`, `issuer`, `written_unix_ms`) | [contracts.md](contracts.md) §1.4 |
+| `AuthorityRef { hash, kind, folders }` and the routing hint | [contracts.md](contracts.md) §1.5 |
+| Authority index chunks referenced from `code-state/1` | [contracts.md](contracts.md) §1.6 |
+| Ledger segments, `dismissed`, memory | [contracts.md](contracts.md) §1.7 |
+| `Known` coverage | [contracts.md](contracts.md) §1.8 |
+| Size bounds and splitting | [contracts.md](contracts.md) §1.9 |
+| Validation V-BYTES to V-KIND | [contracts.md](contracts.md) §1.11 |
+| Learning, mirroring and repair | [contracts.md](contracts.md) §1.12 |
+| Capability `removal/1` | [contracts.md](contracts.md) §1.13 |
 
-### 2.2 Identity: the content hash
+Readers list `authority\` of **every** member directory, including members
+whose newest state is `Unusable` or `Regressed` and retired members.
+Inventory (code candidates) still comes only from admitted states
+(publication.md §6 no-fallback rule).
 
-A record's identity is `SHA-256(bytes)` over the **exact stored bytes**.
-The file name is that hash in lowercase hex plus `.json`. Readers decode only
-a file whose bytes hash to its name, like tree records (`records::decode_tree`).
-A file whose bytes do not match its name is a **bad copy**: it is ignored
-with a diagnostic, and another copy with the same name may still be good. It
-is never a record and never a conflict.
-
-Writers produce bytes with `records::encode` (deterministic). Mirrors copy
-bytes verbatim, so every copy has the same name and hash. Two records with
-different content are simply two records. Two records with identical bytes
-are one record. There is no separate `id`, no compact form with its own
-hash, and nothing is ever recomputed or rewritten (R3D-9).
+### 2.2 (merged into §2.1)
 
 ### 2.3 Record kinds
 
-Common fields: `schema`, `group_id`, `issuer {computer_id, enrollment_id,
-issued_at_seq}` and `written_unix_ms` (display only, never ordering).
-`issued_at_seq` is the seq of the first own state that references the
-record; the issuer reserves it before writing.
+The envelope fields (`schema`, `group_id`, `issuer {computer_id,
+enrollment_id, issued_at_seq}`, `written_unix_ms`) are
+[contracts.md](contracts.md) §1.4. The bodies below are removal's.
 
 **Removal record** (`wowsync.removal/1`, the tombstone):
 
@@ -297,15 +325,18 @@ record; the issuer reserves it before writing.
 - `folders` is the **exact restorable manifest** from the presence baseline
   (or the live package for §1.4). With the provider tree records and blobs
   it can restore the folders on any computer (§7.4). For `folder_drop` it
-  lists only the dropped folders.
+  lists only the dropped folders. At most 256 folders; a larger removal is
+  split into several records (contracts.md §1.9).
 - `title` is display text from the selected toc, untrusted: rendered as plain
-  text with colour codes stripped (`detail::strip_colour_codes`).
+  text with colour codes stripped (`detail::strip_colour_codes`), never
+  exported (contracts.md §7).
 - `audience` is the set of current, non-retired member enrollments the
   issuer had admitted, plus itself (§3.4).
 - `settings` is `{ "kind": "none" }` (settings not handled by this record)
-  or `{ "kind": "checkpoints", "roots": [{ "identity": "…", "checkpoint":
-  "<content hash>", "location": "local|provider" }] }` from the settings
-  design (§6).
+  or `{ "kind": "checkpoints", "roots": [SettingsRoot] }`, where
+  `SettingsRoot { unit, checkpoint, location }` is
+  [contracts.md](contracts.md) §2.3 and the unit is the folder-keyed
+  `SettingsUnit` of contracts.md §3.2 (§6).
 
 **Re-add record** (`wowsync.readd/1`):
 
@@ -314,19 +345,21 @@ record; the issuer reserves it before writing.
   "schema": "wowsync.readd/1",
   "group_id": "<group id>",
   "issuer": { "computer_id": "…", "enrollment_id": "…", "issued_at_seq": 57 },
-  "evidence": "user_restore|observed_reinstall",
+  "evidence": "user_restore|user_add_back",
   "title": "Suite",
   "folders": [ { "key": "suite-core", "name": "Suite-Core", "tree": "<sha256>" } ],
   "present_hash": "<package hash of folders>",
-  "supersedes": [ "<removal record hash>" ],
-  "acks": [ "<own ack hash>" ],
+  "known": { "seen": [ { "enrollment_id": "…", "seq": 39 } ], "extra": [] },
   "written_unix_ms": 1767225600000
 }
 ```
 
-`supersedes` lists every live removal (§3.1) naming any of `folders` in the
-issuer's ledger. `acks` is required for `observed_reinstall` (V5) and empty
-for `user_restore`.
+`known` is the issuer's causal summary (contracts.md §1.8). The re-add
+supersedes, for each of its folders, exactly the removals naming that
+folder that `known` covers. There is no `supersedes` or `acks` list, so the
+record stays below 64 KiB whatever the number of live removals (R4D-4).
+`user_restore` is the GUI restore (§7.4); `user_add_back` is "Add back to
+all computers" (§1.7, §7.4).
 
 **Ack** (`wowsync.removal-ack/1`):
 
@@ -335,123 +368,65 @@ for `user_restore`.
   "schema": "wowsync.removal-ack/1",
   "group_id": "<group id>",
   "issuer": { "computer_id": "…", "enrollment_id": "…", "issued_at_seq": 41 },
-  "removals": [ "<removal record hash>" ],
+  "items": [
+    { "removal": "<removal record hash>", "folders": ["suite-core", "suite_data"] }
+  ],
   "result": "removed|absent",
   "removed": [ { "key": "suite-core", "name": "Suite-Core", "tree": "<sha256>" } ],
-  "settings": "paired|code_only|kept_paused|not_applicable",
+  "settings": "paired|partial|code_only|kept_paused|not_applicable",
   "written_unix_ms": 1767225600000
 }
 ```
 
-`removed` is the manifest this computer moved to recovery (empty for
-`absent`). It names, for example, an offline peer's updated copy, so the
-summary can say "Laptop's copy (v2.1) was kept in recovery on Laptop"
-(A-10). The issuer of a removal writes its own `removed` ack with its record.
+- Each item discharges this enrollment's obligation for exactly the listed
+  `(removal, folder)` pairs, never for other folders of that removal
+  (R4D-2, §3.4). At most 256 items per ack; more are split
+  (contracts.md §1.9).
+- `removed` is the manifest this computer moved to recovery (empty for
+  `absent`). It names, for example, an offline peer's updated copy, so the
+  summary can say "Laptop's copy (v2.1) was kept in recovery on Laptop"
+  (A-10).
+- The issuer of a removal writes its own ack after its settings cleanup
+  (§6.3).
 
-Schemas are open for extension: unknown fields are ignored within a major
-(Q-13); an unknown major is `pending(unknown_schema)` (§2.6).
+Unknown fields are ignored within a major; an unknown major is
+`pending(unknown_schema)` (contracts.md §1.4, §1.11).
 
 ### 2.4 References in the state
 
-`wowsync.code-state/1` gains two additive fields (§11):
+Refs are published through the enrollment's authority index chain
+([contracts.md](contracts.md) §1.6), not inline. For removal kinds the
+routing hint is: removal and re-add, their `folders` keys; ack, the union
+of its items' folders. A member without `removal/1` in `features` is shown
+as "runs an older WoW Sync that does not apply removals" (§9) and never
+counts as confirmed (§5.6).
 
-```json
-{
-  "authority_refs": [
-    { "hash": "<sha256>", "kind": "removal|readd|ack",
-      "folders": ["suite-core", "suite_data"] }
-  ],
-  "features": ["removal/1"]
-}
-```
+### 2.5 The ledger
 
-- `authority_refs` lists every **valid** ledger record of this computer,
-  its own and mirrored. It is grow-only per enrollment. A reader
-  union-merges refs into its ledger and ignores omissions.
-- `folders` is a **routing hint**: the folder keys the record names (for an
-  ack, the union of its removals' folders). It is used only to scope a
-  deferral while the record is unreadable (§4.4). When the record is read,
-  a ref whose `kind` or `folders` differs from the record is a **mismatched
-  ref**: it is ignored with a diagnostic. The record stands on its own.
-  There is no second hash to keep consistent.
-- `features` tells peers this app applies removals. A member without
-  `removal/1` is shown as "runs an older WoW Sync that does not apply
-  removals" (§9) and never counts as confirmed (§5.6).
-- Size: a ref is about 150 bytes; 10,000 records add about 1.5 MB to a
-  state, within the 16 MiB state limit. Reviewed with provider GC (Q-7).
+[contracts.md](contracts.md) §1.7 and §1.12. Removal adds nothing to the
+ledger format. `dismissed` holds the local "Continue without it" choices
+(§4.4).
 
-### 2.5 The ledger (local, durable)
+### 2.6 Validation: removal kind rules
 
-`wowsync.authority-ledger/1` is this enrollment's durable, grow-only set of
-learned records:
-
-| Field per entry | Meaning |
-|---|---|
-| `hash`, `kind`, `folders` | identity, kind and named folder keys |
-| `bytes_path` | local verbatim copy under the app data `authority\` directory |
-| `issuer` | from the record |
-| `learned_from` | `[{computer_id}]`, every member directory or ref it came from |
-| `validity` | `valid` \| `pending(reason)` \| `invalid(reason)`, re-derived (§2.6) |
-| `mirrored_seq` | the own seq at which this computer first referenced it, or `null` |
-
-The ledger file also holds `dismissed: [hash]`, the local "Continue without
-it" choices (§4.4). They are never published.
-
-Learning, at cycle step 2a:
-
-1. Every `authority_refs` entry of every admitted state that is not in the
-   ledger is looked up in the referencing member's `authority\`, then in any
-   member's. If no good copy is readable (missing, cloud-only, bad copy,
-   oversized), the entry is recorded as `pending(unreadable)` with the ref's
-   kind and folder hint.
-2. Every member's `authority\` listing is read, and each unknown name is
-   read and hash-checked.
-3. Each new record is copied locally (temp + flush + rename) and the ledger
-   entry is persisted **before** any target is computed from it. Then
-   validity is derived.
-4. Each newly valid record is mirrored verbatim into this computer's own
-   `authority\` and listed in the next own state (Q-51). A removal therefore
-   survives its issuer's directory, newest state or enrollment becoming
-   unusable.
-5. **Repair:** before publishing, every record that the new state will
-   reference is checked in the own `authority\` (stat, then hash on
-   mismatch) and rewritten from the local copy if missing or bad
-   (write-if-absent, same bytes). A deleted provider copy therefore heals
-   while any member that references the record is active.
-
-Entries are never deleted. A restart reloads the ledger before the first
-target computation. Provider absence of a record is never a reason to forget
-it.
-
-### 2.6 Validation
-
-An entry is `valid` only if all hold:
+Every entry first passes the shared rules V-BYTES, V-GROUP, V-ISSUER,
+V-RET and V-REF ([contracts.md](contracts.md) §1.11). V-RET uses the
+retirement barrier (contracts.md §1.10), not a per-retirement
+`authority_known` list. The removal kinds add (V-KIND):
 
 | # | Rule | Otherwise |
 |---|---|---|
-| V1 | **Bytes.** A good copy is readable: its bytes hash to its name, it is at most 64 KiB, it parses, and its schema major is known | no good copy → `pending(unreadable)`; unknown major → `pending(unknown_schema)` |
-| V2 | **Issuer.** `group_id` is this group, and `issuer.computer_id`/`enrollment_id` is a member enrollment of the group (`member.json`), current or retired | `invalid(not_a_member)` |
-| V3 | **Retirement.** If the issuer enrollment is retired, `issued_at_seq` ≤ the retirement cutoff, or the hash is in the retirement record's `authority_known` (§8.2) | `invalid(after_retirement)` |
-| V4 | **References resolve.** Every hash in `supersedes`, `acks` and `removals` is in the ledger (any validity) and has the expected kind (`removal` for `supersedes`/`removals`, `ack` for `acks`) | not yet in the ledger → `pending(missing_reference)`; wrong kind → `invalid(wrong_reference)` |
-| V5 | **Re-add evidence.** For `observed_reinstall`: every listed ack is valid, from the **same enrollment**, `result` `removed` or `absent`, `issued_at_seq` lower than the re-add's, and the acks' `removals` together include every hash in `supersedes`. For `user_restore`: no ack is required (the GUI action is the explicit choice) | `invalid(readd_without_ack)` |
-| V6 | **Ack consistency.** `removals` is non-empty. `result: absent` has an empty `removed`; `result: removed` has a non-empty `removed` | `invalid(malformed_ack)` |
-| V7 | **Listing.** `folders` (removal, re-add) is non-empty, sorted by key, without duplicates, and every `name` validates to its `key` (`paths::validate_folder_name`). Every hash list is sorted and unique. Each superseded removal shares at least one folder key with the re-add. Every `removed` key of an ack is named by one of its removals. No rule compares package keys | `invalid(malformed_listing)` |
+| V-REMOVAL-1 | **Listing.** `folders` (removal, re-add) is non-empty, at most 256, sorted by key, without duplicates, and every `name` validates to its `key` (`paths::validate_folder_name`). `audience` is sorted and unique. No rule compares package keys | `invalid(malformed_listing)` |
+| V-REMOVAL-2 | **Ack shape.** `items` is non-empty, at most 256, sorted by removal hash, unique; each item's `folders` is non-empty, sorted, unique. `result: absent` has an empty `removed`; `result: removed` has a non-empty `removed` whose keys are all named in `items` | `invalid(malformed_ack)` |
+| V-REMOVAL-3 | **Ack items match.** Each item's `removal` resolves to a removal record (V-REF) and every folder of the item is named by that removal | `invalid(malformed_ack)` |
+| V-REMOVAL-4 | **Re-add evidence.** `evidence` is `user_restore` or `user_add_back`; `known` is well-formed (contracts.md §1.8). Any other evidence, including the withdrawn `observed_reinstall`, is invalid | `invalid(readd_evidence)` |
 
-There is **no** `conflicted` status. Validity is re-derived when a member or
-retirement record changes and when a referenced entry arrives, so
-`invalid(after_retirement)` can follow `valid` (§8.2).
+There is **no** `conflicted` status. Validity is re-derived as contracts.md
+§1.11 says.
 
-| Status | Effect |
-|---|---|
-| `valid` | counts in the merge (§3) |
-| `pending(reason)` | counts as **not known** in the merge. A pending removal additionally defers installs and replacements of the folders in its hint on this computer (§4.4). Resolves automatically when it becomes valid or invalid |
-| `invalid(reason)` | ignored; diagnostic only; never blocks |
-
-V7 and the merge are consistent by construction: `knows`-style "list every
-related record" rules do not exist, `supersedes` is required to overlap the
-re-add's folders (V7) and is written from exactly the live removals that
-overlap them (§2.3). A writer can therefore always produce a record that
-passes V7, whatever packages or folder sets the related records span (§13).
+Because no removal record lists related records, a writer can always
+produce a valid re-add or ack whatever packages or folder sets the related
+records span, and however many there are (R4D-4, §13).
 
 ## 3. The merged removal (D-23)
 
@@ -460,8 +435,9 @@ passes V7, whatever packages or folder sets the related records span (§13).
 All sets are taken over **valid** ledger entries only. For folder key x:
 
 - `Rem(x)` = removal records whose `folders` name x.
-- `Bnd(x)` = the **re-add boundary** of x: the union of `supersedes` over
-  every re-add record whose `folders` name x.
+- `Bnd(x)` = the **re-add boundary** of x: the removals in `Rem(x)` that
+  are covered ([contracts.md](contracts.md) §1.8) by the `known` of some
+  valid re-add record whose `folders` name x.
 - `Live(x)` = `Rem(x) − Bnd(x)`.
 - x is **removed** iff `Live(x)` is non-empty.
 
@@ -470,12 +446,12 @@ The **merged removal** is `M = { x : Live(x) ≠ ∅ }`, with provenance
 connected components of records in `⋃ Live(x)` linked by shared folder keys,
 each shown with the titles of its records.
 
-"Newest re-add boundary" is defined causally, never by a clock: a re-add can
-only supersede removals that its issuer had already learned, so the boundary
+"Newest re-add boundary" is defined causally, never by a clock: a re-add
+covers only removals that its issuer had already learned, so the boundary
 of x is exactly the set of removals that some explicit re-add came after.
 Re-adds never shrink it. A removal written after a re-add, or concurrently
-with it (its issuer had not learned the re-add, and the re-add's issuer had
-not learned it), is not in the boundary and wins (D-21: any removal wins).
+with it (the re-add's issuer had not learned it), is not covered and wins
+(D-21: any removal wins).
 
 ### 3.2 Properties
 
@@ -504,11 +480,12 @@ not learned it), is not in the boundary and wins (D-21: any removal wins).
 | 1 | A: r1 {core, data}; B: r2 {core, data} (independent uninstalls) | {core, data} | one merged removal; both issuers ack themselves; others ack once for both (§5.6) |
 | 2 | A: r1 {core, data}; B: r2 {core, data, extra} (B grouped `extra` in) | {core, data, extra} | union of folder sets. C with {core, data, extra, options} removes three; `options` stays (Q-58) |
 | 3 | r_P {p} and r_Q {q} written with otherwise identical content by one issuer at one seq (the run-003 R3D-13 counterexample) | {p, q} | two hashes, two records; both removals win. Nothing to resolve (§13) |
-| 4 | r1 {core}; later C: a1 user_restore {core} supersedes r1 | {} | explicit re-add; propagates as an addition (§3.5) |
-| 5 | r1 {core}; a1 supersedes r1; later B (after learning a1): r2 {core} | {core} | a removal after a re-add wins |
-| 6 | r1 {core}; a1 supersedes r1; concurrently D (not knowing a1): r3 {core} | {core} | a concurrent removal wins; the re-adder sees "removed again by D" and may restore again (a2 supersedes r3) |
-| 7 | r1 {core, data}; a1 {core} supersedes r1 | {data} | per-folder boundary |
-| 8 | r1 {core}; a1 observed_reinstall by C without an own ack | {core} | a1 invalid (V5); C's copy is removed into recovery (§3.4) |
+| 4 | r1 {core}; later C: a1 user_restore {core}, `known` covers r1 | {} | explicit re-add; propagates as an addition (§3.5) |
+| 5 | r1 {core}; a1 covers r1; later B (after learning a1): r2 {core} | {core} | a removal after a re-add wins |
+| 6 | r1 {core}; a1 covers r1; concurrently D (not knowing a1): r3 {core} | {core} | a concurrent removal wins; the re-adder sees "removed again by D" and may restore again (a2 covers r3) |
+| 7 | r1 {core, data}; a1 {core} covers r1 | {data} | per-folder boundary |
+| 8 | r1 {core}; C (holding an old copy, never acked r1) reinstalls nothing but its copy is present | {core} | not a re-add; C's copy is a stale copy and is removed into recovery (§3.4). Only an explicit GUI add-back re-adds (§1.7) |
+| 9 | 1,024 concurrent removals of {core}; one restore | {} | the restore's `known` covers all of them in a record below 64 KiB (R4D-4, T-R4D4-1024-removals-readd-bound) |
 
 ### 3.4 Stale copies and the audience
 
@@ -518,16 +495,43 @@ delivery order: a peer that learns the removal before the re-add removes its
 copy, but a peer that learns both at once would keep it and could win as
 "newest".
 
-Member m **owes** removal r for folder x iff x ∈ `r.folders`, m's enrollment
-is in `r.audience`, and the ledger holds neither a valid ack from m's
-enrollment listing r nor a valid re-add from m's enrollment superseding r.
-Then:
+Obligations are per **`(enrollment, removal, folder)`** (R4D-2). Member m
+**owes** removal r for folder x iff x ∈ `r.folders`, m's enrollment is in
+`r.audience`, and the ledger holds neither a valid ack from m's enrollment
+with an item `(r, folders ∋ x)` nor a valid re-add from m's enrollment
+naming x whose `known` covers r. An ack for r that names only other folders
+of r discharges nothing for x. Then:
 
-- m's copy of x is **never a candidate** for any computer (§4.1), even when
-  x is no longer in M;
+- m's copy of x is **never a candidate** for any computer (contracts.md
+  §4.1 level 5), even when x is no longer in M;
 - on m itself, a live copy of x that m owes for is removed into recovery
-  (§4.1 level 4), and m then acks; afterwards the re-added version is an
-  ordinary addition there.
+  (stale copy), and m then acks that `(r, x)` item; afterwards the
+  re-added version is an ordinary addition there.
+
+**Discharge binds to state generation (R4D-3).** When m's obligation for
+`(r, x)` is discharged by an ack item, m's copy of x becomes a candidate
+again only from an admitted state of m with `seq ≥ ack.issuer.issued_at_seq`.
+An older admitted state of m (for example seq 10 still listing an offline
+v2, delivered before m's seq-11 state that follows the ack) stays
+ineligible for x even after the ack arrives. Because the ack's
+`issued_at_seq` is the first own state listing it, and that state is
+published after the remove operation verified, the first eligible state
+already shows the post-removal inventory. The same rule applies to a
+discharge by m's own re-add: only states at or after the re-add's
+`issued_at_seq`.
+
+Example (R4D-2): r removes {core, data}; offline C in r's audience holds
+newer copies of both; A re-adds only `core`. If C learns both at once, M is
+{data}, but C still owes `(r, core)` and `(r, data)`. Level 4 removes
+`data`, level 5 removes C's stale `core`, and C acks both items. If C
+learns r first, it removes both in one operation and acks both items. In
+both orders C ends with both old copies in recovery and A's re-added `core`
+installed (T-R4D2-partial-readd-both-orders).
+
+Example (R4D-3): C's admitted seq 10 lists offline v2 of x. C removes it and
+writes an ack at seq 11. B receives the ack before C's seq-11 state, and a
+re-add has emptied M. C's seq-10 state is still not a candidate source for
+x, because 10 < 11 (T-R4D3-ack-before-state).
 
 Example: C (in r1's audience) was offline with an updated v2 of `core`.
 Whether C learns r1 first and a1 later, or both together, C ends with v2 in
@@ -538,23 +542,25 @@ A computer that joined after r was written is not in `r.audience` and owes
 nothing for it: its local copy is an ordinary existing addon (A-04) once r is
 superseded. While r is live, the copy is removed anyway (removal wins, Q-48).
 
-A member in the audience that never had x writes an `absent` ack at step 3b
-**before** it may install x (§5.6), so it never owes for a folder it holds.
+A member in the audience that never had x writes an `absent` ack item
+`(r, x)` at step 3b **before** it may install x (§5.6), so it never owes
+for a folder it holds.
 
 ### 3.5 Re-add rules
 
-- A re-add is **explicit**: a GUI restore or add-back (`user_restore`,
-  §7.4) or an observed reinstall after this computer applied the removal
-  (`observed_reinstall`, §1.7, Q-55).
-- The re-add supersedes exactly the live removals naming its folders in its
-  issuer's ledger. Folders it does not name stay removed (example 7).
+- A re-add is **explicit**: the GUI restore (`user_restore`, §7.4) or "Add
+  back to all computers" (`user_add_back`, §1.7, §7.4). A reappearance
+  alone never re-adds (Q-55 PENDING OWNER).
+- For each of its folders, the re-add supersedes exactly the removals
+  naming that folder that its `known` covers. Folders it does not name stay
+  removed (example 7).
 - After the re-add, x is not in M, and the re-added folders propagate as an
   ordinary addition among non-owing holders ([domain.md](domain.md) §6).
   Later genuine updates by non-owing holders propagate normally.
-- Uninstalling again writes a new removal, which is not superseded by any
-  earlier re-add (example 5).
-- An offline peer cannot re-add by being present: without its own ack its
-  presence is a stale copy (§3.4).
+- Uninstalling again writes a new removal, which no earlier re-add covers
+  (example 5).
+- An offline peer cannot re-add by being present: without its own ack items
+  its presence is a stale copy (§3.4).
 
 ## 4. Target per package
 
@@ -569,55 +575,63 @@ Before grouping ([domain.md](domain.md) §5) and candidate selection (§6):
 
 - every folder in M is removed from every observation, including the local
   one, so group-wide membership and completeness exclude it (§1.5);
-- every folder a member owes for is removed from that member's observation.
+- every folder a member owes for is removed from that member's observation,
+  and every folder whose obligation was discharged is removed from that
+  member's admitted states older than the discharging record (§3.4, R4D-3).
 
 The **remove** decision is made on the unstripped local grouping, so the
 removed folders of one local package form one operation.
 
-Per local package P, first match wins:
+Per local package P, the levels of the shared precedence
+([contracts.md](contracts.md) §4.1) apply, first match wins. Removal owns
+levels 3 (its holds), 4, 5 and 7:
 
-1. **Rejections** (rollback.md) exclude rejected versions from every level
-   below.
-2. **Local hold:** `Held(RemovalObserved | RemovalUnclear |
+1. **Unresolved journal** (contracts level 1).
+2. **Rejections** (rollback.md, contracts level 2) exclude rejected
+   content from every level below.
+3. **Local hold:** `Held(RemovalObserved | RemovalUnclear |
    ReinstallObserved)` for P. Nothing for P is applied here.
-3. **Merged removal:** some live local folder of P is in M →
+4. **Merged removal:** some live local folder of P is in M →
    `Remove { folders: live(P) ∩ M, removals: ⋃ Live(x), reason: Removed }`.
-4. **Stale copy:** some live local folder x of P is not in M but this
-   computer owes for x → `Remove { folders, removals, reason: StaleCopy }`.
-5. **Pending removal information:** a folder of P that would be installed or
+5. **Stale copy:** some live local folder x of P is not in M but this
+   computer owes `(r, x)` for some r (§3.4) →
+   `Remove { folders, removals, reason: StaleCopy }`.
+6. **Constraints** (code choice, rollback recovered target; contracts.md
+   §4.2, §5) for the remaining folders.
+7. **Pending removal information:** a folder of P that would be installed or
    replaced is in the hint of a pending removal that is not dismissed →
    `Unavailable(WaitingForRemovalInfo)` for P on this computer (§4.4).
-   Removals at levels 3–4 are never deferred by this level.
-6. **Ordinary** [domain.md](domain.md) §6 selection over the stripped
+   Removals at levels 4–5 are never deferred by this level.
+8. **Ordinary** [domain.md](domain.md) §6 selection over the stripped
    observations.
 
-When levels 3 or 4 match, folders of P outside M stay and are evaluated by
-level 6 in the next cycle as their own (stripped) package.
+When levels 4 or 5 match, folders of P outside M stay and are evaluated by
+levels 6–8 in the next cycle as their own (stripped) package.
 
 ### 4.2 Results
 
 | Situation (local package P) | Result | Effect |
 |---|---|---|
 | Observation holding or unclear here | `Held(RemovalObserved \| RemovalUnclear)` here only | nothing for P applied here (§1.6) |
-| Reinstall observed after own ack | `Held(ReinstallObserved)` here only | not removed during the hold (§1.7) |
-| Live local folders of P in M | `Remove { reason: Removed }` | removed into recovery when safe (§5); `removed` ack |
-| P not held here, some folders of P in M | nothing to remove | `absent` ack (§5.6) |
-| Local copy owed after the removal was superseded | `Remove { reason: StaleCopy }` | removed into recovery; ack; then ordinary addition |
+| Reinstall observed after own ack | `Held(ReinstallObserved)` here only | not removed; offers Add back to all computers / Remove again (§1.7) |
+| Live local folders of P in M | `Remove { reason: Removed }` | removed into recovery when safe (§5); `removed` ack items |
+| P not held here, some folders of P in M | nothing to remove | `absent` ack items (§5.6) |
+| Local copy owed after the removal was superseded | `Remove { reason: StaleCopy }` | removed into recovery; ack items; then ordinary addition |
 | Install/replace blocked by a pending removal hint | `Unavailable(WaitingForRemovalInfo)` here only | wait, or "Continue without it" (§4.4) |
 | Folders of P remain after removal and hard-depend on a removed folder | ordinary result plus `DependencyRemoved` warning | named in the summary (§5.4, Q-54) |
 | None of the above | ordinary [domain.md](domain.md) §6 | — |
 
-No removal situation produces `NeedsDecision`. `DecisionReason` gains no
-values.
+No removal situation produces `NeedsDecision`. Removal adds no
+`DecisionReason`; the code-choice reasons are contracts.md §5.
 
 ### 4.3 What happened to the run-003 removal decisions
 
 | Run-003 result | Run-004 behaviour |
 |---|---|
 | `RemovalVsUpdate` | removal wins; the update goes to recovery and is named (D-21) |
-| `CompetingRemovalDecisions` | no decisions exist; removal versus re-add is settled by `supersedes` (§3.1) |
-| `InconsistentRemovalRecord` | cannot occur: identity is the content hash (§2.2, §13) |
-| `NewVersionAfterDecision`, `OnlyDeclinedVersions`, selection constraint | no version choice in removal; version pinning and rejection are rollback.md |
+| `CompetingRemovalDecisions` | no decisions exist; removal versus re-add is settled by `known` coverage (§3.1) |
+| `InconsistentRemovalRecord` | cannot occur: identity is the content hash (contracts.md §1.3, §13) |
+| `NewVersionAfterDecision`, `OnlyDeclinedVersions`, selection constraint | no version choice in removal; keeping a copy is the code-choice family (contracts.md §5) and rejecting a release is rollback.md |
 | `RemovalScopeDiffers` | named folders are removed; other folders stay (Q-58) |
 | `RemovalBreaksDependency` | removal proceeds with a warning (Q-54) |
 | `DroppedFolderDiffers` | the dropped folder goes to recovery whatever its tree (§1.5) |
@@ -631,17 +645,20 @@ less knowledge is safe here: an unknown removal can only arrive later and
 remove a copy into recovery; an unknown re-add or ack can only delay an
 install. To avoid needless churn and to honour R-06 ("uncertainty is not
 evidence that nothing happened"), a **pending removal** defers installs and
-replacements of the folders in its hint on this computer (level 5). It never
+replacements of the folders in its hint on this computer (level 7). It never
 defers removals and never affects other folders.
 
 It resolves by itself when a good copy is learned (any member's mirror) or
-when the referencing member repairs its copy (§2.5 step 5). If it does not,
+when the referencing member repairs its copy (contracts.md §1.12). If it
+does not,
 the GUI shows "Waiting for removal information from *Laptop* about *X*"
 with **Continue without it** (§9). That adds the hash to the local
 `dismissed` set: the record is then treated as unknown, exactly like a
 record not published yet. If it becomes readable later, it is learned and
 counts normally. "Continue without it" is local, never published, and
-needs no terminal (Q-57).
+needs no terminal (Q-57 PENDING OWNER). The confirmation explains the risk:
+"If this information is a removal, *X* may be installed here now and
+removed again later. The removed copy is kept for recovery."
 
 ## 5. Apply on receivers (R-11)
 
@@ -649,8 +666,11 @@ needs no terminal (Q-57).
 
 `plan_apply` gains a remove operation: `PackageApply` with `kind:
 Remove`, `removals: Vec<Sha256>`, `reason`, folders with `FolderAction::Remove
-{ expected_live: Tree{tree, fingerprint} }`, and `settings:
-SettingsRemovalPlan` (§6). It is planned only when:
+{ expected_live: Tree{tree, fingerprint} }`, and `settings_ops:
+Vec<SettingsFileOp>` (§6). Its journal is `wowsync.apply-journal/2` and its
+recovery point `wowsync.recovery-point/2` ([contracts.md](contracts.md)
+§2), so a downgraded slice app stops at `NeedsHelp` instead of misreading
+it. It is planned only when:
 
 - the target is `Remove` for P;
 - every live folder to remove is stable and readable (`ok`; a non-`ok`
@@ -671,14 +691,14 @@ One package per operation, as in apply.md §2.2. There is no staging for
 code. Live folders move to recovery by same-volume rename. Nothing is
 deleted.
 
-1. **Journal `staging`** (`kind: remove`, every folder `action: remove`,
-   `target_tree` = the tree being removed). The ack hash is not fixed yet;
-   the ack bytes are fixed in step 7a.
+1. **Journal `staging`** (`/2`, `kind: remove`, every folder `action:
+   remove`, `target_tree` = the tree being removed, `settings_ops` from §6).
+   The ack bytes are fixed in step 7a.
 2. **Destination revalidation** (apply.md §2.2 step 2). Any difference →
    `Replanned(DestinationChanged)`; journal → `rolled_back`; nothing touched.
-3. **Recovery point** `kind: removed`, `pinned: true`, `removals`, the
-   folders as `replaced`, `installed: []`, settings reference (§6) →
-   **journal `committing`**.
+3. **Recovery point** (`/2`, `kind: remove`), `pinned: true`, `removals`,
+   the folders as `replaced`, `installed: []`, `settings` roots and
+   `paired` (§6) → **journal `committing`**.
 4. **Commit**, per folder in name order: `G` (WoW gate); fingerprint
    unchanged; `move(L→R)`. Then the settings steps (§6), each after `G`.
 5. **Journal `committed`.**
@@ -686,13 +706,16 @@ deleted.
    expected tree). Settings verified (§6). → **journal `verified`**, else
    `needs_help`.
 7. **Finalize** (each step "skip if done"):
-   a. encode the ack (`result: removed`, `removed` manifest, settings result)
-      and store its bytes and hash in the journal (so a retry writes the same
-      bytes);
+   a. encode the ack (`result: removed`, one item per `(removal, folders)`
+      removed, the `removed` manifest, settings result) and store its bytes
+      and hash in the journal's `pending_records` (so a retry writes the
+      same bytes);
    b. write the ack record (write-if-absent) and its ledger entry;
    c. recovery point `pinned: false` (an ordinary history state, §7);
       prune per §7;
-   d. record report result `removed` in the pending report;
+   d. record the outcome locally (the pending report keeps only slice
+      `ReportKind` values; the removal outcome is published by the ack,
+      contracts.md §2.4);
    e. `remove_journal`.
 
 ### 5.3 Slot configurations and crash idempotency (extends apply.md §3–§4.1)
@@ -717,10 +740,10 @@ Rollback (phase `committing`), reverse name order:
 Write order with crash points `†`:
 
 ```text
-J:staging(remove) † [revalidate] † RP(removed, pinned) † J:committing
+J:staging(remove) † [revalidate] † RP(remove, pinned) † J:committing
 † f1: L→R † f2: L→R † … † [settings steps] † J:committed † [verify]
 † J:verified † J(ack bytes) † ack record † ledger † RP(unpinned) † prune
-† pending report † remove J
+† local outcome † remove J
 ```
 
 | Crash after | Observed on restart | Recovery |
@@ -761,28 +784,34 @@ commit, or a stop in commit. A recreated folder found after the move is
 
 ### 5.6 Acknowledgments, confirmation and settling
 
-- **`removed` ack:** written in finalize (§5.2 step 7) for every live and
-  owed removal of the folders it removed.
-- **`absent` ack:** at step 3b, for every valid removal r whose audience
-  includes this enrollment, which names no folder present here, and which
-  this enrollment has not acked or superseded. Written before any install of
-  r's folders is planned. Acks are batched: one ack per removal unit per
-  cycle.
-- **Confirmation** of a removal on peer X: this computer's ledger has a
-  valid `removed` or `absent` ack from X's current enrollment listing the
-  removal, **and** X's newest admitted state lists none of its live folders,
-  **and** X advertises `removal/1`. Publication of a removal is not
-  confirmation (A-24).
+- **`removed` ack items:** written in finalize (§5.2 step 7) for every live
+  and owed `(removal, folder)` pair whose folder it removed.
+- **`absent` ack items:** at step 3b, for every `(r, x)` where r is valid,
+  r's audience includes this enrollment, x is not present here, and this
+  enrollment has neither acked `(r, x)` nor re-added x with `known`
+  covering r. Written before any install of x is planned. Items are
+  batched: one ack per cycle, split at 256 items.
+- **Settings cleanup first.** On the origin computer of a passive
+  uninstall or folder drop, the own `removed` ack is written only after
+  the settings cleanup of §6.3 verified or was found not applicable.
+- **Confirmation** of a removal on peer X: for **every** folder of the
+  removal, this computer's ledger has a valid ack item from X's current
+  enrollment for that `(removal, folder)`, **and** X's admitted state at or
+  after the ack's `issued_at_seq` lists none of its live folders, **and** X
+  advertises `removal/1`. Publication of a removal is not confirmation
+  (A-24).
 - **Settled** (derived, display only): every current, non-retired
-  enrollment in the audience has acked or superseded the removal. No record
-  is rewritten when a removal settles. A settled removal stays authority: a
-  late or re-enrolled member's copy is still removed (§8).
+  enrollment in the audience has acked or re-added every folder of the
+  removal. No record is rewritten when a removal settles. A settled removal
+  stays authority: a late or re-enrolled member's copy is still removed
+  (§8).
 
 ## 6. Settings for removed addons
 
 SPEC R-04 and A-10: an uninstall removes the active code **and** its
 applicable saved settings; recovery keeps and restores both. The settings
-design is written in run-004 (`settings.md`, packet R4-settings-design).
+design is [settings.md](settings.md); the shared units and journal ops
+are [contracts.md](contracts.md) §2–§3.
 Removal relies on the contract below; the settings design provides it.
 
 **Q-45 (D-21):** WoW keeps an uninstalled addon's saved variables. So WoW
@@ -793,10 +822,10 @@ them while the addon is not installed.
 
 | Operation | Contract |
 |---|---|
-| `settings::owned_scope(variant, folders, identities) -> SettingsScope` | Pure. For the removed folders, the saved-settings items owned by them per matched account/character identity, plus `unknown_or_shared: Vec<Diagnosis>`. Ownership comes from the folders' own declarations (for example `SavedVariables`), parsed without executing Lua (R-11). WoW's own UI/cloud files are never items (R-07) |
-| `settings::checkpoint(scope) -> CheckpointRef` | Content-addressed copy of the owned items **before** removal, scoped by `(GroupId, product, identity)`. Retained with its recovery point |
-| `SettingsRemovalPlan` | Per item: `expected_live` (hash + fingerprint), same-volume move to `<variant>\.wowsync\recovery\…\settings\…`, `G` before each move. Never an in-place edit; never a split of a shared file. Slot configurations `Untouched / Done / Unknown` as in §5.3 |
-| `settings::restore(checkpoint, identities)` | Moves items back only for the **same** identity they came from (R-02, R-10); verifies hashes |
+| `settings::owned_scope(variant, declarations, identities) -> SettingsScope` | Pure. For the removed folders, the saved-settings items owned by them as `SettingsUnit`s (folder key plus identity, [contracts.md](contracts.md) §3.2), plus `unknown_or_shared: Vec<Diagnosis>`. Ownership comes from the folders' own `SavedVariables` declarations: from the live `.toc` when the folder is present, otherwise from the presence-baseline entry (§1.6), parsed without executing Lua (R-11). A missing code folder never skips applicable settings (R4D-5). WoW's own UI/cloud files are never items (R-07) |
+| `settings::checkpoint(scope) -> CheckpointRef` | Content-addressed copy of the owned items **before** removal (contracts.md §3.4), scoped by `(GroupId, product, unit)`. Retained with its recovery point |
+| `SettingsFileOp` list | Per item: `expected_live` (hash + fingerprint), same-volume move to `<variant>\.wowsync\recovery\…\settings\…`, `G` before each move ([contracts.md](contracts.md) §2.2). Never an in-place edit; never a split of a shared file. Slot configurations `Untouched / Done / Unknown` as in §5.3 |
+| `settings::restore(checkpoint, units)` | Moves items back only for the **same** unit they came from (R-02, R-10); verifies hashes |
 | `settings::is_removed(folder)` | The settings sync never publishes, pushes or applies settings for a folder in M. A settings master holding them moves them to recovery like every other member |
 
 ### 6.2 Rules
@@ -806,9 +835,10 @@ them while the addon is not installed.
    (R-07, Q-46).
 2. **Paused settings** (R-08): the code is removed; paused items stay in
    place; ack `settings: kept_paused`; shown "settings kept (paused)" (Q-47).
-3. **Pairing.** A `removed` recovery point records `paired` only if every
-   owned item was checkpointed and verified; otherwise `code_only` with the
-   reason.
+3. **Pairing.** A `/2` remove recovery point records `paired` only if
+   every owned item was checkpointed and verified, `partial` if some were
+   not (named), otherwise `code_only` with the reason
+   ([contracts.md](contracts.md) §2.3).
 4. **Retention.** A settings checkpoint referenced by a retained recovery
    point is never pruned before that point (R-10).
 5. **No merge.** Restoring settings never merges with other copies (R-09).
@@ -823,9 +853,46 @@ them while the addon is not installed.
 **Integration fallback.** If removal is integrated before the settings
 contract exists, the removal record carries `settings: {kind: none}`, acks
 carry `settings: not_applicable`, recovery points `paired:
-settings_not_applicable`, and the GUI says "Settings for this addon were not
+not_applicable`, and the GUI says "Settings for this addon were not
 changed by WoW Sync." It never claims a paired removal or restore (R-10,
 A-19). A-10 is not complete until the settings half passes.
+
+### 6.3 Settings cleanup on the observing computer (R4D-5)
+
+A passive uninstall (§1.2) or a folder drop (§1.5) leaves no live code
+folder on the observing computer, so no remove operation exists there to
+carry the settings moves. The observing computer therefore runs its own
+**settings-cleanup** operation:
+
+1. When the observation matures, the removal record is written and its
+   ledger entry stored. The presence-baseline entry is **kept**: it holds
+   the settings declarations (§1.6).
+2. `owned_scope` is computed from the baseline declarations. If no owned
+   item exists, or settings are paused for every unit (Q-47), go to step 5
+   with `settings: not_applicable` or `kept_paused`.
+3. A `wowsync.apply-journal/2` with `kind: settings_cleanup`, empty
+   `folders`, the `settings_ops` of every owned item and the ack bytes in
+   `pending_records`, and a `/2` settings-only recovery point
+   (contracts.md §2.3), are written. Crash recovery and the WoW gate are
+   §5.3's, per settings slot.
+4. After verify, the ack (`removed` items for the folders, `settings:
+   paired | partial | code_only`) is written from `pending_records`.
+5. Only then is the baseline entry cleared (§1.6).
+
+A crash before the ack restarts from the journal; the ack is never written
+before the settings moved or were found not applicable. Unowned, shared
+and paused items stay in place with their notice (§6.2). The GUI "Remove
+from all computers" (§1.4) moves code and settings in one remove operation
+and needs no separate cleanup.
+
+**Receivers** that never held the code but hold owned settings of a
+removed folder (for example a character's saved variables on a computer
+where the addon was already removed by hand) run the same cleanup before
+their `absent` ack items for that folder. Their ownership evidence is the
+`.toc` named by the removal record's `folders` manifest, read from the
+provider tree and blob and parsed without executing it. If that is
+unreadable, the settings stay in place and the ack says `code_only` with
+the diagnosis.
 
 ## 7. History and recovery (R-10, A-16, A-17)
 
@@ -837,7 +904,7 @@ is a history state whose content is "not installed":
 | Position | Code | Settings |
 |---|---|---|
 | current | removed (nothing live) | removed (or unchanged with `code_only`) |
-| previous 1 | the removed version (recovery point `kind: removed`) | checkpoint taken at removal |
+| previous 1 | the removed version (recovery point `/2`, `kind: remove`) | checkpoint taken at removal |
 | previous 2 | the version before that, if retained | its checkpoint |
 
 Pruning in finalize (apply.md §2.4) counts states, not recovery points. A
@@ -885,7 +952,7 @@ partial.
 
 From the package's history or the Removed list (§9), on this computer:
 
-1. **Source.** The local recovery point of kind `removed`. If there is none
+1. **Source.** The local recovery point of kind `remove`. If there is none
    (this computer never had P, or its points were pruned) **and** a live
    removal names the folders, the source is that record's `folders` manifest:
    each tree record from the provider, then its blobs, staged and verified
@@ -896,30 +963,34 @@ From the package's history or the Removed list (§9), on this computer:
 2. **Confirm.** The GUI states before confirming: "This reinstalls *X* on
    all computers in this group" (R-04: one collection; a per-computer
    exception is not a product feature).
-3. **Operation** `kind: restore`: install or replace with journal, `G` and
-   verification as apply.md §2.2. The live state before restore (normally
-   absent) becomes a recovery point of kind `restore_undo`.
-4. **Settings:** the paired checkpoint is restored for matching identities
-   if present. Otherwise code-only restore with the warning "Settings were
-   not restored: no saved copy from before the removal" (R-10, A-19).
-   Partial and paired restores are reported distinctly.
+3. **Operation** `kind: restore` (`apply-journal/2`): install or replace
+   with journal, `G` and verification as apply.md §2.2. The live state
+   before restore (normally absent) becomes a `/2` recovery point of kind
+   `restore`.
+4. **Settings:** the paired checkpoint is restored for matching units
+   (contracts.md §3.2) if present. Otherwise code-only restore with the
+   warning "Settings were not restored: no saved copy from before the
+   removal" (R-10, A-19). Partial and paired restores are reported
+   distinctly.
 5. **Re-add:** after verification, write a `user_restore` re-add record
-   superseding every live removal that names a restored folder, then publish.
-   The folders propagate as an addition (§3.5).
+   whose `known` is this computer's current causal summary (it therefore
+   covers every removal of the restored folders this computer has learned),
+   then publish. The folders propagate as an addition (§3.5).
 6. A group-rejected version (rollback.md) is not offered without first
    lifting the rejection, which is a separate explicit choice.
 
-"Keep it" for a held local observation (§1.6) and **Add back to the
-group** on a computer that still holds a copy while a removal is pending
-there (for example WoW is running) use the same re-add record without
-moving files: the live copy is the re-added version.
+"Keep it" for a held local observation (§1.6) does not write a re-add (no
+removal was published). **Add back to all computers** for a held
+reappearance (§1.7), or on a computer that still holds a copy while a
+removal is pending there (for example WoW is running), writes a
+`user_add_back` re-add without moving files: the live copy is the re-added
+version.
 
 ## 8. Rollback, retirement and joining
 
 ### 8.1 Rollback and rejection (R-10, A-18)
 
-Owned by `rollback.md` (packet R4-settings-design, written concurrently;
-this document does not link it until it exists). Removal requires:
+Owned by [rollback.md](rollback.md). Removal requires:
 
 - A removal is not a release and cannot be rejected. Undoing it is a
   restore (§7.4).
@@ -928,29 +999,33 @@ this document does not link it until it exists). Removal requires:
   re-add.
 - Rollback of a currently removed package is a restore, offering only
   non-rejected states.
-- The ledger (§2.5) is generic over record kinds; rollback.md may add a
-  rejection kind with the same identity, mirroring and validation rules.
+- Both are kinds of the one authority family
+  ([contracts.md](contracts.md) §1.1), with the same identity, mirroring
+  and validation; precedence is contracts.md §4.1.
 
 ### 8.2 Retirement (R-03, A-45)
 
-Owned by the run-004 retirement design (R4-ops-design). Removal requires:
+Owned by [ops.md](ops.md) §2; the barrier is
+[contracts.md](contracts.md) §1.10. Removal requires:
 
-- Records issued by a computer later retired **stay valid** (V3); others
-  have mirrored them. Retirement does not un-delete anything.
-- The retirement record carries the retired enrollment's last admitted seq
-  as known to the retiring computer (the cutoff) and `authority_known`, the
-  record hashes of that enrollment in the retiring computer's ledger. A
-  record of that enrollment is valid only if `issued_at_seq` ≤ cutoff or its
-  hash is in `authority_known`.
-- A record that becomes `invalid(after_retirement)` after it was acted on
-  leaves the merge. Members that removed P keep their recovery points; P
-  then follows ordinary rules, including stale-copy rules computed over valid
-  removals only (Q-52).
+- Records issued by a computer later retired **stay valid** when
+  `issued_at_seq ≤ Cutoff(E)`, the **maximum** cutoff over the valid
+  retirements of E. Others have mirrored them. Retirement does not
+  un-delete anything. There is no `authority_known` list.
+- A record above the cutoff is `invalid(after_retirement)`. If it was
+  acted on before the retirement arrived, it leaves the merge. Members that
+  removed P keep their recovery points; P then follows ordinary rules,
+  including stale-copy rules computed over valid removals only (Q-52).
+  Later retirements of E can only raise the cutoff, so they never
+  invalidate more.
+- Retirement is monotone: a retired enrollment never becomes active again
+  without re-enrollment, whatever arrives later (R4D-11).
 - Settling waits only for current, non-retired members. A retired member's
   states are not candidates, so its copy can neither keep nor bring back a
   removed addon.
 - A re-enrolled computer is a new enrollment: it is not in older audiences,
-  and its old acks do not carry over.
+  and its old acks do not carry over. Its old records stay valid through
+  historical membership (contracts.md §1.10).
 
 ### 8.3 Joining with removed addons (R-03, A-04)
 
@@ -979,7 +1054,7 @@ current member confirmed (A-24).
 | Computers | per computer: removal confirmations outstanding; "runs an older WoW Sync that does not apply removals" when `removal/1` is missing | — |
 | Add-ons | a **Removed** section or filter: each removal unit with title, origin computer, evidence kind, "removed here at" (local clock), per-computer state (removed / never had it / pending / not heard from / older version) | open detail; Restore |
 | Add-on detail ("Why this version") | provenance: which computer removed it and how (uninstalled, removed in WoW Sync, confirmed, dropped by an update); other computers' copies kept in recovery (from ack manifests), e.g. "Laptop's copy (v2.1) was kept in recovery on Laptop"; dependency warning; history with three states including "removed", paired or code-only | **Remove from all computers** (consequence text: removed on all computers, kept for recovery, settings effect); **Restore** (§7.4); **Add back to the group** (§7.4) |
-| Needs attention | "Was *X* removed, or renamed to *Y*?" (E6); "Waiting for removal information from *Laptop* about *X*" (§4.4); interrupted removal | Confirm removal / Keep it; Continue without it; open needs-help detail |
+| Needs attention | "Was *X* removed, or renamed to *Y*?" (E6); "*X* was installed again on this computer, but it was removed from all computers" (§1.7); "Waiting for removal information from *Laptop* about *X*" (§4.4); interrupted removal or settings cleanup | Confirm removal / Keep it; Add back to all computers / Remove again; Continue without it; open needs-help detail |
 | Decision | no removal decisions exist; nothing added | — |
 | Needs-help detail | interrupted remove or restore journal, `Unknown` slot | the existing journal resolution flow |
 | Activity | grouped events: "3 addons removed on this computer (from *Laptop*)"; "*X* restored and reinstalled on all computers"; "*Laptop*'s updated copy of *X* was kept in recovery" | open detail |
@@ -994,18 +1069,18 @@ Core stays pure; one implementation is shared by runtime and tests (A-43).
 
 | Module | Add or change |
 |---|---|
-| `core::authority` (new) | `RecordKind { Removal, Readd, Ack }`; `RemovalRecord`, `ReaddRecord`, `RemovalAck`, `Issuer`, `ManifestEntry {key, name, tree}`, `AudienceEntry`, `SettingsRoots` (all `serde`, `Record` impls); `AuthorityRef {hash, kind, folders}`; `decode_authority(bytes, name_hash) -> Result<AnyRecord, RecordError>` (hash check first, then size, then schema); `LedgerEntry`, `Validity { Valid, Pending(PendingReason), Invalid(InvalidReason) }`, `AuthorityLedger { entries, dismissed }` (`wowsync.authority-ledger/1`); `learn(&mut ledger, refs, listings, read) -> LearnDelta`; `validate(&mut ledger, members, retirements)`; `mirror_due(ledger, own_listing) -> Vec<Sha256>` |
-| `core::removal` (new) | `MergedRemoval { live: BTreeMap<FolderKey, BTreeSet<Sha256>>, units: Vec<RemovalUnit> }`; `merge_removals(&ledger) -> MergedRemoval`; `owes(&ledger, enrollment, folder) -> BTreeSet<Sha256>`; `PresenceBaseline`, `Snapshot`, `BaselineEntry` (`wowsync.presence-baseline/1`); `RemovalObservation { kind: Removal \| Reinstall, state: Holding \| Unclear \| Ready \| Published, … }` (`wowsync.removal-observation/1`); `observe(...) -> ObserveOutcome { baseline, observations, new_records }`; `acks_due(&ledger, &merged, enrollment, local) -> Vec<RemovalAck>`; `readd_for_restore(...)`; `pending_hints(&ledger) -> BTreeSet<FolderKey>` |
-| `core::records` | `CodeState` gains `#[serde(default, skip_serializing_if = "Vec::is_empty")] authority_refs: Vec<AuthorityRef>` and `features: Vec<String>`. `ApplyJournal` gains `kind: OpKind { Apply, Remove, Restore }` (default `Apply`), `removals: Vec<Sha256>`, `ack: Option<StoredAck>` (all `serde(default)`). `RecoveryPoint` gains `kind: PointKind { Replaced, Removed, RestoreUndo }` (default `Replaced`), `removals`, `settings: Option<CheckpointRef>`, `paired: Pairing` (default `NotApplicable`). `ReportKind` gains `Removed` |
-| `core::plan` | `FolderAction::Remove`; `PackageApply` gains `kind`, `removals`, `settings`; `plan_apply` takes `&MergedRemoval` through `GroupTarget`; merging of remove and update folders of one package (§5.1) |
-| `core::target` | `TargetInput` gains `merged: &MergedRemoval`, `owed: &BTreeMap<ComputerId, BTreeSet<FolderKey>>`, `holds`, `pending_hints`. `PackageTarget` gains `Remove { folders, removals, reason: RemoveReason { Removed, StaleCopy } }` and `Held { reason: HoldReason { RemovalObserved, RemovalUnclear, ReinstallObserved } }`. Observation stripping before `group_packages` (§4.1). `DecisionReason` unchanged |
-| `core::package` | no change to `group_packages`/`compare_package`; called on stripped observations |
-| `core::exec` | remove slot table and rollback (§5.3); finalize writes the ack via a new effect; `recover_interrupted` handles `kind: remove \| restore`; `ApplyEffects` gains `write_authority(hash, bytes)`; `PublishEffects` gains `list_authority(member)`, `read_authority(member, hash)`, `write_authority`, `stat_authority` (repair) |
+| `core::authority` (new; shared contract, [contracts.md](contracts.md) §1, owner R4-core-removal) | the family-wide parts: `AuthorityRecord` dispatch, `decode_authority`, `AuthorityRef`, index chunks, ledger segments, `Known`, validation V-BYTES to V-REF, learning, mirroring, repair, capabilities. Removal adds its kinds: `RemovalRecord`, `ReaddRecord`, `RemovalAck { items, result, removed, settings }`, `ManifestEntry {key, name, tree}`, `AudienceEntry`, and V-REMOVAL-1 to V-REMOVAL-4 |
+| `core::removal` (new) | `MergedRemoval { live: BTreeMap<FolderKey, BTreeSet<Sha256>>, units: Vec<RemovalUnit> }`; `merge_removals(&ledger) -> MergedRemoval`; `owes(&ledger, enrollment, folder) -> BTreeSet<Sha256>` (per `(enrollment, removal, folder)`); `eligible_from(&ledger, enrollment, folder) -> Option<u64>` (the discharge seq, §3.4); `PresenceBaseline`, `Snapshot`, `BaselineEntry` with settings declarations (`wowsync.presence-baseline/1`); `RemovalObservation { kind: Removal \| Reappearance, state: Holding \| Unclear \| Ready \| Published, … }` (`wowsync.removal-observation/1`); `observe(...) -> ObserveOutcome { baseline, observations, new_records, cleanups }`; `ack_items_due(&ledger, &merged, enrollment, local) -> Vec<AckItem>`; `readd_for_restore(...)`; `pending_hints(&ledger) -> BTreeSet<FolderKey>` |
+| `core::records` | per [contracts.md](contracts.md) §2: `record!` majors, `ApplyJournal/2` and `RecoveryPoint/2` (`kind`, `removals`, `pending_records`, `settings_ops`, `settings`, `paired`, `code_package_hash`), `PendingReport/2`; `CodeState` gains `authority_index` and `features` (§1.6). `ReportKind` in `code-state/1` is unchanged |
+| `core::plan` | `FolderAction::Remove`; `PackageApply` gains `kind`, `removals`, `settings_ops`; `plan_apply` takes `&MergedRemoval` through `GroupTarget`; merging of remove and update folders of one package (§5.1); settings-cleanup ops (§6.3) |
+| `core::target` | `target::compose` ([contracts.md](contracts.md) §4) with removal's inputs: `merged: &MergedRemoval`, `owed`, `eligible_from`, `holds`, `pending_hints`. `PackageTarget` gains `Remove { folders, removals, reason: RemoveReason { Removed, StaleCopy } }` and `Held { reason: HoldReason { RemovalObserved, RemovalUnclear, ReinstallObserved } }`. Observation stripping before `group_packages` (§4.1) |
+| `core::package` | no change to `group_packages`/`compare_package`; called on stripped observations. Package keys stay local and display-only (contracts.md §3.1) |
+| `core::exec` | remove and settings-cleanup slot tables and rollback (§5.3, §6.3); finalize writes `pending_records`; `recover_interrupted` dispatches on journal major and `kind`; `ApplyEffects` gains `write_authority(hash, bytes)`; `PublishEffects` gains `list_authority(member)`, `read_authority(member, hash)`, `write_authority`, `repair_authority`, index chunk I/O |
 | `core::status` | `PackageStatus` gains `RemovalHeld`, `RemovalUnclear`, `ReinstallHeld`, `RemovedHere`, `Removed { confirmed_by, pending_on, older_version }`, `WaitingForRemovalInfo`; headline mapping per §9; `confirmations` extended per §5.6 |
 | `core::explain` | `Explanation` variants for removal provenance, stale copy, dependency warning, kept-in-recovery copies, pending information |
 | `core::layout` | `authority_dir(g, c)`, `authority_record(g, c, hash)`; local names for ledger, baseline and observations |
 | `core::testkit` | removal scenario helpers: records, ledgers, three-replica delivery permutations, fake authority effects |
-| runtime `service.rs` | `sync_once` steps 2a, 3a, 3b and repair (§1.6); `remove_from_group`, `restore`, `add_back`, `confirm_unclear`, `keep_unclear`, `continue_without(hash)` service calls; directory identity for E3 |
+| runtime `service.rs` | `sync_once` steps 2, 2a, 3a, 3b and repair (§1.6); `remove_from_group`, `restore`, `add_back`, `remove_again`, `confirm_unclear`, `keep_unclear`, `continue_without(hash)` service calls; directory identity for E3. The cycle wiring is integrated by R4-core-ops (contracts.md §9) |
 | runtime `effects.rs` | provider `authority\` IO (write-if-absent, read-back, listing, cloud-only refusal per Q-6/Q-23); local ledger and record copies |
 | runtime `detail.rs` | rows for the Removed section and removal provenance |
 | app `pages.rs`, `model.rs` | the §9 screens and actions; no new `Page` |
@@ -1017,16 +1092,17 @@ R4-core-settings; removal calls them through the contract.
 
 | Record | Change | Older app reading it | This app reading older data |
 |---|---|---|---|
-| `wowsync.code-state/1` | additive `authority_refs`, `features` (`serde(default)`, omitted when empty) | unknown fields ignored (no `deny_unknown_fields`); it never removes anything (slice rule) and is shown to others as "older version" (§2.4) | missing fields = no refs, no `removal/1`: absence stays absence, never removal |
+| `wowsync.code-state/1` | additive `authority_index`, `features` (`serde(default)`, omitted when empty); `apply_report` keeps slice `ReportKind` values only | unknown fields ignored (no `deny_unknown_fields`); it never removes anything (slice rule) and is shown to others as "older version" (§2.4) | missing fields = no refs, no `removal/1`: absence stays absence, never removal |
+| `wowsync.authority-index/1` | new provider chunks ([contracts.md](contracts.md) §1.6) | not read | — |
 | `wowsync.removal/1`, `wowsync.readd/1`, `wowsync.removal-ack/1` | new provider records under `authority\` | not read | unknown fields ignored; unknown major → `pending(unknown_schema)`, shown "written by a newer version" |
-| `wowsync.authority-ledger/1`, `wowsync.presence-baseline/1`, `wowsync.removal-observation/1` | new local records; limits 16 MiB, 1 MiB (never dropping a referenced snapshot; overflow → `NeedsHelp(StorageLow)`), 64 KiB | — | absent = empty |
-| `wowsync.apply-journal/1` | additive `kind`, `removals`, `ack`; `FolderAction` gains `remove` | a journal with `remove` fails to decode: an app downgraded while a removal journal exists reports a needs-help journal and changes nothing | missing `kind` = `apply` |
-| `wowsync.recovery-point/1` | additive `kind`, `removals`, `settings`, `paired` | unknown fields ignored | missing `kind` = `replaced` |
-| `wowsync.pending-report/1` | `ReportKind::Removed` | an older app reading `removed` fails to decode the report; same downgrade note | — |
+| `wowsync.authority-ledger-segment/1`, `wowsync.presence-baseline/1`, `wowsync.removal-observation/1` | new local records; limits 4 MiB per segment (contracts.md §1.7), 1 MiB (never dropping a referenced snapshot; overflow → `NeedsHelp(StorageLow)`), 64 KiB | — | absent = empty |
+| `wowsync.apply-journal` | remove, restore and settings-cleanup ops are `/2` ([contracts.md](contracts.md) §2.2); code-only applies stay `/1`, byte-identical | `/2` fails to decode: the slice reports a needs-help journal, keeps it and changes nothing | `/1` = `kind: apply` |
+| `wowsync.recovery-point` | remove, restore and settings points are `/2` (§2.3) | `/2` skipped by `decode_points`, so never pruned by the slice | `/1` = code-only `apply` point |
+| `wowsync.pending-report` | `/2` only if a new kind is needed (contracts.md §2.4) | replaced, not misread | — |
 
-Q-56 records the choice of additive fields over a `code-state/2` major
-(revising the Q-40 default). No record schema major changes. Records are
-written with `records::encode`; the `record!` macro keeps major 1.
+Q-56 records the choice of additive fields in `code-state/1`. Journals and
+recovery points with new content take a new major so the slice refuses
+them safely; the `record!` change that permits this is contracts.md §2.1.
 
 ## 12. Tests
 
@@ -1046,13 +1122,13 @@ built with `Path::join`. The implementing packet lists required cases in
 | T4 | Property test over permutations on 3 replicas: removals, re-adds, acks, refs before records, records without refs, duplicates, a bad copy, restarts between deliveries | identical final M, inventories and ack sets for every order | A-20 |
 | T5 | Offline C updates P to v2; A uninstalls P; C reconnects | v2 removed into recovery on C; C's ack names v2; summary on every computer names "C's copy (v2) kept in recovery"; v2 never a candidate; restorable through the GUI on C | A-10, A-20, A-25 |
 | T6 | Explicit restore on C supersedes r1; concurrently D writes r3 unaware of it | after a1, P propagates; after r3 arrives, P removed again everywhere ("removed again by D"); a second restore supersedes r3 | A-10, A-20 |
-| T7 | `observed_reinstall` re-add without an own ack, and with an ack issued after the re-add | `invalid(readd_without_ack)`; P stays removed; the copy is removed as stale | A-10, A-20 |
+| T7 | P reappears on C after C's own ack (updater reinstall, manual copy), with and without a restart, and C never chooses | `Held(ReinstallObserved)` indefinitely; no re-add is written and nothing propagates; "Add back to all computers" writes `user_add_back` and propagates; "Remove again" removes into recovery (Q-55 PENDING OWNER) | A-10, A-20 |
 | T8 | C in r1's audience holds v2, unacked; learns r1 and a1 (a) in one cycle, (b) in two cycles, (c) a1 first | all orders end with v2 in C's recovery and A's re-added version installed | A-20 |
 | T9 | Joiner with a copy: (a) removal live; (b) removal superseded before the join | (a) listed in consent, removed after consent; (b) ordinary existing addon, newest wins | A-04 |
 | T10 | Ref to an unreadable removal on one replica | installs of hinted folders deferred; other packages and removals proceed; record mirrored elsewhere → learned and applied; own copy deleted → repaired next publish; "Continue without it" → acts as unknown; record readable later → applied | A-20, A-26 |
 | T11 | Ref whose `kind` or `folders` differ from the record; a file whose bytes do not hash to its name, with a good copy elsewhere | mismatched ref ignored with a diagnostic, record stands; bad copy ignored, good copy used; never a conflict | A-20, A-23 |
 | T12 | Malformed records: unsorted or duplicate folders, a name that fails `validate_folder_name` (traversal, separators, non-ASCII), oversize, unknown major, wrong reference kind, non-member issuer, wrong `group_id` | `invalid` or `pending` as §2.6; nothing removed; no path escape; nothing executed; valid unrelated records still apply | A-23 |
-| T13 | Retired issuer: record above the cutoff not in `authority_known`; one within the cutoff; one learned late | above-cutoff `invalid(after_retirement)`, also if learned before the retirement record; within-cutoff valid after the issuer's states become unusable; settling ignores the retired member | A-45, A-20 |
+| T13 | Retired issuer: a record above the maximum cutoff; one within it; one learned late; a second retirement of the same issuer with a lower cutoff arriving later | above-cutoff `invalid(after_retirement)`, also if learned before the retirement record; within-cutoff valid after the issuer's states become unusable; the lower second cutoff invalidates nothing more; settling ignores the retired member (contracts.md T-C10) | A-45, A-20 |
 | T14 | Runtime cycle loop: P present and published; deleted; ≥ 4 cycles with more than three own states published and pruned before the hold matures; restart mid-hold | baseline survives; record and own ack published after the settle wait; P never reinstalled here during the hold; receivers remove into recovery | A-10 |
 | T15 | P absent in one scan (absent state published), then back with the same or new content; also across a restart | no record; hold reset; new content is an ordinary update | A-10, A-21 |
 | T16 | Unreadable folder; unstable listing; AddOns directory identity changed with all folders gone | no record | A-05, A-20 |
@@ -1060,7 +1136,7 @@ built with `Path::join`. The implementing packet lists required cases in
 | T18 | Every folder in AddOns deleted (same directory identity), ≥ 3 packages | removals after the settle wait, no confirmation (D-21) | A-10 |
 | T19 | Our own interrupted apply leaves `L` absent | no record (E5); recovery restores | A-22 |
 | T20 | Update drops folder X; receivers with the same and a different X tree, with and without the update planned in the same cycle | `folder_drop` record; X removed into recovery in the update op or alone; new version complete | A-09 |
-| T21 | After own ack, the user reinstalls P with an updater | `Held(ReinstallObserved)`; not removed during the hold; `observed_reinstall` re-add; propagates | A-10 |
+| T21 | After own ack, the user reinstalls P with an updater; then chooses "Add back to all computers" on C while D concurrently removes P again | `Held(ReinstallObserved)`; not removed and not propagated during the hold; after the choice a `user_add_back` re-add propagates; D's concurrent removal (not covered by C's `known`) wins (example 6) | A-10, A-20 |
 | T22 | Crash after every effect of the remove op and of its recovery (including a second crash during recovery); fakes and real temp filesystem | every restart reaches `Untouched` or `Done`; no lost folder; the ack bytes are identical on retry; accurate status | A-22 |
 | T23 | Folder recreated in `L` after `L→R` | `Unknown` → `needs_help`; nothing deleted | A-22 |
 | T24 | WoW starts before, between and after removal renames, and during a restore | gate stops; no further change; rollback after exit; no process stopped | A-21 |
@@ -1070,19 +1146,27 @@ built with `Path::join`. The implementing packet lists required cases in
 | T28 | Settings: owned, unknown/shared, paused; paired removal and restore; restore with a missing checkpoint (settings phase) | paired / code-only with diagnosis / kept with notice; code-only restore keeps current settings with a distinct warning; WoW's own files untouched | A-09, A-10, A-15, A-19 |
 | T29 | Rejected release and removal | restore does not offer the rejected version; neither record set supersedes the other | A-18 |
 | T30 | Confirmation and wording: a peer without `removal/1`; a peer with an ack but still listing P; a peer acked and absent | "older version"; not confirmed; confirmed. No "removed everywhere" before all current members confirm | A-24, A-25 |
-| T31 | Compatibility: run-003 `code-state/1` without new fields; new state read by the run-003 decoder; old journals and recovery points | decode OK both ways; absence never removal; defaults apply | A-36, A-20 |
+| T31 | Compatibility: run-003 `code-state/1` without new fields; new state (with `authority_index`, `features`) read by the run-003 decoder; `/1` journals and points read by the new app; `/2` remove journal and `/2` point read by the run-003 `exec` | state decodes both ways; absence never removal; `/1` defaults apply; the run-003 app reports `NeedsHelp(UnknownInterruptedState)`, keeps the `/2` journal, changes nothing and never prunes `/2` points (contracts.md T-C06) | A-36, A-20, A-22 |
 | T32 | GUI: remove from all computers, see per-computer progress, confirm an unclear removal, continue without pending information, restore, add back, with keyboard only | flows complete without a terminal; wording rules hold | A-25, A-26 |
 | T33 | Installed app, real Dropbox, two computers (provider tier, after owner Check 2; Q-23) | removal applied and confirmed; provenance kept | A-34 |
+| T-R4D2-partial-readd-both-orders | Removals r1 {p, q} and r2 {q} live; C writes a re-add of {p} only covering both; receivers learn (a) re-add then removals, (b) removals then re-add; C holds q, D holds p and q, E holds nothing | p re-added; q stays removed by r1 and r2; identical inventories in both orders (D: p installed, q in recovery; C: q removed into recovery); obligations per `(enrollment, removal, folder)`: q's obligations to r1 and r2 survive; recovery points name r1, r2 for q | A-10, A-20 |
+| T-R4D3-ack-before-state | C acks r for P at state seq 7 but its state seq 8 (still listing P) is learned before the ack; then the ack; then restart; duplicate ack copies; then C publishes seq 9 with v2 of P (a reinstall after acking) | seq 8 is not a discharge; discharge only from the first state after the ack's `state_seq` that is absent for P; duplicates change nothing; v2 at seq 9 is `Held(ReinstallObserved)` on C, never a candidate elsewhere | A-20, A-25 |
+| T-R4D4-1024-removals-readd-bound | 1,024 live removals of one folder from 8 issuers; one restore re-adds it | the re-add is ≤ 64 KiB (`known` only); covers all 1,024; the folder becomes Added | A-20 |
+| T-R4D4-ledger-overflow-16MiB | Synthetic ledger above 16 MiB across segments, plus 100 remove → restore cycles of one folder | segments roll at 4 MiB; nothing is dropped or `NeedsHelp`; the merged result equals the unsegmented reference; memory within the C-AUTH note (contracts.md §1.7) | A-20, A-41 |
+| T-R4D5-passive-uninstall-settings | C uninstalls P by hand (P owns account and character SavedVariables); also a folder drop that removes an owning folder; crash after cleanup before the ack; crash before cleanup | C's settings for P are checkpointed then removed with the removal (§6.3) before C's ack item says `settings: removed`; after either crash the restart finishes cleanup, the ack is not written early, and settings are never lost (recovery point `/2` pairs them) | A-09, A-10, A-15, A-22 |
 
 **A-38 negative controls** (temporarily mutate the production rule, observe
 the named test fail with exit 101, restore) for at least: T3 (reintroduce an
 id-variant conflict), T4 (make the merge depend on arrival order, e.g. take
-the latest-learned record), T5 (let an updated copy win), T7 (drop V5), T8
+the latest-learned record), T5 (let an updated copy win), T7 (re-add without an explicit choice), T8
 (ignore owing), T10 (forget a pending hint, or block removals on it), T11
 (trust the ref over the record), T14 (read E1 from the newest published
 state, or omit `Held`), T17 (compare E6 with a shared latest snapshot), T22
-(regenerate the ack on retry), T26 (root superseded payload), and T30
-(confirm on publication alone).
+(regenerate the ack on retry), T26 (root superseded payload), T30
+(confirm on publication alone), T-R4D2 (key obligations per package or
+per removal only), T-R4D3 (discharge on any later-learned state), T-R4D4
+(store covered removals in the re-add) and T-R4D5 (ack before settings
+cleanup). T7 mutates the hold into an automatic re-add.
 
 ## 13. Review findings: status after this rewrite
 
@@ -1096,7 +1180,7 @@ named another package. **It is closed by removing the state, not by
 resolving it.**
 
 1. **No id variants.** Identity is the hash of the exact bytes and the file
-   name (§2.2). Different content is a different record. A copy that does
+   name (§2.1). Different content is a different record. A copy that does
    not match its name is not a record. The run-003 trace (variants `(T, hP)`
    and `(T, hQ)`) becomes two valid removals, of P's folders and of Q's
    folders (example 3, T3).
@@ -1104,16 +1188,16 @@ resolving it.**
    removals merge by union of folder keys (§3.1). There is no
    `conflicted` status, no `InconsistentRemovalRecord`, and no removal
    decision of any kind (§4.3).
-3. **V7 holds.** No rule requires a record to list related records. The new
-   V7 (§2.6) checks only that a record's own listing is well-formed and that
-   a re-add overlaps what it supersedes. Writers derive `supersedes` from
-   exactly those overlapping live removals, so every record the app writes
-   passes V7, whatever packages the related records span.
+3. **The run-003 V7 problem is gone.** No rule requires a record to list related records. The
+   rules (§2.6) check only that a record's own listing is well-formed. A
+   re-add supersedes the removals its `known` covers, per folder, so every
+   record the app writes passes validation, whatever packages the related
+   records span.
 4. **Every reachable state resolves.** For every folder key, the result is a
    total function of the ledger (§3.2). The only local states that wait
    either clear by themselves or have a GUI action: the settle hold (matures
    or resets), the unclear rename (confirm, keep, or reappearance), the
-   reinstall hold (matures or resets), pending information (learned,
+   reinstall hold (add back or remove again), pending information (learned,
    repaired, or "Continue without it"), WoW running (exits), and a
    needs-help journal (the existing GUI resolution). None needs a terminal or
    a record that cannot be written.
@@ -1132,15 +1216,15 @@ resolving it.**
 | R3D-5 | UI: reconfirm scenario | **Closed; kept.** A variant or mapping change discards the baseline (E3, §1.6); a build change does not (O-N2) |
 | R3D-6 | UI: continuation promises versus journals | **Closed; kept.** Any journal blocks new removals (Q-25, §5.1); the GUI never promises a removal while a journal blocks |
 | R3D-7 | Removal: publication destroys the baseline | **Kept unchanged.** Separate durable presence baseline, step 3a, `Held` (§1.6) |
-| R3D-8 | Removal: authority lost with an unusable newest state | **Kept, strengthened.** Durable ledger, mirroring on learning, plus own-copy repair (§2.5). Pending information no longer blocks a whole package (§4.4) |
-| R3D-9 | Removal: compact tombstones and lost restore data | **Kept, simplified.** Identity = hash of exact bytes = file name; refs carry only that hash plus a routing hint that is never trusted over the record; exact `folders` manifest kept (§2.2–§2.4) |
-| R3D-10 | Removal: keep-version decision overridden | **Mechanism removed.** Removal makes no version choice; version pinning and rejection belong to rollback.md. The defect cannot recur in removal |
+| R3D-8 | Removal: authority lost with an unusable newest state | **Kept, strengthened.** Durable ledger, mirroring on learning, plus own-copy repair ([contracts.md](contracts.md) §1.12). Pending information no longer blocks a whole package (§4.4) |
+| R3D-9 | Removal: compact tombstones and lost restore data | **Kept, simplified.** Identity = hash of exact bytes = file name; refs carry only that hash plus a routing hint that is never trusted over the record; exact `folders` manifest kept (§2.1–§2.4; [contracts.md](contracts.md) §1.3–§1.5) |
+| R3D-10 | Removal: keep-version decision overridden | **Mechanism removed from removal.** Removal makes no version choice. The code-choice family that replaces it is [contracts.md](contracts.md) §5, which retraces R3D-10 there |
 | R3D-11 | UI: coverage claims from placeholders | **Closed; kept.** §9 lists needs; it claims no acceptance from placeholders |
 | R3D-12 | UI: layout and headline rules | **Closed; kept.** ui/screens.md is authoritative; removal adds no headline state (§9) |
 | R3D-13 | Removal: inconsistent authority unresolvable | **Closed by D-23** (§13.1) |
 | R3D-14 | Removal: one global snapshot | **Kept unchanged.** Per-entry snapshot references (§1.6) |
 | R3D-15 | Removal: superseded payload kept forever | **Kept, simplified.** Only live removals root payload (§7.3) |
-| R3D-16 | Removal: resume formula declines the kept version | **Mechanism removed.** No `declined` sets or resume choice exist in removal |
+| R3D-16 | Removal: resume formula declines the kept version | **Mechanism removed from removal.** Resume declines nothing; retraced in [contracts.md](contracts.md) §5 |
 
 ## 14. Changes to other design documents when implemented
 
@@ -1151,9 +1235,9 @@ Recorded here because this packet does not own those files.
 | [domain.md](domain.md) §6 | Selection runs below the removal precedence of §4.1: rejections, local holds, merged removal, stale copies, pending hints, then ordinary ordering over observations stripped of removed and owed folders. The Q-2 slice limitation is replaced by the folder-drop rule (§1.5). "There is no removal record in the slice" becomes: "Absence never removes; only a live removal record in the ledger (removal.md §3) removes." New target states `Remove` and `Held`; no new `DecisionReason` |
 | [domain.md](domain.md) §1 step 5 | The consent text also states that addons deliberately uninstalled on one computer are removed on the others and kept for recovery, with their settings (§6), and lists the joiner's copies of removed addons (§8.3) |
 | [publication.md](publication.md) §1 | layout gains `members\<computer_id>\authority\<sha256>.json` (single writer, write-if-absent, never deleted while the group exists). Readers list it for every member including unusable and retired ones |
-| [publication.md](publication.md) §2 | additive `authority_refs` and `features` in `code-state/1`; record schemas of §2.3; local schemas of §11; report result `removed`; confirmation rule of §5.6 |
-| [publication.md](publication.md) §4 | publish writes, reads back and repairs referenced records before the state; step 7 pruning never touches `authority\` |
-| [publication.md](publication.md) §6 | admission unchanged; learning and validation (§2.5–§2.6) are a separate step whose output is the ledger |
+| [publication.md](publication.md) §2 | additive `authority_index` and `features` in `code-state/1` ([contracts.md](contracts.md) §1.6); record schemas of §2.3; local schemas of §11; ack item results; confirmation rule of §5.6 |
+| [publication.md](publication.md) §4 | publish writes, reads back and repairs referenced records and index chunks before the state; step 7 pruning never touches `authority\` |
+| [publication.md](publication.md) §6 | admission order of [contracts.md](contracts.md) §6; learning and validation are a separate step whose output is the ledger |
 | [apply.md](apply.md) §1 | steps 2a, 3a and 3b (§1.6); step 5 uses §4.1 |
 | [apply.md](apply.md) §2.2, §3.1, §4.1 | remove and restore operations, the remove slot table and crash rows (§5.3); mixed update-and-remove operations (§5.1) |
 | [apply.md](apply.md) §2.4 | pruning counts history states including `removed` (§7.1) |
