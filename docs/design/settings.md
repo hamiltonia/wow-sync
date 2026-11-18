@@ -14,7 +14,7 @@ A-45 ([ACCEPTANCE.md](../../ACCEPTANCE.md)). Rollback and rejection are in
 settings interface that [removal.md](removal.md) requires, in that
 document's "settings for removed addons" section. Choices that approved
 intent does not settle are marked **(Q-n)** and listed in
-[questions.md](questions.md) from Q-54 on. The computer-retirement design
+[questions.md](questions.md) from Q-67 on. The computer-retirement design
 (`docs/design/ops.md`, run-004 R4-ops-design, written in parallel) uses the
 same terms **settings master** and **reassign**.
 
@@ -57,11 +57,11 @@ WTF\Account\<ACCOUNT>\<Realm>\<Character>\SavedVariables\<Folder>.lua character 
 exactly otherwise, as domain.md does for folders. A file belongs to the
 package that contains that folder **and** whose selected `.toc` declares
 `## SavedVariables` (account file) or `## SavedVariablesPerCharacter`
-(character file) **(Q-54)**. The declaration is `.toc` metadata, read by the
+(character file) **(Q-67)**. The declaration is `.toc` metadata, read by the
 existing `.toc` rule; it is never Lua.
 
 Everything else under `WTF` is out of scope and is never read for content,
-written, moved or deleted by settings sync **(Q-55)**:
+written, moved or deleted by settings sync **(Q-68)**:
 
 | Excluded | Why |
 |---|---|
@@ -82,7 +82,7 @@ settings sync **for the affected units only**; other units continue
 | A file `<Folder>.lua` exists but no installed package folder declares saved variables for that shape | `Unowned { file }` | Not synced, not moved, not deleted. Listed in Details only, as information |
 | A folder declares saved variables but the `.toc` selection for the folder is ambiguous ([domain.md](domain.md) `.toc` rule) | `AmbiguousToc { folder }` | Unit not synced |
 | A path component is a reparse point, link, junction, or names differ only in case on a case-sensitive volume | `UnsafePath { path }` | Unit not synced; nothing under that path is written |
-| A file exceeds the size limit (Q-64) | `TooLarge { file, size }` | Unit not synced |
+| A file exceeds the size limit (Q-77) | `TooLarge { file, size }` | Unit not synced |
 | An identity folder name fails the safe-name rules of [domain.md](domain.md) (control characters, reserved names, trailing dot or space) | `UnsafeIdentity { name }` | Identity not synced |
 
 There is **no fallback** to copying `WTF`, a whole account folder or a whole
@@ -106,7 +106,7 @@ imported-content rule in [domain.md](domain.md) and the A-23 obligations.
   (`<ACCOUNT>`, `<Realm>`, `<Character>`) after Unicode NFC normalization.
   Names that differ only in case are not the same identity; on Windows
   such a pair on two computers is an `IdentityCaseMismatch` diagnosis for
-  that identity **(Q-56)**.
+  that identity **(Q-69)**.
 - A computer shares only the accounts the user included when turning on
   settings sync on that computer (§5.4). A newly seen account folder is
   "not included" until the user includes it. Characters inside an included
@@ -138,7 +138,7 @@ policy before each operation.
 They have not been checked on a real client for every variant, and
 real-client checks were deferred by D-23. Until a variant's layout is
 verified on a real client, settings sync for that variant runs only on
-synthetic test data (the Q-24 gate) **(Q-55)**.
+synthetic test data (the Q-24 gate) **(Q-68)**.
 
 ## 2. Capture at completed play-session boundaries (R-07, A-11)
 
@@ -150,12 +150,12 @@ A capture is taken per unit, never while WoW for that variant runs:
    [apply.md](apply.md) §5) sees the variant's WoW process stop. The
    capture waits for the settle window: two consecutive stable scans of
    the owned files, at least the Q-15 quiescence apart, with the same
-   settle wait as removal detection (Q-41) **(Q-58)**.
+   settle wait as removal detection (Q-41) **(Q-71)**.
 2. **Startup / missed session.** At app start, or when the app has not seen
    a session end (it was not running, the computer slept), any unit whose
    files differ from the last capture or applied checkpoint is captured
    once, as kind `found_at_start`. Several missed sessions become one
-   capture **(Q-59)**.
+   capture **(Q-72)**.
 3. **Before a settings or code change by this app.** Before a yield,
    restore, removal or rollback moves a unit's files, the current files are
    captured (kind `before_change`) so that what is replaced is a recovery
@@ -169,7 +169,7 @@ So history fills at play-session rate, not file-write rate (A-11).
 ### 2.2 Incomplete writes
 
 A capture is **complete** only if all of these hold for every file of the
-unit; otherwise the unit's capture is **suspect** **(Q-58)**:
+unit; otherwise the unit's capture is **suspect** **(Q-71)**:
 
 - WoW for the variant is not running at the start and end of the capture;
 - every file has the same size and hash across the two settle scans and
@@ -231,7 +231,7 @@ A checkpoint is the canonical encoding of:
 - Blobs are the existing content-addressed provider blobs
   ([publication.md](publication.md) §1, §3). A manifest is stored in the
   provider as `trees\<checkpoint hash>.json` only when a revision
-  references it (Q-63). Local captures stay local.
+  references it (Q-76). Local captures stay local.
 - Local store: `<variant>\.wowsync\settings\blobs\<sha256>` and
   `<variant>\.wowsync\settings\manifests\<checkpoint hash>.json`, on the
   same volume as `WTF`.
@@ -491,7 +491,7 @@ still work.
 ### 5.2 Assigning and reassigning
 
 - Settings sync is **off** in a new group: there is no policy object and
-  nothing under `WTF` is read for sharing (Q-57).
+  nothing under `WTF` is read for sharing (Q-70).
 - "Choose a settings master" / "Change master…" (Settings sync page,
   Computers page) issues a new `settings-policy` with `supersedes` = all
   current policy heads. The same object carries exception changes
@@ -501,7 +501,7 @@ still work.
   except an explicit user action. In particular, master retirement,
   long absence, an unusable master state or a missing master folder never
   changes the master.
-- **Concurrent policy changes.** Two policy heads that differ (Q-60): every
+- **Concurrent policy changes.** Two policy heads that differ (Q-73): every
   addon whose effective authority differs between the heads has no
   automatic publication and no automatic apply until the user picks one
   policy ("Settings master was changed on two computers"). Addons whose
@@ -511,14 +511,14 @@ still work.
   captures from sessions that start after this computer learned the policy
   publish automatically. The confirmation for "Make this computer the
   master" lists addons whose settings differ here and offers "Share these
-  now" (a push) as a separate checkbox, off by default (Q-62).
+  now" (a push) as a separate checkbox, off by default (Q-75).
 
 ### 5.3 Master absent: retirement or offline
 
 | Situation | Behaviour | GUI |
 |---|---|---|
 | The master (or an addon's exception computer) is **retired** (`ops.md`) | Its revisions issued before retirement stay valid. Later objects from it are invalid. No automatic publication for its units until the user reassigns. Pushes, choices and restores still work. The policy is not changed | Settings sync page and Needs attention: "The settings master Den PC was retired. Choose a new master; WoW Sync does not pick one for you." Button "Change master…" (A-45) |
-| The master is **offline** or has not published for a long time | Nothing changes. Others keep its last revision; their routine changes stay local; pushes are accepted without the master (Q-61). When it returns, its captures with an old basis compete with pushes made meanwhile only if it changed those addons (§4.5) | "Settings master Den PC last shared settings 12 days ago." with "Change master…" as an option, not a prompt |
+| The master is **offline** or has not published for a long time | Nothing changes. Others keep its last revision; their routine changes stay local; pushes are accepted without the master (Q-74). When it returns, its captures with an old basis compete with pushes made meanwhile only if it changed those addons (§4.5) | "Settings master Den PC last shared settings 12 days ago." with "Change master…" as an option, not a prompt |
 | The master's state is `Unusable` or `Regressed` | As offline, plus the existing admission explanation | as offline, with the admission reason |
 | The master **re-enrolls** after retirement | It is a new enrollment, not the master, until the user reassigns | "Den PC rejoined. It is not the settings master." |
 
@@ -532,7 +532,7 @@ still work.
   (included by default only on the computer making the choice) (R-07).
 - On every other computer, settings sync starts only after the user
   confirms there once ("Den PC is now the settings master. Use its addon
-  settings here?"), with the same account list (Q-57). Until then that
+  settings here?"), with the same account list (Q-70). Until then that
   computer publishes nothing and applies nothing for settings.
 - **First adoption** of a unit with no basis on that computer: the local
   files are captured, kept as a recovery state, and the head is applied.
@@ -544,7 +544,7 @@ still work.
 - **Pause settings for an addon** (Add-on detail) pauses all its units on
   this computer. **Pause all settings** (Settings sync page) pauses every
   unit of the variant on this computer, including addons installed later,
-  and does not pause code (Q-70). Pause lasts until resumed (Q-28).
+  and does not pause code (Q-83). Pause lasts until resumed (Q-28).
 - While paused: captures continue locally (history and recovery), but no
   revision is published and no revision is applied for those units.
   Incoming revisions are learned and listed as "waiting".
@@ -591,7 +591,7 @@ the addon will share all its settings.
 - Provider data: revision objects are immutable. Blobs and manifests of
   revisions older than each unit's newest three are not needed for
   recovery and become garbage-collection candidates under the future
-  provider retention design (Q-7, Q-63).
+  provider retention design (Q-7, Q-76).
 
 ## 8. Removal, re-add and identity boundaries
 

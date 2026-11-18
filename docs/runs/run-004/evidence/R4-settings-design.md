@@ -16,7 +16,7 @@ Design only. No code, tests or required cases changed.
 |---|---|
 | [docs/design/settings.md](../../../design/settings.md) | New. Settings sync: scope, opaque bytes, identities, capture at session boundaries, formats, publish/receive/apply, competing choices, master and exceptions, pause, three states, removal interface, status/GUI, implementation map, tests T-S01..T-S32 |
 | [docs/design/rollback.md](../../../design/rollback.md) | New. Rejection and lift records, target precedence, offline peers, paired/code-only settings, settings rejection, removal/re-add interaction, three states, GUI actions, implementation map, tests T-R01..T-R18 |
-| [docs/design/questions.md](../../../design/questions.md) | Appended section "Settings and rollback design questions" with Q-54..Q-71 |
+| [docs/design/questions.md](../../../design/questions.md) | Appended section "Settings and rollback design questions" with Q-67..Q-84 |
 
 Not edited: `removal.md` (being rewritten by R4-removal-design; referenced by
 concept only), `ops.md` (being written by R4-ops-design; referenced as a code
@@ -47,7 +47,7 @@ orchestrator adds index rows).
 | Types/functions mapped to modules | settings §10; rollback §9 | — |
 | On-disk formats and compatibility | settings §3 (incl. §3.4); rollback §2 | Q-13; A-20 |
 | Test list with negative cases | settings §11 (T-S01..T-S32 + A-38 controls); rollback §10 (T-R01..T-R18 + A-38 controls) | A-11..A-26, A-45, A-38 |
-| New product questions with safe defaults | questions.md Q-54..Q-71 | — |
+| New product questions with safe defaults | questions.md Q-67..Q-84 | — |
 
 Note: the packet attributes "offline peers cannot resurrect" to A-19. In
 ACCEPTANCE.md that is A-18; A-19 is the code-only fallback. Both are
@@ -64,7 +64,7 @@ covered (rollback §3.2 and §4).
 - Not reviewed. An independent design review is still required.
 - The WTF layout (§1.1 of settings.md) is the documented WoW layout and is
   not verified on any real client; real-client checks are deferred by D-23
-  (Q-55). Settings sync is synthetic-only until verified.
+  (Q-68). Settings sync is synthetic-only until verified.
 - The retirement validity rules are referenced from the parallel `ops.md`
   and the tombstone/ledger rules from the parallel removal rewrite. The
   integration review must check the terms and cycle steps still match after
@@ -78,13 +78,13 @@ covered (rollback §3.2 and §4).
 
 ## Open questions raised
 
-In [questions.md](../../../design/questions.md): Q-54 (ownership), Q-55
-(excluded files, synthetic-only), Q-56 (identity matching), Q-57 (start and
-per-computer opt-in), Q-58 (complete/suspect capture), Q-59 (missed
-sessions), Q-60 (concurrent policy changes), Q-61 (push with master
-offline), Q-62 (new master does not publish old differences), Q-63 (where
-copies are stored), Q-64 (64 MiB file limit, numeric gate), Q-65 (exact-hash
-rejection, look-alikes), Q-66 (lift), Q-67 (paired checkpoint selection),
-Q-68 (recovered-release constraint), Q-69 (settings rejection), Q-70
-(pause-all scope), Q-71 (mixed app versions). Numbers may be renumbered by
-the orchestrator if another run-004 design worker also appended Q-54+.
+In [questions.md](../../../design/questions.md): Q-67 (ownership), Q-68
+(excluded files, synthetic-only), Q-69 (identity matching), Q-70 (start and
+per-computer opt-in), Q-71 (complete/suspect capture), Q-72 (missed
+sessions), Q-73 (concurrent policy changes), Q-74 (push with master
+offline), Q-75 (new master does not publish old differences), Q-76 (where
+copies are stored), Q-77 (64 MiB file limit, numeric gate), Q-78 (exact-hash
+rejection, look-alikes), Q-79 (lift), Q-80 (paired checkpoint selection),
+Q-81 (recovered-release constraint), Q-82 (settings rejection), Q-83
+(pause-all scope), Q-84 (mixed app versions). Numbers may be renumbered by
+the orchestrator if another run-004 design worker also appended Q-67+.

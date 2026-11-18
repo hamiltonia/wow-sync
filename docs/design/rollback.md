@@ -81,7 +81,7 @@ and object-hash rule of the removal design's authority objects
 }
 ```
 
-- The rejection is of the **exact package hash** (Q-65). A version label is
+- The rejection is of the **exact package hash** (Q-78). A version label is
   kept only to explain and to detect look-alikes (§3.2).
 - `recovered` is the release the user chose. With `considered` it forms
   the selection constraint of §3.1.
@@ -106,7 +106,7 @@ and object-hash rule of the removal design's authority objects
 
 A lift names exact rejection objects. It never lifts a rejection it does
 not name, so a concurrent new rejection of the same release stays in force
-(Q-66).
+(Q-79).
 
 ### 2.3 Validity and lifetime
 
@@ -126,7 +126,7 @@ not name, so a concurrent new rejection of the same release stays in force
   state to list `"rejection/1"` in its `capabilities` field
   ([settings.md](settings.md) §3.2); otherwise the
   rollback is offered as "local only" (restore on this computer, no group
-  rejection) and the GUI says why (Q-71).
+  rejection) and the GUI says why (Q-84).
 
 ## 3. Target: rejections come first
 
@@ -147,7 +147,7 @@ third computer). So an active rejection with `recovered = R0` adds a
 **selection constraint**: the target is R0 while the only candidates newer
 than R0 are releases in `considered`. A release that is **not** in
 `considered` and newer by ordinary ordering (a genuinely new release that
-appears later) ends the constraint, and ordinary ordering resumes (Q-68).
+appears later) ends the constraint, and ordinary ordering resumes (Q-81).
 If R0 itself becomes unavailable (no recovery point and no published copy)
 the package is held with "Version 2.0 is no longer available on any
 computer" and the user chooses.
@@ -166,7 +166,7 @@ computer" and the user chooses.
   hash. Ordinary ordering would treat it as new. Safe default: a candidate
   whose version label equals the label of an active rejection of P is
   held as an addon-level decision ("This looks like the blocked version
-  2.1 but its files differ") (Q-65).
+  2.1 but its files differ") (Q-78).
 - A joining computer with R1 replaces it with R0, as any member does.
 - A user who installs R1 again by hand on a computer: WoW Sync replaces it
   with R0 (keeping R1 in recovery) and the Activity entry says "Version 2.1
@@ -185,7 +185,7 @@ For each **included identity** I of the package on the issuing computer:
 1. Find the **paired checkpoint**: the newest capture (by `local_seq`) of
    unit `(P, I)` with `code_package_hash == R0`, in local settings history,
    or a revision in the ledger whose `code_package_hash == R0` and whose
-   checkpoint's blobs are present in the provider (Q-67).
+   checkpoint's blobs are present in the provider (Q-80).
 2. If found and the addon is shared ([settings.md](settings.md) §5.1):
    capture the current files (`before_change`), issue a `restore` revision
    with that checkpoint and parent = current head, apply it locally after
@@ -230,7 +230,7 @@ return":
   invalid ([settings.md](settings.md) §4.2 step 1). An `auto` capture on the
   master whose content equals the rejected checkpoint is not published,
   and shows "This copy was undone on <computer>; it is not shared again."
-  (Q-69).
+  (Q-82).
 
 A settings rejection does not touch code. A code rollback does not reject
 settings; it restores (§4).
@@ -275,7 +275,7 @@ These keep the removal design's rollback hooks:
 | Rollback summary | paired / partial / code-only as in §4, with the warning style for partial and code-only |
 | Add-ons list | "Blocked: 2.1" chip on the addon row while a rejection is active |
 | Activity | "You went back to Details 2.0 and blocked 2.1", "Laptop replaced blocked Details 2.1 with 2.0", lifts |
-| Needs attention | recovered release unavailable; look-alike of a blocked version (§3.2); only blocked copies on re-add; rollback not possible group-wide (Q-71) |
+| Needs attention | recovered release unavailable; look-alike of a blocked version (§3.2); only blocked copies on re-add; rollback not possible group-wide (Q-84) |
 | Decision | the look-alike decision (§3.2) |
 
 All of these are GUI flows; none needs a terminal (A-26).
