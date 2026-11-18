@@ -1,6 +1,6 @@
 # Run 004: removal, settings sync, rollback, retire, decisions, notices, diagnostics
 
-Status: **draft, awaiting owner approval.** Scope and ceiling are from D-23.
+Status: **approved** (D-24). Active. Scope and ceiling are from D-23.
 
 - Ceiling: 20,000 AIU, counted from the start of run-004.
   - Stop launching new work at ≥19,000.

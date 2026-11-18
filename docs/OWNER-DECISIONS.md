@@ -170,6 +170,17 @@ Answers from an interactive review session with the orchestrator.
   - UI direction.
   - Run-003 scope and credit ceiling.
 
+### D-24: Run-004 plan approved (2026-11-17)
+
+- The owner approved [run-004 PLAN.md](runs/run-004/PLAN.md) as written,
+  with a ceiling of 20,000 AIU and a stop at 19,000.
+- **P4-1: yes.** The update notice may make an anonymous HTTPS GET to
+  GitHub Releases for this public repository. It sends no credentials and
+  no identifiers beyond the HTTP request itself.
+- **P4-2: yes.** The notification work may add a small, free, widely used
+  OS notification crate. It must be justified under E-06 and pass
+  `cargo deny`.
+
 ### D-23: Run-004 direction and pending answers (2026-11-17)
 
 Answers from an interactive session with the orchestrator after run-003
@@ -348,4 +359,5 @@ phase D barrier.
 | 2026-11-17 | D-21 | Prototype approved; Q-21 no interface gating; removal wins; UI defaults; Dropbox API spike | `f92a61a` |
 | 2026-11-17 | D-20 | Restored the D-20 heading that `f92a61a` accidentally deleted (R3-review RV-10) | `ee244ef` |
 | 2026-11-17 | D-22 | App icon art committed and used as is; owner accepts trademark risk | `8601907` |
-| 2026-11-17 | D-23 | Run-004 scope and 20,000 AIU ceiling; R3D-13 simplify; DA-1 yes, DA-2 to DA-4 deferred; UQ-1/UQ-2 yes; A-31 deferred; Mac available | this commit |
+| 2026-11-17 | D-23 | Run-004 scope and 20,000 AIU ceiling; R3D-13 simplify; DA-1 yes, DA-2 to DA-4 deferred; UQ-1/UQ-2 yes; A-31 deferred; Mac available | `1dbd81e` |
+| 2026-11-17 | D-24 | Run-004 plan approved; P4-1 GitHub Releases check yes; P4-2 notification crate yes | this commit |
