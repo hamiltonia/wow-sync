@@ -13,8 +13,11 @@ units, identity normalization, checkpoint references and target precedence
 are defined only in [contracts.md](contracts.md). This document defines
 the settings-specific bodies (policy, revision, checkpoint manifest,
 settings state) and behaviour. Where an earlier draft disagreed with
-contracts.md, the draft text has been removed. Phase C owner: R4-core-settings
-(contracts.md §9).
+contracts.md, the draft text has been removed. Phase C: shared types are
+built by R4-core-contracts, the settings behaviour by R4-core-settings
+(contracts.md §9, this file §10). Revised again by R4-design-fix2 for
+R4D-4 (parts), R4D-18 (ordered target cases) and R4D-19 (activation
+capture).
 
 Product authority: SPEC R-07, R-08, R-09, R-10, R-11 and R-12
 ([SPEC.md](../../SPEC.md)). Acceptance: A-11 to A-17, A-19, A-20 to A-26 and
@@ -179,9 +182,9 @@ A capture is taken per unit, never while WoW for that variant runs:
    a session end (it was not running, the computer slept), any unit whose
    files differ from the last capture or applied checkpoint is captured
    once, as kind `found_at_start`. Several missed sessions become one
-   capture **(Q-72)**. Whether it may publish automatically is decided by
-   the authority epoch of §4.1, so a startup capture never publishes a
-   difference that predates this computer becoming the authority (Q-75).
+   the capture is compared with the activation capture or a later capture
+   (§4.1), so it never publishes a difference that predates this computer
+   becoming the authority (Q-75, R4D-19).
 3. **Before a settings or code change by this app.** Before a yield,
    restore, removal or rollback moves a unit's files, the current files are
    captured (kind `before_change`) so that what is replaced is a recovery
@@ -215,7 +218,7 @@ copy". A later complete capture replaces the condition.
 {
   "unit": { "folder": "details", "identity": { "character": ["ERIC", "Argent Dawn", "Thrall"] } },
   "checkpoint": "<CheckpointRef>",
-  "kind": "session_end|found_at_start|before_change",
+  "kind": "session_end|found_at_start|before_change|activation",
   "complete": true,
   "basis": ["<revision hash>"],
   "compared_with_local_seq": 405,
@@ -237,7 +240,12 @@ copy". A later complete capture replaces the condition.
   before the session is not re-published by a later unrelated session.
 - `code_package_hash` pairs the settings with the code that wrote them.
   Paired selection (§4.6) uses it.
-- `local_seq` is a local counter. Order never comes from timestamps.
+- `local_seq` is a local per-unit counter, strictly increasing over every
+  capture and applied checkpoint of the unit. Order never comes from
+  timestamps. The authority epoch (§4.1) compares only values of this
+  counter.
+- Kind `activation` is the capture taken when this computer becomes the
+  unit's authority (§4.1). It is a recovery state and never publishes.
 
 ## 3. Records and on-disk formats
 
@@ -288,7 +296,8 @@ A policy is a full snapshot each time:
     { "folder": "details", "rule": "master", "computer_id": "<laptop>", "enrollment_id": "<laptop enr>" },
     { "folder": "weakauras", "rule": "not_shared" }
   ],
-  "known": { "seen": [], "extra": [] },
+  "known": { "seen": [], "extra": [], "parts": [] },
+  "folders_parts": [],
   "written_unix_ms": 1767225600000
 }
 ```
@@ -296,7 +305,11 @@ A policy is a full snapshot each time:
 - `master` may be `null` (settings sync is set up but nobody publishes
   automatically; pushes still work).
 - `folders` holds only exceptions, keyed by **folder key**, sorted and
-  unique, at most 512 entries. Absent means "follow the default master".
+  unique across inline items and parts (`policy_folders`, contracts.md
+  §1.9). There is no count limit: a policy naming every folder of a large
+  install is written with parts and never refused (R4D-4). A folder key
+  twice, inline or in any part, is `invalid(policy_body)`. Absent means
+  "follow the default master".
   `rule: "master"` names a different authority for that folder.
   `rule: "not_shared"` means the folder's settings are local only on every
   computer. The GUI sets one rule for every folder of an addon at once and
@@ -319,6 +332,7 @@ A policy is a full snapshot each time:
   "kind": "auto|push|choice|restore",
   "checkpoint": "<CheckpointRef>",
   "parents": ["<revision hash>"],
+  "parents_parts": [],
   "policy": ["<policy hash>"],
   "code_package_hash": "<sha256>|null",
   "written_unix_ms": 1767225600000
@@ -332,8 +346,9 @@ A policy is a full snapshot each time:
 - `parents` = plain hashes of revisions of the same unit: the issuer's
   whole basis set for `auto`/`push`/`restore`, or **every head** of every
   head state being resolved for a `choice`. Empty only for the first
-  revision of a unit. At most 64 entries (a technical cap, contracts.md
-  §8); more gives `NeedsHelp(TooManySettingsHeads)`.
+  revision of a unit. Partable (`revision_parents`, contracts.md §1.9):
+  any number of heads is written with parts, never refused, and there is
+  no `TooManySettingsHeads` state (R4D-4).
 - `policy` = the policy heads under which the issuer acted (≤ 8). An
   `auto` revision is valid only if the issuer is the unit's authority
   under **every** listed policy head and those heads agree on it (§5.1).
@@ -418,21 +433,42 @@ For each unit, after each capture:
 | any computer, user chooses "Share my settings" for the unit or addon | current file (captured first, kind `before_change`) | a `push` revision, parents = basis set |
 | any computer, unit diagnosed, not included, or folder `not_shared` | — | nothing published |
 
-**Authority epoch (Q-72 with Q-75).** When this computer first learns a
-policy head under which it is the authority for a unit, it records
-`authority_since` = its current local `local_seq` for that unit (§3.5).
-It loses the epoch when it stops being the authority. A capture may
-publish automatically only if `compared_with_local_seq ≥ authority_since`,
-that is, the difference arose after this computer became the authority.
+**Authority epoch (Q-72 with Q-75, R4D-19).** `local_seq` is one counter
+per unit on this computer; every capture and every applied checkpoint gets
+a value strictly greater than all earlier ones (§2.3).
+
+1. **Activation.** When this computer first learns a policy head under
+   which it is the authority for a unit, it records `authority_since` =
+   the counter's current value (§3.5). It then takes an **activation
+   capture** A (kind `activation`) as soon as WoW for the variant is not
+   running: immediately if it is not running, otherwise at the settled end
+   of the current session. A gets `local_seq > authority_since`. A is never
+   published automatically.
+2. **Pre-existing difference.** If A's checkpoint differs from the
+   checkpoint of the unit's basis (the shared state this computer last
+   applied or published; for an empty basis, from the current head state),
+   `epoch_clean = false`: the unit shows `LocalDifferent` ("Changed here,
+   not shared") until the user chooses "Share my settings" (push) or "Use
+   shared settings" (yield on request). Either sets `epoch_clean = true`.
+   Otherwise `epoch_clean = true` at once.
+3. **Automatic publication** of a later capture C requires `epoch_clean`,
+   C complete, `changed_in_session`, and `C.compared_with_local_seq >
+   authority_since` (strict): the capture C is compared with was itself
+   taken inside the epoch (A or later).
+4. Losing the authority clears `authority_since` and `epoch_clean`; a new
+   activation starts again at step 1.
+
 So:
 
-- a `session_end` capture of a session that started after the change
-  publishes (Q-75);
-- a `found_at_start` capture publishes only if the capture it is compared
-  with was taken inside the epoch. A computer that becomes master while
-  its app is closed, or that had an unshared experiment before becoming
-  master, never publishes that experiment at the next start; it shows
-  `LocalDifferent` with "Share my settings" (T-R4D-startup-after-reassign).
+- a `session_end` capture of a session that started after activation
+  (compared with A or later) publishes (Q-75);
+- a difference that already existed at activation, including an
+  experiment made while the app was closed, never publishes
+  automatically: it is A's difference and stays `LocalDifferent`
+  (T-R4D19-epoch-equal-seq);
+- a session in progress at activation is not published; its end is the
+  activation capture, and the next session publishes. This is the
+  conservative reading of Q-75.
 
 A push is offered only when WoW for the variant is not running (the file
 must be a complete capture). A push for a whole addon issues one revision
@@ -463,21 +499,32 @@ graph** and the **selectable heads** are separate:
    late retirement never deletes a later valid revision.
 4. **Heads** = nodes that no node names as a parent. **Head states** group
    heads by checkpoint ref.
-5. **Basis status.** Let `B` be this computer's basis set, restricted to
-   nodes. "B is an ancestor of H" means every element of B is H or an
-   ancestor of H, over node edges only.
+5. **Basis status (R4D-18).** `B` is this computer's recorded basis set
+   (§2.3), kept locally **as recorded**, with its checkpoint `Cb`; it is
+   never silently shrunk. `Bv` = the elements of B that are nodes. `L` is
+   the live checkpoint and `cH` the checkpoint of a head state H. "X ≤ H"
+   means every element of X is a head of H or an ancestor of one, over node
+   edges only.
 
-Outcomes:
+Outcomes: the cases are **mutually exclusive and evaluated in this
+order**; the first that matches is the target, and no later case is
+consulted.
 
-| Situation | Target |
-|---|---|
-| zero nodes (no valid revision) | `Off` for this unit if there is no policy; otherwise `NoSharedCopy`: nothing applied, local file kept, first `auto`/`push` creates the root |
-| one head state H, live checkpoint == H's | `InSync`; set basis = **all heads of H** |
-| one head state H, B is an ancestor of every head of H | **yield**: capture the current file (`before_change`); if it differs from the basis checkpoint keep the capture as a recovery state; apply H; basis = all heads of H (A-12, A-13) |
-| one head state H, B == heads of H, live differs | `LocalDifferent` ("Changed here, not shared"). Nothing applied |
-| one head state H, B non-empty but not an ancestor of H (B's revision became invalid, or B is on a branch that H does not descend from) | `LocalDifferent` with reason `BasisNotShared`: nothing applied automatically; "Use shared settings" (yield on request, current file kept in recovery) or "Share my settings" (push). Never a silent overwrite |
-| one head state H, B empty (first adoption) | §5.4 |
-| two or more head states | `NeedsDecision(SettingsChoice)` (§4.4) |
+| # | Situation | Target |
+|---|---|---|
+| 1 | any pending revision of the unit (step 2) | `Waiting(MissingParent)` |
+| 2 | zero nodes | `Off` for this unit if there is no policy; otherwise `NoSharedCopy`: nothing applied, local file kept, first `auto`/`push` creates the root |
+| 3 | two or more head states | `NeedsDecision(SettingsChoice)` (§4.4) |
+| 4 | one head state H; B = ∅ (never applied or published here) | first adoption, §5.4 |
+| 5 | one head state H; B ≠ ∅ and (`Bv` = ∅, or not `Bv ≤ H`): the recorded basis became wholly invalid, or is on a branch H does not descend from | `LocalDifferent(BasisNotShared)` (or `InSync` with basis = all heads of H if L == cH): nothing applied automatically; "Use shared settings" (yield on request, current file kept in recovery) or "Share my settings" (push). Never a silent overwrite, never first adoption |
+| 6 | one head state H; `Bv` = heads of H (no newer shared revision) | L == cH: `InSync`. L ≠ cH: `LocalDifferent` ("Changed here, not shared"); nothing applied, whoever the authority is |
+| 7 | one head state H; `Bv ≤ H` and `Bv` ≠ heads of H (H is **strictly newer** than the basis) | L == cH: `InSync`, basis = all heads of H. L == Cb (no local change): **yield**. L ≠ Cb and this computer is not the unit's authority: **yield**, with the current file captured (`before_change`) and kept as a recovery state with the notice "Your changes here were replaced by the shared settings; a recovery copy was kept" (R-08, A-12, A-13). L ≠ Cb and this computer is the authority: `LocalDifferent(ConcurrentPush)`, offering "Share my settings" (a push naming H's heads and its basis) or "Use shared settings"; nothing applied automatically |
+
+A **yield** captures the current file (`before_change`), applies H (§4.3)
+and sets basis = all heads of H. Automatic yield happens only in case 7,
+so an unchanged head never overwrites a local experiment
+(T-R4D18-unchanged-head-local-change), and an invalidated basis is never
+mistaken for first adoption (T-R4D18-invalidated-basis).
 
 **Equal heads (R4D-7).** Concurrent `choice` or `push` revisions with the
 same checkpoint are several heads of **one** head state. They are not
@@ -749,7 +796,7 @@ This section implements [removal.md](removal.md) §6.1:
 | restore to the same unit only | §4.3 applying a recovery checkpoint to the same `SettingsUnit`; any other identity is refused |
 | owned-only; shared or unknown ownership gives `code_only` | §1.2 |
 | paused settings are kept on removal (Q-47) | the pause wins: paused units are not moved; the ack says `kept_paused` and the recovery point lists them as not captured |
-| `paired` / `partial` / `code_only` / `not_applicable` | contracts.md §2.3; `not_applicable` when no removed folder declares saved variables |
+| `paired` / `partial` / `code_only` / `settings_only` / `not_applicable` | derived from the point's code and settings roots (contracts.md §2.3), never stored as a free value; `not_applicable` when no removed folder declares saved variables |
 | settings cleanup on the observing computer before its ack (R4D-5) | [removal.md](removal.md) §6.3 uses §4.3 and these units |
 | no merge, no master needed | removal moves files; it never publishes a revision |
 
@@ -769,7 +816,7 @@ one exists, otherwise leaves the unit empty.
 | `Off` | no policy, or not confirmed on this computer, or account not included | "Settings not shared" |
 | `InSync` | live == head, reported `applied` | "Settings up to date (from Den PC)" |
 | `Waiting` | newer head, blocked by WoW running or by another journal; or `Waiting(MissingParent)` (§4.2) | "New settings from Den PC will be used when WoW closes"; "Waiting for settings information from Den PC" |
-| `LocalDifferent` | live differs from head and is not published (non-authority, outside the authority epoch, or `BasisNotShared`, §4.2) | "Changed here, not shared" with "Share my settings" (and "Use shared settings" for `BasisNotShared`) |
+| `LocalDifferent` | live differs from head and is not published (non-authority, `EpochNotClean`, `BasisNotShared` or `ConcurrentPush`, §4.1–§4.2) | "Changed here, not shared" with "Share my settings" (and "Use shared settings" for `EpochNotClean`, `BasisNotShared` and `ConcurrentPush`) |
 | `NoSharedCopy` | a policy exists but no valid revision of the unit yet | "Not shared yet" |
 | `Paused` | §6 | "Settings paused on this computer" |
 | `NeedsChoice` | §4.4 | "Choose which settings to keep" |
@@ -810,58 +857,51 @@ master-absence part of UG-20.
 
 ## 10. Implementation map
 
-### 10.1 `wow-sync-core` (pure; the `arch` test stays as is)
+File ownership and build order are [contracts.md](contracts.md) §9 only;
+this section says what each part contains.
 
-| Module | Additions |
+### 10.1 Built by step 1, R4-core-contracts
+
+| File | Settings contents |
 |---|---|
-| `toc` | `TocInfo.saved_variables: Vec<String>`, `saved_variables_per_character: Vec<String>`: names from the `## SavedVariables` and `## SavedVariablesPerCharacter` lines, validated as identifiers, metadata only |
-| `ids` | per [contracts.md](contracts.md) §3 (owner R4-core-settings): `Identity { Account(AccountName), Character(AccountName, RealmName, CharName) }`, `SettingsUnit { folder: FolderKey, identity: Identity }`, `CheckpointRef`, `SettingsRoot`; NFC/case diagnoses. No revision or policy id types: records are named by their hash (contracts.md §1.3) |
-| `paths` | `wtf_saved_variables_rel(identity, folder) -> Result<RelPath, PathError>`: builds only the two §1.1 shapes; `classify_wtf_rel(&RelPath) -> WtfPathKind` |
-| **new `settings`** | `SettingsScope { items, diagnoses }`, `ScopeDiagnosis`, `settings_scope(&VariantRoot, &Inventory, &WtfListing, &IncludedAccounts) -> SettingsScope`; `Checkpoint`, `checkpoint_of(unit, &[FileFact]) -> Checkpoint`; `Capture`, `classify_capture(prev, settle_scans, activity) -> CaptureClass {Complete, Suspect, Unchanged}`; `PolicyView`, `policy_heads(&Ledger) -> PolicyView`, `authority_for(&PolicyView, &FolderKey) -> Authority`, `master_state(&PolicyView, &Membership) -> MasterState { Present, Absent { was, why }, NotChosen }` (consumed by ops.md §2.6), `authority_epoch(...)`; `RevisionGraph { nodes, pending, heads, head_states }`, `revision_graph(&Ledger, &SettingsUnit) -> RevisionGraph` (§4.2); `UnitTarget { Apply(HeadState), Keep, LocalDifferent(Reason), NoSharedCopy, Waiting(Reason), NeedsChoice(Vec<HeadState>), Blocked(Reason) }`, `compute_settings_target(...) -> Vec<(SettingsUnit, UnitTarget)>`; `publish_decision(capture, authority, epoch, paused) -> PublishAction`; `paired_selection(...)` (§4.6); `gc_roots(...)` (§7); `resume_preview(...) -> ResumeCase`; `KEEP_SETTINGS_STATES = 3` re-using `plan::KEEP_OWN_STATES` |
-| `authority` (consumer) | adds the `settings-policy` and `settings-revision` kinds with V-POLICY and V-REVISION to the family owned by R4-core-removal (contracts.md §9) |
-| `records` | via `record!`: `SettingsCheckpointManifest`, `SettingsState`, `SettingsLocal`. `ApplyJournal/2` with `SettingsFileOp` and `RecoveryPoint/2` are the shared contract (contracts.md §2), owned by R4-core-removal and consumed here |
-| `plan` | `plan_settings_apply(&UnitTarget, &LiveFacts, &ApplyGate) -> Result<SettingsPlan, PlanBlock>`; new `PlanBlock::SettingsPaused`, `SettingsDiagnosed` |
-| `exec` | `SettingsEffects` port trait (`stage_blob`, `live_fact`, `rename_live_to_recovery`, `rename_staged_to_live`, `gate`), `run_settings_apply`; `recover_interrupted` also settles `settings_ops` with `classify_slots` |
-| `status` | `SettingsStatus` per unit (§9.1), group roll-up in `StatusView`; `Headline` counts settings attention items |
-| `explain` | `Explanation` variants for every row of §9.1 and every Activity entry of §9.2, via `render_named` |
-| `view` | `NextAction::{ChooseSettings, ChooseMaster, ReviewResume, ConfirmSettingsHere, FixSettingsScope}` |
-| `testkit` | synthetic WTF trees, identities, revision ledgers |
+| core `toc.rs` | `TocInfo.saved_variables: Vec<String>`, `saved_variables_per_character: Vec<String>`: names from the `## SavedVariables` and `## SavedVariablesPerCharacter` lines, validated as identifiers, metadata only |
+| core `ids.rs` | `Identity { Account(AccountName), Character(AccountName, RealmName, CharName) }`, `SettingsUnit { folder: FolderKey, identity: Identity }`, `CheckpointRef`, `SettingsRoot`; NFC/case diagnoses (contracts.md §3). No revision or policy id types: records are named by their hash (contracts.md §1.3) |
+| core `paths.rs` | `wtf_saved_variables_rel(identity, folder) -> Result<RelPath, PathError>`: builds only the two §1.1 shapes; `classify_wtf_rel(&RelPath) -> WtfPathKind` |
+| core `kinds.rs` | the `settings-policy` and `settings-revision` DTOs with V-POLICY and V-REVISION (§3.2, §3.3), including `policy_folders` and `revision_parents` parts |
+| core `records.rs` | `SettingsCheckpointManifest`, `SettingsState`, `SettingsLocal` (with `authority_since`, `epoch_clean`, the recorded basis and its checkpoint), `SettingsFileOp`, `ApplyJournal/2`, `RecoveryPoint/2` |
+| core `plan.rs`, `exec.rs` | `PackageApply.settings_ops`; `PlanBlock::SettingsPaused`, `SettingsDiagnosed`; the `SettingsEffects` port (`stage_blob`, `live_fact`, `rename_live_to_recovery`, `rename_staged_to_live`, `gate`); settings slot execution and `recover_interrupted` for `settings_ops` |
+| core `status.rs`, `explain.rs`, `view.rs` | `SettingsStatus` per unit (§9.1) including `LocalDifferent(BasisNotShared | ConcurrentPush | EpochNotClean)`, group roll-up, `Explanation` variants for §9.1 and §9.2, `NextAction::{ChooseSettings, ChooseMaster, ReviewResume, ConfirmSettingsHere, FixSettingsScope}` |
+| core `hooks.rs` | `SettingsHooks` (contracts.md §9.4) |
+| adapters `fs_safe.rs`, `fs_install.rs`, `provider.rs` | the `WtfScope` root with the reparse policy and writes restricted to an approved plan; settings staging and recovery slots; settings stream (`write_atomic`) and checkpoint manifest and blob upload (write-if-absent) |
+| runtime `activity.rs`, `control.rs`, `service.rs` | the session-end event; the commands `SetPolicy`, `ShareSettings`, `PauseSettings`, `ResumeSettings(ResumeChoice)`, `ChooseSettings`, `RestoreSettings`, `ConfirmSettingsHere`, `UseSharedSettings` and the `SettingsHistory` query; the cycle steps below calling `SettingsHooks` |
 
-### 10.2 `wow-sync-adapters`
+### 10.2 Built by step 2, R4-core-settings
 
-- `fs_scan`: `scan_wtf(&VariantRoot, &IncludedAccounts) -> WtfListing`:
-  lists `WTF\Account\*\SavedVariables\*.lua` and
-  `WTF\Account\*\*\*\SavedVariables\*.lua` only, with size and SHA-256; no
-  other file content is read.
-- `fs_safe`: a `WtfScope` root with the reparse policy; write operations
-  restricted to the paths of an approved `SettingsPlan`.
-- `fs_install`: settings staging, journal `settings_ops`, recovery slots,
-  local blob/manifest store.
-- `provider`: write and list the settings stream (`write_atomic`) and
-  checkpoint manifests and blobs (write-if-absent). Authority records and
-  index chunks use the shared authority I/O (contracts.md §9).
-- `localstate`: `SettingsLocal`.
-- `winproc`: unchanged; session end is a transition of the existing
-  activity signal.
+| File | Contents |
+|---|---|
+| core `settings.rs`, `settings_tests.rs` | the `SettingsHooks` implementation: `settings_scope(&VariantRoot, &Inventory, &WtfListing, &IncludedAccounts) -> SettingsScope`; `checkpoint_of`; `classify_capture(prev, settle_scans, activity) -> CaptureClass {Complete, Suspect, Unchanged}`; `policy_heads`, `authority_for(&PolicyView, &FolderKey)`, `master_state(&PolicyView, &Membership) -> MasterState { Present, Absent { was, why }, NotChosen }` (consumed by ops.md §2.6); the authority epoch (§4.1); `revision_graph(&Ledger, &SettingsUnit) -> RevisionGraph { nodes, pending, heads, head_states }`; the ordered target cases of §4.2; `publish_decision`; `paired_selection` (§4.6); `gc_roots` (§7); `resume_preview`; `KEEP_SETTINGS_STATES = 3` re-using `plan::KEEP_OWN_STATES` |
+| adapters `wtf.rs` | `scan_wtf(&VariantRoot, &IncludedAccounts) -> WtfListing`: lists `WTF\Account\*\SavedVariables\*.lua` and `WTF\Account\*\*\*\SavedVariables\*.lua` only, with size and SHA-256; no other file content is read |
+| adapters `settings_store.rs` | local blob and manifest store under `<variant>\.wowsync\settings\`; `SettingsLocal` persistence through the existing `localstate` API (no edit of `localstate.rs`) |
+| runtime `settings_cycle.rs` | the bodies of steps 3s, 5s and 7s and of the settings commands; the `SettingsHistory` query result (the settings history view; `detail.rs` is not touched) |
 
-### 10.3 `wow-sync-runtime`
+Rollback's settings caller is rollback.md §9. Screens of §9.3 are R4-app's.
 
-Cycle (removal.md §1.6 numbering, new steps marked; cycle wiring is
-integrated by R4-core-ops, contracts.md §9): 1 recover (also
-`settings_ops`), 2 admit (also settings stream, contracts.md §6), 2a learn
-authority (also policy and revisions), 3 scan, **3s scan WTF and capture
-(§2)**, 3a observe removals, 4 publish (code state, then settings records,
-index and settings state), 5 target, **5s settings target (§4.2)**, 6
-gate/plan, 7 apply code, **7s apply settings (§4.3)**, 8 status. Settings steps never delay the code
-steps for other addons. `activity.rs` emits the session-end event;
-`control.rs` gains commands `SetPolicy`, `ShareSettings`, `PauseSettings`,
-`ResumeSettings(ResumeChoice)`, `ChooseSettings`, `RestoreSettings`,
-`ConfirmSettingsHere`; `detail.rs` gains the settings history view.
+### 10.3 Cycle
+
+Cycle (removal.md §1.6 numbering, new steps marked; the skeleton is
+step 1's `service.rs`): 1 recover (also `settings_ops`), 2 admit (also
+settings stream, contracts.md §6), 2a learn authority (also policy and
+revisions), 3 scan, **3s scan WTF and capture (§2)**, 3a observe removals,
+4 publish (code state, then settings records, index and settings state), 5
+target, **5s settings target (§4.2)**, 6 gate/plan, 7 apply code, **7s
+apply settings (§4.3)**, 8 status. Settings steps never delay the code
+steps for other addons.
 
 ### 10.4 `wow-sync-app`
 
-`pages.rs`/`model.rs`/`backend.rs`: the screens of §9.3, driven only by
-core `StatusView`, `Explanation` and `NextAction` (no logic in the GUI).
+`pages.rs`/`model.rs`/`backend.rs` (R4-app, step 3): the screens of §9.3,
+driven only by core `StatusView`, `Explanation` and `NextAction` (no logic
+in the GUI).
 
 ## 11. Test obligations
 
@@ -887,7 +927,7 @@ deliberate break that makes it fail).
 | T-S14 | more than three captures per unit: three kept; code history independent | A-16 |
 | T-S15 | pinned states (choice, paired, removal, suspect, needs_help) survive pruning with an exception, then prune back to three | A-17 |
 | T-S16 Neg | low storage: no pinned state deleted; needs-help message | A-17 |
-| T-S17 Neg | account identity settings never applied to another account; character never to another character or realm; case-only differences and NFC collisions diagnosed on NTFS and APFS fixtures (contracts.md T-C11) | A-23 |
+| T-S17 Neg | account identity settings never applied to another account; character never to another character or realm; case-only differences and NFC collisions diagnosed on synthetic NTFS and APFS name fixtures (contracts.md T-C11, offline; native volumes NOT RUN) | A-23 |
 | T-S18 Neg | `config-cache.wtf`, `bindings-cache.wtf`, `macros-cache.txt`, `layout-local.txt`, `AddOns.txt`, `Blizzard_*.lua` never read, moved or written | A-23 |
 | T-S19 Neg | shared declared variable: both packages' units diagnosed, live files untouched, other addons sync | A-23 |
 | T-S20 Neg | file with Lua that would write a file or run a command if executed: bytes copied, nothing executed (no process spawn, no file created) | A-23 |
@@ -896,7 +936,7 @@ deliberate break that makes it fail).
 | T-S23 | WoW starts between file renames: stop before next rename, recovery settles later, no process killed (real temp filesystem) | A-21, A-22 |
 | T-S24 | crash/disk-full/permission failure at every settings op transition: next start reports the actual state; prior files recoverable | A-22 |
 | T-S25 | master retired: no automatic publication for its units, master-absent status and reassign action; no policy record written automatically | A-45 |
-| T-S26 Neg | stale publication from the retired master above its cutoff: not valid, not a graph node, does not reactivate it; a later lower-cutoff retirement invalidates nothing more | A-45 |
+| T-S26 Neg | stale publication from the retired master above its cutoff: not valid, not a graph node, does not reactivate it; a later retirement with a higher cutoff re-validates nothing, one with a lower cutoff invalidates the records above it (MIN cutoff, contracts.md §1.10) | A-45 |
 | T-S27 | concurrent policy changes: only addons whose authority differs are held | A-20 |
 | T-S28 | three replicas with reordered, duplicated and deleted deliveries and a manifest without its blobs: no false `InSync`, no apply of a partial checkpoint | A-20 |
 | T-S29 | removal of an addon with settings: owned files moved to recovery; "undo removal" restores both to the same identity; diagnosed ownership gives code-only with the GUI text | A-09, A-19 |
@@ -909,7 +949,10 @@ deliberate break that makes it fail).
 | T-R4D8-retired-basis | this computer's basis revision is from a master later retired with a cutoff below it; a valid push descends from it | the basis is invalid; the push stays a node; target is `LocalDifferent(BasisNotShared)` with "Use shared settings", never a silent overwrite | A-20, A-45 |
 | T-R4D8-undo-then-next-session | a `restore` revision, then the master's next session | the restore parents the basis set; the next `auto` parents the restore; one head state | A-18, A-20 |
 | T-R4D8-zero-heads | policy set, no valid revision; and every revision invalid | `NoSharedCopy`; nothing applied or deleted; first `auto`/`push` creates the root | A-20 |
-| T-R4D-startup-after-reassign | laptop has an unshared experiment, then becomes master while its app is closed; app starts (found_at_start); also a session completed right after reassignment | the experiment is not published (`LocalDifferent`, "Share my settings"); a session after the reassignment publishes | A-11, A-12 |
+| T-R4D19-epoch-equal-seq | last complete capture has `local_seq` 5; app closed; the laptop's file changes (experiment); the laptop is made master elsewhere; app starts (`authority_since` = 5, `found_at_start` compared with 5); also: WoW running at activation; and a later genuine session | the experiment is not published: the activation capture differs from the basis, `epoch_clean = false`, `LocalDifferent(EpochNotClean)` with "Share my settings" / "Use shared settings"; the session running at activation is not published; after the user's choice, the next completed session (compared with a capture above 5) publishes; the A-38 control `>=` instead of `>` makes it fail | A-11, A-12, A-20 |
+| T-R4D18-unchanged-head-local-change | one head h, basis {h}, laptop (non-authority) changes its file; no new revision; then the master publishes h2 descending from h | before h2: `LocalDifferent` (case 6), file untouched, nothing published; after h2: yield (case 7) with the laptop's file kept in recovery and the notice; with the laptop as authority instead: `LocalDifferent(ConcurrentPush)`, nothing applied | A-12, A-14, A-20 |
+| T-R4D18-invalidated-basis | basis {r}, r later invalid (issuer retired below r); valid head h not descending from any valid basis element; live differs from h | case 5 `LocalDifferent(BasisNotShared)`; never first adoption (§5.4), never a silent overwrite; "Use shared settings" yields with recovery | A-20, A-45 |
+| T-R4D4-policy-parts | a policy with 1 000 folder exceptions and a choice revision with 100 parents | written with `policy_folders` / `revision_parents` parts, valid on every peer, never refused; a folder repeated in two parts is `invalid(policy_body)` | A-11, A-14, A-20 |
 | T-S-paired-selection | restore code X with: an exact `/2` pairing; only local history with X's hash; two unordered remote revisions with X's hash; none | exact pairing; newest local; code-only with both offered explicitly; code-only with the A-19 warning. Never by comparing peers' `local_seq` or clocks | A-18, A-19 |
 | T-S-retention-roots | paired recovery roots, unresolved-choice heads, live removal roots and provider-location roots across prune and restart; a 16 MiB+ ledger (contracts.md T-C09) | no root pruned; unrooted checkpoints become collector candidates only; nothing claims provider recovery for them | A-16, A-17 |
 | T-S-capture-failures | read error, disk full while storing blobs, crash between blob and manifest | no partial state recorded; previous three states intact; `CaptureFailed` shown | A-17, A-22 |
@@ -921,5 +964,7 @@ automatically (T-S06 must fail); pick the newer timestamp for a choice
 settings rename (T-S23); auto-elect a master on retirement (T-S25);
 collapse equal heads to one representative parent (T-R4D7); treat a
 missing parent as a root (T-R4D8-child-before-parent); key policy by
-package key (T-R4D6); publish `found_at_start` captures regardless of the
-epoch (T-R4D-startup-after-reassign).
+package key (T-R4D6); publish captures compared with a pre-activation
+capture (T-R4D19-epoch-equal-seq); yield on an unchanged head
+(T-R4D18-unchanged-head-local-change); shrink an invalid basis to empty
+(T-R4D18-invalidated-basis).
