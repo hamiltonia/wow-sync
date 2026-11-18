@@ -1,8 +1,11 @@
 # Rollback and rejected releases
 
-Status: **run-004 design, revised by packet
-[R4-design-fix](../runs/run-004/packets/R4-design-fix.md).** It fixes R4D-9
-and the rollback parts of R4D-1, R4D-4 and R4D-10 of the
+Status: **run-004 design, revised by packets
+[R4-design-fix](../runs/run-004/packets/R4-design-fix.md) and R4-design-fix2
+(after the [recheck](../runs/run-004/evidence/R4-design-recheck.md)).** It
+fixes R4D-9, R4D-20 (folder-changing rollback), the rollback part of
+R4D-21 (per-folder constraints) and the rollback parts of R4D-1, R4D-4 and
+R4D-10 of the
 [R4-design-review](../runs/run-004/evidence/R4-design-review.md). **Not
 implemented.** Nothing here changes the running slice: its recovery points
 stay local (Q-18) and its target has no rejection step. Choices marked
@@ -20,9 +23,9 @@ stay local (Q-18) and its target has no rejection step. Choices marked
 
 This file defines only the bodies of the `rejection` and `lift` kinds, the
 recovered-target constraint and the rollback behaviour. Where it seems to
-differ from contracts.md, contracts.md wins. Phase C owner:
-**R4-core-settings**, after the C-AUTH, C-JRN, admission and compose
-foundations are merged (contracts.md §9).
+differ from contracts.md, contracts.md wins. Phase C: the shared parts are
+built by **R4-core-contracts**, the rollback behaviour by
+**R4-core-settings** (contracts.md §9, this file §9).
 
 Product authority: SPEC R-10, R-11 and R-12 ([SPEC.md](../../SPEC.md)).
 Acceptance: A-16 to A-20, A-23, A-25, A-26 and A-45
@@ -49,29 +52,46 @@ history:
 
 1. The user picks an earlier history state R0 (current plus two previous,
    [apply.md](apply.md) §2.4) and chooses "Go back to this version…". The
-   option is shown only if the group-wide preconditions hold (§2.3) and R0
-   has the same folder keys as the current release R1. Otherwise the GUI
-   explains why ("Version 2.0 used different folders, so it can't be
-   restored for the whole group").
+   option is shown only if the group-wide preconditions hold (§2.3). R0
+   may have different folder keys from the current release R1 (an
+   ordinary release that added or dropped a folder, R4D-20). Let F0 and F1
+   be their folder keys; F = F0 ∪ F1.
 2. The confirmation names R1 and R0 and the scope: "Version 2.1 will be
    blocked on all your computers for <variant>. Version 2.0 will be
-   installed everywhere." It also says which settings will be restored
-   (§4).
-3. On confirmation the app writes a **rejection** of R1 (§2.1) and, per
-   settings unit to restore, a settings `restore` revision (§4).
-4. It installs R0 with one `rollback` operation (`apply-journal/2`,
-   contracts.md §2.2): the WoW-not-running gate, the journal and the game
-   check before every live rename apply as for any apply. R1 moves into a
-   `/2` recovery point with the right `paired` value (contracts.md §2.3).
-   R0 comes from the local recovery point, or from provider trees if some
-   member's state or a §7 upload still has it.
-5. It publishes its code state, whose authority index lists the rejection,
-   and its settings state.
-6. Every other computer learns the rejection (contracts.md §1.12),
-   computes target R0 (§3), and applies R0 when WoW is not running there.
+   installed everywhere." If the folders differ it also says "Details_Extra
+   (added in 2.1) will be removed and kept in recovery" or "Details_Old
+   (removed in 2.1) will be put back". It also says which settings will be
+   restored (§4).
+3. On confirmation the app reserves its next seq and builds, all in one
+   `rollback` journal's `pending_records` (contracts.md §2.2):
+   - a **rejection** of R1 (§2.1) with `folders` = F;
+   - if F1 \ F0 ≠ ∅: a **removal** with `evidence: rollback`, `rejection`
+     = that rejection's hash, naming F1 \ F0 with R1's trees, plus this
+     computer's own `removed` ack for it ([removal.md](removal.md) §2.3);
+   - if F0 \ F1 ≠ ∅: a **re-add** with `evidence: rollback`, naming
+     F0 \ F1 with R0's trees, whose `known` covers the folder-drop
+     removals that removed them;
+   - per settings unit to restore, a settings `restore` revision (§4).
+4. It installs R0 with that one `rollback` operation (`apply-journal/2`):
+   `replace` for F0 ∩ F1, `install` for F0 \ F1, `remove` for F1 \ F0
+   (listing the new removal in `removals`). The WoW-not-running gate, the
+   journal and the game check before every live rename apply as for any
+   apply. R1 moves into a `/2` recovery point with the derived `paired`
+   value (contracts.md §2.3). R0 comes from the local recovery point, or
+   from provider trees if some member's state or a §7 upload still has it.
+   The records are written only after verify; if the op rolls back, none
+   is written.
+5. It publishes its code state, whose authority index lists the new
+   records, and its settings state.
+6. Every other computer learns the records (contracts.md §1.12),
+   computes target R0 per folder (§3): F1 \ F0 removed by the removal,
+   F0 \ F1 added by the re-add, F0 ∩ F1 constrained to R0's trees, and
+   applies it when WoW is not running there.
 
 Rollback never touches other folders, and never another variant: records
-live in the group folder, and one group is one variant (A-18).
+live in the group folder, and one group is one variant (A-18). A
+folder-changing rollback also needs `removal/1` on every non-retired
+member (Q-84 PENDING OWNER default, §2.3).
 
 ## 2. Records
 
@@ -85,26 +105,35 @@ validity (contracts.md §1.3, §1.4, §1.11). Neither has an `id` field.
   "schema": "wowsync.rejection/1",
   "group_id": "…",
   "issuer": { "computer_id": "…", "enrollment_id": "…", "issued_at_seq": 60 },
-  "folders": ["details"],
+  "folders": ["details", "details_extra"],
   "rejected": { "package_hash": "<sha256>", "version_label": "2.1",
-                "folders": [ { "key": "details", "tree": "<sha256>" } ] },
+                "folders": [ { "key": "details", "tree": "<sha256>" },
+                             { "key": "details_extra", "tree": "<sha256>" } ] },
   "recovered": { "package_hash": "<sha256>",
                  "folders": [ { "key": "details", "tree": "<sha256>" } ] },
-  "considered": [ "<package hash>" ],
+  "considered": [ { "package_hash": "<sha256>",
+                    "folders": [ { "key": "details", "tree": "<sha256>" } ],
+                    "holders": ["<enrollment id>"] } ],
   "settings": "paired|partial|code_only|not_applicable",
-  "known": { "seen": [], "extra": [] },
+  "known": { "seen": [], "extra": [], "parts": [] },
+  "considered_parts": [],
   "written_unix_ms": 1767225600000
 }
 ```
 
-- `folders`: the folder keys of the addon. It is the overlap scope for
-  coverage and constraint composition (contracts.md §1.8, §4.2).
+- `folders`: F = the union of R1's and R0's folder keys. It is the scope
+  for coverage and constraint composition, per folder (contracts.md §1.8,
+  §4.2).
 - `rejected`: the exact content rejected (Q-78 PENDING OWNER). Its
   `version_label` is the untrusted display string allowed by contracts.md
   §1.4. It is used for display and for the look-alike hold only (§3.3).
-- `recovered`: the exact content the user chose (§3.1).
-- `considered`: the package hash of every candidate for `folders` that the
-  issuer knew at the time. Used by the newer-release notice (§3.1).
+  Level 2 uses contracts.md §4.2 `matches` against it.
+- `recovered`: the exact content the user chose (§3.1), possibly with
+  fewer or other folders than `rejected`.
+- `considered`: every candidate for `folders` that the issuer knew at the
+  time, with its folder trees (same item type as the code-choice
+  `considered`, contracts.md §5.2; partable). Used by the newer-release
+  notice (§3.1).
 - `settings`: the outcome of §4, shown in history and audit. The
   restore revisions are ordinary settings revisions and are not referenced.
 - `known`: what the issuer had learned (contracts.md §1.8). It decides
@@ -113,12 +142,14 @@ validity (contracts.md §1.3, §1.4, §1.11). Neither has an `id` field.
 
 **V-REJECTION** (V-KIND):
 1. `folders` non-empty, sorted, unique, ≤ 256.
-2. The folder keys of `rejected.folders` and of `recovered.folders` both
-   equal `folders`.
+2. The union of the folder keys of `rejected.folders` and
+   `recovered.folders` equals `folders`; each list is non-empty, sorted
+   and unique.
 3. Each `package_hash` is the package hash of its folder trees, and
    `rejected.package_hash ≠ recovered.package_hash`.
-4. `considered` ≤ 64 entries (technical cap, contracts.md §1.9), sorted,
-   unique, containing both package hashes.
+4. `considered` (inline plus parts, contracts.md §1.9) is sorted, unique
+   by package hash, and contains entries matching `rejected` and
+   `recovered`.
 5. `version_label` ≤ 128 bytes of valid UTF-8.
 
 ### 2.2 Lift (`wowsync.rejection-lift/1`)
@@ -130,7 +161,7 @@ validity (contracts.md §1.3, §1.4, §1.11). Neither has an `id` field.
   "issuer": { "computer_id": "…", "enrollment_id": "…", "issued_at_seq": 75 },
   "folders": ["details"],
   "lifts": [ "<rejection hash>" ],
-  "known": { "seen": [], "extra": [] },
+  "known": { "seen": [], "extra": [], "parts": [] },
   "written_unix_ms": 1767225600000
 }
 ```
@@ -145,7 +176,15 @@ rejections' `folders`.
 - Two lifts naming the same rejection are harmless: the rejection is
   lifted once.
 - A lift ends only the named rejections and their recovered-target
-  constraints. It affects no removal, choice or settings record.
+  constraints. It affects no removal, choice or settings record. In
+  particular it does not end a rollback-evidence removal (removal.md
+  §2.3).
+- **"Allow again…" after a folder-changing rollback** writes the lift and,
+  in the same act, a re-add (`user_add_back`) of R1's added folders
+  F1 \ F0 whose `known` covers the rollback removal, so R1 can be complete
+  again. If R1 then wins ordinary selection while some of its folders are
+  still missing on a computer, that computer gets `PartialCandidate`
+  (contracts.md §5.1).
 - "Allow again…" is the only GUI action that writes a lift. Any
   non-retired member may write one (Q-79).
 
@@ -158,11 +197,12 @@ rejections' `folders`.
   the cutoff, contracts.md §1.10).
 - **Q-84 PENDING OWNER default: block group rollback** when any
   non-retired member's newest admitted code state does not list
-  `rejection/1` in `features` (contracts.md §1.13). "Go back to this
-  version…" is then disabled with "Laptop runs an older WoW Sync that
-  can't block versions. Update WoW Sync on Laptop first." There is no
-  "this computer only" variant: ordinary selection would reinstall R1 at
-  the next cycle.
+  `rejection/1` in `features` (contracts.md §1.13), and, for a
+  folder-changing rollback (§1), also when one lacks `removal/1`.
+  "Go back to this version…" is then disabled with "Laptop runs an older
+  WoW Sync that can't block versions. Update WoW Sync on Laptop first."
+  There is no "this computer only" variant: ordinary selection would
+  reinstall R1 at the next cycle.
 - A member that is downgraded after a rollback publishes states without
   `rejection/1`. It may reinstall R1 locally, because it ignores
   rejections. It is shown as "runs an older WoW Sync that does not apply
@@ -173,33 +213,35 @@ rejections' `folders`.
 
 Rollback fills two levels of `target::compose` (contracts.md §4.1):
 
-- **Level 2, rejection.** A candidate whose package hash equals
-  `rejected.package_hash` of an active rejection over overlapping folders
-  is never a candidate, never a source and never kept as a target. A
-  computer whose installed copy is rejected is never a source of it.
-- **Level 6, recovered target**, composed with code choices by contracts.md
-  §4.2 and defined below.
+- **Level 2, rejection.** A candidate that `matches` (contracts.md §4.2)
+  `rejected` of an active rejection is never a candidate, never a source
+  and never kept as a target for the common folders. A computer whose
+  installed copy is rejected is never a source of it.
+- **Level 6, recovered target**, composed per folder with code choices by
+  contracts.md §4.2 and defined below.
 
 ### 3.1 The recovered-target constraint
 
 Rejecting R1 alone would let ordinary selection pick another release newer
 than R0 that the user saw and did not choose (for example 2.1.5 on a third
-computer). So each active rejection X adds the constraint "install
-`X.recovered`" on `X.folders`.
+computer). So each active rejection X adds, **for each folder f of
+`X.recovered.folders`**, the constraint "install `X.recovered`'s tree for
+f". Folders of `X.folders` that R0 lacks (F1 \ F0) carry no tree; they are
+removed by the rollback removal (§1) instead.
 
-- **Live constraints.** X's constraint is live unless another valid
-  constraint record on overlapping folders covers X through its `known`
-  (contracts.md §4.2): a later rejection, a code choice (keep or resume) or
-  a re-add. A resume therefore ends the recovered target but not the
-  rejection itself.
-- **Recovered chain.** If `X.recovered` is itself rejected by active
-  rejections Y1…Yn, X's constraint stands for their recovered targets
+- **Live constraints, per folder.** X's constraint is live for f unless
+  another valid code choice, rejection or re-add that names f covers X
+  through its `known` (contracts.md §4.2). A record covering X for some
+  folders leaves X live for the others (R4D-21). A resume therefore ends
+  the recovered target for its folders but not the rejection itself.
+- **Recovered chain.** If `X.recovered` is itself rejected for f by active
+  rejections Y1…Yn, X's constraint for f stands for their recovered trees
   instead, repeated with a visited set (no cycles). Rejected contents are
-  dropped. If nothing remains, X imposes no constraint and ordinary
+  dropped. If nothing remains, X imposes no constraint on f and ordinary
   selection among non-rejected candidates applies.
-- **Composition.** The resulting contents of all live constraints are
-  composed by contracts.md §4.2: one content installs it; several
-  different contents give `NeedsDecision(RollbackTargetsDiffer)`.
+- **Composition.** The resulting trees of all live constraints for f are
+  composed by contracts.md §4.2: one tree installs it; several
+  different trees give `NeedsDecision(RollbackTargetsDiffer)`.
 - **Unavailable target.** If the constrained content has no source (no
   local recovery point, no member's admitted state and no §7 upload), the
   folders get `NeedsDecision(RecoveredUnavailable)` (contracts.md §5.1):
@@ -215,8 +257,8 @@ computer). So each active rejection X adds the constraint "install
   raises the non-blocking notice `NewerAfterRollback` (contracts.md §5.1):
   "Details 2.2 is available. You went back to 2.0 on <date>." Options:
   "Use 2.2" (a keep whose `known` covers X) or "Stay on 2.0" (a local
-  dismissal of that candidate only). Candidates in `considered` never raise
-  the notice.
+  dismissal of that candidate only). Candidates that match a `considered`
+  entry never raise the notice.
 
 ### 3.2 Concurrent, late and conflicting records (R4D-9)
 
@@ -286,10 +328,11 @@ For each settings unit of the folders F on the issuing computer
    only."
 4. If none is found: the unit's current settings are not touched.
 
-The rejection's `settings` field and the recovery point's `paired` field
-(contracts.md §2.3) record `paired` (every unit restored), `partial`
-(some), `code_only` (none) or `not_applicable` (the addon has no settings
-units).
+The recovery point's `paired` value is **derived** from its code and
+settings roots (contracts.md §2.3), never set by this flow; the
+rejection's `settings` field copies it: `paired` (every unit restored),
+`partial` (some), `code_only` (none) or `not_applicable` (the addon has no
+settings units).
 
 **Afterwards** the app shows a summary that keeps the outcomes apart
 (R-10, A-19):
@@ -354,23 +397,31 @@ does not reject settings; it restores them (§4).
 
 All of these are GUI flows; none needs a terminal (A-26).
 
-## 9. Implementation map (owner R4-core-settings)
+## 9. Implementation map
 
-| Crate / module | Additions | Consumes |
-|---|---|---|
-| core `records` | `RejectionRecord`, `RejectionLiftRecord` bodies via `record!`, V-REJECTION, V-LIFT | C-AUTH dispatch (R4-core-removal) |
-| core **new `reject`** | `active_rejections(&Ledger, &[FolderKey]) -> Rejections`; `is_rejected(&Rejections, &PackageHash) -> bool`; `recovered_constraints(&Rejections, &Ledger) -> Vec<Constraint>` (chain, coverage); `lookalike(&Rejections, &str, &PackageHash) -> bool`; `newer_after_rollback(...)` | `authority::Known`, ledger |
-| core `target` | the level-2 and level-6 rows of `compose` call `reject` | `target::compose` (R4-core-removal) |
-| core `settings` | the rollback caller of paired selection and `restore` revisions | settings module (same owner) |
-| core `plan` / `exec` | a `rollback` operation that bundles code and settings moves | C-JRN (R4-core-removal) |
-| core `status` / `explain` / `view` | `PackageStatus::Blocked`, rollback summaries, `NextAction::{AllowAgain, GoBack}` | the integration of R4-core-ops |
-| adapters `provider` | §7 upload of a recovery point's trees | authority I/O (R4-core-removal) |
-| runtime `control.rs` | `Rollback { folders, to }`, `AllowAgain { rejections }`, `UndoSettingsChange { unit, revision }` | runtime cycle and `decide` (R4-core-ops) |
-| app | screens of §8 | — |
+File ownership and build order are [contracts.md](contracts.md) §9 only.
 
-The decision reasons of §3 are part of the code-choice family owned by
-R4-core-ops (contracts.md §5.1). This packet produces the items; it does
-not extend the family's record.
+**Built by step 1, R4-core-contracts:** the rejection and lift DTOs with
+V-REJECTION and V-LIFT (`kinds.rs`); the `rollback` journal kind with
+mixed replace/install/remove actions and `pending_records` (`records.rs`,
+`exec.rs`); the level-2 and level-6 hook calls in `target::compose` and
+the `RollbackTargetsDiffer`, `RecoveredUnavailable`, `LookalikeOfRejected`
+and `NewerAfterRollback` reasons (`target.rs`); `PackageStatus::Blocked`,
+`NextAction::{AllowAgain, GoBack}` and the rollback explanations
+(`status.rs`, `explain.rs`, `view.rs`); the `Rollback { folders, to }`,
+`AllowAgain { rejections }` and `UndoSettingsChange { unit, revision }`
+control commands (`control.rs`); the §7 provider upload IO
+(`provider.rs`).
+
+**Built by step 2, R4-core-settings** (with the settings files):
+
+| File | Contents |
+|---|---|
+| core `reject.rs`, `reject_tests.rs` | `ConstraintHooks::rejected` and the rejection half of `live_constraints`: `active_rejections`, per-folder recovered constraints with the chain and coverage, `lookalike`, `newer_after_rollback`; `plan_rollback(R1, R0) -> PackageApply` building the rejection, rollback removal/re-add and own ack in `pending_records` (§1); the allow-again lift and re-add (§2.2) |
+| runtime `rollback_flow.rs` | the `Rollback` and `AllowAgain` command bodies, paired settings selection through `settings.rs` (§4), the §7 upload trigger |
+
+GUI screens of §8 are R4-app's. The decision reasons of §3 belong to the
+code-choice family (contracts.md §5.1); this packet produces the items.
 
 ## 10. Test obligations
 
@@ -391,11 +442,13 @@ not extend the family's record.
 | T-R13 | history after rollback: current plus two previous, blocked state labelled, paired settings pinned while their recovery point exists | A-16, A-17 |
 | T-R14 | "Undo this settings change" writes a `restore` revision and no rejection; the master's later identical capture is shared and explained (Q-82 default) | A-18 |
 | T-R15 Neg | rejection issued after its issuer's retirement cutoff: invalid; one issued before it stays valid | A-45 |
-| T-R16 Neg | malformed rejection, `version_label` over 128 bytes, a label with markup, colour codes or Lua: refused, or shown as plain text; folder sets that differ between `rejected` and `recovered`: invalid | A-23 |
+| T-R16 Neg | malformed rejection, `version_label` over 128 bytes, a label with markup, colour codes or Lua: refused, or shown as plain text; `rejected` ∪ `recovered` keys ≠ `folders`: invalid | A-23 |
 | T-R17 | WoW starts during a rollback apply: stops before the next rename; no process killed | A-21, A-22 |
 | T-R18 (GUI) | go back, summary (paired and code-only), allow again, undo settings change, the three decisions, all without a terminal | A-25, A-26 |
-| T-R19 Neg | Q-84 default: a non-retired member without `rejection/1` disables group rollback with the named reason; no record is written; a downgraded member after a rollback is never counted as confirmed | A-18 |
-| T-R20 | R0 with different folder keys than R1: "Go back" not offered, with the reason | A-18 |
+| T-R19 Neg | Q-84 default: a non-retired member without `rejection/1` (or, for a folder-changing rollback, without `removal/1`) disables group rollback with the named reason; no record is written; a downgraded member after a rollback is never counted as confirmed | A-18 |
+| **T-R4D20-rollback-added-folder** | R1 = {details, details_extra} (2.1 added a folder), R0 = {details}; roll back on A; B and C hold R1; crash at every slot of the `rollback` journal | one journal: replace `details`, remove `details_extra`; after verify the rejection, a `rollback` removal of `details_extra` and A's own ack are written from `pending_records`, none if the op rolled back; B and C end with R0 and `details_extra` in recovery; "Allow again…" writes a lift plus a re-add of `details_extra`, and R1 becomes eligible and complete | A-18, A-20, A-22 |
+| **T-R4D20-rollback-dropped-folder** | R1 = {details} (2.1 dropped `details_old` with a `folder_drop` removal), R0 = {details, details_old}; roll back on A; crash at every slot | one journal: replace `details`, install `details_old`; a `rollback` re-add of `details_old` covering the drop removal; every computer reinstalls `details_old` with R0's tree; a later unrelated removal of `details_old` still wins | A-18, A-20, A-22 |
+| **T-R4D21-choice-over-rollback** | contracts.md §10: rejection on {a, b}; a later keep on {a} covering it | a follows the keep; b keeps the recovered tree; same result with a and b grouped or separate locally | A-18, A-20 |
 | **T-R4D9-concurrent-rollbacks** | each row of §3.2 in both delivery orders on three computers: same target; different targets (decision, R1 spreads nowhere); chain R2→R1→R0; opposite rejections (ordinary or only-blocked hold); late delivery of the covered rejection; unavailable target (`RecoveredUnavailable`, nothing changed on disk); concurrent lifts; lift vs new rejection; rollback vs removal (removed everywhere, rejection kept, re-add selects non-rejected). Same target on every computer in every order | A-18, A-20 |
 | **T-R4D9-choice-vs-rollback** | a keep that covers a rejection replaces the recovered target; a rollback that covers a keep replaces it; concurrent keep and rollback with different contents give a decision; a keep of rejected content is inert; resume ends the recovered target and R1 stays rejected | A-18, A-20 |
 
