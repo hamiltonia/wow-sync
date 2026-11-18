@@ -170,6 +170,37 @@ Answers from an interactive review session with the orchestrator.
   - UI direction.
   - Run-003 scope and credit ceiling.
 
+### D-23: Run-004 direction and pending answers (2026-11-17)
+
+Answers from an interactive session with the orchestrator after run-003
+closed.
+
+- **Run-004 scope:**
+  - removal (after the R3D-13 re-review);
+  - settings sync (master, exceptions, peer push);
+  - rollback;
+  - resolving decisions in the GUI;
+  - retiring a computer;
+  - notifications and the update notice;
+  - diagnostics export.
+
+  The Windows installer is not in scope.
+- **Ceiling:** 10,000 AIU for run-004. The run plan itself still needs owner
+  approval before the swarm launches.
+- **R3D-13:** simplify. Under D-21, any removal wins and conflicting
+  removal records merge into one removal. The simplified design must be
+  independently re-reviewed before it is implemented.
+- **Real-PC checks (Q-3, Q-23):** later. Run-004 must not depend on them.
+- **DA-1:** yes. All of the owner's computers use the same Dropbox account.
+- **DA-2 to DA-4:** still open. The owner asked for more explanation.
+- **UQ-1:** yes. When a guided reconfirmation is pending, promote the
+  dashboard headline to "Review needed".
+- **UQ-2:** yes. Core exposes a typed scope for a pending decision.
+- **Tray badge:** keep the status badge on the brand tray icon.
+- **A-31:** numeric budgets deferred until closer to release.
+- **Mac:** the owner has a Mac available for real runtime testing (macOS
+  runtime and A-29 memory on macOS).
+
 ### D-22: App icon art (2026-11-17)
 
 - The owner provided app art: a PNG and an ICO with sizes from 16 to 256 px.
@@ -313,4 +344,5 @@ phase D barrier.
 | 2026-11-16 | D-20 | Run-003 plan approved as written | `b420717` |
 | 2026-11-17 | D-21 | Prototype approved; Q-21 no interface gating; removal wins; UI defaults; Dropbox API spike | `f92a61a` |
 | 2026-11-17 | D-20 | Restored the D-20 heading that `f92a61a` accidentally deleted (R3-review RV-10) | `ee244ef` |
-| 2026-11-17 | D-22 | App icon art committed and used as is; owner accepts trademark risk | this commit |
+| 2026-11-17 | D-22 | App icon art committed and used as is; owner accepts trademark risk | `8601907` |
+| 2026-11-17 | D-23 | Run-004 scope and 10,000 AIU ceiling; R3D-13 simplify; DA-1 yes; UQ-1/UQ-2 yes; A-31 deferred; Mac available | this commit |
