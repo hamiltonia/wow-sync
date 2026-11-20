@@ -1262,6 +1262,7 @@ tier = "offline"
 tests = [
   "removed_ui::tests::lines_name_the_remover_and_who_is_still_awaited",
   "removed_ui::tests::nobody_awaited_means_no_waiting_line_and_empty_means_the_empty_text",
+  "removed_ui::tests::restore_names_the_removal_of_the_same_row_and_a_retired_computer_cannot",
 ]
 
 [[case]]

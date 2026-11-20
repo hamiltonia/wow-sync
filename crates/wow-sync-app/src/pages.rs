@@ -834,15 +834,20 @@ impl Shell {
             if let Some(a) = &r.awaiting {
                 body.push(self.muted(a).into_any_element());
             }
-            body.push(
-                self.btn_off(
-                    &format!("removed-restore-{i}"),
-                    "Restore",
-                    crate::removed_ui::RESTORE_UNAVAILABLE,
-                    cx,
-                )
-                .into_any_element(),
-            );
+            body.push(match crate::removed_ui::restore_action(&self.w, i) {
+                Ok(a) => self
+                    .btn(
+                        &format!("removed-restore-{i}"),
+                        "Restore",
+                        Bk::Secondary,
+                        Act::Group(a),
+                        cx,
+                    )
+                    .into_any_element(),
+                Err(why) => self
+                    .btn_off(&format!("removed-restore-{i}"), "Restore", &why, cx)
+                    .into_any_element(),
+            });
             col = col.child(self.panel(&r.title, body));
         }
         col.into_any_element()

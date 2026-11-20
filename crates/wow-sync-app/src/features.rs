@@ -476,6 +476,8 @@ pub struct FeatureData {
     pub history: Vec<crate::rollback_ui::ReleaseRow>,
     /// Removals the group has recorded, for the Removed section.
     pub removed: Vec<wow_sync_runtime::RemovedRow>,
+    /// The removal record of each `removed` row (same index), which Restore names.
+    pub removal_hashes: Vec<Sha256>,
     /// Name of a live member whose WoW Sync can't block versions (Q-84), which blocks go-back.
     pub older_peer: Option<String>,
     /// Name of the settings master, when one is chosen.
@@ -503,6 +505,7 @@ impl Default for FeatureData {
             allow_again: Vec::new(),
             history: Vec::new(),
             removed: Vec::new(),
+            removal_hashes: Vec::new(),
             older_peer: None,
             master: None,
             review_needed: false,
@@ -522,6 +525,7 @@ pub fn apply_snapshot(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot)
     f.review_needed = s.review_needed;
     f.update = s.update.clone();
     f.removed = s.removed.clone();
+    f.removal_hashes = s.removal_hashes.clone();
     apply_peers(f, s);
     let retired_on = |enrollment: &wow_sync_core::ids::EnrollmentId| {
         s.peers
