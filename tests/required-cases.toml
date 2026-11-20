@@ -995,6 +995,16 @@ tier = "offline"
 tests = [
     "e2e::tests::settings_policy_and_push_commands_record_explicit_intent_only",
 ]
+
+[[case]]
+id = "R4-integrate:settings-apply"
+tier = "offline"
+tests = [
+    "e2e::tests::the_masters_settings_change_reaches_a_peer",
+    "e2e::tests::a_per_addon_exception_is_respected",
+    "e2e::tests::a_non_master_routine_write_yields_to_the_master_and_keeps_a_recovery_copy",
+    "e2e::tests::with_no_approved_cap_nothing_of_settings_is_read_published_or_applied",
+]
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag

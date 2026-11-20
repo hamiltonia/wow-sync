@@ -7,16 +7,25 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
+use crate::decisions::{write_own_record, Plane};
+use wow_sync_adapters::authority_store;
 use wow_sync_adapters::fs_safe::WtfScope;
+use wow_sync_adapters::localstate::LocalState;
+use wow_sync_adapters::provider::ProviderRoot;
 use wow_sync_adapters::settings_store::SettingsStore;
+use wow_sync_adapters::sysinfo::{now_unix_ms, random_id_hex};
 use wow_sync_adapters::wtf::scan_wtf;
 use wow_sync_adapters::FsError;
+use wow_sync_core::authority::AuthorityRecord;
 use wow_sync_core::hash::sha256;
-use wow_sync_core::ids::{CheckpointRef, OpId, SettingsUnit, Sha256};
+use wow_sync_core::ids::{CheckpointRef, GroupId, OpId, SettingsUnit, Sha256};
+use wow_sync_core::kinds::{EnrollmentRef, Issuer};
+use wow_sync_core::layout;
+use wow_sync_core::ledger::derive;
 use wow_sync_core::plan::{ExpectedLive, PackageApply};
 use wow_sync_core::records::{
-    encode, CheckpointFile, Location, OpKind, RecoverySlot, RootState, SettingsCheckpointManifest,
-    SettingsFileOp, SettingsRoot,
+    decode, encode, CheckpointFile, LocalUnitState, Location, OpKind, RecoverySlot, RootState,
+    SettingsCheckpointManifest, SettingsFileOp, SettingsLocal, SettingsRoot,
 };
 use wow_sync_core::settings::{
     settings_scope, DeclaringFolder, OwnedFile, SettingsScope, WtfEntry,
@@ -194,6 +203,398 @@ impl<'a> EpochStore<'a> {
         .expect("plain data serializes");
         self.state.write_atomic(&epoch_name(&self.group), &bytes)
     }
+}
+
+/// What a peer's captured checkpoint of one settings file is made of (single-file units).
+fn manifest_blob(
+    provider: &ProviderRoot,
+    checkpoint: &CheckpointRef,
+    unit: &SettingsUnit,
+) -> Option<Sha256> {
+    let bytes = provider
+        .read(&layout::settings_manifest(checkpoint), 64 * 1024)
+        .ok()?;
+    if sha256(&bytes) != *checkpoint {
+        return None;
+    }
+    let m: SettingsCheckpointManifest = decode(&bytes, 64 * 1024).ok()?;
+    if &m.unit != unit {
+        return None;
+    }
+    let blob = m.files.first()?.blob;
+    provider
+        .open_read(&layout::settings_blob(&blob), BLOB_LIMIT)
+        .ok()?;
+    Some(blob)
+}
+
+/// Copies the checkpoint (blob first, then manifest) to the shared folder, write-if-absent.
+fn upload_checkpoint(
+    provider: &ProviderRoot,
+    store: &SettingsStore,
+    checkpoint: &CheckpointRef,
+    me: &str,
+) -> Result<(), String> {
+    let manifest = store
+        .get_manifest(&checkpoint.0)
+        .map_err(|e| e.to_string())?
+        .ok_or("the checkpoint is not in the local store")?;
+    let m: SettingsCheckpointManifest = decode(&manifest, 64 * 1024).map_err(|e| e.to_string())?;
+    for f in &m.files {
+        let blob = store
+            .get_blob(&f.blob.0, BLOB_LIMIT)
+            .map_err(|e| e.to_string())?
+            .ok_or("the blob is not in the local store")?;
+        authority_store::put_record(
+            provider,
+            &layout::settings_blob(&f.blob),
+            &blob,
+            BLOB_LIMIT,
+            me,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    authority_store::put_record(
+        provider,
+        &layout::settings_manifest(checkpoint),
+        &manifest,
+        64 * 1024,
+        me,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+const BLOB_LIMIT: u64 = 256 * 1024 * 1024;
+const LOCAL_LIMIT: usize = 16 * 1024 * 1024;
+
+fn local_name(group: &GroupId) -> String {
+    format!("settings-local-{group}.json")
+}
+
+/// This computer's settings sync consent, included accounts and per-unit bookkeeping. Damaged
+/// or missing state means no consent: nothing is read or applied until the owner confirms again.
+pub fn load_local(state: &LocalState, group: &GroupId) -> SettingsLocal {
+    state
+        .read(&local_name(group), LOCAL_LIMIT as u64)
+        .ok()
+        .flatten()
+        .and_then(|b| decode::<SettingsLocal>(&b, LOCAL_LIMIT).ok())
+        .unwrap_or(SettingsLocal {
+            units: Vec::new(),
+            paused_folders: Vec::new(),
+            included_accounts: Vec::new(),
+            consent: false,
+            first_adoption: None,
+        })
+}
+
+pub fn save_local(state: &LocalState, group: &GroupId, l: &SettingsLocal) -> Result<(), FsError> {
+    state.write_atomic(&local_name(group), &encode(l))
+}
+
+/// The folders whose selected `.toc` declares saved variables (metadata only, never Lua).
+pub fn declaring_folders(scans: &[wow_sync_core::inventory::FolderScan]) -> Vec<DeclaringFolder> {
+    use wow_sync_core::toc::{select_toc, TocSelection};
+    use wow_sync_core::variant::TocMapping;
+    let mut out = Vec::new();
+    for s in scans {
+        if s.status != wow_sync_core::inventory::ScanStatus::Ok {
+            continue;
+        }
+        let Ok(folder) = wow_sync_core::paths::validate_folder_name(&s.name) else {
+            continue;
+        };
+        if let TocSelection::Selected { info, .. } =
+            select_toc(&s.name, &s.tocs, &TocMapping::ValidatedPlain)
+        {
+            out.push(DeclaringFolder {
+                folder,
+                saved_variables: info.saved_variables,
+                saved_variables_per_character: info.saved_variables_per_character,
+                toc_ambiguous: false,
+            });
+        }
+    }
+    out
+}
+
+/// What one settings cycle needs from the service. `cap` is the approved saved-file size; with no
+/// approved value (`None`) nothing is read, captured, published or applied (Q-77).
+pub(crate) struct StepArgs<'a> {
+    pub cap: Option<u64>,
+    pub state: &'a LocalState,
+    pub provider: &'a ProviderRoot,
+    pub variant_dir: &'a Path,
+    pub group: &'a GroupId,
+    pub own: &'a EnrollmentRef,
+    pub inventory: &'a wow_sync_core::inventory::Inventory,
+    pub decls: &'a [DeclaringFolder],
+    pub game_blocks: bool,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct StepOutcome {
+    pub applies: Vec<PackageApply>,
+    pub notes: Vec<String>,
+    /// Revisions this cycle wrote, in order.
+    pub published: Vec<Sha256>,
+}
+
+fn unit_rel(unit: &SettingsUnit, name: &str) -> Option<wow_sync_core::paths::SettingsPath> {
+    use wow_sync_core::paths::{account_settings_path, character_settings_path};
+    match unit.identity.realm_character() {
+        None => account_settings_path(unit.identity.account_name(), name).ok(),
+        Some((realm, ch)) => {
+            character_settings_path(unit.identity.account_name(), realm, ch, name).ok()
+        }
+    }
+}
+
+/// Steps 3s, 5s and 7s for every unit this computer may touch (settings.md §10.3): capture the
+/// owned files, publish the authority's changes inside its epoch, and plan the settings applies
+/// the target asks for. Returns the operations; every ledger write is already persisted.
+pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64) -> StepOutcome {
+    use wow_sync_core::settings::{
+        authority_for, build_auto, graph_from_ledger, policy_heads, publish_decision, target_case,
+        Authority, CaptureKind, Case, Publish, PublishInput, TargetInput,
+    };
+    let mut out = StepOutcome::default();
+    let Some(cap) = a.cap else {
+        return out;
+    };
+    if a.game_blocks {
+        return out;
+    }
+    let mut local = load_local(a.state, a.group);
+    if !local.consent {
+        return out;
+    }
+    let included: BTreeSet<String> = local.included_accounts.iter().cloned().collect();
+    let derived = derive(&plane.ledger, a.group, &plane.members);
+    let heads = policy_heads(&plane.ledger, &derived);
+    if heads.is_empty() {
+        return out;
+    }
+    let Ok(scope) = observe_scope(a.variant_dir, a.decls, &included, Some(cap)) else {
+        out.notes.push("settings could not be read".into());
+        return out;
+    };
+    let Ok(store) = SettingsStore::open(a.variant_dir) else {
+        out.notes
+            .push("the settings store could not be opened".into());
+        return out;
+    };
+    let epochs = EpochStore::new(a.state, a.group.clone());
+    let mut eps = epochs.load();
+    let mut units: BTreeSet<SettingsUnit> = scope.owned.iter().map(|o| o.unit.clone()).collect();
+    for e in plane.ledger.entries() {
+        if let Some(AuthorityRecord::SettingsRevision(r)) = plane.ledger.record(&e.hash) {
+            if included.contains(r.unit.identity.account_name()) {
+                units.insert(r.unit.clone());
+            }
+        }
+    }
+    let mut written = false;
+    let mut dirty = false;
+    for unit in units {
+        if scope.blocked.contains(&unit) {
+            continue;
+        }
+        let Some(name) = a
+            .inventory
+            .folders
+            .iter()
+            .find(|f| f.key == unit.folder)
+            .map(|f| f.name.clone())
+        else {
+            continue;
+        };
+        let Some(rel) = unit_rel(&unit, &name) else {
+            continue;
+        };
+        let owned = scope.owned.iter().find(|o| o.unit == unit);
+        let live = match owned {
+            Some(o) => match capture_unit(a.variant_dir, &store, o, cap) {
+                Ok(c) => Some(c),
+                Err(_) => {
+                    out.notes
+                        .push(format!("{name}: settings changed while being read"));
+                    continue;
+                }
+            },
+            None => None,
+        };
+        let li = match local.units.iter().position(|u| u.unit == unit) {
+            Some(i) => i,
+            None => {
+                local.units.push(LocalUnitState {
+                    unit: unit.clone(),
+                    captures: Vec::new(),
+                    basis: Vec::new(),
+                    last_applied: None,
+                    pinned: false,
+                    authority_since: None,
+                });
+                local.units.len() - 1
+            }
+        };
+        let ei = match eps.iter().position(|u| u.unit == unit) {
+            Some(i) => i,
+            None => {
+                eps.push(UnitEpoch {
+                    unit: unit.clone(),
+                    epoch_clean: false,
+                    capture_seq: 0,
+                    capture_kind: None,
+                });
+                eps.len() - 1
+            }
+        };
+        let graph = graph_from_ledger(&plane.ledger, &derived, &unit);
+        let authority = authority_for(&heads, &unit.folder);
+        let is_authority = matches!(&authority, Authority::Holder(h) if h == a.own);
+        let paused = local.paused_folders.contains(&unit.folder);
+        dirty = true;
+
+        // Becoming the authority starts a new epoch: the activation capture never publishes.
+        if is_authority && local.units[li].authority_since.is_none() {
+            let since = eps[ei].capture_seq;
+            local.units[li].authority_since = Some(since);
+            eps[ei].capture_seq = since + 1;
+            eps[ei].capture_kind = Some(CaptureKind::Activation);
+            eps[ei].epoch_clean = wow_sync_core::settings::epoch_clean(
+                live,
+                local.units[li].last_applied,
+                !graph.nodes.is_empty(),
+            );
+            if let Some(l) = live {
+                local.units[li].captures.insert(0, l);
+            }
+            continue;
+        }
+        if !is_authority && local.units[li].authority_since.is_some() {
+            local.units[li].authority_since = None;
+            eps[ei].epoch_clean = false;
+        }
+
+        let previous_seq = eps[ei].capture_seq;
+        let changed = live.is_some() && live != local.units[li].captures.first().copied();
+        if changed {
+            eps[ei].capture_seq += 1;
+            eps[ei].capture_kind = Some(CaptureKind::SessionEnd);
+            if let Some(l) = live {
+                local.units[li].captures.insert(0, l);
+                local.units[li].captures.truncate(8);
+            }
+        }
+        let case = target_case(&TargetInput {
+            graph: &graph,
+            authority: &authority,
+            is_authority,
+            paused,
+            basis: &local.units[li].basis,
+            basis_checkpoint: local.units[li].last_applied,
+            live,
+            epoch_clean: eps[ei].epoch_clean,
+        });
+        match case {
+            Case::InSync { basis } => {
+                local.units[li].basis = basis;
+                local.units[li].last_applied = live;
+            }
+            Case::NoSharedCopy | Case::LocalDifferent(_) if is_authority && changed => {
+                let decision = publish_decision(&PublishInput {
+                    authority: authority.clone(),
+                    own: a.own.clone(),
+                    paused,
+                    complete: true,
+                    kind: CaptureKind::SessionEnd,
+                    changed_in_session: true,
+                    epoch_clean: eps[ei].epoch_clean,
+                    authority_since: local.units[li].authority_since,
+                    compared_with_local_seq: previous_seq,
+                });
+                let Some(cp) = live.filter(|_| decision == Publish::Auto) else {
+                    continue;
+                };
+                let rec = match build_auto(
+                    &plane.ledger,
+                    &derived,
+                    a.group,
+                    Issuer {
+                        computer_id: a.own.computer_id.clone(),
+                        enrollment_id: a.own.enrollment_id.clone(),
+                        issued_at_seq: *next_seq,
+                    },
+                    unit.clone(),
+                    cp,
+                    &local.units[li].basis,
+                    now_unix_ms() as u64,
+                ) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        out.notes.push(format!("{name}: not shared ({e:?})"));
+                        continue;
+                    }
+                };
+                if let Err(e) =
+                    upload_checkpoint(a.provider, &store, &cp, a.own.computer_id.as_str())
+                {
+                    out.notes.push(format!("{name}: not shared ({e})"));
+                    continue;
+                }
+                match write_own_record(
+                    plane,
+                    a.provider,
+                    a.group,
+                    &a.own.computer_id,
+                    &AuthorityRecord::SettingsRevision(rec),
+                ) {
+                    Ok(h) => {
+                        *next_seq += 1;
+                        written = true;
+                        out.published.push(h);
+                        local.units[li].basis = vec![h];
+                        local.units[li].last_applied = Some(cp);
+                    }
+                    Err(e) => out.notes.push(format!("{name}: not shared ({e})")),
+                }
+            }
+            Case::FirstAdoption(to) if live == Some(to) => {
+                local.units[li].basis = graph.heads.clone();
+                local.units[li].last_applied = live;
+            }
+            Case::FirstAdoption(to) | Case::Yield { to, .. } => {
+                let Some(blob) = manifest_blob(a.provider, &to, &unit) else {
+                    out.notes
+                        .push(format!("{name}: shared settings are not available yet"));
+                    continue;
+                };
+                let op = OpId::parse(&random_id_hex()).expect("random id");
+                out.applies.push(plan_settings_apply(
+                    op,
+                    owned,
+                    unit.clone(),
+                    rel,
+                    Some(blob),
+                    to,
+                    wow_sync_core::explain::Explanation::Applied {
+                        package: format!("{name} settings"),
+                    },
+                ));
+            }
+            _ => {}
+        }
+    }
+    if dirty {
+        let _ = save_local(a.state, a.group, &local);
+        let _ = epochs.save(&eps);
+    }
+    if written {
+        let _ = plane.save(a.state);
+    }
+    out
 }
 
 /// One revision of a unit's settings history (the `SettingsHistory` query).

@@ -301,6 +301,9 @@ pub enum Command {
         unit: wow_sync_core::ids::SettingsUnit,
         checkpoint: wow_sync_core::ids::Sha256,
     },
+    /// Consent to settings sync on this computer for these accounts (settings.md §5.4). Local
+    /// only; nothing of WTF is read until it is recorded.
+    EnableSettings { included_accounts: Vec<String> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -314,6 +317,8 @@ pub enum CommandOutcome {
     /// Following a retirement (or a held status) this computer joined again under a new
     /// enrollment; the old enrollment stays retired.
     ReEnrolled,
+    /// A local choice was recorded; nothing was written to the group.
+    Recorded,
     /// The command had no effect to make (for example the subject is already retired).
     NothingToDo,
 }

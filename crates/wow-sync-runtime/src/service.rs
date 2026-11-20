@@ -283,6 +283,7 @@ struct World {
     /// This enrollment's newest published state, if readable.
     own_latest: Option<CodeState>,
     titles: BTreeMap<String, String>,
+    decls: Vec<wow_sync_core::settings::DeclaringFolder>,
     own: EnrollmentRef,
     standing: OwnStanding,
 }
@@ -300,6 +301,9 @@ pub struct SliceService {
     last_blocks: Vec<PlanBlock>,
     provider_error: Option<String>,
     plane: Plane,
+    /// The approved saved-settings size cap. No value is approved (Q-77), so it is `None` and
+    /// settings sync never touches real data; only tests set one.
+    settings_cap: Option<u64>,
     /// The decisions currently offered to the owner and what answering each one does.
     offered: (
         Vec<wow_sync_core::decision::DecisionItem>,
@@ -352,8 +356,15 @@ impl SliceService {
             last_blocks: Vec::new(),
             provider_error: None,
             plane,
+            settings_cap: wow_sync_core::records::MAX_SETTINGS_FILE_BYTES,
             offered: Default::default(),
         })
+    }
+
+    /// Test-only: a settings size cap, standing in for the unapproved production value (Q-77).
+    #[cfg(test)]
+    pub(crate) fn set_settings_cap_for_tests(&mut self, cap: Option<u64>) {
+        self.settings_cap = cap;
     }
 
     /// Replaces the offered decisions. The set is what `Command::Decide` is judged against, so
@@ -403,6 +414,16 @@ impl SliceService {
             return Err(CommandError::NotAllowed);
         }
         let gid = w.group.group_id.clone();
+        if let Command::EnableSettings { included_accounts } = &cmd {
+            let mut l = crate::settings_cycle::load_local(&self.state, &gid);
+            l.consent = true;
+            l.included_accounts = included_accounts.clone();
+            l.included_accounts.sort();
+            l.included_accounts.dedup();
+            crate::settings_cycle::save_local(&self.state, &gid, &l)
+                .map_err(|e| CommandError::Service(e.to_string()))?;
+            return Ok(CommandOutcome::Recorded);
+        }
         let now = now_unix_ms() as u64;
         let seq = w.enrollment.next_seq;
         let derived = derive(&self.plane.ledger, &gid, &self.plane.members);
@@ -494,7 +515,9 @@ impl SliceService {
                     DecisionEffect::Write(Box::new(AuthorityRecord::Readd(readd)))
                 }
                 // Dispatched before observation, above.
-                Command::ReEnroll => return Err(CommandError::NotAllowed),
+                Command::ReEnroll | Command::EnableSettings { .. } => {
+                    return Err(CommandError::NotAllowed)
+                }
                 Command::SetSettingsPolicy { master, exceptions } => {
                     let rec = wow_sync_core::settings::build_policy(
                         &self.plane.ledger,
@@ -1204,6 +1227,7 @@ impl SliceService {
         let variant = self.rederive_variant(&enrollment)?;
         let (scans, stable) = self.scan()?;
         let titles = folder_titles(&scans);
+        let decls = crate::settings_cycle::declaring_folders(&scans);
         let inventory = build_inventory(scans, stable, &variant);
         let marks = match self
             .state
@@ -1408,6 +1432,7 @@ impl SliceService {
             own_states,
             own_latest,
             titles,
+            decls,
             own,
             standing,
         })
@@ -1711,7 +1736,7 @@ impl SliceService {
                     journaled.extend(w.inventory.folders.iter().map(|f| f.key.clone()));
                     journaled.extend(rec.ops.iter().map(|(_, k, _)| k.clone()));
                 }
-                let extra = Self::removal_steps(
+                let (extra, mut next_seq) = Self::removal_steps(
                     &self.state,
                     &mut self.plane,
                     &provider,
@@ -1720,6 +1745,26 @@ impl SliceService {
                     game_blocks,
                     &mut report,
                 );
+                let settings_ops = if w.standing == OwnStanding::Active && !game_blocks {
+                    let out = crate::settings_cycle::settings_cycle(
+                        &mut self.plane,
+                        &crate::settings_cycle::StepArgs {
+                            cap: self.settings_cap,
+                            state: &self.state,
+                            provider: &provider,
+                            variant_dir: &self.cfg.install_root.join(&self.cfg.variant_folder),
+                            group: &group_id,
+                            own: &w.own,
+                            inventory: &w.inventory,
+                            decls: &w.decls,
+                            game_blocks,
+                        },
+                        &mut next_seq,
+                    );
+                    out.applies
+                } else {
+                    Vec::new()
+                };
                 let mut planned = match plan_apply(&w.target, &w.inventory, &mut gen, &gate) {
                     Ok(p) => Some(p),
                     Err(PlanBlock::NothingToDo) => None,
@@ -1739,6 +1784,27 @@ impl SliceService {
                     let mut all = extra;
                     all.append(&mut p.packages);
                     p.packages = all;
+                }
+                if !settings_ops.is_empty() {
+                    let p = planned.get_or_insert_with(|| ApplyPlan {
+                        group_id: group_id.clone(),
+                        started_unix_ms: gate.now_unix_ms,
+                        packages: Vec::new(),
+                        skipped: Vec::new(),
+                    });
+                    let taken: BTreeSet<FolderKey> = p
+                        .packages
+                        .iter()
+                        .flat_map(|q| {
+                            std::iter::once(q.package.clone())
+                                .chain(q.removes.iter().map(|r| r.key.clone()))
+                        })
+                        .collect();
+                    p.packages.extend(
+                        settings_ops
+                            .into_iter()
+                            .filter(|s| !taken.contains(&s.package)),
+                    );
                 }
                 match planned {
                     None => {}
@@ -1877,9 +1943,9 @@ impl SliceService {
         journaled: &BTreeSet<FolderKey>,
         game_blocks_changes: bool,
         report: &mut SyncReport,
-    ) -> Vec<PackageApply> {
+    ) -> (Vec<PackageApply>, u64) {
         if w.standing != OwnStanding::Active {
-            return Vec::new();
+            return (Vec::new(), w.enrollment.next_seq);
         }
         let gid = &w.group.group_id;
         let now = now_unix_ms() as u64;
@@ -1901,7 +1967,7 @@ impl SliceService {
                 Ok(o) => o,
                 Err(e) => {
                     report.apply_note = Some(format!("removal state could not be saved: {e}"));
-                    return Vec::new();
+                    return (Vec::new(), next_seq);
                 }
             };
             for (name, _) in &observed.held {
@@ -1982,7 +2048,8 @@ impl SliceService {
             held: &held,
             roots: &[],
         };
-        step_3a(&cx, &w.inventory, next_seq, game_blocks_changes)
+        let ops = step_3a(&cx, &w.inventory, next_seq, game_blocks_changes);
+        (ops, next_seq)
     }
 
     #[allow(clippy::too_many_arguments)]

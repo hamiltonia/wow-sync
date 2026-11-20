@@ -2076,6 +2076,182 @@ mod tests {
         );
     }
 
+    const SV_TOC: &str = "## Interface: 11508\n## Version: 1.0\n## SavedVariables: AlphaDB\n";
+
+    fn wtf_file(pc: &Pc, folder: &str) -> PathBuf {
+        pc.install
+            .variant_dir
+            .join(format!("WTF/Account/ACC/SavedVariables/{folder}.lua"))
+    }
+
+    fn write_wtf(pc: &Pc, folder: &str, text: &str) {
+        let p = wtf_file(pc, folder);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, text).unwrap();
+    }
+
+    fn read_wtf(pc: &Pc, folder: &str) -> Option<String> {
+        std::fs::read_to_string(wtf_file(pc, folder)).ok()
+    }
+
+    /// Two computers with the same addon that saves variables, settings consent on both, and
+    /// `master` chosen (`a` is the master when true, `b` otherwise). Test cap is on for both.
+    fn settings_pair(lab: &Lab, a_is_master: bool, cap: Option<u64>) -> (Pc, Pc, GroupId) {
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon_with("Alpha", "alpha-v1", SV_TOC);
+        b.addon_with("Alpha", "alpha-v1", SV_TOC);
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        synced(&mut a);
+        a.svc.set_settings_cap_for_tests(cap);
+        b.svc.set_settings_cap_for_tests(cap);
+        let master = if a_is_master { ref_of(&a) } else { ref_of(&b) };
+        let out = a
+            .svc
+            .command(Command::SetSettingsPolicy {
+                master: Some(master),
+                exceptions: vec![],
+            })
+            .unwrap();
+        assert!(matches!(out, CommandOutcome::Written(_)));
+        for pc in [&mut a, &mut b] {
+            assert_eq!(
+                pc.svc.command(Command::EnableSettings {
+                    included_accounts: vec!["ACC".into()]
+                }),
+                Ok(CommandOutcome::Recorded)
+            );
+        }
+        synced(&mut a);
+        synced(&mut b);
+        (a, b, g)
+    }
+
+    #[test]
+    fn the_masters_settings_change_reaches_a_peer() {
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a); // activation capture: never published
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 2 }\n")
+        );
+        // The next cycles settle: nothing is applied or published again.
+        let r = synced(&mut b);
+        assert!(!texts(&r).contains("settings"), "{}", texts(&r));
+        synced(&mut a);
+        assert_eq!(
+            read_wtf(&a, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 2 }\n")
+        );
+    }
+
+    #[test]
+    fn with_no_approved_cap_nothing_of_settings_is_read_published_or_applied() {
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, None);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        assert_eq!(read_wtf(&b, "Alpha"), None);
+        assert!(a.svc.settings_history(&alpha_unit()).is_empty());
+    }
+
+    fn alpha_unit() -> wow_sync_core::ids::SettingsUnit {
+        wow_sync_core::ids::SettingsUnit {
+            folder: wow_sync_core::paths::validate_folder_name("Alpha").unwrap(),
+            identity: wow_sync_core::ids::Identity::account("ACC").unwrap(),
+        }
+    }
+
+    #[test]
+    fn a_non_master_routine_write_yields_to_the_master_and_keeps_a_recovery_copy() {
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        // b's own routine edit is not published; the master's next revision replaces it.
+        synced(&mut b);
+        write_wtf(&b, "Alpha", "AlphaDB = { mine = true }\n");
+        synced(&mut b);
+        synced(&mut a);
+        assert_eq!(
+            a.svc.settings_history(&alpha_unit()).len(),
+            1,
+            "a non-master's routine write publishes nothing"
+        );
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 3 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 3 }\n")
+        );
+        let recovery = b
+            .install
+            .variant_dir
+            .join(".wowsync")
+            .join("settings-recovery");
+        let mut found = false;
+        let mut stack = vec![recovery];
+        while let Some(d) = stack.pop() {
+            for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if std::fs::read_to_string(&p).is_ok_and(|t| t.contains("mine = true")) {
+                    found = true;
+                }
+            }
+        }
+        assert!(found, "the replaced file is kept in settings-recovery");
+    }
+
+    #[test]
+    fn a_per_addon_exception_is_respected() {
+        use wow_sync_core::kinds::{PolicyRule, PolicyRuleKind};
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let alpha = wow_sync_core::paths::validate_folder_name("Alpha").unwrap();
+        let rule = PolicyRule {
+            folder: alpha,
+            rule: PolicyRuleKind::NotShared,
+            computer_id: None,
+            enrollment_id: None,
+        };
+        a.svc
+            .command(Command::SetSettingsPolicy {
+                master: Some(ref_of(&a)),
+                exceptions: vec![rule],
+            })
+            .unwrap();
+        synced(&mut a);
+        synced(&mut b);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        assert!(a.svc.settings_history(&alpha_unit()).is_empty());
+        assert_eq!(
+            read_wtf(&b, "Alpha"),
+            None,
+            "a not-shared folder is never applied"
+        );
+    }
+
     fn two_option_item(
         key: &wow_sync_core::paths::FolderKey,
         write: AuthorityRecord,
