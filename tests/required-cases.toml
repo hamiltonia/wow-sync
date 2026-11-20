@@ -1077,6 +1077,14 @@ tests = [
 ]
 
 [[case]]
+id = "R4-integrate:snapshot-settings"
+tier = "offline"
+tests = [
+    "e2e::tests::the_snapshot_reports_settings_master_accounts_and_what_a_paused_folder_would_meet",
+    "e2e::tests::the_snapshot_settings_stay_disabled_and_unpaused_without_consent_or_cap",
+]
+
+[[case]]
 id = "R4-integrate:snapshot-peers"
 tier = "offline"
 tests = [

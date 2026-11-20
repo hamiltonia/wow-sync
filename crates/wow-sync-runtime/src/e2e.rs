@@ -2424,6 +2424,67 @@ mod tests {
     }
 
     #[test]
+    fn the_snapshot_reports_settings_master_accounts_and_what_a_paused_folder_would_meet() {
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let alpha = alpha_unit().folder;
+        let (sa, sb) = (a.svc.status().settings, b.svc.status().settings);
+        assert!(sa.enabled && sb.enabled);
+        assert_eq!(sb.accounts, vec!["ACC".to_string()]);
+        assert_eq!(sb.master, Some(ref_of(&a)));
+        assert_eq!(sb.master_name, Some(a.svc.status().computer_name));
+        assert!(sb.paused.is_empty(), "nothing is paused yet");
+
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        synced(&mut b);
+        b.svc
+            .command(Command::PauseSettings {
+                folder: alpha.clone(),
+            })
+            .unwrap();
+        let s = b.svc.status().settings;
+        assert_eq!(s.paused.len(), 1);
+        assert!(
+            !s.paused[0].here_changed && !s.paused[0].shared_newer,
+            "{s:?}"
+        );
+
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 3 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        let s = b.svc.status().settings;
+        assert!(
+            s.paused[0].shared_newer && !s.paused[0].here_changed,
+            "{s:?}"
+        );
+
+        write_wtf(&b, "Alpha", "AlphaDB = { mine = true }\n");
+        synced(&mut b);
+        let s = b.svc.status().settings;
+        assert!(
+            s.paused[0].shared_newer && s.paused[0].here_changed,
+            "{s:?}"
+        );
+        assert_eq!(s.paused[0].folder, alpha);
+    }
+
+    #[test]
+    fn the_snapshot_settings_stay_disabled_and_unpaused_without_consent_or_cap() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        a.addon_with("Alpha", "alpha-v1", SV_TOC);
+        a.create();
+        synced(&mut a);
+        let s = a.svc.status().settings;
+        assert!(!s.enabled && s.accounts.is_empty() && s.master.is_none());
+        assert!(s.paused.is_empty() && !s.policy_conflict);
+    }
+
+    #[test]
     fn a_per_addon_exception_is_respected() {
         use wow_sync_core::kinds::{PolicyRule, PolicyRuleKind};
         let lab = Lab::new();

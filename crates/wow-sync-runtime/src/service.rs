@@ -241,6 +241,8 @@ pub struct StatusSnapshot {
     pub detail: Option<StatusDetail>,
     /// Every enrolled computer with its enrollment and standing (retire and master choices).
     pub peers: Vec<crate::detail::PeerRow>,
+    /// Settings consent, accounts, master and paused folders.
+    pub settings: crate::settings_cycle::SettingsSnapshot,
     /// How much is held and why (ops.md §1.6). `None` shows no scope sentence.
     pub hold: wow_sync_core::status::HoldScope,
     /// Set when this computer's own enrollment is retired and the retirement is effective.
@@ -2027,6 +2029,12 @@ impl SliceService {
                     .map(|n| (p.enrollment_id.clone(), n.clone()))
             })
             .collect();
+        let settings = crate::settings_cycle::settings_snapshot(
+            &crate::settings_cycle::load_local(&self.state, &w.group.group_id),
+            &self.plane.ledger,
+            &derived,
+            &enrollment_names,
+        );
         let retirements = crate::detail::retirement_rows(
             &self.plane.ledger,
             &derived,
@@ -2167,6 +2175,7 @@ impl SliceService {
             reconfirm: None,
             detail: Some(detail),
             peers,
+            settings,
             hold,
             this_retirement,
             retirements,

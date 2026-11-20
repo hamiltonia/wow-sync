@@ -172,9 +172,13 @@ fn every_snapshot_field_can_be_named_and_read_from_outside_the_crate() {
     use wow_sync_runtime::{
         HeldRelease, PeerRow, PeerStanding, RemovedRow, RetirementRow, StatusSnapshot,
     };
+    use wow_sync_runtime::{PausedFolder, SettingsSnapshot};
 
     let st = StatusSnapshot::default();
     let peers: &Vec<PeerRow> = &st.peers;
+    let settings: &SettingsSnapshot = &st.settings;
+    let paused: &Vec<PausedFolder> = &settings.paused;
+    assert!(!settings.enabled && paused.is_empty() && !settings.policy_conflict);
     assert!(peers.is_empty() && PeerStanding::Active != PeerStanding::Retired);
     let hold: &HoldScope = &st.hold;
     assert_eq!(hold, &HoldScope::None);
