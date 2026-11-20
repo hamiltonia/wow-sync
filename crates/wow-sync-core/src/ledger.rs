@@ -503,6 +503,47 @@ pub fn read_parts(
     Ok(out)
 }
 
+// ---------------------------------------------------------------- journal vs ledger (V-JRN)
+
+/// Ledger-level journal checks (contracts.md §2.2 V-JRN): every `remove` folder is named by a
+/// listed removal, and each listed removal is valid in the ledger or has its acknowledgement
+/// among the journal's pending records.
+pub fn validate_journal_against_ledger(
+    j: &crate::records::ApplyJournalV2,
+    ledger: &Ledger,
+    derived: &Derived,
+) -> Result<(), String> {
+    use crate::plan::FolderAction;
+    let acked: BTreeMap<Sha256, Vec<FolderKey>> = j
+        .pending_records
+        .iter()
+        .filter_map(|p| match decode_authority(p.bytes.as_bytes(), &p.hash) {
+            Ok(AuthorityRecord::Ack(a)) => Some(a),
+            _ => None,
+        })
+        .flat_map(|a| a.items.into_iter().map(|i| (i.removal, i.folders)))
+        .collect();
+    let mut named: BTreeSet<FolderKey> = BTreeSet::new();
+    for h in &j.removals {
+        let pending_ack = acked.get(h);
+        match (derived.status_of(h), ledger.record(h)) {
+            (Some(Status::Valid), Some(AuthorityRecord::Removal(r))) => {
+                named.extend(r.folders.iter().map(|f| f.key.clone()));
+            }
+            _ if pending_ack.is_some() => {
+                named.extend(pending_ack.into_iter().flatten().cloned());
+            }
+            _ => return Err("removal_not_valid".into()),
+        }
+    }
+    for f in j.folders.iter().filter(|f| f.action == FolderAction::Remove) {
+        if !named.contains(&f.key) {
+            return Err("remove_folder_unnamed".into());
+        }
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------- segment files
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -643,6 +684,56 @@ mod tests {
             written_unix_ms: 8,
         };
         golden("removal-ack-1.json", &encode(&ack));
+    }
+
+    #[test]
+    fn journal_removals_must_be_valid_and_name_every_remove_folder() {
+        // V-JRN ledger-level checks
+        use crate::plan::{ExpectedLive, FolderAction};
+        use crate::records::{ApplyJournalV2, JournalFolderV2, OpKind, RecoverySlot};
+        let mut l = Ledger::new();
+        let rm = learn(&mut l, &removal(2, 3), AuthorityKind::Removal);
+        let d = derive(&l, &group_id(), &members(&[1, 2]));
+        let f = |name: &str, key: &str| JournalFolderV2 {
+            name: name.into(),
+            key: FolderKey::lossy(key),
+            action: FolderAction::Remove,
+            expected_live: ExpectedLive::Absent,
+            staged: None,
+            recovery_slot: RecoverySlot::new("r/0").unwrap(),
+        };
+        let j = |folders: Vec<JournalFolderV2>, removals: Vec<Sha256>| ApplyJournalV2 {
+            op: crate::testkit::op(1),
+            group_id: group_id(),
+            started_unix_ms: 1,
+            kind: OpKind::Remove,
+            package: FolderKey::lossy("suite"),
+            target_hash: None,
+            phase: crate::records::JournalPhase::Staging,
+            from_phase: None,
+            reason: None,
+            halted_by_game: false,
+            folders,
+            removals,
+            pending_records: vec![],
+            settings_ops: vec![],
+        };
+        assert_eq!(
+            validate_journal_against_ledger(&j(vec![f("Suite", "suite")], vec![rm]), &l, &d),
+            Ok(())
+        );
+        assert_eq!(
+            validate_journal_against_ledger(&j(vec![f("Other", "other")], vec![rm]), &l, &d),
+            Err("remove_folder_unnamed".into())
+        );
+        assert_eq!(
+            validate_journal_against_ledger(
+                &j(vec![f("Suite", "suite")], vec![sha256(b"unknown")]),
+                &l,
+                &d
+            ),
+            Err("removal_not_valid".into())
+        );
     }
 
     #[test]
