@@ -461,11 +461,21 @@ pub(crate) fn write_own_record(
     me: &ComputerId,
     r: &AuthorityRecord,
 ) -> Result<Sha256, FsError> {
-    let bytes = encode_authority(r);
-    let h = sha256(&bytes);
+    write_own_bytes(plane, provider, group, me, &encode_authority(r))
+}
+
+/// Writes already-encoded record or part bytes under the own `authority\` and learns them.
+pub(crate) fn write_own_bytes(
+    plane: &mut Plane,
+    provider: &ProviderRoot,
+    group: &GroupId,
+    me: &ComputerId,
+    bytes: &[u8],
+) -> Result<Sha256, FsError> {
+    let h = sha256(bytes);
     let rel = layout::authority_record(group, me, &h);
-    authority_store::put_record(provider, &rel, &bytes, AUTHORITY_LIMIT, me.as_str())?;
-    plane.learn_bytes(h, Some(me), &bytes);
+    authority_store::put_record(provider, &rel, bytes, AUTHORITY_LIMIT, me.as_str())?;
+    plane.learn_bytes(h, Some(me), bytes);
     Ok(h)
 }
 

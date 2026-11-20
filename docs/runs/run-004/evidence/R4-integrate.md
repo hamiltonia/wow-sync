@@ -1,4 +1,4 @@
-# R4-integrate evidence (stages A, B, C0 and rollback done; C partial; items 3-5 DEFERRED)
+# R4-integrate evidence (stages A, B, C0, rollback, settings commands and policy parts done)
 
 Branch `run004/R4-integrate`. Status: **partial**. Stage A, the code-state `authority_index`,
 stage B (authority plane, compose with constraints, removal through the cycle) and a subset of
@@ -118,8 +118,15 @@ accepted the core `decision.rs` match-arm change and the `e2e.rs` service tests.
 | `Keep` | scope, copy, why | pin a copy for a typed scope (Q-50 exclusions inherited) | `UnknownCopy`, `EmptySelection`, `Write` |
 | `Resume` | scope, allow_again, why | release a keep | `Write` |
 | `RestoreRemoved` | removal | bring back code and settings of a removed addon | `UnknownRemoval` |
-| `SetSettingsPolicy` | master, exceptions | record master and per-addon exceptions | `Settings(NotLive/BadRule/TooManyRules)` |
+| `SetSettingsPolicy` | master, exceptions | record master and per-addon exceptions; any number of rules (over the inline bound they go into parts, written before the policy; no `TooManyRules` any more) | `Settings(NotLive/BadRule)` |
 | `ShareSettings` | unit, checkpoint | explicit push of a stored checkpoint | `UnknownCheckpoint`, `Settings(NoPolicy/NotShared/HistoryIncomplete)` |
+| `PauseSettings` | folder | "Pause settings for this addon": its unit applies and captures nothing until resumed | `UnknownFolder`; `NothingToDo` if already paused; `Recorded` |
+| `ResumeSettings` | folder, `ResumeOption` | resume with the chosen option. `UseShared`/`GoBackToShared`/`UseSharedKeepMineAsRecovery` unpause and queue use-shared; `Resume`/`KeepMineHere` unpause; `StayPaused` → `NothingToDo`; `ShareMine`/`ShareMineInstead` are refused (a push is explicit) | `UnknownFolder`, `UseShareSettings`; `NothingToDo`; `Recorded` |
+| `UseSharedSettings` | unit | "Use the shared settings here": replaces a local difference at the next cycle, keeping mine as a recovery copy | `NoSharedSettings` (no single head); `Recorded` |
+| `ChooseSettings` | unit, checkpoint, shown_heads | resolve competing settings: one `Choice` revision naming every head; `shown_heads` must equal the current heads | `Settings(Changed)` (show the choice again), `Settings(NotAHead)`, `Settings(NotCompeting)`; `Written` |
+| `RestoreSettings` | unit, checkpoint | "Restore these settings": a `Restore` revision of a shared copy (uploads it) | `UnknownCheckpoint`, `Settings(NoPolicy/NotShared/HistoryIncomplete)`; `Written` |
+| `RestoreRemovedSettings` | removal, unit | undo a removal for one unit's settings: a `Restore` revision of the checkpoint the removal captured | `UnknownRemoval`, `Settings(NotRemovedUnit)`; `Written` |
+| `EnableSettings` (= "Confirm settings here", settings.md §10.1) | included_accounts | consent; no account included is refused | `EmptySelection`; `Recorded` |
 | query `settings_history(unit)` | unit | graph nodes, oldest first | none |
 | query `offered_decisions()` | none | decision items from live state | none |
 
@@ -157,9 +164,19 @@ are gone, from a local recovery point (`NotAvailable` only if neither has it). S
 | Unrouted rollback | rollback plan not inserted into the apply plan (`rollback.filter(\|_\| false)`) | `e2e::tests::a_rollback_installs_the_recovered_release_and_an_offline_peer_cannot_bring_the_rejected_one_back` (failed at the v1 assertion; reverted, clean) |
 | R0 staged from local recovery | fallback returns `Err(NotFound)` | `e2e::tests::a_rollback_stages_the_recovered_release_from_a_local_recovery_point` (failed; reverted, clean) |
 | Pending removal not replayed | `observe` returns only newly matured removals | `e2e::tests::a_removal_whose_record_could_not_be_written_is_replayed_on_the_next_cycle` (failed; reverted, clean) |
+| Settings pause ignored | `paused = ... && false` in `settings_cycle.rs` | `e2e::tests::pausing_settings_holds_a_units_updates_until_resume_and_resume_never_publishes` (failed; reverted, clean) |
+| Choose skips the freshness check | `shown != now_heads && false` in `build_choice` | `e2e::tests::competing_settings_choices_are_resolved_by_one_choice_that_names_every_head` (failed at "a head the owner was not shown"; reverted, clean) |
+| Policy parts not written | `write_own_bytes` loop filtered to nothing in `service.rs` | `e2e::tests::a_policy_with_thousands_of_exceptions_is_written_in_parts_and_read_back_whole` (failed; reverted, clean) |
 
 ## Open items
 
+- **Policy parts (§1.9 writer).** `kinds.rs` was not changed (`pack_items` already existed).
+  `settings::build_policy` now returns `(policy, parts)` and writes no `TooManyRules`; the
+  service writes the parts first. When the policy is kept (held/paused) the parts are written at
+  once anyway: they are issuer-less and inert until the policy is written. Reader proof: the
+  policy stays non-Valid while a part is missing and becomes Valid when it arrives. The same
+  split is not applied to other partable fields (`known`, `parents`, `considered`); only the
+  settings-policy writer was in scope.
 - **Crash between observe-save and the removal-record write (FIXED, `afa7f59`).**
   `RemovalStore::observe` now persists matured removals in `removal-pending-<group>.json`
   before consuming the observation and returns them every pass until `clear_pending` (called
@@ -183,13 +200,13 @@ are gone, from a local recovery point (`NotAvailable` only if neither has it). S
 
 ## DEFERRED (not built; each needs the named change)
 
-- **Settings commands (this turn's item 3)** (`control.rs`, `service.rs`, `settings_cycle.rs`):
-  settings pause/resume/choose/restore/confirm/use-shared and settings removal-restore, dispatch
-  only using the existing settings core functions. Not started (stopped at an item boundary).
-- **`TooLarge` split persistence (this turn's item 4)**: needs `kinds.rs` (split only) plus the
-  writer and a reader-reconstruction test. Not started.
-- **Rest of the §9.1 surface** (`control.rs`): a capture command producing the checkpoint;
-  policies over 256 rules need parts.
+- **Not modelled:** "Pause all settings" (per-folder only); a capture command producing a
+  checkpoint (`ShareSettings`/`RestoreSettings` take a checkpoint already in the local store);
+  a removal that captures settings (the core `removal_record` hard-codes `RemovalSettings::None`,
+  so only a hand-crafted record carries roots; the settings return as a `Restore` revision, and
+  the file-level return follows the usual §4.2 target).
+- **`ShareSettings` does not upload its checkpoint** (Choose, Restore and removal-restore do);
+  a peer cannot fetch a plain push's blob until something uploads it.
 - **Cross-packet items** and stage D A-38 controls not listed above.
 
 ## Verification
