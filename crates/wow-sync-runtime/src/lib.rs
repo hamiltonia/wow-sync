@@ -26,7 +26,8 @@ pub use control::{
     Command, CommandError, CommandOutcome, PauseState, QuitGate, StopState,
 };
 pub use detail::{
-    strip_colour_codes, CandidateRow, FolderRow, MemberRow, PackageRow, StatusDetail,
+    strip_colour_codes, CandidateRow, FolderRow, HeldRelease, MemberRow, PackageRow, RemovedRow,
+    RetirementRow, StatusDetail,
 };
 pub use discover::{
     dropbox_defaults, dropbox_info_files, dropbox_paths_from_info, find_dropbox, find_wow,

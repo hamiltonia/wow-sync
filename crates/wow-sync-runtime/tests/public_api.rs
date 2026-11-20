@@ -142,3 +142,28 @@ fn every_command_can_be_built_and_every_refusal_named_from_outside_the_crate() {
     let history: Vec<SettingsHistoryEntry> = Vec::new();
     assert!(history.is_empty());
 }
+
+#[test]
+fn every_snapshot_field_can_be_named_and_read_from_outside_the_crate() {
+    use std::collections::BTreeMap;
+    use wow_sync_runtime::core::status::{AllHoldCause, HoldScope, RetiredInfo};
+    use wow_sync_runtime::core::update::UpdateResult;
+    use wow_sync_runtime::{HeldRelease, RemovedRow, RetirementRow, StatusSnapshot};
+
+    let st = StatusSnapshot::default();
+    let hold: &HoldScope = &st.hold;
+    assert_eq!(hold, &HoldScope::None);
+    let retired: &Option<RetiredInfo> = &st.this_retirement;
+    assert!(retired.is_none());
+    let rows: &Vec<RetirementRow> = &st.retirements;
+    let held: &Vec<HeldRelease> = &st.held_releases;
+    let removed: &Vec<RemovedRow> = &st.removed;
+    let names: &BTreeMap<EnrollmentId, String> = &st.enrollment_names;
+    let update: &Option<UpdateResult> = &st.update;
+    assert!(rows.is_empty() && held.is_empty() && removed.is_empty() && names.is_empty());
+    assert!(!st.review_needed && update.is_none());
+    assert_ne!(
+        HoldScope::AllApplies(AllHoldCause::Retired),
+        HoldScope::AllApplies(AllHoldCause::Paused)
+    );
+}

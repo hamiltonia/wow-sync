@@ -239,6 +239,23 @@ pub struct StatusSnapshot {
     pub reconfirm: Option<EnrollPreview>,
     /// Typed rows for the GUI; present whenever the shared state could be read.
     pub detail: Option<StatusDetail>,
+    /// How much is held and why (ops.md §1.6). `None` shows no scope sentence.
+    pub hold: wow_sync_core::status::HoldScope,
+    /// Set when this computer's own enrollment is retired and the retirement is effective.
+    pub this_retirement: Option<wow_sync_core::status::RetiredInfo>,
+    /// Effective retirements of any computer, for the Computers "Retired" group.
+    pub retirements: Vec<crate::detail::RetirementRow>,
+    /// Older complete releases a rollback can restore, per package.
+    pub held_releases: Vec<crate::detail::HeldRelease>,
+    /// Packages the group removed and that are still removed.
+    pub removed: Vec<crate::detail::RemovedRow>,
+    /// Every known enrollment id with the name its computer's owner chose.
+    pub enrollment_names: BTreeMap<EnrollmentId, String>,
+    /// "Review needed" (ops.md §1.7): a guided reconfirmation is pending and neither
+    /// `NeedsHelp` nor `Error` applies. The app shows it above Paused and Working.
+    pub review_needed: bool,
+    /// The newest update-check result; `None` until an update service has run.
+    pub update: Option<wow_sync_core::update::UpdateResult>,
 }
 
 impl StatusSnapshot {
@@ -286,6 +303,8 @@ struct World {
     decls: Vec<wow_sync_core::settings::DeclaringFolder>,
     own: EnrollmentRef,
     standing: OwnStanding,
+    /// Computer names from the member records, including computers the barrier hides.
+    names: BTreeMap<ComputerId, String>,
 }
 
 pub struct SliceService {
@@ -1503,6 +1522,15 @@ impl SliceService {
             }
         }
         learn_from_directories(&mut self.plane, &provider, &group.group_id, &computers);
+        let names: BTreeMap<ComputerId, String> = obs
+            .iter()
+            .filter_map(|m| match &m.member {
+                Ok(rec) if rec.computer_id == m.computer => {
+                    Some((m.computer.clone(), rec.display_name.clone()))
+                }
+                _ => None,
+            })
+            .collect();
         let derived = derive(&self.plane.ledger, &group.group_id, &self.plane.members);
         if persist {
             self.plane.save(&self.state).map_err(local)?;
@@ -1668,6 +1696,7 @@ impl SliceService {
             decls,
             own,
             standing,
+            names,
         })
     }
 
@@ -1721,6 +1750,64 @@ impl SliceService {
             .chain(pending.as_ref())
             .collect();
         let here = applied_here(&self.applied_here, &reports, &w.target);
+        let derived = derive(&self.plane.ledger, &w.group.group_id, &self.plane.members);
+        let mut names = w.names.clone();
+        names.insert(
+            w.computer.computer_id.clone(),
+            w.computer.display_name.clone(),
+        );
+        let enrollment_names: BTreeMap<EnrollmentId, String> = self
+            .plane
+            .members
+            .pairs()
+            .filter_map(|p| {
+                names
+                    .get(&p.computer_id)
+                    .map(|n| (p.enrollment_id.clone(), n.clone()))
+            })
+            .collect();
+        let retirements = crate::detail::retirement_rows(
+            &self.plane.ledger,
+            &derived,
+            &names,
+            &w.computer.computer_id,
+        );
+        let this_retirement = retirements
+            .iter()
+            .find(|r| r.enrollment == w.own.enrollment_id)
+            .map(|r| wow_sync_core::status::RetiredInfo {
+                enrollment: r.enrollment.clone(),
+                retired_by: r.retired_by_id.clone(),
+                cutoff_seq: r.cutoff_seq,
+            });
+        let unresolved: Vec<FolderKey> = interrupted
+            .iter()
+            .cloned()
+            .chain(needs_help.iter().map(|(k, _)| k.clone()))
+            .collect();
+        let hold = wow_sync_core::status::hold_scope(
+            &blocks,
+            &unresolved,
+            &wow_sync_core::status::HoldInputs {
+                paused: crate::control::pause_state(&self.state).holds_sync(),
+                retired: w.standing == OwnStanding::Retired,
+                retirement_unresolved: w.standing == OwnStanding::Held,
+                waiting_addons: self.offered.0.iter().map(|i| i.scope.clone()).collect(),
+            },
+        );
+        let held_releases = crate::detail::held_releases(
+            &w.copies,
+            &w.inventory,
+            &w.titles,
+            &w.enrollment.enrollment_id,
+            &enrollment_names,
+        );
+        let removed = crate::detail::removed_rows(
+            &self.plane.ledger,
+            &derived,
+            &names,
+            &w.computer.computer_id,
+        );
         let sv: StatusView = derive_status(&StatusInput {
             target: &w.target,
             members: &w.views,
@@ -1811,6 +1898,14 @@ impl SliceService {
             retained_extra_recovery: sv.retained_extra_recovery,
             reconfirm: None,
             detail: Some(detail),
+            hold,
+            this_retirement,
+            retirements,
+            held_releases,
+            removed,
+            enrollment_names,
+            review_needed: false,
+            update: None,
         }
     }
 
@@ -1840,6 +1935,9 @@ impl SliceService {
                     headline: headline_sentence(Headline::NeedsHelp),
                     provider_error: Some(ServiceError::NeedsReconfirmation.to_string()),
                     reconfirm: Some(preview),
+                    // The NeedsHelp sentence stands in for the unreadable state here; no real
+                    // NeedsHelp or Error is known, so the reconfirmation shows (ops.md §1.7).
+                    review_needed: crate::detail::review_needed(true, Headline::Waiting),
                     ..Default::default()
                 };
             }
