@@ -196,6 +196,45 @@ impl<'a> EpochStore<'a> {
     }
 }
 
+/// One revision of a unit's settings history (the `SettingsHistory` query).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettingsHistoryEntry {
+    pub hash: wow_sync_core::ids::Sha256,
+    pub kind: wow_sync_core::kinds::RevisionKind,
+    pub checkpoint: wow_sync_core::ids::CheckpointRef,
+    pub issuer: wow_sync_core::kinds::Issuer,
+    pub written_unix_ms: u64,
+    /// Currently a head of the unit's graph: nothing newer builds on it.
+    pub is_head: bool,
+}
+
+/// The valid revisions of `unit`, oldest first. Invalid and unreadable ones are not history.
+pub fn settings_history(
+    ledger: &wow_sync_core::ledger::Ledger,
+    derived: &wow_sync_core::ledger::Derived,
+    unit: &SettingsUnit,
+) -> Vec<SettingsHistoryEntry> {
+    use wow_sync_core::authority::AuthorityRecord;
+    let graph = wow_sync_core::settings::graph_from_ledger(ledger, derived, unit);
+    let mut out: Vec<SettingsHistoryEntry> = graph
+        .nodes
+        .keys()
+        .filter_map(|h| match ledger.record(h) {
+            Some(AuthorityRecord::SettingsRevision(r)) => Some(SettingsHistoryEntry {
+                hash: *h,
+                kind: r.kind,
+                checkpoint: r.checkpoint,
+                issuer: r.issuer.clone(),
+                written_unix_ms: r.written_unix_ms,
+                is_head: graph.heads.contains(h),
+            }),
+            _ => None,
+        })
+        .collect();
+    out.sort_by_key(|e| (e.written_unix_ms, e.hash));
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

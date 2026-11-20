@@ -269,6 +269,38 @@ pub enum Command {
     AllowAgain {
         rejections: Vec<wow_sync_core::ids::Sha256>,
     },
+    /// Restore a removed addon for the whole group (explicit only, Q-55): `removal` is the hash of
+    /// a valid removal record. The re-add covers it, so no later cycle removes the addon again.
+    RestoreRemoved { removal: wow_sync_core::ids::Sha256 },
+    /// "Join again…": explicit re-enrollment of this computer after it was retired.
+    ReEnroll,
+    /// Keep one release of the folders in `scope` (typed folder keys, UQ-2). `copy` is the package
+    /// hash of a release currently held in the group; `why` is the reason the owner was shown.
+    Keep {
+        scope: Vec<wow_sync_core::paths::FolderKey>,
+        copy: wow_sync_core::ids::Sha256,
+        why: wow_sync_core::kinds::ChoiceReason,
+    },
+    /// Resume following the group for `scope`. `allow_again` names inherited exclusions to lift
+    /// (Q-50); one that is not inherited is refused.
+    Resume {
+        scope: Vec<wow_sync_core::paths::FolderKey>,
+        allow_again: Vec<wow_sync_core::ids::Sha256>,
+        why: wow_sync_core::kinds::ChoiceReason,
+    },
+    /// Choose the settings master and the per-folder exceptions (settings.md §5.2). Explicit only:
+    /// the whole policy is replaced, nothing elects a master. Recorded as intent; applying it to
+    /// real settings stays off until the settings size cap is approved (Q-77).
+    SetSettingsPolicy {
+        master: Option<wow_sync_core::kinds::EnrollmentRef>,
+        exceptions: Vec<wow_sync_core::kinds::PolicyRule>,
+    },
+    /// "Share my settings": publish this computer's captured settings of `unit` as a push. Any
+    /// computer may, master or not; `checkpoint` must already be in the local settings store.
+    ShareSettings {
+        unit: wow_sync_core::ids::SettingsUnit,
+        checkpoint: wow_sync_core::ids::Sha256,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -279,6 +311,9 @@ pub enum CommandOutcome {
     Kept,
     /// Only this computer changed.
     Local(wow_sync_core::decision::LocalResolution),
+    /// Following a retirement (or a held status) this computer joined again under a new
+    /// enrollment; the old enrollment stays retired.
+    ReEnrolled,
     /// The command had no effect to make (for example the subject is already retired).
     NothingToDo,
 }
@@ -291,6 +326,17 @@ pub enum CommandError {
     /// A named rejection is not active (never existed, or already allowed again).
     UnknownRejection(wow_sync_core::ids::Sha256),
     EmptySelection,
+    /// The choice could not be written (empty scope, a folder outside it, an exclusion that is
+    /// not inherited).
+    Write(wow_sync_core::choice::WriteError),
+    /// No release with this package hash is currently held for the scope.
+    UnknownCopy(wow_sync_core::ids::Sha256),
+    /// No valid removal record has this hash.
+    UnknownRemoval(wow_sync_core::ids::Sha256),
+    /// The settings record could not be built.
+    Settings(wow_sync_core::settings::SettingsWriteError),
+    /// The checkpoint is not in this computer's settings store.
+    UnknownCheckpoint(wow_sync_core::ids::Sha256),
     Service(String),
 }
 

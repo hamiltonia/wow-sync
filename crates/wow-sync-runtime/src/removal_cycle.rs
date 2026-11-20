@@ -69,6 +69,52 @@ impl<'a> RemovalStore<'a> {
             .write_atomic(&baseline_name(&self.group), &base.to_bytes())
     }
 
+    /// A package the group removed and this computer applied is not a local disappearance:
+    /// forgetting it keeps the next observation from turning the applied removal into a new one.
+    pub fn forget_group_removed(
+        &self,
+        inventory: &Inventory,
+        removed_by_group: impl Fn(&FolderKey) -> bool,
+    ) -> Result<(), FsError> {
+        let (mut base, mut obs) = self.load();
+        let gone: Vec<String> = base
+            .packages
+            .iter()
+            .filter(|(_, fs)| {
+                fs.iter()
+                    .all(|f| inventory.get(&f.key).is_none() && removed_by_group(&f.key))
+            })
+            .map(|(n, _)| n.clone())
+            .collect();
+        if gone.is_empty() {
+            return Ok(());
+        }
+        for n in gone {
+            base.packages.remove(&n);
+            obs.gone.remove(&n);
+        }
+        self.save(&base, &obs)
+    }
+
+    /// Packages this computer just removed on the group's behalf, whatever the removal's state.
+    pub fn forget_keys(&self, keys: &BTreeSet<FolderKey>) -> Result<(), FsError> {
+        let (mut base, mut obs) = self.load();
+        let gone: Vec<String> = base
+            .packages
+            .iter()
+            .filter(|(_, fs)| fs.iter().all(|f| keys.contains(&f.key)))
+            .map(|(n, _)| n.clone())
+            .collect();
+        if gone.is_empty() {
+            return Ok(());
+        }
+        for n in gone {
+            base.packages.remove(&n);
+            obs.gone.remove(&n);
+        }
+        self.save(&base, &obs)
+    }
+
     /// One observation pass; the new baseline and observation are persisted before the result is
     /// returned, so a crash cannot lose a first sighting.
     pub fn observe(&self, input: &ObserveInput) -> Result<Observed, FsError> {

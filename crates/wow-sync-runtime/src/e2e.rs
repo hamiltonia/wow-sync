@@ -1754,6 +1754,328 @@ mod tests {
         assert!(authority_files(&lab, &g, &bc).is_empty());
     }
 
+    #[test]
+    fn a_retired_computer_cannot_publish_until_it_re_enrolls() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        synced(&mut a);
+        let (_, old_enrollment) = pc_ids(&b);
+        assert_eq!(
+            a.svc.command(Command::ReEnroll),
+            Ok(CommandOutcome::NothingToDo),
+            "an active computer has nothing to join again"
+        );
+        a.svc
+            .command(Command::Retire {
+                subject: ref_of(&b),
+            })
+            .unwrap();
+        synced(&mut a);
+        for _ in 0..2 {
+            let r = synced(&mut b);
+            assert!(r.published.is_none(), "retired: {r:?}");
+        }
+        b.addon("Beta", "beta-v1");
+        assert!(synced(&mut b).published.is_none());
+        assert_eq!(
+            a.read("Beta/main.lua"),
+            None,
+            "nothing a retired computer holds reaches the group"
+        );
+        assert_eq!(
+            b.svc.command(Command::ReEnroll),
+            Ok(CommandOutcome::ReEnrolled)
+        );
+        let r = synced(&mut b);
+        assert!(r.published.is_some(), "re-enrolled: {r:?}");
+        synced(&mut a);
+        synced(&mut a);
+        let bc = pc_ids(&b).0;
+        let enrollments: Vec<_> = a
+            .svc
+            .plane()
+            .members
+            .pairs()
+            .filter(|p| p.computer_id == bc)
+            .map(|p| p.enrollment_id.clone())
+            .collect();
+        assert_eq!(enrollments.len(), 2, "{enrollments:?}");
+        assert!(enrollments.contains(&old_enrollment), "history is kept");
+        assert_eq!(
+            a.read("Beta/main.lua").as_deref(),
+            Some("beta-v1"),
+            "the re-enrolled computer's addon reaches the group"
+        );
+        // The old enrollment is still retired: re-enrollment is not an undo of the record.
+        assert_eq!(
+            a.svc.command(Command::Retire {
+                subject: wow_sync_core::kinds::EnrollmentRef {
+                    computer_id: pc_ids(&b).0,
+                    enrollment_id: old_enrollment,
+                }
+            }),
+            Ok(CommandOutcome::NothingToDo)
+        );
+    }
+
+    #[test]
+    fn restoring_a_removed_addon_brings_it_back_and_it_is_not_removed_again() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        let mut c = lab.pc("c");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        c.join(&g);
+        synced(&mut c);
+        synced(&mut b);
+        a_removes_alpha(&mut a, &g);
+        let (ac, _) = pc_ids(&a);
+        let removal = removal_hash(&lab, &g, &ac);
+        synced(&mut b);
+        assert_eq!(b.read("Alpha/main.lua"), None, "the removal applied first");
+
+        let ghost = sha256(b"no such removal");
+        assert_eq!(
+            b.svc.command(Command::RestoreRemoved { removal: ghost }),
+            Err(CommandError::UnknownRemoval(ghost))
+        );
+        let (bc, _) = pc_ids(&b);
+        assert!(authority_files(&lab, &g, &bc).iter().all(|f| !f.is_empty()));
+        let before = authority_files(&lab, &g, &bc).len();
+        let out = b.svc.command(Command::RestoreRemoved { removal }).unwrap();
+        let CommandOutcome::Written(readd) = out else {
+            panic!("{out:?}")
+        };
+        assert_eq!(authority_files(&lab, &g, &bc).len(), before + 1);
+        for _ in 0..3 {
+            synced(&mut b);
+            synced(&mut c);
+            synced(&mut a);
+        }
+        assert_eq!(status(&b, &g, &readd), Some(Status::Valid));
+        let rc = synced(&mut c);
+        assert!(!rc.crashed);
+        for pc in [&b, &a, &c] {
+            assert_eq!(
+                pc.read("Alpha/main.lua").as_deref(),
+                Some("alpha-v1"),
+                "the code returned and stays"
+            );
+        }
+        let removals = |pc: &Pc| {
+            let p = pc.svc.plane();
+            p.ledger
+                .entries()
+                .filter(|e| e.kind == wow_sync_core::kinds::AuthorityKind::Removal)
+                .count()
+        };
+        for pc in [&a, &b, &c] {
+            assert_eq!(
+                removals(pc),
+                1,
+                "no new removal is written after the restore"
+            );
+        }
+    }
+
+    /// A settings checkpoint of one synthetic file in `pc`'s local store.
+    fn stored_checkpoint(pc: &Pc, unit: &wow_sync_core::ids::SettingsUnit, bytes: &[u8]) -> Sha256 {
+        use wow_sync_core::records::{encode, CheckpointFile, SettingsCheckpointManifest};
+        let store = wow_sync_adapters::settings_store::SettingsStore::open(
+            &pc.cfg.install_root.join(&pc.cfg.variant_folder),
+        )
+        .unwrap();
+        let blob = store.put_blob(bytes).unwrap();
+        let manifest = SettingsCheckpointManifest {
+            unit: unit.clone(),
+            files: vec![CheckpointFile {
+                name: "Alpha.lua".into(),
+                size: bytes.len() as u64,
+                blob: Sha256(blob),
+            }],
+        };
+        Sha256(store.put_manifest(&encode(&manifest), &[blob]).unwrap())
+    }
+
+    #[test]
+    fn settings_policy_and_push_commands_record_explicit_intent_only() {
+        use wow_sync_core::kinds::{PolicyRule, PolicyRuleKind, RevisionKind};
+        use wow_sync_core::settings::SettingsWriteError as W;
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        synced(&mut a);
+        let alpha = wow_sync_core::paths::validate_folder_name("Alpha").unwrap();
+        let beta = wow_sync_core::paths::validate_folder_name("Beta").unwrap();
+        let unit = wow_sync_core::ids::SettingsUnit {
+            folder: alpha.clone(),
+            identity: wow_sync_core::ids::Identity::account("ACC").unwrap(),
+        };
+        let cp = stored_checkpoint(&b, &unit, b"settings one");
+
+        // Nothing is written without a policy, a stored checkpoint or a live member.
+        assert_eq!(
+            b.svc.command(Command::ShareSettings {
+                unit: unit.clone(),
+                checkpoint: cp
+            }),
+            Err(CommandError::Settings(W::NoPolicy))
+        );
+        let ghost = sha256(b"no such checkpoint");
+        assert_eq!(
+            b.svc.command(Command::ShareSettings {
+                unit: unit.clone(),
+                checkpoint: ghost
+            }),
+            Err(CommandError::UnknownCheckpoint(ghost))
+        );
+        let nobody = EnrollmentRef {
+            computer_id: ComputerId::parse(&"9".repeat(32)).unwrap(),
+            enrollment_id: EnrollmentId::parse(&"8".repeat(32)).unwrap(),
+        };
+        assert_eq!(
+            a.svc.command(Command::SetSettingsPolicy {
+                master: Some(nobody),
+                exceptions: vec![]
+            }),
+            Err(CommandError::Settings(W::NotLive))
+        );
+        let malformed = PolicyRule {
+            folder: alpha.clone(),
+            rule: PolicyRuleKind::NotShared,
+            computer_id: Some(pc_ids(&b).0),
+            enrollment_id: None,
+        };
+        assert_eq!(
+            a.svc.command(Command::SetSettingsPolicy {
+                master: None,
+                exceptions: vec![malformed]
+            }),
+            Err(CommandError::Settings(W::BadRule))
+        );
+        let not_shared = |f: &wow_sync_core::paths::FolderKey| PolicyRule {
+            folder: f.clone(),
+            rule: PolicyRuleKind::NotShared,
+            computer_id: None,
+            enrollment_id: None,
+        };
+        assert_eq!(
+            a.svc.command(Command::SetSettingsPolicy {
+                master: None,
+                exceptions: vec![not_shared(&beta), not_shared(&beta)]
+            }),
+            Err(CommandError::Settings(W::BadRule)),
+            "one rule per folder"
+        );
+
+        // The master is chosen explicitly; a local-only exception is respected.
+        let out = a
+            .svc
+            .command(Command::SetSettingsPolicy {
+                master: Some(ref_of(&a)),
+                exceptions: vec![not_shared(&beta)],
+            })
+            .unwrap();
+        let CommandOutcome::Written(policy) = out else {
+            panic!("{out:?}")
+        };
+        synced(&mut a);
+        synced(&mut b);
+        assert_eq!(status(&b, &g, &policy), Some(Status::Valid));
+        assert_eq!(
+            b.svc.command(Command::ShareSettings {
+                unit: wow_sync_core::ids::SettingsUnit {
+                    folder: beta.clone(),
+                    identity: unit.identity.clone()
+                },
+                checkpoint: cp
+            }),
+            Err(CommandError::Settings(W::NotShared)),
+            "a not-shared folder publishes nothing"
+        );
+
+        // b is not the master; its explicit push is a valid push, never an automatic revision.
+        let out = b
+            .svc
+            .command(Command::ShareSettings {
+                unit: unit.clone(),
+                checkpoint: cp,
+            })
+            .unwrap();
+        let CommandOutcome::Written(push) = out else {
+            panic!("{out:?}")
+        };
+        synced(&mut b);
+        synced(&mut a);
+        assert_eq!(status(&a, &g, &push), Some(Status::Valid));
+        let history = a.svc.settings_history(&unit);
+        assert_eq!(history.len(), 1, "{history:?}");
+        assert_eq!(history[0].hash, push);
+        assert_eq!(history[0].kind, RevisionKind::Push);
+        assert!(history[0].is_head);
+        assert!(a
+            .svc
+            .settings_history(&wow_sync_core::ids::SettingsUnit {
+                folder: beta,
+                identity: unit.identity.clone()
+            })
+            .is_empty());
+
+        // A later push builds on the head, which stops being one.
+        let cp2 = stored_checkpoint(&b, &unit, b"settings two");
+        let out = b
+            .svc
+            .command(Command::ShareSettings {
+                unit: unit.clone(),
+                checkpoint: cp2,
+            })
+            .unwrap();
+        let CommandOutcome::Written(push2) = out else {
+            panic!("{out:?}")
+        };
+        synced(&mut b);
+        synced(&mut a);
+        let history = a.svc.settings_history(&unit);
+        assert_eq!(history.len(), 2);
+        let heads: Vec<_> = history
+            .iter()
+            .filter(|e| e.is_head)
+            .map(|e| e.hash)
+            .collect();
+        assert_eq!(heads, vec![push2]);
+
+        // A retired computer records no settings intent.
+        a.svc
+            .command(Command::Retire {
+                subject: ref_of(&b),
+            })
+            .unwrap();
+        synced(&mut a);
+        synced(&mut b);
+        assert_eq!(
+            b.svc.command(Command::SetSettingsPolicy {
+                master: Some(ref_of(&b)),
+                exceptions: vec![]
+            }),
+            Err(CommandError::NotAllowed)
+        );
+    }
+
     fn two_option_item(
         key: &wow_sync_core::paths::FolderKey,
         write: AuthorityRecord,
@@ -1938,5 +2260,216 @@ mod tests {
             }),
             Err(CommandError::UnknownRejection(rh))
         );
+    }
+
+    /// A keep of `owner`'s own Alpha release, written into `owner`'s authority folder.
+    fn put_keep_of_alpha(lab: &Lab, g: &GroupId, owner: &Pc) -> Sha256 {
+        use wow_sync_core::choice::{build_keep, ChoiceView, CopyEntry, WriteCx};
+        use wow_sync_core::kinds::{ChoiceReason, ManifestFolder};
+        use wow_sync_core::ledger::Ledger;
+        use wow_sync_core::target::Source;
+        let (oc, oe) = pc_ids(owner);
+        let kept = alpha_folder(lab, g, owner);
+        let copy = CopyEntry::new(
+            vec![ManifestFolder {
+                key: kept.key.clone(),
+                name: kept.name.clone(),
+                tree: kept.tree.unwrap(),
+            }],
+            vec![oe],
+        );
+        let ledger = Ledger::new();
+        let view = ChoiceView::new(&ledger, &Default::default());
+        let keep = build_keep(
+            &view,
+            &WriteCx {
+                group: g,
+                issuer: issuer_of(owner),
+                now_unix_ms: 5,
+            },
+            ChoiceReason::Ambiguous,
+            std::slice::from_ref(&kept.key),
+            &copy,
+            &[],
+            &Source::from_state(&latest_state(lab, g, owner), true),
+        )
+        .unwrap();
+        put_authority(lab, g, &oc, &AuthorityRecord::CodeChoice(keep))
+    }
+
+    fn offered_kinds(pc: &Pc) -> Vec<wow_sync_core::decision::DecisionKind> {
+        pc.svc
+            .offered_decisions()
+            .iter()
+            .map(|i| i.reason)
+            .collect()
+    }
+
+    #[test]
+    fn a_newer_version_after_a_keep_is_offered_while_the_kept_version_stays() {
+        use wow_sync_core::decision::DecisionKind;
+        let lab = Lab::new();
+        let (mut a, _b, _c, _g) = alpha_v2_published(&lab);
+        // Control: with no keep a plain newer release is simply taken, nothing is asked.
+        synced(&mut a);
+        assert!(offered_kinds(&a).is_empty(), "{:?}", offered_kinds(&a));
+        assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v2"));
+
+        let lab = Lab::new();
+        let (mut a, _b, _c, g2) = alpha_v2_published(&lab);
+        let kh = put_keep_of_alpha(&lab, &g2, &a);
+        for _ in 0..2 {
+            synced(&mut a);
+            assert_eq!(status(&a, &g2, &kh), Some(Status::Valid));
+            assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+            assert_eq!(
+                offered_kinds(&a),
+                vec![DecisionKind::NewVersionAfterDecision]
+            );
+        }
+    }
+
+    #[test]
+    fn keep_and_resume_commands_pin_and_release_a_typed_scope() {
+        use wow_sync_core::choice::WriteError;
+        use wow_sync_core::hash::package_hash;
+        use wow_sync_core::kinds::ChoiceReason;
+        let lab = Lab::new();
+        let (mut a, b, _c, g) = alpha_v2_published(&lab);
+        let key = alpha_folder(&lab, &g, &a).key;
+        let v1 = alpha_folder(&lab, &g, &a).tree.unwrap();
+        let v2 = package_hash(&[(key.clone(), alpha_folder(&lab, &g, &b).tree.unwrap())]);
+        let scope = vec![key.clone()];
+        let why = ChoiceReason::Ambiguous;
+        // Negative cases write nothing.
+        let ghost = sha256(b"no such release");
+        assert_eq!(
+            a.svc.command(Command::Keep {
+                scope: scope.clone(),
+                copy: ghost,
+                why
+            }),
+            Err(CommandError::UnknownCopy(ghost))
+        );
+        assert_eq!(
+            a.svc.command(Command::Keep {
+                scope: vec![],
+                copy: ghost,
+                why
+            }),
+            Err(CommandError::UnknownCopy(ghost))
+        );
+        assert_eq!(
+            a.svc.command(Command::Resume {
+                scope: scope.clone(),
+                allow_again: vec![ghost],
+                why
+            }),
+            Err(CommandError::Write(WriteError::AllowAgainNotInherited(
+                ghost
+            )))
+        );
+        assert_eq!(
+            a.svc.command(Command::Resume {
+                scope: vec![],
+                allow_again: vec![],
+                why
+            }),
+            Err(CommandError::Write(WriteError::EmptyScope))
+        );
+        let (ac, _) = pc_ids(&a);
+        assert!(authority_files(&lab, &g, &ac).is_empty());
+
+        let kept = package_hash(&[(key.clone(), v1)]);
+        let out = a
+            .svc
+            .command(Command::Keep {
+                scope: scope.clone(),
+                copy: kept,
+                why,
+            })
+            .unwrap();
+        let CommandOutcome::Written(kh) = out else {
+            panic!("{out:?}")
+        };
+        for _ in 0..2 {
+            synced(&mut a);
+            assert_eq!(status(&a, &g, &kh), Some(Status::Valid));
+            assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        }
+        assert!(
+            offered_kinds(&a).is_empty(),
+            "the newer release was shown when the keep was made, so it is not new"
+        );
+        let out = a
+            .svc
+            .command(Command::Resume {
+                scope: scope.clone(),
+                allow_again: vec![],
+                why,
+            })
+            .unwrap();
+        let CommandOutcome::Written(rh) = out else {
+            panic!("{out:?}")
+        };
+        for _ in 0..2 {
+            synced(&mut a);
+        }
+        assert_eq!(status(&a, &g, &rh), Some(Status::Valid));
+        assert_eq!(
+            a.read("Alpha/main.lua").as_deref(),
+            Some("alpha-v1"),
+            "a resume inherits the exclusion of the release the keep passed over (Q-50)"
+        );
+        let out = a
+            .svc
+            .command(Command::Resume {
+                scope,
+                allow_again: vec![v2],
+                why,
+            })
+            .unwrap();
+        let CommandOutcome::Written(ah) = out else {
+            panic!("{out:?}")
+        };
+        for _ in 0..2 {
+            synced(&mut a);
+        }
+        assert_eq!(status(&a, &g, &ah), Some(Status::Valid));
+        assert_eq!(
+            a.read("Alpha/main.lua").as_deref(),
+            Some("alpha-v2"),
+            "allowing the excluded release again lets the group's newer release in"
+        );
+    }
+
+    #[test]
+    fn two_different_concurrent_keeps_raise_a_choices_differ_item() {
+        use wow_sync_core::decision::DecisionKind;
+        let lab = Lab::new();
+        let (mut a, b, _c, g) = alpha_v2_published(&lab);
+        put_keep_of_alpha(&lab, &g, &a);
+        put_keep_of_alpha(&lab, &g, &b);
+        for _ in 0..2 {
+            let r = synced(&mut a);
+            assert_eq!(
+                a.read("Alpha/main.lua").as_deref(),
+                Some("alpha-v1"),
+                "{r:?}"
+            );
+            assert!(
+                offered_kinds(&a).contains(&DecisionKind::ChoicesDiffer),
+                "{:?}",
+                offered_kinds(&a)
+            );
+        }
+        let item = a
+            .svc
+            .offered_decisions()
+            .iter()
+            .find(|i| i.reason == DecisionKind::ChoicesDiffer)
+            .unwrap()
+            .clone();
+        assert!(item.options.len() >= 2, "a choice is offered, none made");
     }
 }

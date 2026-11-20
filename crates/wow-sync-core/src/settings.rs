@@ -1020,3 +1020,133 @@ impl SettingsHooks for SettingsBehaviour {
 pub fn needs_witness(k: RevisionKind) -> bool {
     matches!(k, RevisionKind::Auto)
 }
+
+// ------------------------------------------------------------------------- user-written records
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsWriteError {
+    /// A rule is malformed, or two rules name the same folder.
+    BadRule,
+    /// The named computer is not a live member of the group.
+    NotLive,
+    /// More rules than one record carries inline; writing parts is not built yet.
+    TooManyRules,
+    /// No policy exists, so a revision has no witness.
+    NoPolicy,
+    /// The folder's settings are local only on every computer.
+    NotShared,
+    /// A revision of the unit is not readable yet: a push now could orphan it.
+    HistoryIncomplete,
+}
+
+/// The causal summary of the settings policies this ledger has learned.
+pub fn settings_known(l: &Ledger, group: &crate::ids::GroupId) -> crate::kinds::Known {
+    let mut best: BTreeMap<crate::ids::EnrollmentId, u64> = BTreeMap::new();
+    for e in l.entries() {
+        let (Some(AuthorityRecord::SettingsPolicy(p)), Some(i)) = (l.record(&e.hash), &e.issuer)
+        else {
+            continue;
+        };
+        if &p.group_id == group {
+            let s = best.entry(i.enrollment_id.clone()).or_insert(0);
+            *s = (*s).max(i.issued_at_seq);
+        }
+    }
+    crate::kinds::Known {
+        seen: best
+            .into_iter()
+            .map(|(enrollment_id, seq)| crate::kinds::Seen { enrollment_id, seq })
+            .collect(),
+        extra: Vec::new(),
+        parts: Vec::new(),
+    }
+}
+
+fn live_member(
+    members: &crate::ledger::Membership,
+    d: &Derived,
+    who: &crate::kinds::EnrollmentRef,
+) -> bool {
+    members.contains(&who.computer_id, &who.enrollment_id)
+        && d.barrier.retired(&who.enrollment_id) == crate::authority::Retired::No
+}
+
+/// A policy naming `master` and the per-folder exceptions `rules`, covering every policy this
+/// ledger has learned. It is an explicit user choice: nothing elects a master (settings.md §5.2).
+#[allow(clippy::too_many_arguments)]
+pub fn build_policy(
+    l: &Ledger,
+    d: &Derived,
+    members: &crate::ledger::Membership,
+    group: &crate::ids::GroupId,
+    issuer: crate::kinds::Issuer,
+    master: Option<EnrollmentRef>,
+    mut rules: Vec<PolicyRule>,
+    now_unix_ms: u64,
+) -> Result<SettingsPolicy, SettingsWriteError> {
+    if rules.len() > crate::kinds::MAX_FOLDERS {
+        return Err(SettingsWriteError::TooManyRules);
+    }
+    if rules.iter().any(|r| !r.well_formed()) {
+        return Err(SettingsWriteError::BadRule);
+    }
+    rules.sort_by(|a, b| a.folder.cmp(&b.folder));
+    if rules.windows(2).any(|w| w[0].folder == w[1].folder) {
+        return Err(SettingsWriteError::BadRule);
+    }
+    let named = master.iter().cloned().chain(rules.iter().filter_map(|r| {
+        Some(EnrollmentRef {
+            computer_id: r.computer_id.clone()?,
+            enrollment_id: r.enrollment_id.clone()?,
+        })
+    }));
+    if named.into_iter().any(|w| !live_member(members, d, &w)) {
+        return Err(SettingsWriteError::NotLive);
+    }
+    Ok(SettingsPolicy {
+        group_id: group.clone(),
+        issuer,
+        master,
+        folders: rules,
+        known: settings_known(l, group),
+        folders_parts: Vec::new(),
+        written_unix_ms: now_unix_ms,
+    })
+}
+
+/// An explicit "Share my settings" revision for `unit` (settings.md §4.1): any computer may
+/// push, whether or not it is the authority. Its parents are every head of the unit's graph.
+pub fn build_push(
+    l: &Ledger,
+    d: &Derived,
+    group: &crate::ids::GroupId,
+    issuer: crate::kinds::Issuer,
+    unit: SettingsUnit,
+    checkpoint: CheckpointRef,
+    now_unix_ms: u64,
+) -> Result<crate::kinds::SettingsRevision, SettingsWriteError> {
+    let heads = policy_heads(l, d);
+    if heads.is_empty() {
+        return Err(SettingsWriteError::NoPolicy);
+    }
+    if authority_for(&heads, &unit.folder) == Authority::NotShared {
+        return Err(SettingsWriteError::NotShared);
+    }
+    let g = graph_from_ledger(l, d, &unit);
+    if g.pending {
+        return Err(SettingsWriteError::HistoryIncomplete);
+    }
+    Ok(crate::kinds::SettingsRevision {
+        group_id: group.clone(),
+        issuer,
+        unit,
+        kind: RevisionKind::Push,
+        checkpoint,
+        parents: g.heads.clone(),
+        parents_parts: Vec::new(),
+        policy: witness_set(&heads),
+        code_package_hash: None,
+        known: settings_known(l, group),
+        written_unix_ms: now_unix_ms,
+    })
+}

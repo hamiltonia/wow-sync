@@ -34,6 +34,7 @@ use wow_sync_core::admit::{
     StateFileObs,
 };
 use wow_sync_core::authority::{AuthorityRecord, Retired};
+use wow_sync_core::decide::decision_items;
 use wow_sync_core::decide::{DecideBehaviour, Standing};
 use wow_sync_core::decision::CycleCx;
 use wow_sync_core::decision::{DecideOutcome, DecisionEffect, FreshEvidence};
@@ -48,7 +49,7 @@ use wow_sync_core::inventory::{build_inventory, FolderScan, Inventory, ScanStatu
 use wow_sync_core::kinds::EnrollmentRef;
 use wow_sync_core::kinds::Issuer;
 use wow_sync_core::layout;
-use wow_sync_core::ledger::derive;
+use wow_sync_core::ledger::{derive, Status as LedgerStatus};
 use wow_sync_core::package::ClientInfo;
 use wow_sync_core::paths::FolderKey;
 use wow_sync_core::plan::{
@@ -71,7 +72,9 @@ use wow_sync_core::status::{
     applied_here, derive_status, game_halted, headline_sentence, journal_status, remember_applied,
     render_block, render_headline, render_member, render_result, Headline, StatusInput, StatusView,
 };
-use wow_sync_core::target::{compose, GroupTarget, TargetInput, TreeAvail};
+use wow_sync_core::target::{
+    compose, package_copies, GroupTarget, PackageCopies, TargetInput, TreeAvail,
+};
 use wow_sync_core::toc::TocCandidate;
 use wow_sync_core::variant::{
     assess_layout, check_join, confirm_enrolled, confirm_variant, consent_disclosures, consent_gap,
@@ -271,6 +274,11 @@ struct World {
     inventory: Inventory,
     views: Vec<MemberView>,
     target: GroupTarget,
+    offers: Vec<(
+        wow_sync_core::decision::DecisionItem,
+        wow_sync_core::decide::Plans,
+    )>,
+    copies: Vec<PackageCopies>,
     own_states: Vec<String>,
     /// This enrollment's newest published state, if readable.
     own_latest: Option<CodeState>,
@@ -358,8 +366,33 @@ impl SliceService {
         self.offered = (items, plans);
     }
 
+    /// The decisions offered after the latest cycle.
+    pub fn offered_decisions(&self) -> &[wow_sync_core::decision::DecisionItem] {
+        &self.offered.0
+    }
+
+    /// The `SettingsHistory` query: the valid revisions of `unit` as of the latest observation,
+    /// oldest first. It reads the plane only; nothing is written or applied.
+    pub fn settings_history(
+        &self,
+        unit: &wow_sync_core::ids::SettingsUnit,
+    ) -> Vec<crate::settings_cycle::SettingsHistoryEntry> {
+        let Ok(Some(enrollment)) = self.read_enrollment() else {
+            return Vec::new();
+        };
+        let derived = derive(
+            &self.plane.ledger,
+            &enrollment.group_id,
+            &self.plane.members,
+        );
+        crate::settings_cycle::settings_history(&self.plane.ledger, &derived, unit)
+    }
+
     /// Runs one group command (contracts.md §9.1) against the current observed state.
     pub fn command(&mut self, cmd: Command) -> Result<CommandOutcome, CommandError> {
+        if cmd == Command::ReEnroll {
+            return self.re_enroll();
+        }
         let w = self
             .observe_world(false)
             .map_err(|e| CommandError::Service(e.to_string()))?;
@@ -443,6 +476,120 @@ impl SliceService {
                     })?;
                     DecisionEffect::Write(Box::new(AuthorityRecord::Lift(lift)))
                 }
+                Command::RestoreRemoved { removal } => {
+                    let valid = derived.status.get(&removal) == Some(&LedgerStatus::Valid);
+                    let Some(AuthorityRecord::Removal(rm)) =
+                        self.plane.ledger.record(&removal).filter(|_| valid)
+                    else {
+                        return Err(CommandError::UnknownRemoval(removal));
+                    };
+                    let readd = crate::removal_cycle::restore(
+                        &self.plane.ledger,
+                        &gid,
+                        &w.own,
+                        rm,
+                        seq,
+                        now,
+                    );
+                    DecisionEffect::Write(Box::new(AuthorityRecord::Readd(readd)))
+                }
+                // Dispatched before observation, above.
+                Command::ReEnroll => return Err(CommandError::NotAllowed),
+                Command::SetSettingsPolicy { master, exceptions } => {
+                    let rec = wow_sync_core::settings::build_policy(
+                        &self.plane.ledger,
+                        &derived,
+                        &self.plane.members,
+                        &gid,
+                        issuer,
+                        master,
+                        exceptions,
+                        now,
+                    )
+                    .map_err(CommandError::Settings)?;
+                    DecisionEffect::Write(Box::new(AuthorityRecord::SettingsPolicy(rec)))
+                }
+                Command::ShareSettings { unit, checkpoint } => {
+                    let known_here =
+                        wow_sync_adapters::settings_store::SettingsStore::open(&self.variant_dir())
+                            .ok()
+                            .and_then(|s| s.get_manifest(&checkpoint.0).ok().flatten())
+                            .is_some();
+                    if !known_here {
+                        return Err(CommandError::UnknownCheckpoint(checkpoint));
+                    }
+                    let rec = wow_sync_core::settings::build_push(
+                        &self.plane.ledger,
+                        &derived,
+                        &gid,
+                        issuer,
+                        unit,
+                        checkpoint,
+                        now,
+                    )
+                    .map_err(CommandError::Settings)?;
+                    DecisionEffect::Write(Box::new(AuthorityRecord::SettingsRevision(rec)))
+                }
+                Command::Keep { scope, copy, why } => {
+                    let valid = wow_sync_core::choice::valid_hashes(&derived);
+                    let view = wow_sync_core::choice::ChoiceView::new(&self.plane.ledger, &valid);
+                    let pc = w
+                        .copies
+                        .iter()
+                        .find(|p| {
+                            !scope.is_empty() && scope.iter().all(|k| p.package.members.contains(k))
+                        })
+                        .ok_or(CommandError::UnknownCopy(copy))?;
+                    let chosen = pc
+                        .copies
+                        .iter()
+                        .find(|c| c.version.hash == copy)
+                        .ok_or(CommandError::UnknownCopy(copy))?;
+                    let shown: Vec<_> = pc
+                        .copies
+                        .iter()
+                        .map(|c| wow_sync_core::choice::CopyEntry::from_copy(c, &scope))
+                        .collect::<Result<_, _>>()
+                        .map_err(CommandError::Write)?;
+                    let kept = wow_sync_core::choice::CopyEntry::from_copy(chosen, &scope)
+                        .map_err(CommandError::Write)?;
+                    let rec = wow_sync_core::choice::build_keep(
+                        &view,
+                        &wow_sync_core::choice::WriteCx {
+                            group: &gid,
+                            issuer,
+                            now_unix_ms: now,
+                        },
+                        why,
+                        &scope,
+                        &kept,
+                        &shown,
+                        &chosen.source,
+                    )
+                    .map_err(CommandError::Write)?;
+                    DecisionEffect::Write(Box::new(AuthorityRecord::CodeChoice(rec)))
+                }
+                Command::Resume {
+                    scope,
+                    allow_again,
+                    why,
+                } => {
+                    let valid = wow_sync_core::choice::valid_hashes(&derived);
+                    let view = wow_sync_core::choice::ChoiceView::new(&self.plane.ledger, &valid);
+                    let rec = wow_sync_core::choice::build_resume(
+                        &view,
+                        &wow_sync_core::choice::WriteCx {
+                            group: &gid,
+                            issuer,
+                            now_unix_ms: now,
+                        },
+                        why,
+                        &scope,
+                        &allow_again,
+                    )
+                    .map_err(CommandError::Write)?;
+                    DecisionEffect::Write(Box::new(AuthorityRecord::CodeChoice(rec)))
+                }
             }
         };
         let routed = route(
@@ -475,6 +622,50 @@ impl SliceService {
                 Ok(CommandOutcome::Kept)
             }
         }
+    }
+
+    /// Explicit re-enrollment of a retired (or held) computer: a new enrollment id for the same
+    /// computer, recorded in `member.json` with the old ids kept (ops.md §2.3 item 6). The old
+    /// enrollment stays retired and its records stay valid.
+    fn re_enroll(&mut self) -> Result<CommandOutcome, CommandError> {
+        let svc = |e: &dyn std::fmt::Display| CommandError::Service(e.to_string());
+        let w = self.observe_world(false).map_err(|e| svc(&e))?;
+        if w.standing == OwnStanding::Active {
+            return Ok(CommandOutcome::NothingToDo);
+        }
+        let provider = self.open_provider().map_err(|e| svc(&e))?;
+        let me = w.computer.computer_id.clone();
+        let old = provider
+            .read(&layout::member_record(&w.group.group_id, &me), SMALL)
+            .map_err(|e| svc(&e))
+            .and_then(|b| decode::<MemberRecord>(&b, SMALL as usize).map_err(|e| svc(&e)))?;
+        let enrollment_id = EnrollmentId::parse(&random_id_hex()).expect("random id");
+        let mut previous = old.previous_enrollments.clone();
+        previous.push(w.enrollment.enrollment_id.clone());
+        previous.sort();
+        previous.dedup();
+        let member = MemberRecord {
+            enrollment_id: enrollment_id.clone(),
+            enrolled_unix_ms: now_unix_ms() as u64,
+            app_version: self.cfg.app_version.clone(),
+            previous_enrollments: previous,
+            ..old
+        };
+        provider
+            .write_atomic(
+                &layout::member_record(&w.group.group_id, &me),
+                &encode(&member),
+                me.as_str(),
+            )
+            .map_err(|e| svc(&e))?;
+        let mut le = w.enrollment.clone();
+        le.enrollment_id = enrollment_id;
+        le.next_seq = 1;
+        self.state
+            .write_atomic("enrollment.json", &encode(&le))
+            .map_err(|e| svc(&e))?;
+        let _ = self.state.append_audit("re-enrolled this computer");
+        Ok(CommandOutcome::ReEnrolled)
     }
 
     /// The sequence number a record used is never handed out again.
@@ -895,6 +1086,7 @@ impl SliceService {
             enrolled_unix_ms: now,
             app_version: self.cfg.app_version.clone(),
             retired: None,
+            previous_enrollments: vec![],
         };
         provider
             .write_atomic(
@@ -1042,6 +1234,9 @@ impl SliceService {
             if let Ok(rec) = &m.member {
                 if rec.computer_id == m.computer {
                     self.plane.add_member(&m.computer, &rec.enrollment_id);
+                    for p in &rec.previous_enrollments {
+                        self.plane.add_member(&m.computer, p);
+                    }
                 }
             }
             for f in &m.files {
@@ -1103,6 +1298,14 @@ impl SliceService {
             };
             trees.insert(h, avail);
         }
+        if inventory.listing_stable {
+            let hooks =
+                RemovalBehaviour::new(&self.plane.ledger, &group.group_id, &self.plane.members);
+            let _ = RemovalStore::new(&self.state, group.group_id.clone())
+                .forget_group_removed(&inventory, |k| {
+                    !hooks.merged_removals(&self.plane.ledger, k).live.is_empty()
+                });
+        }
         let held = {
             let identity = format!("{}|{}", enrollment.install_root, enrollment.variant_folder);
             let journaled = self.journaled();
@@ -1130,22 +1333,47 @@ impl SliceService {
             RemovalBehaviour::new(&self.plane.ledger, &group.group_id, &self.plane.members)
                 .with_inventory(inventory.clone(), enrollment.next_seq);
         let constraints = Constraints::for_derived(&derived);
+        let input = TargetInput {
+            group: &group,
+            variant: &variant,
+            local: &inventory,
+            local_client: &Self::client_info(&variant),
+            local_id: &computer.computer_id,
+            members: &views,
+            trees: &trees,
+        };
         let target = compose(
-            &TargetInput {
-                group: &group,
-                variant: &variant,
-                local: &inventory,
-                local_client: &Self::client_info(&variant),
-                local_id: &computer.computer_id,
-                members: &views,
-                trees: &trees,
-            },
+            &input,
             &self.plane.ledger,
             &removal_hooks,
             &held,
             &constraints,
         )
         .target;
+        let copies = package_copies(
+            &input,
+            &enrollment.enrollment_id,
+            &self.plane.ledger,
+            &constraints,
+        );
+        let offers = {
+            let valid = wow_sync_core::choice::valid_hashes(&derived);
+            let view = wow_sync_core::choice::ChoiceView::new(&self.plane.ledger, &valid);
+            decision_items(
+                &view,
+                &wow_sync_core::choice::WriteCx {
+                    group: &group.group_id,
+                    issuer: Issuer {
+                        computer_id: computer.computer_id.clone(),
+                        enrollment_id: enrollment.enrollment_id.clone(),
+                        issued_at_seq: enrollment.next_seq,
+                    },
+                    now_unix_ms: now_unix_ms() as u64,
+                },
+                &target,
+                &copies,
+            )
+        };
         let own_states =
             match provider.list(&layout::state_dir(&group.group_id, &computer.computer_id)) {
                 Ok(l) => l
@@ -1175,6 +1403,8 @@ impl SliceService {
             inventory,
             views,
             target,
+            offers,
+            copies,
             own_states,
             own_latest,
             titles,
@@ -1400,6 +1630,13 @@ impl SliceService {
         let mut journals_remaining = false;
         self.last_blocks.clear();
         self.settle_kept(&w, &provider);
+        if w.standing == OwnStanding::Active {
+            let (items, plans): (Vec<_>, Vec<_>) =
+                std::mem::take(&mut w.offers).into_iter().unzip();
+            self.offer_decisions(items, plans.into_iter().flatten().collect());
+        } else {
+            self.offer_decisions(vec![], vec![]);
+        }
 
         // Drop results the newest own state already carries (a crash after publishing but
         // before the store was cleared). A failure here is retried: `publish_step` refuses to
@@ -1520,6 +1757,15 @@ impl SliceService {
                             });
                         }
                         remember_applied(&mut self.applied_here, &plan, &outcome);
+                        let removed_here: BTreeSet<FolderKey> = plan
+                            .packages
+                            .iter()
+                            .flat_map(|p| p.removes.iter().map(|r| r.key.clone()))
+                            .collect();
+                        if !removed_here.is_empty() && !fx.crashed() {
+                            let _ = RemovalStore::new(&self.state, group_id.clone())
+                                .forget_keys(&removed_here);
+                        }
                         if let Some(b) = &outcome.stopped {
                             report.apply_note = Some(render_block(b));
                             self.last_blocks.push(b.clone());

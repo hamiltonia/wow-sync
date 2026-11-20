@@ -105,8 +105,38 @@ stage A ledger-rule mutation.
 | `detail.rs`, proto `scenario.rs` | no edit needed |
 | proto and app `model.rs` `decision_title`/`decision_reason` | arms for `ChoicesDiffer` and `RollbackTargetsDiffer` (NeedsDecision with `candidates: []`; the detail view renders an empty candidate list) |
 
-No new UI was added. The app can drive `Decide`, `Retire` and `AllowAgain` through
-`SliceService::command`; the other commands do not exist yet.
+No new UI was added. Commands go through `SliceService::command` (`control.rs`). The orchestrator
+accepted the core `decision.rs` match-arm change and the `e2e.rs` service tests.
+
+### Command handover
+
+| Command | Parameters | UI meaning | Errors |
+|---|---|---|---|
+| `Decide` | item, choice, freshness | answer an offered decision; stale → `Changed` | `Decide`, `NotAllowed` |
+| `Retire` / `ReEnroll` | computer / none | retire; explicit re-enrollment of a retired computer (`previous_enrollments`) | `NotAllowed` |
+| `AllowAgain` | rejection | allow a rejected release again | `UnknownRejection` |
+| `Keep` | scope, copy, why | pin a copy for a typed scope (Q-50 exclusions inherited) | `UnknownCopy`, `EmptySelection`, `Write` |
+| `Resume` | scope, allow_again, why | release a keep | `Write` |
+| `RestoreRemoved` | removal | bring back code and settings of a removed addon | `UnknownRemoval` |
+| `SetSettingsPolicy` | master, exceptions | record master and per-addon exceptions | `Settings(NotLive/BadRule/TooManyRules)` |
+| `ShareSettings` | unit, checkpoint | explicit push of a stored checkpoint | `UnknownCheckpoint`, `Settings(NoPolicy/NotShared/HistoryIncomplete)` |
+| query `settings_history(unit)` | unit | graph nodes, oldest first | none |
+| query `offered_decisions()` | none | decision items from live state | none |
+
+Intent is recorded only; settings apply (C0) is not wired.
+
+### Item 1–5 additions
+
+`target::package_copies`, `decide::decision_items`, `MemberRecord.previous_enrollments` (skipped
+when empty, so golden fixtures are unchanged), `RemovalStore::forget_group_removed`/`forget_keys`
+(fixes a stale presence baseline that re-removed a restored addon), settings builders
+`build_policy`/`build_push`.
+
+### A-38 (item 5)
+
+| Control | Mutation | Failing test |
+|---|---|---|
+| Non-master push accepted without explicit intent | `build_push` emits `RevisionKind::Auto` | `e2e::tests::settings_policy_and_push_commands_record_explicit_intent_only` (failed; reverted, `git diff --exit-code` clean) |
 
 ## Open items
 
@@ -130,14 +160,9 @@ No new UI was added. The app can drive `Decide`, `Retire` and `AllowAgain` throu
   `build_inventory`, a private test-only settings cap (production stays `None`, Q-77), the
   policy/revision builders, the per-unit step (capture, `target_case`, publish `Auto`, plan the
   apply) and `SetPolicy`/`ConfirmSettingsHere`. Not started; real-data settings sync stays off.
-- **Rest of the §9.1 surface** (`control.rs`): not built, so no variant is declared for them:
-  keep and resume (typed scope), explicit re-enrollment, `Rollback` (needs live R1/R0, stage D),
-  settings master/exception/push/pause/resume/choose/restore/confirm/use-shared,
-  `SettingsHistory`, removal recovery/restore commands (functions exist in `removal_cycle.rs`
-  but are not routed). `ExportDiagnostics`, `CheckUpdates`, `AppSettings` remain as before.
-- **Decision item producer:** nothing in the cycle builds `DecisionItem`s from live state;
-  `offer_decisions` is the hook the producer (compose's `NeedsDecision`, `new_version_item`)
-  must call.
+- **Rest of the §9.1 surface** (`control.rs`): `Rollback` (needs live R1/R0, stage D); settings
+  pause/resume/choose/restore/confirm/use-shared and settings removal-restore; a capture command
+  producing the checkpoint; policies over 256 rules need parts.
 - **Rollback inputs from live scans, cross-packet items, `TooLarge` split persistence**
   (probably `kinds.rs`), the stage D A-38 controls.
 
