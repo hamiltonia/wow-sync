@@ -913,8 +913,7 @@ impl Shell {
         if let Some(g) = &s.grouped {
             folders.push(self.muted(g.clone()).into_any_element());
         }
-        let restore = self.btn_off("restore", "Restore…", "coming later", cx);
-        let mut rec: Vec<AnyElement> = vec![restore.into_any_element()];
+        let mut rec: Vec<AnyElement> = Vec::new();
         let installed = s.versions.clone();
         let rows: Vec<crate::rollback_ui::ReleaseRow> = self
             .w
@@ -924,7 +923,10 @@ impl Shell {
             .filter(|r| r.package.as_str() == key)
             .cloned()
             .collect();
-        for (j, r) in rows.into_iter().enumerate() {
+        if rows.iter().all(|r| r.current) {
+            rec.push(self.muted(crate::change_ui::NO_EARLIER).into_any_element());
+        }
+        for (j, r) in rows.iter().cloned().enumerate() {
             let mut line = format!("Version {}", r.version);
             if !r.held_by.is_empty() {
                 line.push_str(&format!(", held by {}", r.held_by));
@@ -999,6 +1001,90 @@ impl Shell {
         let mut det: Vec<AnyElement> = vec![self
             .disclosure("addon-details", "Details", cx)
             .into_any_element()];
+        let mut change: Vec<AnyElement> = vec![self
+            .muted("Keep a version for the whole group, or let WoW Sync update this add-on automatically again.")
+            .into_any_element()];
+        for (j, c) in crate::change_ui::change_controls(&self.w, key, &s.title, &rows)
+            .into_iter()
+            .enumerate()
+        {
+            let open = format!("chg-{j}");
+            match c.action {
+                Err(reason) => {
+                    change.push(
+                        self.btn_off(&open, &c.label, &reason, cx)
+                            .into_any_element(),
+                    );
+                    change.push(self.muted(reason).into_any_element());
+                }
+                Ok(a) if self.expanded.contains(&open) => {
+                    change.push(
+                        div()
+                            .child(SharedString::from(c.confirm.clone()))
+                            .into_any_element(),
+                    );
+                    change.push(
+                        self.btn(
+                            &format!("{open}-go"),
+                            &c.label,
+                            Bk::Primary,
+                            Act::Group(a),
+                            cx,
+                        )
+                        .aria_label(SharedString::from(c.name.clone()))
+                        .into_any_element(),
+                    );
+                    change.push(
+                        self.btn(
+                            &format!("{open}-no"),
+                            "Cancel",
+                            Bk::Secondary,
+                            Act::ToggleExpand(open),
+                            cx,
+                        )
+                        .into_any_element(),
+                    );
+                }
+                Ok(_) => change.push(
+                    self.btn(
+                        &open,
+                        &format!("{}…", c.label),
+                        Bk::Secondary,
+                        Act::ToggleExpand(open.clone()),
+                        cx,
+                    )
+                    .aria_label(SharedString::from(c.name.clone()))
+                    .into_any_element(),
+                ),
+            }
+        }
+        let units: Vec<(usize, crate::settings_ui::UnitRow)> = self
+            .w
+            .features
+            .settings
+            .units
+            .iter()
+            .cloned()
+            .enumerate()
+            .filter(|(_, r)| r.unit.folder.as_str() == key)
+            .collect();
+        for (i, row) in units {
+            for (j, (c, sentence)) in crate::settings_ui::restore_controls(&self.w, &row)
+                .into_iter()
+                .enumerate()
+            {
+                rec.push(
+                    div()
+                        .child(SharedString::from(format!(
+                            "Settings for {}",
+                            crate::settings_ui::identity_words(&row.unit)
+                        )))
+                        .into_any_element(),
+                );
+                let open = format!("ad-u{i}-r{j}");
+                rec.extend(self.restore_rows(&open, c, sentence, cx));
+            }
+        }
         if self.expanded.contains("addon-details") {
             for d in &s.details {
                 det.push(self.muted(d.clone()).into_any_element());
@@ -1033,6 +1119,7 @@ impl Shell {
             ))
             .child(self.panel("Why this version", why))
             .child(self.panel("Next step", next))
+            .child(self.panel("Change decision", change))
             .child(self.panel("On each computer", comps))
             .child(self.panel("Folders", folders))
             .child(self.panel("Recovery copies", rec))
@@ -1705,38 +1792,7 @@ impl Shell {
                 .enumerate()
             {
                 let open = format!("ss-u{i}-r{j}");
-                if self.expanded.contains(&open) {
-                    s.push(div().child(SharedString::from(sentence)).into_any_element());
-                    s.extend(self.control_buttons(
-                        &format!("{open}-go"),
-                        vec![crate::settings_ui::Control {
-                            label: "Restore".into(),
-                            action: c.action,
-                        }],
-                        cx,
-                    ));
-                    s.push(
-                        self.btn(
-                            &format!("{open}-no"),
-                            "Cancel",
-                            Bk::Secondary,
-                            Act::ToggleExpand(open),
-                            cx,
-                        )
-                        .into_any_element(),
-                    );
-                } else {
-                    s.push(
-                        self.btn(
-                            &open,
-                            &c.label,
-                            Bk::Secondary,
-                            Act::ToggleExpand(open.clone()),
-                            cx,
-                        )
-                        .into_any_element(),
-                    );
-                }
+                s.extend(self.restore_rows(&open, c, sentence, cx));
             }
         }
         col = col.child(self.panel("Settings choices and sharing", s));
@@ -1801,6 +1857,52 @@ impl Shell {
         }
         col = col.child(self.panel("Pause settings", p));
         col.into_any_element()
+    }
+
+    /// A restore button that opens its confirmation sentence; a disabled one says why.
+    fn restore_rows(
+        &mut self,
+        open: &str,
+        c: crate::settings_ui::Control,
+        sentence: String,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let mut s: Vec<AnyElement> = Vec::new();
+        if c.action.is_err() {
+            s.extend(self.control_buttons(open, vec![c], cx));
+        } else if self.expanded.contains(open) {
+            s.push(div().child(SharedString::from(sentence)).into_any_element());
+            s.extend(self.control_buttons(
+                &format!("{open}-go"),
+                vec![crate::settings_ui::Control {
+                    label: "Restore".into(),
+                    action: c.action,
+                }],
+                cx,
+            ));
+            s.push(
+                self.btn(
+                    &format!("{open}-no"),
+                    "Cancel",
+                    Bk::Secondary,
+                    Act::ToggleExpand(open.to_string()),
+                    cx,
+                )
+                .into_any_element(),
+            );
+        } else {
+            s.push(
+                self.btn(
+                    open,
+                    &c.label,
+                    Bk::Secondary,
+                    Act::ToggleExpand(open.to_string()),
+                    cx,
+                )
+                .into_any_element(),
+            );
+        }
+        s
     }
 
     /// A button per control; an unavailable one is disabled and says why.

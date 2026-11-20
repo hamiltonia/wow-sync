@@ -1301,6 +1301,14 @@ tier = "offline"
 tests = ["backend::tests::opening_the_service_attaches_os_services_and_survives_a_failed_attach"]
 
 [[case]]
+id = "R4-app:change-decision"
+tier = "offline"
+tests = [
+    "change_ui::tests::keep_names_the_release_and_resume_is_always_offered",
+    "change_ui::tests::a_blocked_release_is_not_offered_and_a_retired_computer_cannot_change_a_decision",
+]
+
+[[case]]
 id = "R4-app:notices"
 tier = "offline"
 tests = [

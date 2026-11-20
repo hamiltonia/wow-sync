@@ -14,6 +14,7 @@ mod app;
 mod assets;
 mod backend;
 mod brand;
+mod change_ui;
 mod computers_ui;
 mod consent;
 mod decisions_ui;
