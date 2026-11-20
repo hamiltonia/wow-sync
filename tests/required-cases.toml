@@ -1011,6 +1011,7 @@ id = "R4-integrate:rollback"
 tier = "offline"
 tests = [
     "e2e::tests::a_rollback_installs_the_recovered_release_and_an_offline_peer_cannot_bring_the_rejected_one_back",
+    "e2e::tests::a_rollback_stages_the_recovered_release_from_a_local_recovery_point",
 ]
 # <<< section: R4-integrate
 

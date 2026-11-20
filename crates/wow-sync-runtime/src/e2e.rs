@@ -1708,6 +1708,61 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_rollback_stages_the_recovered_release_from_a_local_recovery_point() {
+        use wow_sync_core::hash::package_hash;
+        use wow_sync_core::records::decode_tree;
+        let lab = Lab::new();
+        let (mut a, b, c, g) = alpha_v2_published(&lab);
+        let v1 = alpha_folder(&lab, &g, &c);
+        let tree = v1.tree.unwrap();
+        let v1_hash = package_hash(&[(v1.key.clone(), tree)]);
+        // A follows B to v2; its recovery point now holds v1.
+        synced(&mut a);
+        assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v2"));
+        // v1 leaves the shared folder: its files and its tree record.
+        let rec_rel = layout::tree_record(&g, &tree);
+        let rec = std::fs::read(provider_file(&lab, &rec_rel)).unwrap();
+        for f in decode_tree(&rec, &tree).unwrap().files {
+            std::fs::remove_file(provider_file(&lab, &layout::blob(&g, &f.sha256))).unwrap();
+        }
+        std::fs::remove_file(provider_file(&lab, &rec_rel)).unwrap();
+
+        // B changed v1 to v2 by hand: no recovery point holds v1 anywhere, so it is refused.
+        let mut b = b;
+        synced(&mut b);
+        let (bc, _) = pc_ids(&b);
+        let before = authority_files(&lab, &g, &bc);
+        assert_eq!(
+            b.svc.command(Command::Rollback {
+                package: v1.key.clone(),
+                recovered: v1_hash,
+            }),
+            Err(CommandError::Rollback(
+                crate::rollback_flow::RollbackRefusal::NotAvailable
+            ))
+        );
+        synced(&mut b);
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v2"));
+        assert_eq!(authority_files(&lab, &g, &bc), before, "nothing written");
+
+        assert_eq!(
+            a.svc.command(Command::Rollback {
+                package: v1.key.clone(),
+                recovered: v1_hash,
+            }),
+            Ok(CommandOutcome::Recorded)
+        );
+        let r = synced(&mut a);
+        assert_eq!(
+            a.read("Alpha/main.lua").as_deref(),
+            Some("alpha-v1"),
+            "{r:?}"
+        );
+        let (ac, _) = pc_ids(&a);
+        assert!(!authority_files(&lab, &g, &ac).is_empty(), "{r:?}");
+    }
+
     // ------------------------------------------------ control commands (R4-integrate C1)
 
     #[test]
