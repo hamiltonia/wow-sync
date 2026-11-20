@@ -950,6 +950,15 @@ tests = [
     "e2e::tests::a_rejected_release_is_never_installed",
     "e2e::tests::apply_report_survives_crash_before_publish",
 ]
+
+[[case]]
+id = "R4-integrate:control-commands-decide-retire-allow-again"
+tier = "offline"
+tests = [
+    "e2e::tests::retire_command_writes_a_retirement_and_a_retired_computer_is_refused",
+    "e2e::tests::decide_command_is_checked_for_freshness_and_kept_while_paused",
+    "e2e::tests::allow_again_lifts_only_an_active_rejection",
+]
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag
