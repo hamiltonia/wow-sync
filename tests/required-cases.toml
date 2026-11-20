@@ -891,6 +891,27 @@ tests = [
 ]
 # <<< section: R4-core-ops
 
+# >>> section: R4-integrate
+[[case]]
+id = "R4-integrate:ledger-and-state"
+tier = "offline"
+tests = [
+    "ledger::tests::a_settings_revision_parent_needs_the_same_unit_and_any_kind",
+    "ledger::tests::graph_from_ledger_keeps_equal_heads_and_marks_an_unknown_parent_pending",
+    "ledger::tests::policy_heads_drop_a_policy_that_a_later_one_knows",
+    "decisions::tests::a_kept_queue_survives_a_restart_and_a_tampered_item_is_dropped",
+    "settings_cycle::tests::the_epoch_state_survives_a_restart_and_unreadable_state_is_not_clean",
+]
+
+[[case]]
+id = "R4-integrate:code-state-authority-index"
+tier = "offline"
+tests = [
+    "records::tests::authority_index_and_features_are_additive_and_old_readers_ignore_them",
+    "plan::tests::publish_needed_decisions",
+]
+# <<< section: R4-integrate
+
 # >>> section: R4-notify-diag
 # <<< section: R4-notify-diag
 

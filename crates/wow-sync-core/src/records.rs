@@ -211,7 +211,32 @@ pub struct CodeState {
     pub folders: Vec<FolderState>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub apply_report: Option<ApplyReport>,
+    /// Additive in `code-state/1` (contracts.md §1.6): the head of this enrollment's authority
+    /// index chain and the number of refs it lists. Old readers ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority_index: Option<AuthorityIndexHead>,
+    /// Additive: the capabilities this app applies (contracts.md §1.13).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub features: Vec<String>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthorityIndexHead {
+    pub head: Sha256,
+    pub total: u64,
+}
+
+/// The capabilities this build applies, in the order of contracts.md §1.13.
+pub const FEATURES: &[&str] = &[
+    "authority/1",
+    "removal/1",
+    "code-choice/1",
+    "rejection/1",
+    "settings/1",
+    "retirement/1",
+    "journal/2",
+];
+
 record!(CodeState, "wowsync.code-state", 16 * MIB, |self| {
     let mut seen = std::collections::BTreeSet::new();
     for f in &self.folders {
@@ -1262,6 +1287,34 @@ mod tests {
             3,
             &testkit::inventory(vec![testkit::addon("Suite", Some("1.0"), "a")]),
         )
+    }
+
+    #[test]
+    fn authority_index_and_features_are_additive_and_old_readers_ignore_them() {
+        // contracts.md §1.6, §1.13 downgrade: the slice shape stays byte-identical
+        let slice = code_state();
+        let slice_bytes = encode(&slice);
+        let text = String::from_utf8(slice_bytes.clone()).unwrap();
+        assert!(!text.contains("authority_index") && !text.contains("features"));
+        assert_eq!(decode::<CodeState>(&slice_bytes, MIB).unwrap(), slice);
+
+        let mut modern = slice.clone();
+        modern.authority_index = Some(AuthorityIndexHead {
+            head: Sha256([5; 32]),
+            total: 12,
+        });
+        modern.features = FEATURES.iter().map(|f| f.to_string()).collect();
+        let bytes = encode(&modern);
+        assert_eq!(decode::<CodeState>(&bytes, 16 * MIB).unwrap(), modern);
+
+        #[derive(Deserialize)]
+        struct SliceReader {
+            seq: u64,
+            folders: Vec<serde_json::Value>,
+        }
+        let old: SliceReader = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(old.seq, 3);
+        assert_eq!(old.folders.len(), 1);
     }
 
     #[test]

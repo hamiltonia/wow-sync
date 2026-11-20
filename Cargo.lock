@@ -6211,6 +6211,8 @@ dependencies = [
 name = "wow-sync-runtime"
 version = "0.0.0"
 dependencies = [
+ "serde",
+ "serde_json",
  "wow-sync-adapters",
  "wow-sync-core",
 ]

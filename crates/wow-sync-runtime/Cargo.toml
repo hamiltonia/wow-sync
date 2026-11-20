@@ -10,6 +10,8 @@ publish = false
 [dependencies]
 wow-sync-core = { version = "0.0.0", path = "../wow-sync-core" }
 wow-sync-adapters = { version = "0.0.0", path = "../wow-sync-adapters" }
+serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 wow-sync-adapters = { version = "0.0.0", path = "../wow-sync-adapters", features = ["testkit"] }

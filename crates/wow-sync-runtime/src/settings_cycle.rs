@@ -137,6 +137,65 @@ pub fn plan_settings_apply(
     p
 }
 
+/// What the cycle remembers about one unit beyond `SettingsLocal`: whether the authority epoch is
+/// clean, the sequence of the last capture, and why that capture was taken (settings.md §5).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct UnitEpoch {
+    pub unit: SettingsUnit,
+    pub epoch_clean: bool,
+    pub capture_seq: u64,
+    pub capture_kind: Option<wow_sync_core::settings::CaptureKind>,
+}
+
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+struct EpochFile {
+    units: Vec<UnitEpoch>,
+}
+
+fn epoch_name(group: &wow_sync_core::ids::GroupId) -> String {
+    format!("settings-epoch-{group}.json")
+}
+
+/// Persisted in local state so a restart keeps an experiment held rather than publishing it.
+pub struct EpochStore<'a> {
+    state: &'a wow_sync_adapters::localstate::LocalState,
+    group: wow_sync_core::ids::GroupId,
+}
+
+impl<'a> EpochStore<'a> {
+    pub fn new(
+        state: &'a wow_sync_adapters::localstate::LocalState,
+        group: wow_sync_core::ids::GroupId,
+    ) -> Self {
+        Self { state, group }
+    }
+
+    /// Missing or damaged state means no unit is known clean: nothing publishes until a fresh
+    /// activation capture proves it.
+    pub fn load(&self) -> Vec<UnitEpoch> {
+        let file: EpochFile = self
+            .state
+            .read(&epoch_name(&self.group), 4 * 1024 * 1024)
+            .ok()
+            .flatten()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
+        let mut seen = BTreeSet::new();
+        file.units
+            .into_iter()
+            .filter(|u| seen.insert(u.unit.clone()))
+            .collect()
+    }
+
+    pub fn save(&self, units: &[UnitEpoch]) -> Result<(), FsError> {
+        let bytes = serde_json::to_vec(&EpochFile {
+            units: units.to_vec(),
+        })
+        .expect("plain data serializes");
+        self.state.write_atomic(&epoch_name(&self.group), &bytes)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,6 +226,37 @@ mod tests {
 
     fn included() -> BTreeSet<String> {
         ["ERIC".to_string()].into()
+    }
+
+    #[test]
+    fn the_epoch_state_survives_a_restart_and_unreadable_state_is_not_clean() {
+        use wow_sync_core::settings::CaptureKind;
+        let t = TempDir::new();
+        let state = wow_sync_adapters::localstate::LocalState::open_at(t.path()).unwrap();
+        let g = wow_sync_core::ids::GroupId::parse(&hex('9')).unwrap();
+        let unit = SettingsUnit {
+            folder: wow_sync_core::paths::validate_folder_name("Details").unwrap(),
+            identity: Identity::account("ERIC").unwrap(),
+        };
+        let units = vec![UnitEpoch {
+            unit: unit.clone(),
+            epoch_clean: false,
+            capture_seq: 41,
+            capture_kind: Some(CaptureKind::BeforeChange),
+        }];
+        let store = EpochStore::new(&state, g.clone());
+        assert!(store.load().is_empty());
+        store.save(&units).unwrap();
+        assert_eq!(EpochStore::new(&state, g.clone()).load(), units);
+        let other = wow_sync_core::ids::GroupId::parse(&hex('8')).unwrap();
+        assert!(EpochStore::new(&state, other).load().is_empty());
+        state
+            .write_atomic(&epoch_name(&g), b"{\"units\": [ truncated")
+            .unwrap();
+        assert!(
+            store.load().is_empty(),
+            "damaged state claims nothing clean"
+        );
     }
 
     #[test]

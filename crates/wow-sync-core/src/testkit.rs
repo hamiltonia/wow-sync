@@ -265,6 +265,8 @@ pub fn member_state(c: &ComputerId, seq: u64, inv: &Inventory) -> CodeState {
             .all(|f| f.status == crate::inventory::FolderStatus::Ok),
         folders,
         apply_report: None,
+        authority_index: None,
+        features: Vec::new(),
     }
 }
 
@@ -448,6 +450,8 @@ impl Scenario {
             seq,
             client: self.local_client.clone(),
             apply_report: None,
+            authority_index: None,
+            features: Vec::new(),
             own_state_files: own_files
                 .iter()
                 .map(|f| f.rsplit('/').next().unwrap_or(f).to_string())

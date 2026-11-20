@@ -87,12 +87,21 @@ pub enum Body {
 }
 
 /// Grow-only set of every (computer, enrollment) pair the group has ever had (§1.10).
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Membership {
     pairs: BTreeSet<EnrollmentRef>,
 }
 
 impl Membership {
+    pub fn pairs(&self) -> impl Iterator<Item = &EnrollmentRef> {
+        self.pairs.iter()
+    }
+    pub fn len(&self) -> usize {
+        self.pairs.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.pairs.is_empty()
+    }
     pub fn add(&mut self, c: &ComputerId, e: &EnrollmentId) {
         self.pairs.insert(EnrollmentRef {
             computer_id: c.clone(),
@@ -455,8 +464,7 @@ fn kind_rules(ledger: &Ledger, members: &Membership, r: &AuthorityRecord) -> Res
         AuthorityRecord::SettingsRevision(v) => {
             for h in &v.parents {
                 match ledger.record(h) {
-                    Some(AuthorityRecord::SettingsRevision(p))
-                        if p.unit == v.unit && p.kind == v.kind => {}
+                    Some(AuthorityRecord::SettingsRevision(p)) if p.unit == v.unit => {}
                     _ => return Err("revision_parent".into()),
                 }
             }
@@ -1662,5 +1670,152 @@ mod tests {
             fetch(&store, h)
         });
         assert_eq!(r.error, Some(IndexError::Foreign(big.head)));
+    }
+
+    fn unit(folder: &str) -> crate::ids::SettingsUnit {
+        crate::ids::SettingsUnit {
+            folder: FolderKey::lossy(folder),
+            identity: crate::ids::Identity::account("ACC").unwrap(),
+        }
+    }
+
+    fn revision(
+        by: u8,
+        seq: u64,
+        u: &crate::ids::SettingsUnit,
+        kind: crate::kinds::RevisionKind,
+        parents: Vec<Sha256>,
+        checkpoint: &[u8],
+    ) -> crate::kinds::SettingsRevision {
+        crate::kinds::SettingsRevision {
+            group_id: group_id(),
+            issuer: issuer(by, seq),
+            unit: u.clone(),
+            kind,
+            checkpoint: sha256(checkpoint),
+            parents,
+            parents_parts: vec![],
+            policy: vec![sha256(&encode(&policy_with(vec![], vec![])))],
+            code_package_hash: None,
+            known: Default::default(),
+            written_unix_ms: 9,
+        }
+    }
+
+    fn with_policy(l: &mut Ledger) {
+        learn(
+            l,
+            &policy_with(vec![], vec![]),
+            AuthorityKind::SettingsPolicy,
+        );
+    }
+
+    #[test]
+    fn a_settings_revision_parent_needs_the_same_unit_and_any_kind() {
+        // settings.md §3.3: only the unit must match; a push may be followed by an auto
+        use crate::kinds::RevisionKind;
+        use crate::settings::graph_from_ledger;
+        let u = unit("suite");
+        let mut l = Ledger::new();
+        with_policy(&mut l);
+        let push = learn(
+            &mut l,
+            &revision(1, 5, &u, RevisionKind::Push, vec![], b"c1"),
+            AuthorityKind::SettingsRevision,
+        );
+        let auto = learn(
+            &mut l,
+            &revision(1, 6, &u, RevisionKind::Auto, vec![push], b"c2"),
+            AuthorityKind::SettingsRevision,
+        );
+        let other = learn(
+            &mut l,
+            &revision(1, 7, &unit("other"), RevisionKind::Auto, vec![push], b"c3"),
+            AuthorityKind::SettingsRevision,
+        );
+        let d = derive(&l, &group_id(), &members(&[1]));
+        assert_eq!(d.status_of(&push), Some(&Status::Valid));
+        assert_eq!(d.status_of(&auto), Some(&Status::Valid));
+        assert_eq!(
+            d.status_of(&other),
+            Some(&Status::Invalid(InvalidReason::Kind(
+                "revision_parent".into()
+            )))
+        );
+        let g = graph_from_ledger(&l, &d, &u);
+        assert_eq!(g.heads, vec![auto]);
+        assert!(!g.pending);
+        let go = graph_from_ledger(&l, &d, &unit("other"));
+        assert!(go.heads.is_empty() && go.nodes.is_empty());
+    }
+
+    #[test]
+    fn graph_from_ledger_keeps_equal_heads_and_marks_an_unknown_parent_pending() {
+        // R4D-7 / R4D-8 at ledger level
+        use crate::kinds::RevisionKind;
+        use crate::settings::graph_from_ledger;
+        let u = unit("suite");
+        let mut l = Ledger::new();
+        with_policy(&mut l);
+        let a = learn(
+            &mut l,
+            &revision(1, 5, &u, RevisionKind::Push, vec![], b"same"),
+            AuthorityKind::SettingsRevision,
+        );
+        let b = learn(
+            &mut l,
+            &revision(2, 5, &u, RevisionKind::Push, vec![], b"same"),
+            AuthorityKind::SettingsRevision,
+        );
+        let d = derive(&l, &group_id(), &members(&[1, 2]));
+        let g = graph_from_ledger(&l, &d, &u);
+        assert_eq!(g.heads.len(), 2);
+        assert_eq!(g.head_states.len(), 1);
+        assert!(g.nodes.contains_key(&a) && g.nodes.contains_key(&b));
+        let missing = revision(
+            1,
+            6,
+            &u,
+            RevisionKind::Auto,
+            vec![sha256(b"nowhere")],
+            b"c9",
+        );
+        learn(&mut l, &missing, AuthorityKind::SettingsRevision);
+        let d = derive(&l, &group_id(), &members(&[1, 2]));
+        assert!(graph_from_ledger(&l, &d, &u).pending);
+    }
+
+    #[test]
+    fn policy_heads_drop_a_policy_that_a_later_one_knows() {
+        use crate::kinds::{Known, Seen};
+        use crate::settings::policy_heads;
+        let mut l = Ledger::new();
+        let mut first = policy_with(vec![rule(1)], vec![]);
+        first.issuer = issuer(1, 3);
+        let a = learn(&mut l, &first, AuthorityKind::SettingsPolicy);
+        let mut second = policy_with(vec![rule(2)], vec![]);
+        second.issuer = issuer(2, 4);
+        second.known = Known {
+            seen: vec![Seen {
+                enrollment_id: enrollment(1),
+                seq: 3,
+            }],
+            extra: vec![],
+            parts: vec![],
+        };
+        let b = learn(&mut l, &second, AuthorityKind::SettingsPolicy);
+        let d = derive(&l, &group_id(), &members(&[1, 2]));
+        let heads: Vec<Sha256> = policy_heads(&l, &d).iter().map(|p| p.hash).collect();
+        assert_eq!(heads, vec![b]);
+        let mut rival = policy_with(vec![rule(3)], vec![]);
+        rival.issuer = issuer(1, 9);
+        let c = learn(&mut l, &rival, AuthorityKind::SettingsPolicy);
+        let d = derive(&l, &group_id(), &members(&[1, 2]));
+        let mut heads: Vec<Sha256> = policy_heads(&l, &d).iter().map(|p| p.hash).collect();
+        heads.sort();
+        let mut want = vec![b, c];
+        want.sort();
+        assert_eq!(heads, want);
+        assert!(!heads.contains(&a));
     }
 }

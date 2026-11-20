@@ -8,8 +8,8 @@ use crate::layout::{blob, parse_state_name, state_record, tree_record};
 use crate::package::ClientInfo;
 use crate::paths::{FolderKey, RelPath};
 use crate::records::{
-    encode, ApplyReport, CodeState, FolderTreeRecord, OpKind, PendingRecord, SettingsFileOp,
-    SettingsRoot,
+    encode, ApplyReport, AuthorityIndexHead, CodeState, FolderTreeRecord, OpKind, PendingRecord,
+    SettingsFileOp, SettingsRoot,
 };
 use crate::target::{GroupTarget, PackageTarget};
 use crate::variant::ConfirmedVariant;
@@ -74,6 +74,8 @@ pub struct PublishContext {
     pub seq: u64,
     pub client: ClientInfo,
     pub apply_report: Option<ApplyReport>,
+    pub authority_index: Option<AuthorityIndexHead>,
+    pub features: Vec<String>,
     pub own_state_files: Vec<String>,
 }
 
@@ -146,6 +148,8 @@ pub fn plan_publish(inv: &Inventory, ctx: &PublishContext) -> Result<PublishPlan
         inventory_complete: inv.folders.iter().all(|f| f.transfer_eligible()),
         folders: inv.folders.clone(),
         apply_report: ctx.apply_report.clone(),
+        authority_index: ctx.authority_index,
+        features: ctx.features.clone(),
     };
     let mut seqs = own;
     seqs.push(ctx.seq);
@@ -187,16 +191,22 @@ pub fn own_publish_slot(
 
 /// Whether a new state must be published (M3): there is an apply report to carry, no previous
 /// state of this enrollment is readable, or the previous state differs from the inventory in any
-/// folder, status, tree, toc outcome or completeness.
+/// folder, status, tree, toc outcome or completeness, or the authority index head or the
+/// capability list changed.
 pub fn publish_needed(
     previous: Option<&CodeState>,
     inv: &Inventory,
     has_apply_report: bool,
+    index: Option<&AuthorityIndexHead>,
+    features: &[String],
 ) -> bool {
     if has_apply_report {
         return true;
     }
     let Some(st) = previous else { return true };
+    if st.authority_index.as_ref() != index || st.features != features {
+        return true;
+    }
     let same = st.folders.len() == inv.folders.len()
         && st.folders.iter().zip(&inv.folders).all(|(a, b)| {
             a.key == b.key && a.status == b.status && a.tree == b.tree && a.toc.kind == b.toc.kind
@@ -588,21 +598,69 @@ mod tests {
     fn publish_needed_decisions() {
         let sc = Scenario::new(suite("1.0", "a"));
         let p = plan_publish(&sc.local, &sc.publish_ctx(1, &[])).unwrap();
-        assert!(publish_needed(None, &sc.local, false));
-        assert!(!publish_needed(Some(&p.state), &sc.local, false));
-        assert!(publish_needed(Some(&p.state), &sc.local, true));
+        assert!(publish_needed(None, &sc.local, false, None, &[]));
+        assert!(!publish_needed(Some(&p.state), &sc.local, false, None, &[]));
+        assert!(publish_needed(Some(&p.state), &sc.local, true, None, &[]));
         let changed = Scenario::new(suite("1.1", "b"));
-        assert!(publish_needed(Some(&p.state), &changed.local, false));
+        assert!(publish_needed(
+            Some(&p.state),
+            &changed.local,
+            false,
+            None,
+            &[]
+        ));
         let more = Scenario::new(vec![
             addon("Suite", Some("1.0"), "a"),
             addon("Other", Some("1.0"), "o"),
             addon("Third", Some("1.0"), "t"),
         ]);
-        assert!(publish_needed(Some(&p.state), &more.local, false));
+        assert!(publish_needed(
+            Some(&p.state),
+            &more.local,
+            false,
+            None,
+            &[]
+        ));
         // Completeness flips without a tree change.
         let mut unstable = Scenario::new(suite("1.0", "a"));
         unstable.local.folders[1].status = FolderStatus::Unstable;
-        assert!(publish_needed(Some(&p.state), &unstable.local, false));
+        assert!(publish_needed(
+            Some(&p.state),
+            &unstable.local,
+            false,
+            None,
+            &[]
+        ));
+        // A new index head or a changed capability list alone republishes.
+        let head = AuthorityIndexHead {
+            head: Sha256([4; 32]),
+            total: 3,
+        };
+        assert!(publish_needed(
+            Some(&p.state),
+            &sc.local,
+            false,
+            Some(&head),
+            &[]
+        ));
+        let caps = ["authority/1".to_string()];
+        assert!(publish_needed(
+            Some(&p.state),
+            &sc.local,
+            false,
+            None,
+            &caps
+        ));
+        let mut with = p.state.clone();
+        with.authority_index = Some(head);
+        with.features = caps.to_vec();
+        assert!(!publish_needed(
+            Some(&with),
+            &sc.local,
+            false,
+            Some(&head),
+            &caps
+        ));
     }
 
     #[test]

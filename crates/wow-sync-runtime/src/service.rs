@@ -1309,7 +1309,18 @@ impl SliceService {
         let me = &w.computer.computer_id;
         let enrollment = &w.enrollment.enrollment_id;
         let apply_rep = outstanding(store.as_ref(), group_id, enrollment, w.own_latest.as_ref());
-        if !publish_needed(w.own_latest.as_ref(), &w.inventory, apply_rep.is_some()) {
+        let features: Vec<String> = wow_sync_core::records::FEATURES
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let index_head: Option<wow_sync_core::records::AuthorityIndexHead> = None;
+        if !publish_needed(
+            w.own_latest.as_ref(),
+            &w.inventory,
+            apply_rep.is_some(),
+            index_head.as_ref(),
+            &features,
+        ) {
             return;
         }
         // Deduplication only looks at the newest own state, so the saved store must no longer
@@ -1344,6 +1355,8 @@ impl SliceService {
             client: Self::client_info(&w.variant),
             apply_report: apply_rep,
             own_state_files: w.own_states.clone(),
+            authority_index: index_head,
+            features,
         };
         let plan = match plan_publish(&w.inventory, &ctx) {
             Ok(p) => p,
