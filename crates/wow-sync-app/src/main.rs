@@ -13,6 +13,7 @@ mod app;
 mod assets;
 mod backend;
 mod brand;
+mod computers_ui;
 mod consent;
 mod decisions_ui;
 mod features;

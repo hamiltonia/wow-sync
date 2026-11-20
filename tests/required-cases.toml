@@ -1150,6 +1150,19 @@ tests = [
     "decisions_ui::tests::a_retired_computer_cannot_choose_and_is_told_why",
     "decisions_ui::tests::settings_decisions_and_this_computer_reach_read_plainly",
 ]
+[[case]]
+id = "R4-app:computers-retire-join-allow"
+tier = "offline"
+tests = [
+    "computers_ui::tests::the_sheet_says_what_retiring_does_and_keeps",
+    "computers_ui::tests::a_silent_computer_gets_the_72_hour_warning_and_a_master_gets_its_note",
+    "computers_ui::tests::retire_needs_the_tick_and_names_the_exact_enrollment",
+    "computers_ui::tests::retire_is_unavailable_while_paused_retired_or_unknown",
+    "computers_ui::tests::a_retired_self_reads_retired_and_a_held_self_claims_nothing",
+    "computers_ui::tests::join_again_exists_only_for_a_retired_computer",
+    "computers_ui::tests::allow_again_carries_exactly_the_rejections_shown",
+]
+
 # <<< section: R4-app
 
 # >>> section: R4-mac-kit

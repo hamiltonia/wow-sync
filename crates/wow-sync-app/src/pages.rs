@@ -488,7 +488,47 @@ impl Shell {
         if self.w.peers.is_empty() {
             col = col.child(self.muted("No other computers have joined this group yet. To add one, install WoW Sync on it and choose Join when it asks for a sync group."));
         }
-        col.child(header).child(list).into_any_element()
+        if let Some((h, sub)) = crate::computers_ui::standing_headline(&self.w.features.standing) {
+            col = col.child(self.heading(&h, 2)).child(self.muted(sub));
+            if let Ok(a) = crate::computers_ui::join_again(&self.w) {
+                col = col.child(self.btn(
+                    "join-again",
+                    "Join again…",
+                    Bk::Primary,
+                    Act::Group(a),
+                    cx,
+                ));
+            }
+        }
+        let mut col = col.child(header).child(list);
+        if !self.w.features.retired.is_empty() {
+            col = col.child(self.heading("Retired", 2));
+            for r in self.w.features.retired.clone() {
+                col = col.child(
+                    div()
+                        .flex()
+                        .gap(u(10.))
+                        .child(
+                            div()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(SharedString::from(r.name.clone())),
+                        )
+                        .child(self.muted(crate::computers_ui::retired_line(&r))),
+                );
+            }
+        }
+        for (j, row) in self.w.features.allow_again.clone().into_iter().enumerate() {
+            let label = crate::computers_ui::allow_again_label(&row);
+            col = col.child(self.muted(label));
+            let key = format!("allow-again-{j}");
+            col = match crate::computers_ui::allow_again(&self.w, &row) {
+                Ok(a) => {
+                    col.child(self.btn(&key, "Allow again…", Bk::Secondary, Act::Group(a), cx))
+                }
+                Err(why) => col.child(self.btn_off(&key, "Allow again…", &why, cx)),
+            };
+        }
+        col.into_any_element()
     }
 
     fn computer_detail(&mut self, i: usize, cx: &mut Context<Self>) -> AnyElement {
@@ -554,7 +594,59 @@ impl Shell {
                 .into_any_element(),
             );
         }
-        let retire = self.btn_off("retire", "Retire this computer…", "coming later", cx);
+        let retire = match crate::computers_ui::retire_sheet(&self.w, i) {
+            Err(why) => self.btn_off("retire", "Retire this computer…", &why, cx),
+            Ok(_) => self.btn(
+                "retire",
+                "Retire this computer…",
+                Bk::Secondary,
+                Act::ToggleExpand("retire-open".into()),
+                cx,
+            ),
+        };
+        let mut retire_panel: Vec<AnyElement> = Vec::new();
+        if self.expanded.contains("retire-open") {
+            if let Ok(s) = crate::computers_ui::retire_sheet(&self.w, i) {
+                retire_panel.push(self.heading(&s.title, 2).into_any_element());
+                for f in s.facts {
+                    retire_panel.push(div().child(SharedString::from(f)).into_any_element());
+                }
+                for extra in s.stale_warning.into_iter().chain(s.master_note) {
+                    retire_panel.push(
+                        div()
+                            .text_color(rgb(pal.fg(Tone::Help)))
+                            .child(SharedString::from(extra))
+                            .into_any_element(),
+                    );
+                }
+                let acked = self.expanded.contains("retire-ack");
+                retire_panel.push(
+                    self.btn(
+                        "retire-ack",
+                        &format!("{} {}", if acked { "[x]" } else { "[ ]" }, s.ack_label),
+                        Bk::Link,
+                        Act::ToggleExpand("retire-ack".into()),
+                        cx,
+                    )
+                    .into_any_element(),
+                );
+                let go = match crate::computers_ui::retire_action(&self.w, i, acked) {
+                    Ok(a) => self.btn("retire-go", "Retire", Bk::Primary, Act::Group(a), cx),
+                    Err(why) => self.btn_off("retire-go", "Retire", &why, cx),
+                };
+                retire_panel.push(go.into_any_element());
+                retire_panel.push(
+                    self.btn(
+                        "retire-cancel",
+                        "Cancel",
+                        Bk::Secondary,
+                        Act::ToggleExpand("retire-open".into()),
+                        cx,
+                    )
+                    .into_any_element(),
+                );
+            }
+        }
         self.body_col()
             .child(back)
             .child(
@@ -574,6 +666,7 @@ impl Shell {
             .child(self.panel("What we know", know))
             .child(self.panel("More", details))
             .child(retire)
+            .children(retire_panel)
             .into_any_element()
     }
 

@@ -411,6 +411,8 @@ pub struct FeatureData {
     /// Peer computer id (hex) to the enrollment a retirement would name.
     pub enrollments: Vec<(String, EnrollmentRef)>,
     pub retired: Vec<RetiredComputer>,
+    /// Rejected releases the owner may allow again. Pending snapshot field (R4-integrate).
+    pub allow_again: Vec<crate::computers_ui::AllowAgainRow>,
     /// Name of the settings master, when one is chosen.
     pub master: Option<String>,
 }
@@ -424,6 +426,7 @@ impl Default for FeatureData {
             decisions: Vec::new(),
             enrollments: Vec::new(),
             retired: Vec::new(),
+            allow_again: Vec::new(),
             master: None,
         }
     }
