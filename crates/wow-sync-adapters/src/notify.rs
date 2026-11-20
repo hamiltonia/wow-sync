@@ -120,6 +120,24 @@ mod recording {
 mod tests {
     use super::*;
 
+    /// T-27-11 manual row: `cargo test -p wow-sync-adapters --lib manual_toast -- --ignored`.
+    /// Shows one real notification under a scoped test identity and removes it afterwards.
+    #[test]
+    #[ignore = "manual: shows a real OS notification"]
+    fn manual_toast_shows_the_app_name() {
+        let id = "WoWSync.ManualToastTest";
+        crate::winproc::register_app_user_model_id(id, "WoW Sync", None).unwrap();
+        let n = OsNotifier::with_app_id(id);
+        let r = n.deliver(&RenderedNotice {
+            title: "WoW Sync".into(),
+            body: "Manual notification check (synthetic).".into(),
+            urgent: false,
+        });
+        std::thread::sleep(std::time::Duration::from_secs(3));
+        crate::winproc::unregister_app_user_model_id(id).unwrap();
+        r.unwrap();
+    }
+
     #[test]
     fn recorder_keeps_order_and_counts_failed_attempts() {
         let r = RecordingNotifier::new();

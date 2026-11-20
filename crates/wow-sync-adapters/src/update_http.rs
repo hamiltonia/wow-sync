@@ -265,6 +265,19 @@ mod tests {
     use super::*;
     use std::path::{Path, PathBuf};
 
+    /// T-28-13 manual row: one anonymous GET of the public releases endpoint.
+    /// `cargo test -p wow-sync-adapters --lib manual_live -- --ignored --nocapture`
+    #[test]
+    #[ignore = "manual: one live network request"]
+    fn manual_live_release_fetch_is_one_anonymous_get() {
+        let body = GithubReleases::new().unwrap().fetch_latest();
+        match &body {
+            Ok(b) => println!("LIVE: ok, {} bytes", b.len()),
+            Err(e) => println!("LIVE: {e:?}"),
+        }
+        assert!(matches!(body, Ok(_) | Err(FetchError::Http(404))));
+    }
+
     fn policy() -> Policy {
         Policy {
             hosts: vec!["api.github.com".into(), "github.com".into()],
