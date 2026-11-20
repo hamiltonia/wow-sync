@@ -1,4 +1,4 @@
-# R4-integrate evidence (stages A and B done; C partial; settings wiring and D DEFERRED)
+# R4-integrate evidence (stages A, B, C0 and rollback done; C partial; items 3-5 DEFERRED)
 
 Branch `run004/R4-integrate`. Status: **partial**. Stage A, the code-state `authority_index`,
 stage B (authority plane, compose with constraints, removal through the cycle) and a subset of
@@ -123,20 +123,39 @@ accepted the core `decision.rs` match-arm change and the `e2e.rs` service tests.
 | query `settings_history(unit)` | unit | graph nodes, oldest first | none |
 | query `offered_decisions()` | none | decision items from live state | none |
 
-Intent is recorded only; settings apply (C0) is not wired.
+Intent is recorded only for the policy/push commands; settings apply is wired in C0 (below).
 
-### Item 1–5 additions
+### C0 settings apply and rollback (this turn)
 
-`target::package_copies`, `decide::decision_items`, `MemberRecord.previous_enrollments` (skipped
-when empty, so golden fixtures are unchanged), `RemovalStore::forget_group_removed`/`forget_keys`
-(fixes a stale presence baseline that re-removed a restored addon), settings builders
-`build_policy`/`build_push`.
+| Command | Parameters | UI meaning | Errors / outcome |
+|---|---|---|---|
+| `EnableSettings` | included_accounts | consent to settings sync on this computer; local only | `Recorded` |
+| `Rollback` | package, recovered (package hash of a held copy) | "Go back to this release": queued, applied when the game is closed; the rejection is written with the install | `UnknownCopy` (release not held), `Rollback(SameRelease/NotInstalled/NotAvailable)`; `Recorded` |
+
+Settings step (`settings_cycle.rs`): applies nothing in production (cap `None`, Q-77); consent,
+policy heads and an unblocked unit are required. Simplifications: no session-end or settle
+window (Q-71 unbuilt); a unit file first seen after authority counts as an activation capture;
+`Explanation::Applied{"<Folder> settings"}` is reused; capture history limited to 8. A fix in
+`target_case` handling: `FirstAdoption(c_h)` with live already equal to `c_h` now settles the
+basis, otherwise `Yield` is never reached.
+
+Rollback (`rollback_flow.rs`, `service.rs`): `command` dry-runs `plan_requested` against the live
+scan (R1 = inventory of the package's folders; R0 = the tree records of the chosen copy read
+from the shared folder) and queues `rollback-request-<group>.json`. `sync_once` rebuilds the
+input when Active and the game is not running, reserves the record sequence, puts the rollback
+`PackageApply` first and drops colliding packages. The request is consumed either way (a
+refused one is reported in `apply_note`). Known gap: if the recovered release's files are no
+longer in the shared folder the request is refused (`NotAvailable`); there is no local-recovery
+source for R0 (`effects.rs` stages from the provider only). Settings of a rollback are
+`NotApplicable` (code only); `actual_settings_result` stays unwired.
 
 ### A-38 (item 5)
 
 | Control | Mutation | Failing test |
 |---|---|---|
 | Non-master push accepted without explicit intent | `build_push` emits `RevisionKind::Auto` | `e2e::tests::settings_policy_and_push_commands_record_explicit_intent_only` (failed; reverted, `git diff --exit-code` clean) |
+| Settings yield dropped | `target_case` pattern `FirstAdoption(to) \| Yield{..}` → `FirstAdoption(to)` | `e2e::tests::a_non_master_routine_write_yields_to_the_master_and_keeps_a_recovery_copy` (failed; reverted, clean) |
+| Unrouted rollback | rollback plan not inserted into the apply plan (`rollback.filter(\|_\| false)`) | `e2e::tests::a_rollback_installs_the_recovered_release_and_an_offline_peer_cannot_bring_the_rejected_one_back` (failed at the v1 assertion; reverted, clean) |
 
 ## Open items
 
@@ -155,16 +174,16 @@ when empty, so golden fixtures are unchanged), `RemovalStore::forget_group_remov
 
 ## DEFERRED (not built; each needs the named change)
 
-- **Settings `PackageApply`s (C0)** (`service.rs`, `settings_cycle.rs`): `plan_settings` is not
-  called; `CycleCx.roots` is `&[]`. Needs: `DeclaringFolder`s computed from the scans before
-  `build_inventory`, a private test-only settings cap (production stays `None`, Q-77), the
-  policy/revision builders, the per-unit step (capture, `target_case`, publish `Auto`, plan the
-  apply) and `SetPolicy`/`ConfirmSettingsHere`. Not started; real-data settings sync stays off.
-- **Rest of the §9.1 surface** (`control.rs`): `Rollback` (needs live R1/R0, stage D); settings
-  pause/resume/choose/restore/confirm/use-shared and settings removal-restore; a capture command
-  producing the checkpoint; policies over 256 rules need parts.
-- **Rollback inputs from live scans, cross-packet items, `TooLarge` split persistence**
-  (probably `kinds.rs`), the stage D A-38 controls.
+- **Item 3 (this turn)** (`control.rs`, `service.rs`, `settings_cycle.rs`): settings
+  pause/resume/choose/restore/confirm/use-shared and settings removal-restore, dispatch only
+  using the existing settings core functions. Not started.
+- **Item 4 (this turn)** (`removal_cycle.rs`, `service.rs::removal_steps`): the crash-hazard fix
+  described in Open items. Not started.
+- **Item 5 (this turn)**: `TooLarge` split persistence; probably needs `kinds.rs` (not on the
+  file list), so it would be reported, not edited. Not started.
+- **Rest of the §9.1 surface** (`control.rs`): a capture command producing the checkpoint;
+  policies over 256 rules need parts.
+- **Cross-packet items** and stage D A-38 controls not listed above.
 
 ## Verification
 
