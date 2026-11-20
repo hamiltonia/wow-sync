@@ -1,0 +1,30 @@
+Independent executions on source 511c7041fa3138af15ed99dac8b9ae1e0c9772b3.
+Windows 11 Pro 10.0.26300 x64; Rust 1.100.0.
+Working directory D:\GitHub\wow-sync.worktrees\R4-check.
+PATH prepended with %USERPROFILE%\.cargo\bin.
+
+cargo xtask verify --tier offline
+[PASS   ] offline/fmt
+[PASS   ] offline/clippy
+[PASS   ] offline/test
+[PASS   ] offline/required-cases
+[PASS   ] offline/deny
+[PASS   ] offline/markdown-links
+overall: PASS (allow-blocked: false) -> exit 0
+
+cargo xtask verify --tier native
+[PASS   ] native/tier
+overall: PASS (allow-blocked: false) -> exit 0
+
+Native generated report:
+git_sha: 511c7041fa3138af15ed99dac8b9ae1e0c9772b3
+git_dirty: true (only verifier evidence was untracked)
+generated_at: 2026-11-20T22:59:52Z
+tier: native
+detail: 6 native case(s) verified against 676 test result(s)
+
+Scope limitation: this initial tier invocation did not override TEMP/TMP.
+Framework-generated synthetic test fixtures therefore used the system temp
+directory, not the assigned neutral lab root. No real game/provider data
+was deliberately accessed. Subsequent validation explicitly sets TEMP/TMP
+to D:\WoWSyncLab\R4-check\temp; the scoped final tier rerun is required.
