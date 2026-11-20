@@ -3,6 +3,7 @@
 //! Pause is persisted by the runtime (UG-2). Quit-when-safe goes through `QuitGate` (UG-17): a
 //! sync cycle is one step, and the thread only reads commands between steps.
 
+use crate::features::{ActionKind, ActionResult, GroupAction};
 use crate::world::SetupData;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
@@ -32,6 +33,24 @@ pub enum Cmd {
     Enroll(Target, EnrollRequest),
     Reconfirm(ReconfirmRequest),
     SaveSettings(AppSettings),
+    /// The About toggles; stored in their own file by the service.
+    SaveToggles(wow_sync_runtime::AppToggles),
+    /// A group command from a feature screen; its result is published for the screen to show.
+    Group(GroupAction),
+}
+
+/// The outcome of the last group command, with a counter so a screen shows each result once.
+#[derive(Clone, Debug)]
+pub struct GroupResult {
+    pub seq: u64,
+    pub kind: ActionKind,
+    pub result: ActionResult,
+}
+
+/// Runs a group action on the service. The one place the app turns a screen's choice into a
+/// runtime command.
+pub fn dispatch(svc: &mut SliceService, a: &GroupAction) -> ActionResult {
+    ActionResult::from_outcome(svc.command(a.to_command()))
 }
 
 #[derive(Default)]
@@ -44,6 +63,7 @@ pub struct Shared {
     pub pause_damaged: bool,
     pub activity: Vec<ActivityEntry>,
     pub settings: AppSettings,
+    pub toggles: wow_sync_runtime::AppToggles,
     pub busy: bool,
     pub last_check_ms: Option<i64>,
     /// When the scheduler will next run a check on its own; `None` while none is scheduled
@@ -54,6 +74,9 @@ pub struct Shared {
     pub setup: Option<SetupData>,
     pub enrolled_now: bool,
     pub shared_root: Option<PathBuf>,
+    /// What core currently offers the owner to decide (typed; the app renders the words).
+    pub decisions: Vec<wow_sync_core::decision::DecisionItem>,
+    pub group_result: Option<GroupResult>,
 }
 
 pub type SharedState = Arc<Mutex<Shared>>;
@@ -72,6 +95,8 @@ pub struct BackendOptions {
     pub recent_ms: u64,
     /// Remember the enrolled target for the next start (not in developer mode).
     pub save_target: bool,
+    /// Attach the real notifier and the update source (not in developer mode).
+    pub os_services: bool,
 }
 
 const CONFIG_FILE: &str = "target.txt";
@@ -157,10 +182,14 @@ fn now_ms() -> i64 {
 
 fn refresh(svc: &mut SliceService, shared: &SharedState, wake: &Sender<()>, checked: bool) {
     let st = svc.status();
+    let decisions = svc.offered_decisions().to_vec();
     let (pause, act, settings) = (svc.pause_state(), svc.activity_log(300), svc.app_settings());
+    let toggles = svc.toggles();
     publish(shared, wake, |g| {
         g.started = true;
+        g.toggles = toggles;
         g.snapshot = st;
+        g.decisions = decisions;
         g.paused_since = match pause {
             PauseState::Paused { since_ms } => Some(since_ms),
             _ => None,
@@ -174,6 +203,28 @@ fn refresh(svc: &mut SliceService, shared: &SharedState, wake: &Sender<()>, chec
     });
 }
 
+type Attach = fn(&mut SliceService) -> Result<(), wow_sync_runtime::ServiceError>;
+
+/// Opens the service and, when `attach` is given, attaches the OS notifier and update source.
+/// A failed attach costs notifications and update checks only; sync still runs.
+fn open_service(
+    cfg: ServiceConfig,
+    attach: Option<Attach>,
+) -> Result<SliceService, wow_sync_runtime::ServiceError> {
+    let mut s = SliceService::new(cfg)?;
+    if let Some(f) = attach {
+        if let Err(e) = f(&mut s) {
+            crate::app::log(&format!("OS services not attached: {e}"));
+        }
+    }
+    Ok(s)
+}
+
+fn os_attach(o: &BackendOptions) -> Option<Attach> {
+    o.os_services
+        .then_some(SliceService::attach_os_services as Attach)
+}
+
 fn run(
     target: Option<Target>,
     setup: Option<SetupData>,
@@ -184,7 +235,7 @@ fn run(
 ) {
     let mut svc: Option<SliceService> = None;
     if let Some(t) = &target {
-        match SliceService::new(config_for(&opts, t)) {
+        match open_service(config_for(&opts, t), os_attach(&opts)) {
             Ok(mut s) => {
                 s.inject_crash_after(opts.crash_after);
                 svc = Some(s);
@@ -234,10 +285,11 @@ fn run(
             }
             Some(Cmd::Enroll(t, req)) => {
                 let _ = std::fs::create_dir_all(&t.shared_root);
-                let res = SliceService::new(config_for(&opts, &t)).and_then(|mut s| {
-                    s.enroll(&req)?;
-                    Ok(s)
-                });
+                let res =
+                    open_service(config_for(&opts, &t), os_attach(&opts)).and_then(|mut s| {
+                        s.enroll(&req)?;
+                        Ok(s)
+                    });
                 match res {
                     Ok(mut s) => {
                         if opts.save_target {
@@ -273,6 +325,25 @@ fn run(
                 if let Some(s) = svc.as_ref() {
                     let _ = s.save_app_settings(&st);
                     publish(&shared, &wake, |g| g.settings = st);
+                }
+                continue;
+            }
+            Some(Cmd::SaveToggles(t)) => {
+                if let Some(s) = svc.as_ref() {
+                    let _ = s.save_toggles(&t);
+                    publish(&shared, &wake, |g| g.toggles = t);
+                }
+                continue;
+            }
+            Some(Cmd::Group(a)) => {
+                if let Some(s) = svc.as_mut() {
+                    let result = dispatch(s, &a);
+                    let kind = a.kind();
+                    publish(&shared, &wake, |g| {
+                        let seq = g.group_result.as_ref().map_or(1, |r| r.seq + 1);
+                        g.group_result = Some(GroupResult { seq, kind, result });
+                    });
+                    refresh(s, &shared, &wake, false);
                 }
                 continue;
             }
@@ -375,5 +446,50 @@ mod tests {
             "an empty field is not a target"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    static ATTACHED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    fn counting_attach(_: &mut SliceService) -> Result<(), wow_sync_runtime::ServiceError> {
+        ATTACHED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err(wow_sync_runtime::ServiceError::Refused("test".into()))
+    }
+
+    #[test]
+    fn opening_the_service_attaches_os_services_and_survives_a_failed_attach() {
+        let base = std::env::temp_dir().join(format!("wowsync-attach-{}", std::process::id()));
+        let mut opts = BackendOptions {
+            interval: Duration::from_secs(1),
+            crash_after: None,
+            state_dir: base.join("state"),
+            display_name: "Desk".into(),
+            app_version: "0.0.0".into(),
+            recent_ms: 0,
+            save_target: false,
+            os_services: false,
+        };
+        let t = Target {
+            install_root: base.join("wow"),
+            variant_folder: "_retail_".into(),
+            shared_root: base.join("shared"),
+        };
+        for d in [&opts.state_dir, &t.install_root, &t.shared_root] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        assert!(
+            os_attach(&opts).is_none(),
+            "developer mode attaches nothing"
+        );
+        opts.os_services = true;
+        let attach = os_attach(&opts);
+        assert!(attach.is_some(), "startup attaches the OS services");
+        let before = ATTACHED.load(std::sync::atomic::Ordering::SeqCst);
+        let svc = open_service(config_for(&opts, &t), Some(counting_attach));
+        assert!(svc.is_ok(), "a failed attach does not stop sync");
+        assert_eq!(
+            ATTACHED.load(std::sync::atomic::Ordering::SeqCst),
+            before + 1
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

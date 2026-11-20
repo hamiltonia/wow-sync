@@ -1155,6 +1155,109 @@ tests = [
 # <<< section: R4-notify-diag
 
 # >>> section: R4-app
+[[case]]
+id = "R4-app:feature-gating"
+tier = "offline"
+tests = [
+    "features::tests::nothing_is_wired_on_this_base_and_each_control_says_why",
+    "features::tests::a_wired_action_is_enabled_and_a_retired_computer_cannot_publish",
+    "features::tests::a_held_computer_may_still_choose_and_the_choice_is_kept",
+    "features::tests::hold_sentences_follow_the_typed_scope",
+    "features::tests::every_result_has_its_own_plain_sentence",
+    "features::tests::runtime_outcomes_and_refusals_map_to_distinct_results",
+    "features::tests::an_action_becomes_the_command_with_the_same_typed_fields",
+]
+
+[[case]]
+id = "R4-app:decisions"
+tier = "offline"
+tests = [
+    "decisions_ui::tests::a_card_names_the_holders_and_who_the_choice_affects",
+    "decisions_ui::tests::choosing_sends_the_shown_evidence_and_only_an_offered_option",
+    "decisions_ui::tests::a_warning_must_be_confirmed_before_the_choice_is_built",
+    "decisions_ui::tests::items_without_options_say_so_and_offer_nothing_to_send",
+    "decisions_ui::tests::a_retired_computer_cannot_choose_and_is_told_why",
+    "decisions_ui::tests::settings_decisions_and_this_computer_reach_read_plainly",
+]
+[[case]]
+id = "R4-app:computers-retire-join-allow"
+tier = "offline"
+tests = [
+    "computers_ui::tests::the_sheet_says_what_retiring_does_and_keeps",
+    "computers_ui::tests::a_silent_computer_gets_the_72_hour_warning_and_a_master_gets_its_note",
+    "computers_ui::tests::retire_needs_the_tick_and_names_the_exact_enrollment",
+    "computers_ui::tests::retire_is_unavailable_while_paused_retired_or_unknown",
+    "computers_ui::tests::a_retired_self_reads_retired_and_a_held_self_claims_nothing",
+    "computers_ui::tests::join_again_exists_only_for_a_retired_computer",
+    "computers_ui::tests::allow_again_carries_exactly_the_rejections_shown",
+]
+
+[[case]]
+id = "R4-app:rollback"
+tier = "offline"
+tests = [
+    "rollback_ui::tests::each_state_gets_the_right_action",
+    "rollback_ui::tests::go_back_is_disabled_with_a_reason_when_it_cannot_be_planned",
+    "rollback_ui::tests::partial_and_code_only_are_warnings_and_paired_is_not",
+    "rollback_ui::tests::the_confirmation_says_what_is_blocked_and_when_it_applies",
+    "rollback_ui::tests::a_temporary_exception_shows_its_size",
+]
+
+[[case]]
+id = "R4-app:settings"
+tier = "offline"
+tests = [
+    "settings_ui::tests::status_words_follow_the_design",
+    "settings_ui::tests::local_difference_offers_share_and_only_some_offer_use_shared",
+    "settings_ui::tests::a_choice_names_the_heads_it_was_shown",
+    "settings_ui::tests::resume_never_shares_and_stay_paused_is_not_a_command",
+    "settings_ui::tests::master_and_exceptions_keep_each_other",
+    "settings_ui::tests::a_retired_computer_cannot_change_settings_and_enable_needs_an_account",
+    "settings_ui::tests::restore_says_the_current_copy_is_kept",
+]
+
+[[case]]
+id = "R4-app:snapshot-connect"
+tier = "offline"
+tests = ["features::tests::the_snapshot_fills_standing_retired_rows_and_held_releases"]
+
+[[case]]
+id = "R4-app:headline"
+tier = "offline"
+tests = ["model::tests::review_needed_retired_held_and_removing_have_their_own_headlines"]
+
+[[case]]
+id = "R4-app:removed"
+tier = "offline"
+tests = [
+  "removed_ui::tests::lines_name_the_remover_and_who_is_still_awaited",
+  "removed_ui::tests::nobody_awaited_means_no_waiting_line_and_empty_means_the_empty_text",
+]
+
+[[case]]
+id = "R4-app:about-diagnostics"
+tier = "offline"
+tests = [
+  "about_ui::tests::update_states_use_core_text_and_an_empty_state",
+  "about_ui::tests::a_toggle_flips_only_its_own_flag_and_unknown_keys_do_nothing",
+  "about_ui::tests::changing_an_option_drops_the_preview_and_a_refusal_is_shown_not_saved",
+]
+
+[[case]]
+id = "R4-app:macos-platform-logic"
+tier = "offline"
+tests = [
+  "platform::tests::the_mac_state_folder_is_under_application_support",
+  "platform::tests::utc_offsets_parse_and_bad_text_is_refused",
+  "platform::tests::a_second_launch_socket_is_per_instance_key",
+  "win::tests::a_visibility_request_is_taken_once_and_the_latest_wins",
+]
+
+[[case]]
+id = "R4-app:attach-os-services"
+tier = "offline"
+tests = ["backend::tests::opening_the_service_attaches_os_services_and_survives_a_failed_attach"]
+
 # <<< section: R4-app
 
 # >>> section: R4-mac-kit

@@ -106,6 +106,8 @@ pub enum Act {
     Setup(SetupAct),
     Reconfirm(ReconfAct),
     CopyVersion,
+    /// A group command from a feature screen, sent to the sync thread as it is.
+    Group(crate::features::GroupAction),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -187,6 +189,8 @@ pub struct Shell {
     pub seen_version: u64,
     pub loaded: bool,
     pub message: String,
+    seen_group_result: u64,
+    pub diag: crate::about_ui::DiagState,
     pub preview_lines: Vec<String>,
     pub app_version: String,
     pub closing_quits: bool,
@@ -280,6 +284,8 @@ impl Shell {
             seen_version: u64::MAX,
             loaded: false,
             message: String::new(),
+            seen_group_result: 0,
+            diag: Default::default(),
             preview_lines: Vec::new(),
             app_version,
             closing_quits: false,
@@ -380,6 +386,15 @@ impl Shell {
                 {
                     break;
                 }
+                if let Some(show) = crate::win::take_visibility_request() {
+                    cx.update(|app| {
+                        if show {
+                            app.activate(true);
+                        } else {
+                            app.hide();
+                        }
+                    });
+                }
             }
         })
         .detach();
@@ -443,6 +458,17 @@ impl Shell {
                 .as_ref()
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
+            w.features.caps = crate::features::Capabilities::runtime();
+            w.features.decisions = g.decisions.clone();
+            crate::features::apply_snapshot(&mut w.features, &g.snapshot);
+            w.features.toggles = g.toggles;
+            if let Some(r) = &g.group_result {
+                if r.seq != self.seen_group_result {
+                    self.seen_group_result = r.seq;
+                    self.diag.absorb(r.kind, &r.result);
+                    self.notice = Some(crate::features::result_text(r.kind, &r.result));
+                }
+            }
             (
                 w,
                 g.message.clone(),
@@ -637,7 +663,11 @@ impl Shell {
                     self.closing_quits = !self.closing_quits;
                     self.save_settings();
                     self.notice = Some("Saved".into());
-                } else {
+                } else if let Some(t) = crate::about_ui::toggled(self.w.features.toggles, &k) {
+                    self.w.features.toggles = t;
+                    self.send(Cmd::SaveToggles(t));
+                    self.notice = Some("Saved".into());
+                } else if !self.diag.toggle(&k) {
                     self.notice = Some("This setting isn't available yet.".into());
                 }
             }
@@ -677,6 +707,10 @@ impl Shell {
             Act::Setup(a) => self.setup_act(a),
             Act::Reconfirm(a) => self.reconf_act(a),
             Act::CopyVersion => self.copied = true,
+            Act::Group(a) => match crate::features::gate(&self.w, a.kind()) {
+                Ok(()) => self.send(Cmd::Group(a)),
+                Err(why) => self.notice = Some(why),
+            },
         }
         let _ = window;
         cx.notify();
@@ -1636,6 +1670,11 @@ impl Shell {
                             .text_color(rgb(pal.muted))
                             .child(SharedString::from(model::context_line(&self.w))),
                     )
+                    .when(model::headline_sub(&self.w).is_some(), |d| {
+                        d.child(div().text_size(u(13.)).text_color(rgb(pal.muted)).child(
+                            SharedString::from(model::headline_sub(&self.w).unwrap_or_default()),
+                        ))
+                    })
                     .when(matches!(self.w.busy, Some(Busy::Syncing { .. })), |d| {
                         let (done, total) = match self.w.busy {
                             Some(Busy::Syncing { done, total }) => (done, total),

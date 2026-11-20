@@ -9,13 +9,21 @@
 //! Logging goes to $WOWSYNC_LOG.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod about_ui;
 mod app;
 mod assets;
 mod backend;
 mod brand;
+mod computers_ui;
 mod consent;
+mod decisions_ui;
+mod features;
 mod model;
 mod pages;
+mod platform;
+mod removed_ui;
+mod rollback_ui;
+mod settings_ui;
 mod setup;
 mod theme;
 mod ui;
@@ -99,13 +107,19 @@ fn parse() -> Cli {
 }
 
 fn computer_name() -> String {
-    std::env::var("COMPUTERNAME")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
+    #[cfg(windows)]
+    let name = std::env::var("COMPUTERNAME").ok();
+    #[cfg(not(windows))]
+    let name = platform::host_name();
+    name.filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "This computer".into())
 }
 
 fn state_dir() -> PathBuf {
+    #[cfg(not(windows))]
+    if let Some(home) = platform::home_dir() {
+        return platform::mac_state_dir(&home);
+    }
     let base = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
@@ -221,6 +235,7 @@ fn main() {
             app_version: env!("CARGO_PKG_VERSION").into(),
             recent_ms: cli.recent_ms,
             save_target: !developer,
+            os_services: !developer,
         },
         cmd_rx,
         shared.clone(),
