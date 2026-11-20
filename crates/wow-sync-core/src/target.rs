@@ -29,6 +29,10 @@ pub enum DecisionReason {
     DifferentTocMapping,
     UnvalidatedTocMapping,
     PartialCandidate,
+    /// Concurrent keeps or choices name different trees for a folder (contracts.md §4.4).
+    ChoicesDiffer,
+    /// Concurrent rollbacks name different trees for a folder.
+    RollbackTargetsDiffer,
 }
 
 pub struct TargetInput<'a> {
@@ -215,6 +219,22 @@ fn effective(pv: &PackageVersion) -> EffectiveTarget {
 }
 
 pub fn compute_target(input: &TargetInput) -> GroupTarget {
+    compute_inner(input, None).0
+}
+
+/// Whether a whole source may be a candidate for a package (contracts.md §4.1 level 2, §5.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Screened {
+    Eligible,
+    /// Rejected or excluded: never a candidate.
+    Out,
+    /// Undecided (`Unknown`): not a candidate, and nothing falls back to a lesser one.
+    Wait,
+}
+
+type Screen<'a> = &'a dyn Fn(&Package, &Source) -> Screened;
+
+fn valid_peers<'a>(input: &'a TargetInput) -> Vec<(&'a ComputerId, u64, &'a CodeState)> {
     let mut peers: Vec<(&ComputerId, u64, &CodeState)> = Vec::new();
     for m in input.members {
         if m.computer == *input.local_id {
@@ -230,9 +250,21 @@ pub fn compute_target(input: &TargetInput) -> GroupTarget {
         }
     }
     peers.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+    peers
+}
+
+fn compute_inner(input: &TargetInput, screen: Option<Screen>) -> (GroupTarget, Vec<Package>) {
+    let peers = valid_peers(input);
     let peer_invs: Vec<Inventory> = peers.iter().map(|p| state_inventory(p.2)).collect();
     let mut observations: Vec<&Inventory> = vec![input.local];
     observations.extend(peer_invs.iter());
+    let mut sources: BTreeMap<&ComputerId, Source> = BTreeMap::new();
+    if screen.is_some() {
+        sources.insert(input.local_id, Source::from_inventory(input.local));
+        for (id, _, state) in &peers {
+            sources.insert(id, Source::from_state(state, true));
+        }
+    }
 
     let mut out = GroupTarget {
         group_id: input.group.group_id.clone(),
@@ -240,7 +272,9 @@ pub fn compute_target(input: &TargetInput) -> GroupTarget {
         effective: BTreeMap::new(),
         local_hash: BTreeMap::new(),
     };
+    let mut seen_packages = Vec::new();
     for pkg in group_packages(&observations) {
+        seen_packages.push(pkg.clone());
         let mut cands: BTreeMap<Sha256, Cand> = BTreeMap::new();
         let local_pv = package_version(&pkg, input.local, input.local_client);
         if let Some(pv) = &local_pv {
@@ -267,6 +301,44 @@ pub fn compute_target(input: &TargetInput) -> GroupTarget {
         }
         for c in cands.values_mut() {
             c.holders.sort_by(|a, b| a.0.cmp(&b.0));
+        }
+        if let Some(screen) = screen {
+            let (mut waiting, mut out_any) = (false, false);
+            for c in cands.values_mut() {
+                c.holders.retain(|(id, _)| match sources.get(id) {
+                    Some(s) => match screen(&pkg, s) {
+                        Screened::Eligible => true,
+                        Screened::Out => {
+                            out_any = true;
+                            false
+                        }
+                        Screened::Wait => {
+                            waiting = true;
+                            false
+                        }
+                    },
+                    None => true,
+                });
+            }
+            cands.retain(|_, c| !c.holders.is_empty());
+            if waiting {
+                out.packages.insert(
+                    pkg.key.clone(),
+                    PackageTarget::Held {
+                        why: Explanation::CheckingAgainstBlocked,
+                    },
+                );
+                continue;
+            }
+            if cands.is_empty() && out_any {
+                out.packages.insert(
+                    pkg.key.clone(),
+                    PackageTarget::Held {
+                        why: Explanation::OnlyBlockedVersions,
+                    },
+                );
+                continue;
+            }
         }
         let list: Vec<&Cand> = cands.values().collect();
         let holds_local = |c: &Cand| c.holders.iter().any(|(id, _)| id == input.local_id);
@@ -341,7 +413,7 @@ pub fn compute_target(input: &TargetInput) -> GroupTarget {
         };
         out.packages.insert(pkg.key.clone(), target);
     }
-    out
+    (out, seen_packages)
 }
 
 fn decision_candidates(list: &[&Cand]) -> Vec<(PackageVersion, Vec<ComputerId>)> {
@@ -355,16 +427,9 @@ fn decision_candidates(list: &[&Cand]) -> Vec<(PackageVersion, Vec<ComputerId>)>
         .collect()
 }
 
-fn choose(
-    out: &mut GroupTarget,
-    pkg: &Package,
-    c: &Cand,
-    holders: Vec<(ComputerId, ClientInfo)>,
-    local_pv: Option<&PackageVersion>,
-    input: &TargetInput,
-) -> PackageTarget {
-    let mut version = c.pv.clone();
-    version.client = holders[0].1.clone();
+/// Fills each folder's file list from the published tree records, or says why it cannot.
+#[allow(clippy::result_large_err)]
+fn attach_trees(version: &mut PackageVersion, input: &TargetInput) -> Result<(), PackageTarget> {
     let mut missing = Vec::new();
     let mut corrupt = None;
     for f in &mut version.folders {
@@ -386,14 +451,30 @@ fn choose(
         }
     }
     if let Some(tree) = corrupt {
-        return PackageTarget::Unavailable {
+        return Err(PackageTarget::Unavailable {
             why: Explanation::TreeCorrupt { tree },
-        };
+        });
     }
     if !missing.is_empty() {
-        return PackageTarget::Unavailable {
+        return Err(PackageTarget::Unavailable {
             why: Explanation::NotAvailableYet { missing },
-        };
+        });
+    }
+    Ok(())
+}
+
+fn choose(
+    out: &mut GroupTarget,
+    pkg: &Package,
+    c: &Cand,
+    holders: Vec<(ComputerId, ClientInfo)>,
+    local_pv: Option<&PackageVersion>,
+    input: &TargetInput,
+) -> PackageTarget {
+    let mut version = c.pv.clone();
+    version.client = holders[0].1.clone();
+    if let Err(t) = attach_trees(&mut version, input) {
+        return t;
     }
     let sources: Vec<ComputerId> = holders.into_iter().map(|h| h.0).collect();
     let why = match local_pv {
@@ -628,29 +709,70 @@ pub fn compose(
     ledger: &crate::ledger::Ledger,
     removal: &dyn crate::hooks::RemovalHooks,
     held: &BTreeSet<FolderKey>,
+    constraints: &dyn crate::hooks::ConstraintHooks,
 ) -> Composed {
-    let target = compute_target(input);
+    let screen = |p: &Package, s: &Source| {
+        let r = constraints.rejected(ledger, p, s);
+        let x = constraints.excluded(ledger, p, s);
+        if r == ScopeMatch::Same || x == ScopeMatch::Same {
+            Screened::Out
+        } else if r == ScopeMatch::Unknown || x == ScopeMatch::Unknown {
+            Screened::Wait
+        } else {
+            Screened::Eligible
+        }
+    };
+    let (mut target, packages) = compute_inner(input, Some(&screen));
+    for pkg in &packages {
+        apply_constraints(pkg, input, ledger, constraints, &screen, &mut target);
+    }
     let mut removed = BTreeSet::new();
     let mut deferred = BTreeSet::new();
-    let mut keys: BTreeSet<FolderKey> = input.local.folders.iter().map(|f| f.key.clone()).collect();
-    keys.extend(target.effective.keys().cloned());
-    for k in keys {
-        let view = removal.merged_removals(ledger, &k);
-        let facts = FolderFacts {
-            local_hold: held.contains(&k),
-            merged_removal: !view.live.is_empty(),
-            pending_removal: view.pending,
-            ..FolderFacts::default()
+    for pkg in &packages {
+        let (mut any_removed, mut any_held, mut any_pending) = (false, false, false);
+        for k in &pkg.members {
+            let view = removal.merged_removals(ledger, k);
+            let facts = FolderFacts {
+                local_hold: held.contains(k),
+                merged_removal: !view.live.is_empty(),
+                pending_removal: view.pending,
+                ..FolderFacts::default()
+            };
+            match compose_folder(&facts).map(|d| d.level) {
+                Some(Level::LocalHold) => any_held = true,
+                Some(Level::MergedRemoval) => {
+                    removed.insert(k.clone());
+                    any_removed = true;
+                }
+                Some(Level::PendingRemoval) => {
+                    deferred.insert(k.clone());
+                    any_pending = true;
+                }
+                _ => {}
+            }
+        }
+        let installing = matches!(
+            target.packages.get(&pkg.key),
+            Some(PackageTarget::Chosen { .. })
+        );
+        let overlay = if any_held {
+            Some(PackageTarget::Held {
+                why: Explanation::WaitingForGroupHistory,
+            })
+        } else if any_removed {
+            Some(PackageTarget::Remove {
+                why: Explanation::RemovedByGroup,
+            })
+        } else if any_pending && installing {
+            Some(PackageTarget::Held {
+                why: Explanation::WaitingForGroupHistory,
+            })
+        } else {
+            None
         };
-        match compose_folder(&facts).map(|d| d.level) {
-            Some(Level::LocalHold) => {}
-            Some(Level::MergedRemoval) => {
-                removed.insert(k.clone());
-            }
-            Some(Level::PendingRemoval) => {
-                deferred.insert(k.clone());
-            }
-            _ => {}
+        if let Some(o) = overlay {
+            target.packages.insert(pkg.key.clone(), o);
+            target.effective.remove(&pkg.key);
         }
     }
     Composed {
@@ -661,11 +783,169 @@ pub fn compose(
     }
 }
 
+/// Level 6 (contracts.md §4.4) for one package: each folder with a live constraint takes exactly
+/// the constrained tree; several different trees are a decision; no constraint changes nothing.
+fn apply_constraints(
+    pkg: &Package,
+    input: &TargetInput,
+    ledger: &crate::ledger::Ledger,
+    constraints: &dyn crate::hooks::ConstraintHooks,
+    screen: Screen,
+    target: &mut GroupTarget,
+) {
+    use crate::decision::ConstraintKind;
+    let mut wanted: BTreeMap<FolderKey, Sha256> = BTreeMap::new();
+    let mut differ: Option<DecisionReason> = None;
+    for f in &pkg.members {
+        let live = constraints.live_constraints(ledger, f);
+        let trees: BTreeSet<Sha256> = live.iter().filter_map(|c| c.tree).collect();
+        match trees.len() {
+            0 => {}
+            1 => {
+                wanted.insert(f.clone(), *trees.iter().next().expect("one tree"));
+            }
+            _ => {
+                let all_rollbacks = live.iter().all(|c| c.kind == ConstraintKind::Rejection);
+                differ.get_or_insert(if all_rollbacks {
+                    DecisionReason::RollbackTargetsDiffer
+                } else {
+                    DecisionReason::ChoicesDiffer
+                });
+            }
+        }
+    }
+    if let Some(reason) = differ {
+        target.packages.insert(
+            pkg.key.clone(),
+            PackageTarget::NeedsDecision {
+                reason,
+                candidates: Vec::new(),
+                why: Explanation::ConcurrentDecisions,
+            },
+        );
+        target.effective.remove(&pkg.key);
+        return;
+    }
+    if wanted.is_empty() {
+        return;
+    }
+    let local_pv = package_version(pkg, input.local, input.local_client);
+    let (mut version, _) = match target.packages.get(&pkg.key) {
+        Some(PackageTarget::Chosen {
+            version, sources, ..
+        }) => (version.clone(), sources.clone()),
+        Some(PackageTarget::Held { .. }) | None => return,
+        Some(_) => match &local_pv {
+            Some(pv) => (pv.clone(), Vec::new()),
+            None => return,
+        },
+    };
+    let peers = valid_peers(input);
+    let local_source = Source::from_inventory(input.local);
+    let peer_sources: Vec<Source> = peers
+        .iter()
+        .map(|(_, _, s)| Source::from_state(s, true))
+        .collect();
+    for (f, tree) in &wanted {
+        if version
+            .folders
+            .iter()
+            .any(|x| &x.key == f && x.tree == Some(*tree) && x.status == FolderStatus::Ok)
+        {
+            continue;
+        }
+        let find = |folders: &[FolderState]| {
+            folders
+                .iter()
+                .find(|x| &x.key == f && x.tree == Some(*tree) && x.status == FolderStatus::Ok)
+                .cloned()
+        };
+        let mut found: Option<FolderState> = None;
+        if screen(pkg, &local_source) == Screened::Eligible {
+            found = find(&input.local.folders);
+        }
+        if found.is_none() {
+            for (i, (_, _, state)) in peers.iter().enumerate() {
+                if screen(pkg, &peer_sources[i]) != Screened::Eligible {
+                    continue;
+                }
+                if let Some(x) = find(&state.folders) {
+                    found = Some(x);
+                    break;
+                }
+            }
+        }
+        let Some(fs) = found else {
+            target.packages.insert(
+                pkg.key.clone(),
+                PackageTarget::Unavailable {
+                    why: Explanation::NotAvailableYet {
+                        missing: vec![*tree],
+                    },
+                },
+            );
+            target.effective.remove(&pkg.key);
+            return;
+        };
+        version.folders.retain(|x| &x.key != f);
+        version.folders.push(fs);
+    }
+    version.folders.sort_by(|a, b| a.key.cmp(&b.key));
+    version.hash = package_hash(
+        &version
+            .folders
+            .iter()
+            .filter_map(|f| f.tree.map(|t| (f.key.clone(), t)))
+            .collect::<Vec<_>>(),
+    );
+    if target.local_hash.get(&pkg.key) == Some(&version.hash) {
+        target
+            .effective
+            .insert(pkg.key.clone(), effective(&version));
+        target
+            .packages
+            .insert(pkg.key.clone(), PackageTarget::InSync);
+        return;
+    }
+    let sources: Vec<ComputerId> = peers
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| screen(pkg, &peer_sources[*i]) == Screened::Eligible)
+        .filter(|(_, (_, _, state))| {
+            version.folders.iter().all(|vf| {
+                state
+                    .folders
+                    .iter()
+                    .any(|x| x.key == vf.key && x.tree == vf.tree && x.status == FolderStatus::Ok)
+            })
+        })
+        .map(|(_, (id, _, _))| (*id).clone())
+        .collect();
+    if let Err(t) = attach_trees(&mut version, input) {
+        target.packages.insert(pkg.key.clone(), t);
+        target.effective.remove(&pkg.key);
+        return;
+    }
+    target
+        .effective
+        .insert(pkg.key.clone(), effective(&version));
+    target.packages.insert(
+        pkg.key.clone(),
+        PackageTarget::Chosen {
+            version,
+            sources,
+            why: Explanation::ChosenByGroupRecord,
+        },
+    );
+}
+
 #[cfg(test)]
 mod contract_tests {
     use super::*;
+    use crate::decision::{AckItem, Candidate, CleanupClass, Constraint, ConstraintKind, CycleCx};
     use crate::hooks::Neutral;
     use crate::ledger::Ledger;
+    use crate::plan::PackageApply;
     use crate::testkit::{addon, inventory, Scenario};
 
     fn k(s: &str) -> FolderKey {
@@ -857,9 +1137,201 @@ mod contract_tests {
             members: &sc.members,
             trees: &sc.trees,
         };
-        let c = compose(&input, &Ledger::new(), &Neutral, &BTreeSet::new());
+        let c = compose(&input, &Ledger::new(), &Neutral, &BTreeSet::new(), &Neutral);
         assert_eq!(c.target, compute_target(&input));
         assert!(c.removed.is_empty() && c.deferred.is_empty());
+    }
+
+    struct Fake {
+        constraints: Vec<Constraint>,
+        rejected_trees: Vec<Sha256>,
+        removed: Vec<FolderKey>,
+    }
+
+    impl Fake {
+        fn new() -> Self {
+            Fake {
+                constraints: Vec::new(),
+                rejected_trees: Vec::new(),
+                removed: Vec::new(),
+            }
+        }
+    }
+
+    impl crate::hooks::RemovalHooks for Fake {
+        fn merged_removals(&self, l: &Ledger, f: &FolderKey) -> crate::decision::RemovalView {
+            let mut v = Neutral.merged_removals(l, f);
+            if self.removed.contains(f) {
+                v.live.push(t(9));
+            }
+            v
+        }
+        fn stale_copy(&self, l: &Ledger, f: &FolderKey, c: &Candidate) -> bool {
+            Neutral.stale_copy(l, f, c)
+        }
+        fn classify_due(&self, cx: &CycleCx) -> Vec<(AckItem, CleanupClass)> {
+            Neutral.classify_due(cx)
+        }
+        fn plan_removals(&self, cx: &CycleCx) -> Vec<PackageApply> {
+            Neutral.plan_removals(cx)
+        }
+    }
+
+    impl crate::hooks::ConstraintHooks for Fake {
+        fn live_constraints(&self, _: &Ledger, _: &FolderKey) -> Vec<Constraint> {
+            self.constraints.clone()
+        }
+        fn excluded(&self, _: &Ledger, _: &Package, _: &Source) -> ScopeMatch {
+            ScopeMatch::Different
+        }
+        fn rejected(&self, _: &Ledger, p: &Package, s: &Source) -> ScopeMatch {
+            let hit = p.members.iter().any(
+                |m| matches!(s.content(m), Content::Tree(t) if self.rejected_trees.contains(&t)),
+            );
+            if hit {
+                ScopeMatch::Same
+            } else {
+                ScopeMatch::Different
+            }
+        }
+    }
+
+    fn composed(sc: &Scenario, fake: &Fake, held: &BTreeSet<FolderKey>) -> Composed {
+        let (group, variant, local_id) = (
+            crate::testkit::group_record(),
+            crate::testkit::confirmed_forever(),
+            crate::testkit::computer(1),
+        );
+        let input = TargetInput {
+            group: &group,
+            variant: &variant,
+            local: &sc.local,
+            local_client: &sc.local_client,
+            local_id: &local_id,
+            members: &sc.members,
+            trees: &sc.trees,
+        };
+        compose(&input, &Ledger::new(), fake, held, fake)
+    }
+
+    fn keep(tree: Sha256, n: u8) -> Constraint {
+        Constraint {
+            record: t(n),
+            kind: ConstraintKind::Keep,
+            tree: Some(tree),
+        }
+    }
+
+    fn two_versions() -> Scenario {
+        Scenario::new(vec![addon("A", Some("1.0"), "a")])
+            .peer(2, vec![addon("A", Some("2.0"), "b")])
+    }
+
+    #[test]
+    fn a_live_keep_pins_the_folder_against_a_newer_candidate() {
+        let sc = two_versions();
+        let mut fake = Fake::new();
+        let local_tree = sc.local.folders[0].tree.unwrap();
+        fake.constraints.push(keep(local_tree, 1));
+        let c = composed(&sc, &fake, &BTreeSet::new());
+        assert_eq!(c.target.packages[&k("a")], PackageTarget::InSync);
+        // Without the keep the newer release is chosen.
+        let c = composed(&sc, &Fake::new(), &BTreeSet::new());
+        assert!(matches!(
+            c.target.packages[&k("a")],
+            PackageTarget::Chosen { .. }
+        ));
+    }
+
+    #[test]
+    fn a_keep_names_the_tree_that_installs_even_when_older() {
+        let sc = Scenario::new(vec![addon("A", Some("1.0"), "a")])
+            .peer(2, vec![addon("A", Some("2.0"), "b")])
+            .peer(3, vec![addon("A", Some("3.0"), "c")]);
+        let mut fake = Fake::new();
+        fake.constraints.push(keep(sc.peer_tree(2, "a"), 1));
+        let c = composed(&sc, &fake, &BTreeSet::new());
+        match &c.target.packages[&k("a")] {
+            PackageTarget::Chosen {
+                version, sources, ..
+            } => {
+                assert_eq!(version.folders[0].toc.version.as_deref(), Some("2.0"));
+                assert_eq!(sources, &vec![crate::testkit::computer(2)]);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn constraints_naming_different_trees_need_a_decision() {
+        let sc = two_versions();
+        for (kinds, expected) in [
+            (
+                [ConstraintKind::Keep, ConstraintKind::Keep],
+                DecisionReason::ChoicesDiffer,
+            ),
+            (
+                [ConstraintKind::Rejection, ConstraintKind::Rejection],
+                DecisionReason::RollbackTargetsDiffer,
+            ),
+        ] {
+            let mut fake = Fake::new();
+            fake.constraints = vec![
+                Constraint {
+                    record: t(1),
+                    kind: kinds[0],
+                    tree: sc.local.folders[0].tree,
+                },
+                Constraint {
+                    record: t(2),
+                    kind: kinds[1],
+                    tree: Some(sc.peer_tree(2, "a")),
+                },
+            ];
+            let c = composed(&sc, &fake, &BTreeSet::new());
+            match &c.target.packages[&k("a")] {
+                PackageTarget::NeedsDecision { reason, .. } => assert_eq!(*reason, expected),
+                other => panic!("{other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_rejected_release_is_never_a_candidate() {
+        let sc = two_versions();
+        let mut fake = Fake::new();
+        fake.rejected_trees.push(sc.peer_tree(2, "a"));
+        let c = composed(&sc, &fake, &BTreeSet::new());
+        assert_eq!(c.target.packages[&k("a")], PackageTarget::InSync);
+        // The only holder is rejected and the local copy differs: nothing is installable.
+        let sc = Scenario::new(vec![]).peer(2, vec![addon("A", Some("2.0"), "b")]);
+        let mut fake = Fake::new();
+        fake.rejected_trees.push(sc.peer_tree(2, "a"));
+        let c = composed(&sc, &fake, &BTreeSet::new());
+        assert!(!matches!(
+            c.target.packages.get(&k("a")),
+            Some(PackageTarget::Chosen { .. })
+        ));
+    }
+
+    #[test]
+    fn removal_and_local_hold_overlay_the_target() {
+        let sc = two_versions();
+        let mut fake = Fake::new();
+        fake.removed.push(k("a"));
+        let c = composed(&sc, &fake, &BTreeSet::new());
+        assert!(matches!(
+            c.target.packages[&k("a")],
+            PackageTarget::Remove { .. }
+        ));
+        assert!(c.removed.contains(&k("a")));
+        assert!(!c.target.effective.contains_key(&k("a")));
+        let held: BTreeSet<FolderKey> = [k("a")].into();
+        let c = composed(&sc, &Fake::new(), &held);
+        assert!(matches!(
+            c.target.packages[&k("a")],
+            PackageTarget::Held { .. }
+        ));
     }
 }
 

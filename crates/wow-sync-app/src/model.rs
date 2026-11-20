@@ -702,6 +702,8 @@ fn decision_title(r: DecisionReason) -> &'static str {
         DecisionReason::NoCompatibleToc => "a copy has no readable add-on file list",
         DecisionReason::DifferentTocMapping => "the copies read their file lists differently",
         DecisionReason::UnvalidatedTocMapping => "a copy has client-specific files",
+        DecisionReason::ChoicesDiffer => "computers chose different versions",
+        DecisionReason::RollbackTargetsDiffer => "computers went back to different versions",
     }
 }
 
@@ -735,6 +737,12 @@ pub fn decision_reason(_w: &World, a: &Addon, r: DecisionReason) -> String {
         }
         DecisionReason::UnvalidatedTocMapping => {
             "This add-on has client-specific .toc files that WoW Sync does not handle yet.".into()
+        }
+        DecisionReason::ChoicesDiffer => {
+            "Different computers chose different versions of this add-on.".into()
+        }
+        DecisionReason::RollbackTargetsDiffer => {
+            "Different computers went back to different versions of this add-on.".into()
         }
     }
 }

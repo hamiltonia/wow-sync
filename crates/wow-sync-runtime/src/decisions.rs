@@ -30,6 +30,56 @@ use wow_sync_core::retire::OwnStanding;
 
 const AUTHORITY_LIMIT: u64 = 16 * 1024 * 1024;
 
+/// The two constraint behaviours as one `ConstraintHooks`: keeps and exclusions from the code
+/// choices, level-2 rejection and recovered targets from the rejections.
+pub(crate) struct Constraints {
+    choice: wow_sync_core::choice::ChoiceBehaviour,
+    reject: wow_sync_core::reject::RejectBehaviour,
+}
+
+impl Constraints {
+    pub(crate) fn for_derived(d: &wow_sync_core::ledger::Derived) -> Self {
+        Self {
+            choice: wow_sync_core::choice::ChoiceBehaviour::for_derived(d),
+            reject: wow_sync_core::reject::RejectBehaviour::new(d),
+        }
+    }
+}
+
+impl wow_sync_core::hooks::ConstraintHooks for Constraints {
+    fn live_constraints(
+        &self,
+        l: &Ledger,
+        f: &wow_sync_core::paths::FolderKey,
+    ) -> Vec<wow_sync_core::decision::Constraint> {
+        let mut out = self.choice.live_constraints(l, f);
+        for c in self.reject.live_constraints(l, f) {
+            if !out.contains(&c) {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    fn excluded(
+        &self,
+        l: &Ledger,
+        p: &wow_sync_core::package::Package,
+        s: &wow_sync_core::target::Source,
+    ) -> wow_sync_core::target::ScopeMatch {
+        self.choice.excluded(l, p, s)
+    }
+
+    fn rejected(
+        &self,
+        l: &Ledger,
+        p: &wow_sync_core::package::Package,
+        s: &wow_sync_core::target::Source,
+    ) -> wow_sync_core::target::ScopeMatch {
+        self.reject.rejected(l, p, s)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum KeepWhy {

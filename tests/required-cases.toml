@@ -927,6 +927,29 @@ tests = [
     "e2e::tests::own_records_are_listed_in_the_published_authority_index",
     "e2e::tests::a_peer_mirrors_valid_records_and_only_repairs_its_own_copy",
 ]
+
+[[case]]
+id = "R4-integrate:compose-constraints-and-removal-core"
+tier = "offline"
+tests = [
+    "target::contract_tests::a_live_keep_pins_the_folder_against_a_newer_candidate",
+    "target::contract_tests::a_keep_names_the_tree_that_installs_even_when_older",
+    "target::contract_tests::constraints_naming_different_trees_need_a_decision",
+    "target::contract_tests::a_rejected_release_is_never_a_candidate",
+    "target::contract_tests::removal_and_local_hold_overlay_the_target",
+    "target::contract_tests::neutral_hooks_leave_the_slice_target_unchanged",
+]
+
+[[case]]
+id = "R4-integrate:composed-target-through-the-service"
+tier = "offline"
+tests = [
+    "e2e::tests::a_removal_published_by_a_peer_is_applied_and_an_offline_peer_cannot_resurrect_it",
+    "e2e::tests::a_computer_that_lost_a_folder_waits_for_the_group_instead_of_reinstalling",
+    "e2e::tests::a_live_keep_pins_a_folder_against_a_newer_candidate",
+    "e2e::tests::a_rejected_release_is_never_installed",
+    "e2e::tests::apply_report_survives_crash_before_publish",
+]
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag

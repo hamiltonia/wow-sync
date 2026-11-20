@@ -4,7 +4,7 @@
 
 use crate::activity::{ActivitySource, WinprocActivity};
 use crate::decisions::write_own_record;
-use crate::decisions::{learn_from_directories, plan_own_index, Plane};
+use crate::decisions::{learn_from_directories, plan_own_index, Constraints, Plane};
 use crate::detail::{
     build_package_rows, folder_titles, member_rows, render_with_names, DetailInput, StatusDetail,
 };
@@ -60,7 +60,7 @@ use wow_sync_core::status::{
     applied_here, derive_status, game_halted, headline_sentence, journal_status, remember_applied,
     render_block, render_headline, render_member, render_result, Headline, StatusInput, StatusView,
 };
-use wow_sync_core::target::{compute_target, GroupTarget, TargetInput, TreeAvail};
+use wow_sync_core::target::{compose, GroupTarget, TargetInput, TreeAvail};
 use wow_sync_core::toc::TocCandidate;
 use wow_sync_core::variant::{
     assess_layout, check_join, confirm_enrolled, confirm_variant, consent_disclosures, consent_gap,
@@ -293,6 +293,15 @@ fn file_obs(r: FileRead) -> FileObs {
 
 fn is_missing(e: &FsError) -> bool {
     e.kind == FsErrorKind::NotFound
+}
+
+/// Folders that any journal names (removal.md E5).
+fn journaled_folders(area: &InstallArea) -> BTreeSet<FolderKey> {
+    let (journals, _) = crate::control::split_journals(area.read_journals().unwrap_or_default());
+    journals
+        .iter()
+        .flat_map(|j| j.folders.iter().map(|f| f.key.clone()))
+        .collect()
 }
 
 impl SliceService {
@@ -892,37 +901,75 @@ impl SliceService {
             }
         }
         let mut trees = BTreeMap::new();
-        for v in &views {
-            let MemberLatest::Valid { state, .. } = &v.latest else {
+        let state_folders = views
+            .iter()
+            .filter_map(|v| match &v.latest {
+                MemberLatest::Valid { state, .. } => Some(state.folders.iter()),
+                _ => None,
+            })
+            .flatten()
+            .chain(inventory.folders.iter());
+        for f in state_folders {
+            let Some(h) = f.tree else {
                 continue;
             };
-            for f in &state.folders {
-                let Some(h) = f.tree else { continue };
-                if trees.contains_key(&h) {
-                    continue;
-                }
-                let avail =
-                    match provider.read(&layout::tree_record(&group.group_id, &h), TREE_LIMIT) {
-                        Ok(b) => match decode_tree(&b, &h) {
-                            Ok(t) => TreeAvail::Ok(t),
-                            Err(_) => TreeAvail::Corrupt,
-                        },
-                        Err(e) if e.kind == FsErrorKind::CloudOnly => TreeAvail::CloudOnly,
-                        Err(e) if is_missing(&e) => TreeAvail::Missing,
-                        Err(_) => TreeAvail::Corrupt,
-                    };
-                trees.insert(h, avail);
+            if trees.contains_key(&h) {
+                continue;
             }
+            let avail = match provider.read(&layout::tree_record(&group.group_id, &h), TREE_LIMIT) {
+                Ok(b) => match decode_tree(&b, &h) {
+                    Ok(t) => TreeAvail::Ok(t),
+                    Err(_) => TreeAvail::Corrupt,
+                },
+                Err(e) if e.kind == FsErrorKind::CloudOnly => TreeAvail::CloudOnly,
+                Err(e) if is_missing(&e) => TreeAvail::Missing,
+                Err(_) => TreeAvail::Corrupt,
+            };
+            trees.insert(h, avail);
         }
-        let target = compute_target(&TargetInput {
-            group: &group,
-            variant: &variant,
-            local: &inventory,
-            local_client: &Self::client_info(&variant),
-            local_id: &computer.computer_id,
-            members: &views,
-            trees: &trees,
-        });
+        let held = {
+            let identity = format!("{}|{}", enrollment.install_root, enrollment.variant_folder);
+            let journaled = self.journaled();
+            let (base, obs) = RemovalStore::new(&self.state, group.group_id.clone()).load();
+            let seen = wow_sync_core::removal::observe(
+                &base,
+                &obs,
+                &ObserveInput {
+                    inventory: &inventory,
+                    dir_identity: &identity,
+                    variant: &enrollment.variant_folder,
+                    now_unix_ms: now_unix_ms() as u64,
+                    journaled: &journaled,
+                },
+            );
+            let mut held: BTreeSet<FolderKey> = BTreeSet::new();
+            for (name, _) in &seen.held {
+                if let Some(fs) = seen.baseline.packages.get(name).or(base.packages.get(name)) {
+                    held.extend(fs.iter().map(|f| f.key.clone()));
+                }
+            }
+            held
+        };
+        let removal_hooks =
+            RemovalBehaviour::new(&self.plane.ledger, &group.group_id, &self.plane.members)
+                .with_inventory(inventory.clone(), enrollment.next_seq);
+        let constraints = Constraints::for_derived(&derived);
+        let target = compose(
+            &TargetInput {
+                group: &group,
+                variant: &variant,
+                local: &inventory,
+                local_client: &Self::client_info(&variant),
+                local_id: &computer.computer_id,
+                members: &views,
+                trees: &trees,
+            },
+            &self.plane.ledger,
+            &removal_hooks,
+            &held,
+            &constraints,
+        )
+        .target;
         let own_states =
             match provider.list(&layout::state_dir(&group.group_id, &computer.computer_id)) {
                 Ok(l) => l
@@ -965,6 +1012,14 @@ impl SliceService {
         area: &InstallArea,
     ) -> (Vec<ApplyJournal>, Vec<crate::control::UnknownJournal>) {
         crate::control::split_journals(area.read_journals().unwrap_or_default())
+    }
+
+    /// Folders that any journal names (removal.md E5).
+    fn journaled(&self) -> BTreeSet<FolderKey> {
+        match InstallArea::open(&self.variant_dir()) {
+            Ok(area) => journaled_folders(&area),
+            Err(_) => BTreeSet::new(),
+        }
     }
 
     fn snapshot(&mut self, w: &World, area: &InstallArea) -> StatusSnapshot {
@@ -1236,11 +1291,18 @@ impl SliceService {
                 };
                 let mut gen = || OpId::parse(&random_id_hex()).expect("random id");
                 let game_blocks = !matches!(gate.activity, Activity::NotRunning);
+                let mut journaled = journaled_folders(&area);
+                if !rec.ops.is_empty() {
+                    // Recovery changed the folders after the scan; judge nothing until the next one.
+                    journaled.extend(w.inventory.folders.iter().map(|f| f.key.clone()));
+                    journaled.extend(rec.ops.iter().map(|(_, k, _)| k.clone()));
+                }
                 let extra = Self::removal_steps(
                     &self.state,
                     &mut self.plane,
                     &provider,
                     &w,
+                    &journaled,
                     game_blocks,
                     &mut report,
                 );
@@ -1389,6 +1451,7 @@ impl SliceService {
         plane: &mut Plane,
         provider: &ProviderRoot,
         w: &World,
+        journaled: &BTreeSet<FolderKey>,
         game_blocks_changes: bool,
         report: &mut SyncReport,
     ) -> Vec<PackageApply> {
@@ -1405,13 +1468,12 @@ impl SliceService {
                 "{}|{}",
                 w.enrollment.install_root, w.enrollment.variant_folder
             );
-            let journaled = BTreeSet::new();
             let observed = match RemovalStore::new(state, gid.clone()).observe(&ObserveInput {
                 inventory: &w.inventory,
                 dir_identity: &identity,
                 variant: &w.enrollment.variant_folder,
                 now_unix_ms: now,
-                journaled: &journaled,
+                journaled,
             }) {
                 Ok(o) => o,
                 Err(e) => {

@@ -1478,4 +1478,232 @@ mod tests {
         let r = synced(&mut a);
         assert!(r.published.is_some(), "{r:?}");
     }
+
+    // ------------------------------------------------ composed target (R4-integrate B3b)
+
+    fn alpha_folder(lab: &Lab, g: &GroupId, pc: &Pc) -> wow_sync_core::inventory::FolderState {
+        latest_state(lab, g, pc)
+            .folders
+            .into_iter()
+            .find(|f| f.key.as_str() == "alpha")
+            .expect("alpha is published")
+    }
+
+    fn issuer_of(pc: &Pc) -> Issuer {
+        let (c, e) = pc_ids(pc);
+        Issuer {
+            computer_id: c,
+            enrollment_id: e,
+            issued_at_seq: 1000,
+        }
+    }
+
+    /// Three computers that all hold Alpha v1, then `b` moves to v2 and publishes it.
+    fn alpha_v2_published(lab: &Lab) -> (Pc, Pc, Pc, GroupId) {
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        let mut c = lab.pc("c");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        c.join(&g);
+        synced(&mut c);
+        synced(&mut a);
+        b.addon("Alpha", "alpha-v2");
+        let r = synced(&mut b);
+        assert!(r.published.is_some(), "{r:?}");
+        (a, b, c, g)
+    }
+
+    #[test]
+    fn a_removal_published_by_a_peer_is_applied_and_an_offline_peer_cannot_resurrect_it() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        let mut c = lab.pc("c");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        c.join(&g);
+        synced(&mut c);
+        synced(&mut b);
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        a_removes_alpha(&mut a, &g);
+        // C is offline from here on: its published state still lists Alpha.
+        assert!(alpha_folder(&lab, &g, &c).tree.is_some());
+        let r = synced(&mut b);
+        assert_eq!(b.read("Alpha/main.lua"), None, "{r:?}");
+        assert!(
+            !b.install.addons.join("Alpha").exists(),
+            "the folder is gone, not emptied"
+        );
+        for _ in 0..2 {
+            synced(&mut b);
+            assert_eq!(
+                b.read("Alpha/main.lua"),
+                None,
+                "removed once, stays removed"
+            );
+        }
+        // A computer enrolled later sees only C's stale copy as a holder: it must not install it.
+        let mut d = lab.pc("d");
+        d.join(&g);
+        for _ in 0..2 {
+            let r = synced(&mut d);
+            assert_eq!(d.read("Alpha/main.lua"), None, "resurrected: {r:?}");
+        }
+        assert!(!d.install.addons.join("Alpha").exists());
+    }
+
+    #[test]
+    fn a_computer_that_lost_a_folder_waits_for_the_group_instead_of_reinstalling() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        synced(&mut b);
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        std::fs::remove_dir_all(b.install.addons.join("Alpha")).unwrap();
+        for _ in 0..2 {
+            let r = synced(&mut b);
+            assert_eq!(b.read("Alpha/main.lua"), None, "{r:?}");
+            assert!(
+                texts(&r).contains("removal history"),
+                "the wait is visible: {}",
+                texts(&r)
+            );
+        }
+        let (bc, _) = pc_ids(&b);
+        assert!(
+            authority_files(&lab, &g, &bc).is_empty(),
+            "nothing is written before the removal is confirmed"
+        );
+    }
+
+    #[test]
+    fn a_live_keep_pins_a_folder_against_a_newer_candidate() {
+        use wow_sync_core::choice::{build_keep, ChoiceView, CopyEntry, WriteCx};
+        use wow_sync_core::kinds::{ChoiceReason, ManifestFolder};
+        use wow_sync_core::ledger::Ledger;
+        use wow_sync_core::target::Source;
+        let lab = Lab::new();
+        let (mut a, _b, mut c, g) = alpha_v2_published(&lab);
+        // Control: without a record a computer takes the newer release.
+        synced(&mut c);
+        assert_eq!(c.read("Alpha/main.lua").as_deref(), Some("alpha-v2"));
+        let (ac, ae) = pc_ids(&a);
+        let kept = alpha_folder(&lab, &g, &a);
+        let copy = CopyEntry::new(
+            vec![ManifestFolder {
+                key: kept.key.clone(),
+                name: kept.name.clone(),
+                tree: kept.tree.unwrap(),
+            }],
+            vec![ae],
+        );
+        let ledger = Ledger::new();
+        let view = ChoiceView::new(&ledger, &Default::default());
+        let keep = build_keep(
+            &view,
+            &WriteCx {
+                group: &g,
+                issuer: issuer_of(&a),
+                now_unix_ms: 5,
+            },
+            ChoiceReason::Ambiguous,
+            std::slice::from_ref(&kept.key),
+            &copy,
+            &[],
+            &Source::from_state(&latest_state(&lab, &g, &a), true),
+        )
+        .unwrap();
+        let kh = put_authority(&lab, &g, &ac, &AuthorityRecord::CodeChoice(keep));
+        for _ in 0..2 {
+            let r = synced(&mut a);
+            assert_eq!(status(&a, &g, &kh), Some(Status::Valid), "{r:?}");
+            assert_eq!(
+                a.read("Alpha/main.lua").as_deref(),
+                Some("alpha-v1"),
+                "the keep pins the folder: {r:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_rejected_release_is_never_installed() {
+        use wow_sync_core::choice::ChoiceView;
+        use wow_sync_core::hash::package_hash;
+        use wow_sync_core::kinds::{
+            RecoveredEntry, RejectedEntry, Rejection, RejectionSettings, TreeEntry,
+        };
+        use wow_sync_core::ledger::Ledger;
+        let lab = Lab::new();
+        let (mut a, b, _c, g) = alpha_v2_published(&lab);
+        let (ac, _) = pc_ids(&a);
+        let bad = alpha_folder(&lab, &g, &b);
+        let good = alpha_folder(&lab, &g, &a);
+        let entry = |f: &wow_sync_core::inventory::FolderState| TreeEntry {
+            key: f.key.clone(),
+            tree: f.tree.unwrap(),
+        };
+        let hash = |f: &wow_sync_core::inventory::FolderState| {
+            package_hash(&[(f.key.clone(), f.tree.unwrap())])
+        };
+        let ledger = Ledger::new();
+        let view = ChoiceView::new(&ledger, &Default::default());
+        let rej = Rejection {
+            group_id: g.clone(),
+            issuer: issuer_of(&a),
+            folders: vec![bad.key.clone()],
+            rejected: RejectedEntry {
+                package_hash: hash(&bad),
+                version_label: "3.0".into(),
+                folders: vec![entry(&bad)],
+            },
+            recovered: RecoveredEntry {
+                package_hash: hash(&good),
+                folders: vec![entry(&good)],
+            },
+            considered: {
+                let (_, be) = pc_ids(&b);
+                let (_, ae) = pc_ids(&a);
+                let mut v = vec![
+                    wow_sync_core::kinds::Considered {
+                        package_hash: hash(&bad),
+                        folders: vec![entry(&bad)],
+                        holders: vec![be],
+                    },
+                    wow_sync_core::kinds::Considered {
+                        package_hash: hash(&good),
+                        folders: vec![entry(&good)],
+                        holders: vec![ae],
+                    },
+                ];
+                v.sort();
+                v
+            },
+            settings: RejectionSettings::NotApplicable,
+            known: view.known_for(std::slice::from_ref(&bad.key)),
+            considered_parts: vec![],
+            written_unix_ms: 5,
+        };
+        let rh = put_authority(&lab, &g, &ac, &AuthorityRecord::Rejection(rej));
+        for _ in 0..3 {
+            let r = synced(&mut a);
+            assert_eq!(status(&a, &g, &rh), Some(Status::Valid), "{r:?}");
+            assert_eq!(
+                a.read("Alpha/main.lua").as_deref(),
+                Some("alpha-v1"),
+                "the rejected release is not installed: {r:?}"
+            );
+        }
+    }
 }
