@@ -525,7 +525,10 @@ pub fn encode_segments(entries: &[Entry]) -> Vec<Vec<u8>> {
     let mut cur: Vec<Entry> = Vec::new();
     let mut cur_bytes = 128usize;
     for e in entries {
-        let n = serde_json::to_string_pretty(e).map_or(512, |s| s.len() + 4);
+        let n = serde_json::to_string_pretty(e).map_or(512, |s| {
+            // The entry is indented four more spaces on every line inside the segment.
+            s.len() + 4 + 4 * s.bytes().filter(|b| *b == b'\n').count() + 4
+        });
         if !cur.is_empty() && cur_bytes + n > SEGMENT_BYTES {
             out.push(crate::records::encode(&LedgerSegment {
                 entries: std::mem::take(&mut cur),
@@ -543,4 +546,205 @@ pub fn encode_segments(entries: &[Entry]) -> Vec<Vec<u8>> {
 
 pub fn decode_segment(bytes: &[u8]) -> Result<LedgerSegment, RecordError> {
     decode::<LedgerSegment>(bytes, SEGMENT_BYTES)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hash::sha256;
+    use crate::kinds::{
+        Ack, AckItem, AckResult, AckSettings, ManifestFolder, Removal, RemovalEvidence,
+        RemovalSettings, Retirement,
+    };
+    use crate::records::encode;
+    use crate::testkit::{computer, enrollment, golden, group_id};
+
+    fn issuer(n: u8, seq: u64) -> Issuer {
+        Issuer {
+            computer_id: computer(n),
+            enrollment_id: enrollment(n),
+            issued_at_seq: seq,
+        }
+    }
+
+    fn eref(n: u8) -> EnrollmentRef {
+        EnrollmentRef {
+            computer_id: computer(n),
+            enrollment_id: enrollment(n),
+        }
+    }
+
+    fn retirement(by: u8, retired: u8, cutoff: u64) -> Retirement {
+        Retirement {
+            group_id: group_id(),
+            issuer: issuer(by, 1),
+            retired: eref(retired),
+            cutoff_seq: cutoff,
+            was_settings_master: false,
+            retirements_known: vec![],
+            written_unix_ms: 7,
+        }
+    }
+
+    fn removal(by: u8, seq: u64) -> Removal {
+        Removal {
+            group_id: group_id(),
+            issuer: issuer(by, seq),
+            evidence: RemovalEvidence::UserAction,
+            rejection: None,
+            title: "Suite".into(),
+            folders: vec![ManifestFolder {
+                key: FolderKey::lossy("suite"),
+                name: "Suite".into(),
+                tree: sha256(b"tree"),
+            }],
+            removed_hash: sha256(b"pkg"),
+            audience: vec![eref(1), eref(2)],
+            settings: RemovalSettings::None,
+            written_unix_ms: 7,
+        }
+    }
+
+    fn members(ns: &[u8]) -> Membership {
+        let mut m = Membership::default();
+        for n in ns {
+            m.add(&computer(*n), &enrollment(*n));
+        }
+        m
+    }
+
+    fn learn<R: Record>(l: &mut Ledger, r: &R, kind: AuthorityKind) -> Sha256 {
+        let bytes = encode(r);
+        let h = sha256(&bytes);
+        l.learn(h, kind, vec![], Some(&computer(1)), Some(&bytes));
+        h
+    }
+
+    #[test]
+    fn golden_bytes_and_name_is_the_hash() {
+        // T-C01-golden-bytes (removal, retirement, ack)
+        let rm = encode(&removal(2, 3));
+        golden("removal-1.json", &rm);
+        golden("retirement-1.json", &encode(&retirement(1, 2, 10)));
+        let mut l = Ledger::new();
+        let h = learn(&mut l, &removal(2, 3), AuthorityKind::Removal);
+        assert_eq!(h, sha256(&rm));
+        assert!(matches!(l.body(&h), Some(Body::Record(_))));
+        let ack = Ack {
+            group_id: group_id(),
+            issuer: issuer(1, 4),
+            items: vec![AckItem {
+                removal: h,
+                folders: vec![FolderKey::lossy("suite")],
+            }],
+            result: AckResult::Removed,
+            removed: vec![],
+            settings: AckSettings::NotApplicable,
+            written_unix_ms: 8,
+        };
+        golden("removal-ack-1.json", &encode(&ack));
+    }
+
+    #[test]
+    fn bad_copy_is_skipped_and_a_good_copy_is_used() {
+        // T-C03-bad-copy
+        let bytes = encode(&removal(2, 3));
+        let h = sha256(&bytes);
+        let mut l = Ledger::new();
+        l.learn(h, AuthorityKind::Removal, vec![], None, Some(b"damaged"));
+        assert!(matches!(l.body(&h), Some(Body::Unreadable)));
+        let d = derive(&l, &group_id(), &members(&[1, 2]));
+        assert_eq!(
+            d.status_of(&h),
+            Some(&Status::Pending(PendingReason::Unreadable))
+        );
+        l.learn(h, AuthorityKind::Removal, vec![], None, Some(&bytes));
+        let d = derive(&l, &group_id(), &members(&[1, 2]));
+        assert_eq!(d.status_of(&h), Some(&Status::Valid));
+    }
+
+    #[test]
+    fn a_reference_of_the_wrong_kind_is_invalid() {
+        // T-C02-retired-forms-rejected (wrong_reference)
+        let mut l = Ledger::new();
+        let ret = learn(&mut l, &retirement(1, 2, 10), AuthorityKind::Retirement);
+        let ack = Ack {
+            group_id: group_id(),
+            issuer: issuer(1, 4),
+            items: vec![AckItem {
+                removal: ret,
+                folders: vec![FolderKey::lossy("suite")],
+            }],
+            result: AckResult::Absent,
+            removed: vec![],
+            settings: AckSettings::NotApplicable,
+            written_unix_ms: 8,
+        };
+        let h = learn(&mut l, &ack, AuthorityKind::Ack);
+        let d = derive(&l, &group_id(), &members(&[1, 2]));
+        assert_eq!(
+            d.status_of(&h),
+            Some(&Status::Invalid(InvalidReason::WrongReference))
+        );
+    }
+
+    #[test]
+    fn historical_membership_and_non_member_retirement() {
+        // T-C13-historical-membership
+        let mut l = Ledger::new();
+        let rm = learn(&mut l, &removal(2, 3), AuthorityKind::Removal);
+        let non_member = learn(&mut l, &retirement(1, 7, 3), AuthorityKind::Retirement);
+        let m = members(&[1, 2]);
+        let d = derive(&l, &group_id(), &m);
+        assert_eq!(d.status_of(&rm), Some(&Status::Valid));
+        assert_eq!(
+            d.status_of(&non_member),
+            Some(&Status::Invalid(InvalidReason::NotAMember))
+        );
+        // Enrollment 2 left member.json but stays in the grow-only membership set.
+        let d = derive(&l, &group_id(), &members(&[1, 2, 7]));
+        assert_eq!(d.status_of(&rm), Some(&Status::Valid));
+    }
+
+    #[test]
+    fn records_above_a_retirement_cutoff_are_invalid_in_any_order() {
+        // T-C10 at the ledger: B's seq-11 removal after A retires B at 10.
+        let mut l = Ledger::new();
+        let rm = learn(&mut l, &removal(2, 11), AuthorityKind::Removal);
+        let before = derive(&l, &group_id(), &members(&[1, 2]));
+        assert_eq!(before.status_of(&rm), Some(&Status::Valid));
+        let r = learn(&mut l, &retirement(1, 2, 10), AuthorityKind::Retirement);
+        let after = derive(&l, &group_id(), &members(&[1, 2]));
+        assert_eq!(after.status_of(&r), Some(&Status::Valid));
+        assert_eq!(
+            after.status_of(&rm),
+            Some(&Status::Invalid(InvalidReason::AfterRetirement))
+        );
+    }
+
+    #[test]
+    fn segments_reload_past_sixteen_mib() {
+        // T-C09-ledger-segments
+        let names: Vec<FolderKey> = (0..2000)
+            .map(|i| FolderKey::lossy(&format!("{i:0>50}")))
+            .collect();
+        let entries: Vec<Entry> = (0..170u32)
+            .map(|i| Entry {
+                hash: sha256(&i.to_le_bytes()),
+                kind: AuthorityKind::Removal,
+                folders: names.clone(),
+                issuer: None,
+                learned_from: vec![computer(1)],
+                mirrored_seq: Some(1),
+            })
+            .collect();
+        let segs = encode_segments(&entries);
+        assert!(segs.iter().map(Vec::len).sum::<usize>() > 16 * MIB);
+        assert!(segs.len() >= 4 && segs.iter().all(|s| s.len() <= SEGMENT_BYTES));
+        let mut back = Vec::new();
+        for s in &segs {
+            back.extend(decode_segment(s).unwrap().entries);
+        }
+        assert_eq!(back, entries);
+    }
 }

@@ -1,0 +1,31 @@
+{
+  "schema": "wowsync.apply-journal/1",
+  "op": "09090909090909090909090909090909",
+  "group_id": "11111111111111111111111111111111",
+  "started_unix_ms": 5,
+  "package": "suite",
+  "target_hash": "e3b98a4da31a127d4bde6e43033f66ba274cab0eb7eb1c70ec41402bf6273dd8",
+  "phase": "staging",
+  "folders": [
+    {
+      "name": "Suite",
+      "key": "suite",
+      "action": "replace",
+      "target_tree": "11507a0e2f5e69d5dfa40a62a1bd7b6ee57e6bcd85c67c9b8431b36fff21c437",
+      "expected_live": {
+        "kind": "tree",
+        "tree": "cba06b5736faf67e54b07b561eae94395e774c517a7d910a54369e1263ccfbd4",
+        "fingerprint": "5aef96240bca5582e6fd0468879a26863d81d1c1fb602def55926ef33ec8bb1f"
+      }
+    },
+    {
+      "name": "Suite_Data",
+      "key": "suite_data",
+      "action": "install",
+      "target_tree": "d504f01608b7a8b04349a9ccf4630f4917e67cc4eb6803da31ed503e04a00c68",
+      "expected_live": {
+        "kind": "absent"
+      }
+    }
+  ]
+}

@@ -19,7 +19,8 @@ pub fn put_record(
 ) -> Result<bool, FsError> {
     match root.read(rel, limit) {
         Ok(existing) if existing == bytes => return Ok(false),
-        Ok(_) | Err(FsError {
+        Ok(_)
+        | Err(FsError {
             kind: FsErrorKind::TooLarge,
             ..
         }) => {}
@@ -44,5 +45,32 @@ pub fn list_names(root: &ProviderRoot, rel_dir: &str) -> Result<Vec<String>, FsE
         Ok(v) => Ok(v.into_iter().map(|e| e.name).collect()),
         Err(e) if e.kind == FsErrorKind::NotFound => Ok(Vec::new()),
         Err(e) => Err(e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testkit::TempDir;
+
+    #[test]
+    fn own_bad_copy_is_repaired_and_a_good_one_is_never_rewritten() {
+        // T-C04-repair-own-only
+        let t = TempDir::new();
+        let root = ProviderRoot::open_or_create(t.path()).unwrap();
+        let rel = "authority/rec.json";
+        let good = b"{\"good\":true}\n";
+        assert!(put_record(&root, rel, good, 1024, "pc1").unwrap());
+        assert!(!put_record(&root, rel, good, 1024, "pc1").unwrap());
+        root.write_atomic(rel, b"damaged", "pc1").unwrap();
+        assert!(put_record(&root, rel, good, 1024, "pc1").unwrap());
+        assert_eq!(root.read(rel, 1024).unwrap(), good);
+    }
+
+    #[test]
+    fn a_missing_directory_lists_as_empty() {
+        let t = TempDir::new();
+        let root = ProviderRoot::open_or_create(t.path()).unwrap();
+        assert!(list_names(&root, "authority").unwrap().is_empty());
     }
 }

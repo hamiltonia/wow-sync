@@ -632,3 +632,66 @@ tests = [
     "discover::tests::an_oversized_dropbox_info_file_is_not_read",
     "detail::tests::this_computer_confirms_only_applied_or_in_sync_packages",
 ]
+
+# >>> section: R4-core-contracts
+[[case]]
+id = "R4-core-contracts:same-release"
+tier = "offline"
+tests = [
+    "target::contract_tests::same_release_table",
+    "target::contract_tests::same_release_unknown_waits",
+    "target::contract_tests::same_release_exact_source_unrelated_addon_is_ignored",
+    "target::contract_tests::same_release_regrouped_exclusion",
+    "target::contract_tests::no_hybrid_of_two_releases_in_one_package",
+    "target::contract_tests::compose_precedence_adjacent_levels",
+    "target::contract_tests::neutral_hooks_leave_the_slice_target_unchanged",
+]
+
+[[case]]
+id = "R4-core-contracts:retirement-barrier"
+tier = "offline"
+tests = [
+    "authority::tests::vret_predicate_truth_table",
+    "authority::tests::later_cutoff_does_not_reauthorize_and_lower_one_tightens",
+    "authority::tests::retirement_by_a_retired_issuer_is_void",
+    "authority::tests::partial_retirement_dag_is_order_and_restart_stable",
+    "authority::tests::chained_retirements_keep_the_retired_set_in_both_orders",
+]
+
+[[case]]
+id = "R4-core-contracts:journal-point-ledger"
+tier = "offline"
+tests = [
+    "records::contract_tests::journal_kind_action_table",
+    "records::contract_tests::v1_journal_with_a_remove_action_is_rejected",
+    "records::contract_tests::dropping_a_folder_is_not_v1_expressible",
+    "records::contract_tests::slice_decoder_reports_major_2_and_new_decoder_reads_both",
+    "records::contract_tests::journal_v1_and_v2_golden_bytes",
+    "records::contract_tests::paired_is_derived_for_every_row",
+    "ledger::tests::golden_bytes_and_name_is_the_hash",
+    "ledger::tests::bad_copy_is_skipped_and_a_good_copy_is_used",
+    "ledger::tests::a_reference_of_the_wrong_kind_is_invalid",
+    "ledger::tests::historical_membership_and_non_member_retirement",
+    "ledger::tests::records_above_a_retirement_cutoff_are_invalid_in_any_order",
+    "ledger::tests::segments_reload_past_sixteen_mib",
+    "authority_store::tests::own_bad_copy_is_repaired_and_a_good_one_is_never_rewritten",
+]
+# <<< section: R4-core-contracts
+
+# >>> section: R4-core-removal
+# <<< section: R4-core-removal
+
+# >>> section: R4-core-settings
+# <<< section: R4-core-settings
+
+# >>> section: R4-core-ops
+# <<< section: R4-core-ops
+
+# >>> section: R4-notify-diag
+# <<< section: R4-notify-diag
+
+# >>> section: R4-app
+# <<< section: R4-app
+
+# >>> section: R4-mac-kit
+# <<< section: R4-mac-kit

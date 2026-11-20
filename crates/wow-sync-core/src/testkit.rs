@@ -1023,6 +1023,25 @@ impl PublishEffects for FakeEffects {
     }
 }
 
+/// Compares `bytes` with `fixtures/contracts/<name>`. With `WOWSYNC_BLESS=1` a missing golden file
+/// is written from `bytes`; otherwise a missing file fails the test.
+pub fn golden(name: &str, bytes: &[u8]) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("fixtures")
+        .join("contracts")
+        .join(name);
+    if !path.exists() && std::env::var("WOWSYNC_BLESS").is_ok_and(|v| v == "1") {
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("create fixtures dir");
+        std::fs::write(&path, bytes).expect("write golden");
+    }
+    let want = std::fs::read(&path).unwrap_or_else(|_| panic!("missing golden {name}"));
+    assert_eq!(
+        String::from_utf8_lossy(&want),
+        String::from_utf8_lossy(bytes),
+        "golden {name}"
+    );
+}
+
 pub fn live_of(fx: &FakeEffects, names: &[&str]) -> Vec<Option<Sha256>> {
     names
         .iter()

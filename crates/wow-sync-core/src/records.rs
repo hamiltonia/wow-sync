@@ -961,6 +961,244 @@ pub struct AuditEntry {
 record!(AuditEntry, "wowsync.audit", 16 * KIB, |self| { Ok(()) });
 
 #[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use crate::hash::sha256;
+    use crate::ids::Identity;
+    use crate::testkit::{golden, group_id, op, sample_journal};
+
+    fn key(s: &str) -> FolderKey {
+        FolderKey::lossy(s)
+    }
+
+    fn folder2(name: &str, action: FolderAction) -> JournalFolderV2 {
+        JournalFolderV2 {
+            name: name.into(),
+            key: key(name),
+            action,
+            expected_live: ExpectedLive::Absent,
+            staged: (action != FolderAction::Remove).then(|| sha256(name.as_bytes())),
+            recovery_slot: RecoverySlot::new(&format!("recovery/{name}")).unwrap(),
+        }
+    }
+
+    fn unit(folder: &str) -> SettingsUnit {
+        SettingsUnit {
+            folder: key(folder),
+            identity: Identity::account("ACC").unwrap(),
+        }
+    }
+
+    fn settings_op(folder: &str) -> SettingsFileOp {
+        SettingsFileOp {
+            unit: unit(folder),
+            live_rel: crate::paths::account_settings_path("ACC", folder).unwrap(),
+            expected_live: ExpectedLive::Absent,
+            staged: Some(sha256(b"s")),
+            recovery_slot: RecoverySlot::new(&format!("recovery/s-{folder}")).unwrap(),
+        }
+    }
+
+    fn j2(kind: OpKind, actions: &[FolderAction], removals: usize, ops: bool) -> ApplyJournalV2 {
+        let mut rem: Vec<Sha256> = (0..removals as u8).map(|n| sha256(&[n])).collect();
+        rem.sort();
+        ApplyJournalV2 {
+            op: op(9),
+            group_id: group_id(),
+            started_unix_ms: 5,
+            kind,
+            package: key("suite"),
+            target_hash: None,
+            phase: JournalPhase::Staging,
+            from_phase: None,
+            reason: None,
+            halted_by_game: false,
+            folders: actions
+                .iter()
+                .enumerate()
+                .map(|(i, a)| folder2(&format!("f{i}"), *a))
+                .collect(),
+            removals: rem,
+            pending_records: Vec::new(),
+            settings_ops: if ops {
+                vec![settings_op("suite")]
+            } else {
+                vec![]
+            },
+        }
+    }
+
+    fn accepts(j: &ApplyJournalV2) -> bool {
+        decode::<ApplyJournalV2>(&encode(j), ApplyJournalV2::LIMIT).is_ok()
+    }
+
+    #[test]
+    fn journal_kind_action_table() {
+        // T-R4D1-jrn-kind-actions
+        use FolderAction::{Install as I, Remove as R, Replace as P};
+        use OpKind::*;
+        let cases: Vec<(ApplyJournalV2, bool)> = vec![
+            (j2(Apply, &[I, P], 0, false), true),
+            (j2(Apply, &[P, R], 1, false), true),
+            (j2(Apply, &[P, R], 0, false), false),
+            (j2(Apply, &[I], 1, false), false),
+            (j2(Remove, &[R], 1, false), true),
+            (j2(Remove, &[R, I], 1, false), false),
+            (j2(Remove, &[R], 0, false), false),
+            (j2(Remove, &[], 1, false), false),
+            (j2(Restore, &[I, P], 0, false), true),
+            (j2(Restore, &[R], 0, false), false),
+            (j2(Restore, &[P], 1, false), false),
+            (j2(Rollback, &[P, R], 1, false), true),
+            (j2(Rollback, &[R], 0, false), false),
+            (j2(Settings, &[], 0, true), true),
+            (j2(Settings, &[], 0, false), false),
+            (j2(Settings, &[I], 0, true), false),
+            (j2(Settings, &[], 1, true), false),
+            (j2(SettingsCleanup, &[], 0, true), true),
+            (j2(SettingsCleanup, &[R], 0, true), false),
+            (j2(Apply, &[], 0, true), true),
+            (j2(Apply, &[], 0, false), false),
+        ];
+        for (i, (j, want)) in cases.iter().enumerate() {
+            assert_eq!(accepts(j), *want, "case {i}: {:?} {:?}", j.kind, j.folders);
+        }
+    }
+
+    #[test]
+    fn v1_journal_with_a_remove_action_is_rejected() {
+        let mut j = sample_journal(JournalPhase::Committing);
+        j.folders[1].action = FolderAction::Remove;
+        assert!(decode::<ApplyJournal>(&encode(&j), ApplyJournal::LIMIT).is_err());
+    }
+
+    #[test]
+    fn dropping_a_folder_is_not_v1_expressible() {
+        // T-R4D1-mixed-update-drop (shape), T-C05
+        use FolderAction::{Remove as R, Replace as P};
+        let pure = j2(OpKind::Apply, &[P], 0, false);
+        let mut pure = pure;
+        pure.target_hash = Some(sha256(b"t"));
+        assert!(pure.is_v1_expressible());
+        let mixed = j2(OpKind::Apply, &[P, R], 1, false);
+        assert!(!mixed.is_v1_expressible());
+        assert!(accepts(&mixed));
+    }
+
+    #[test]
+    fn slice_decoder_reports_major_2_and_new_decoder_reads_both() {
+        // T-C06-v2-under-slice
+        let j = j2(OpKind::Settings, &[], 0, true);
+        let bytes = encode(&j);
+        assert!(matches!(
+            decode::<ApplyJournal>(&bytes, ApplyJournal::LIMIT),
+            Err(RecordError::UnsupportedMajor(2))
+        ));
+        assert!(matches!(decode_journal(&bytes), Ok(AnyJournal::V2(_))));
+        let v1 = encode(&sample_journal(JournalPhase::Staging));
+        assert!(matches!(decode_journal(&v1), Ok(AnyJournal::V1(_))));
+    }
+
+    #[test]
+    fn journal_v1_and_v2_golden_bytes() {
+        // T-C05-journal-v1-golden, T-C01
+        golden(
+            "apply-journal-1.json",
+            &encode(&sample_journal(JournalPhase::Staging)),
+        );
+        golden(
+            "apply-journal-2-mixed.json",
+            &encode(&j2(
+                OpKind::Apply,
+                &[FolderAction::Replace, FolderAction::Remove],
+                1,
+                true,
+            )),
+        );
+        golden(
+            "apply-journal-2-settings.json",
+            &encode(&j2(OpKind::Settings, &[], 0, true)),
+        );
+    }
+
+    fn captured(folder: &str) -> SettingsRoot {
+        SettingsRoot {
+            unit: unit(folder),
+            state: RootState::Captured {
+                checkpoint: sha256(b"cp"),
+                location: Location::Local,
+            },
+        }
+    }
+
+    fn missing(folder: &str) -> SettingsRoot {
+        SettingsRoot {
+            unit: unit(folder),
+            state: RootState::Missing {
+                reason: MissingReason::NotIncluded,
+            },
+        }
+    }
+
+    #[test]
+    fn paired_is_derived_for_every_row() {
+        // T-R4D1-paired-derived
+        assert_eq!(derive_paired(true, &[]), Some(Paired::NotApplicable));
+        assert_eq!(derive_paired(true, &[captured("a")]), Some(Paired::Paired));
+        assert_eq!(
+            derive_paired(true, &[captured("a"), missing("b")]),
+            Some(Paired::Partial)
+        );
+        assert_eq!(derive_paired(true, &[missing("a")]), Some(Paired::CodeOnly));
+        assert_eq!(
+            derive_paired(false, &[captured("a")]),
+            Some(Paired::SettingsOnly)
+        );
+        assert_eq!(derive_paired(false, &[missing("a")]), None);
+        assert_eq!(derive_paired(false, &[]), None);
+
+        let mut p = RecoveryPointV2 {
+            op: op(9),
+            group_id: group_id(),
+            kind: OpKind::Apply,
+            package: key("suite"),
+            code_package_hash: Some(sha256(b"t")),
+            created_unix_ms: 1,
+            replaced: vec![TreeRef {
+                name: "Suite".into(),
+                tree: sha256(b"old"),
+            }],
+            installed: vec![],
+            removals: vec![],
+            settings: vec![captured("a")],
+            paired: Paired::Paired,
+            reason: "apply".into(),
+            pinned: true,
+        };
+        let ok = |p: &RecoveryPointV2| {
+            decode::<RecoveryPointV2>(&encode(p), RecoveryPointV2::LIMIT).is_ok()
+        };
+        assert!(ok(&p));
+        for wrong in [
+            Paired::NotApplicable,
+            Paired::Partial,
+            Paired::CodeOnly,
+            Paired::SettingsOnly,
+        ] {
+            p.paired = wrong;
+            assert!(!ok(&p), "{wrong:?}");
+        }
+        golden(
+            "recovery-point-2-paired.json",
+            &encode(&RecoveryPointV2 {
+                paired: Paired::Paired,
+                ..p
+            }),
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::inventory::TocSummary;

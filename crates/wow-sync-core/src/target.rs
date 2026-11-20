@@ -653,6 +653,208 @@ pub fn compose(
 }
 
 #[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use crate::hooks::Neutral;
+    use crate::ledger::Ledger;
+    use crate::testkit::{addon, inventory, Scenario};
+
+    fn k(s: &str) -> FolderKey {
+        FolderKey::lossy(s)
+    }
+
+    fn t(n: u8) -> Sha256 {
+        crate::hash::sha256(&[n])
+    }
+
+    fn src(entries: &[(&str, Option<&str>)]) -> Source {
+        let scans = entries
+            .iter()
+            .map(|(n, tag)| addon(n, Some("1.0"), tag.unwrap_or("x")))
+            .collect();
+        Source::from_inventory(&inventory(scans))
+    }
+
+    #[test]
+    fn same_release_exact_source_unrelated_addon_is_ignored() {
+        // T-R4D28-exact-source-unrelated-addon: the source's extra folder is outside K.
+        let s = src(&[("A", Some("a")), ("Unrelated", Some("u"))]);
+        let tree = match s.content(&k("a")) {
+            Content::Tree(t) => t,
+            c => panic!("{c:?}"),
+        };
+        let e = Release::new(&[k("a")], &[(k("a"), tree)]);
+        assert_eq!(same_release(&s, &e), ScopeMatch::Same);
+    }
+
+    #[test]
+    fn same_release_table() {
+        // T-R4D23-same-release-table
+        let s = src(&[("A", Some("a"))]);
+        let tree = match s.content(&k("a")) {
+            Content::Tree(t) => t,
+            c => panic!("{c:?}"),
+        };
+        let same = Release::new(&[k("a")], &[(k("a"), tree)]);
+        let other = Release::new(&[k("a")], &[(k("a"), t(9))]);
+        let absent_in_entry = Release::new(&[k("a")], &[]);
+        let missing_in_source = Release::new(&[k("a"), k("b")], &[(k("a"), tree), (k("b"), t(2))]);
+        let both_absent = Release::new(&[k("a"), k("b")], &[(k("a"), tree)]);
+        assert_eq!(same_release(&s, &same), ScopeMatch::Same);
+        assert_eq!(same_release(&s, &other), ScopeMatch::Different);
+        assert_eq!(same_release(&s, &absent_in_entry), ScopeMatch::Different);
+        assert_eq!(same_release(&s, &missing_in_source), ScopeMatch::Different);
+        assert_eq!(same_release(&s, &both_absent), ScopeMatch::Same);
+    }
+
+    #[test]
+    fn same_release_unknown_waits() {
+        // T-R4D23-unknown-waits: Unknown never equals Same and never becomes Different.
+        let s = Source::from_state(
+            &crate::testkit::member_state(
+                &crate::testkit::computer(2),
+                1,
+                &inventory(vec![addon("A", Some("1.0"), "a")]),
+            ),
+            false,
+        );
+        let e = Release::new(&[k("a")], &[(k("a"), t(1))]);
+        assert_eq!(same_release(&s, &e), ScopeMatch::Unknown);
+        let x = Release::new(&[k("a")], &[(k("a"), t(1))]);
+        let y = Release::new(&[k("a"), k("b")], &[(k("a"), t(1)), (k("b"), t(2))]);
+        assert_eq!(same_release_entries(&x, &y), ScopeMatch::Unknown);
+        let z = Release::new(&[k("a"), k("b")], &[(k("a"), t(3)), (k("b"), t(2))]);
+        assert_eq!(same_release_entries(&x, &z), ScopeMatch::Different);
+    }
+
+    #[test]
+    fn same_release_regrouped_exclusion() {
+        // T-R4D28-regrouped-exclusion: a folder excluded in one entry but listed in another is
+        // not evidence of sameness.
+        let x = Release::new(&[k("a")], &[(k("a"), t(1))]);
+        let y = Release::new(&[k("a"), k("b")], &[(k("a"), t(1))]);
+        assert_ne!(same_release_entries(&x, &y), ScopeMatch::Same);
+        assert_ne!(same_release_entries(&y, &x), ScopeMatch::Same);
+    }
+
+    #[test]
+    fn no_hybrid_of_two_releases_in_one_package() {
+        // T-R4D24-no-hybrid: a newer core on one peer and newer data on another is never mixed.
+        let sc = Scenario::new(vec![
+            addon("Suite", Some("1.0"), "c1"),
+            addon("Suite_Data", Some("1.0"), "d1"),
+        ])
+        .peer(
+            2,
+            vec![
+                addon("Suite", Some("2.0"), "c2"),
+                addon("Suite_Data", Some("1.0"), "d1"),
+            ],
+        )
+        .peer(
+            3,
+            vec![
+                addon("Suite", Some("1.0"), "c1"),
+                addon("Suite_Data", Some("2.0"), "d2"),
+            ],
+        );
+        let t = sc.target();
+        let folders: Vec<&(FolderKey, Sha256)> = t
+            .effective
+            .values()
+            .flat_map(|e| e.folders.iter())
+            .collect();
+        let has = |key: &str, tree: Sha256| folders.iter().any(|(f, h)| *f == k(key) && *h == tree);
+        let hybrid = has("suite", sc.peer_tree(2, "suite"))
+            && has("suite_data", sc.peer_tree(3, "suite_data"));
+        assert!(!hybrid, "{:?}", t.effective);
+    }
+
+    #[test]
+    fn compose_precedence_adjacent_levels() {
+        // T-C14-compose-precedence: each level beats the next one down.
+        let order = [
+            FolderFacts {
+                journal_unresolved: true,
+                source_rejected: true,
+                ..Default::default()
+            },
+            FolderFacts {
+                source_rejected: true,
+                local_hold: true,
+                ..Default::default()
+            },
+            FolderFacts {
+                local_hold: true,
+                merged_removal: true,
+                ..Default::default()
+            },
+            FolderFacts {
+                merged_removal: true,
+                stale_copy: true,
+                ..Default::default()
+            },
+            FolderFacts {
+                stale_copy: true,
+                constraint: Some(None),
+                ..Default::default()
+            },
+            FolderFacts {
+                constraint: Some(None),
+                pending_removal: true,
+                ..Default::default()
+            },
+            FolderFacts {
+                pending_removal: true,
+                ordinary: Some(t(1)),
+                ..Default::default()
+            },
+        ];
+        let want = [
+            Level::UnresolvedJournal,
+            Level::Rejection,
+            Level::LocalHold,
+            Level::MergedRemoval,
+            Level::StaleCopy,
+            Level::Constraint,
+            Level::PendingRemoval,
+        ];
+        for (f, w) in order.iter().zip(want) {
+            assert_eq!(compose_folder(f).map(|d| d.level), Some(w));
+        }
+        assert_eq!(compose_folder(&FolderFacts::default()), None);
+        let ord = FolderFacts {
+            ordinary: Some(t(1)),
+            ..Default::default()
+        };
+        assert_eq!(compose_folder(&ord).map(|d| d.level), Some(Level::Ordinary));
+    }
+
+    #[test]
+    fn neutral_hooks_leave_the_slice_target_unchanged() {
+        let sc = Scenario::new(vec![addon("A", Some("1.0"), "a")])
+            .peer(2, vec![addon("A", Some("2.0"), "b")]);
+        let (group, variant, local_id) = (
+            crate::testkit::group_record(),
+            crate::testkit::confirmed_forever(),
+            crate::testkit::computer(1),
+        );
+        let input = TargetInput {
+            group: &group,
+            variant: &variant,
+            local: &sc.local,
+            local_client: &sc.local_client,
+            local_id: &local_id,
+            members: &sc.members,
+            trees: &sc.trees,
+        };
+        let c = compose(&input, &Ledger::new(), &Neutral, &BTreeSet::new());
+        assert_eq!(c.target, compute_target(&input));
+        assert!(c.removed.is_empty() && c.deferred.is_empty());
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::testkit::{addon, addon_interface, addon_unvalidated, client, computer, Scenario};

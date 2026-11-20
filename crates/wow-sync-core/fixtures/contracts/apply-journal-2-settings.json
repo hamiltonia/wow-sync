@@ -1,0 +1,29 @@
+{
+  "schema": "wowsync.apply-journal/2",
+  "op": "09090909090909090909090909090909",
+  "group_id": "11111111111111111111111111111111",
+  "started_unix_ms": 5,
+  "kind": "settings",
+  "package": "suite",
+  "target_hash": null,
+  "phase": "staging",
+  "folders": [],
+  "removals": [],
+  "pending_records": [],
+  "settings_ops": [
+    {
+      "unit": {
+        "folder": "suite",
+        "identity": {
+          "account": "ACC"
+        }
+      },
+      "live_rel": "Account/ACC/SavedVariables/suite.lua",
+      "expected_live": {
+        "kind": "absent"
+      },
+      "staged": "043a718774c572bd8a25adbeb1bfcd5c0256ae11cecf9f9c3f925d0e52beaf89",
+      "recovery_slot": "recovery/s-suite"
+    }
+  ]
+}

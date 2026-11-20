@@ -284,3 +284,155 @@ impl Barrier {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testkit::{computer, enrollment, group_id};
+
+    fn h(n: u8) -> Sha256 {
+        sha256(&[n])
+    }
+
+    fn ret(retired: u8, cutoff: u64, known: &[u8]) -> Retirement {
+        let mut k: Vec<Sha256> = known.iter().map(|n| h(*n)).collect();
+        k.sort();
+        Retirement {
+            group_id: group_id(),
+            issuer: Issuer {
+                computer_id: computer(9),
+                enrollment_id: enrollment(9),
+                issued_at_seq: 1,
+            },
+            retired: EnrollmentRef {
+                computer_id: computer(retired),
+                enrollment_id: enrollment(retired),
+            },
+            cutoff_seq: cutoff,
+            was_settings_master: false,
+            retirements_known: k,
+            written_unix_ms: 1,
+        }
+    }
+
+    fn barrier(rs: &[(u8, Retirement)]) -> Barrier {
+        let nodes: BTreeMap<Sha256, RetNode> = rs
+            .iter()
+            .map(|(n, r)| (h(*n), RetNode::Valid(r.clone())))
+            .collect();
+        let st = retirement_statuses(&nodes);
+        let map = rs.iter().map(|(n, r)| (h(*n), r.clone())).collect();
+        Barrier::new(&map, &st)
+    }
+
+    #[test]
+    fn vret_predicate_truth_table() {
+        // T-R4D15-vret-predicate
+        let b = barrier(&[(1, ret(2, 10, &[]))]);
+        let e = enrollment(2);
+        assert_eq!(b.verdict(&e, 10), RetVerdict::Valid);
+        assert_eq!(b.verdict(&e, 11), RetVerdict::AfterRetirement);
+        assert_eq!(b.verdict(&enrollment(3), 99), RetVerdict::Valid);
+        // Unresolved retirement: above the hold cut waits, never invalid.
+        let nodes = BTreeMap::from([(h(1), RetNode::Valid(ret(2, 10, &[7])))]);
+        let st = retirement_statuses(&nodes);
+        assert_eq!(st[&h(1)], RetStatus::Unresolved);
+        let map = BTreeMap::from([(h(1), ret(2, 10, &[7]))]);
+        let b = Barrier::new(&map, &st);
+        assert_eq!(b.retired(&e), Retired::Unresolved);
+        assert_eq!(b.verdict(&e, 10), RetVerdict::Valid);
+        assert_eq!(b.verdict(&e, 11), RetVerdict::RetirementUnresolved);
+    }
+
+    #[test]
+    fn later_cutoff_does_not_reauthorize_and_lower_one_tightens() {
+        // T-R4D16-later-cutoff-no-reauth
+        let e = enrollment(2);
+        let b = barrier(&[(1, ret(2, 10, &[])), (2, ret(2, 12, &[]))]);
+        assert_eq!(b.cutoff(&e), Some(10));
+        assert_eq!(b.verdict(&e, 11), RetVerdict::AfterRetirement);
+        let b = barrier(&[
+            (1, ret(2, 10, &[])),
+            (2, ret(2, 12, &[])),
+            (3, ret(2, 8, &[])),
+        ]);
+        assert_eq!(b.cutoff(&e), Some(8));
+        assert_eq!(b.verdict(&e, 9), RetVerdict::AfterRetirement);
+    }
+
+    #[test]
+    fn retirement_by_a_retired_issuer_is_void() {
+        // T-R4D16-retired-issuer-retirement-void: B retires A while naming B's own retirement.
+        for order in [[1u8, 2], [2, 1]] {
+            let rs: Vec<(u8, Retirement)> = order
+                .iter()
+                .map(|n| match n {
+                    1 => (1, ret(2, 10, &[])),
+                    _ => (2, ret(1, 5, &[1])),
+                })
+                .collect();
+            let b = barrier(&rs);
+            assert_eq!(b.retired(&enrollment(2)), Retired::Yes);
+            assert_eq!(b.retired(&enrollment(1)), Retired::No);
+        }
+    }
+
+    #[test]
+    fn partial_retirement_dag_is_order_and_restart_stable() {
+        // T-R4D25-partial-retirement-dag: R <- S <- T <- U.
+        let full: Vec<(u8, Retirement)> = vec![
+            (1, ret(11, 5, &[])),
+            (2, ret(12, 5, &[1])),
+            (3, ret(13, 5, &[2])),
+            (4, ret(14, 5, &[3])),
+        ];
+        let want = [
+            RetStatus::Effective,
+            RetStatus::Void,
+            RetStatus::Effective,
+            RetStatus::Void,
+        ];
+        let orders: [[usize; 4]; 4] = [[0, 1, 2, 3], [3, 2, 1, 0], [1, 3, 0, 2], [2, 0, 3, 1]];
+        for order in orders {
+            let mut nodes: BTreeMap<Sha256, RetNode> = BTreeMap::new();
+            for (step, i) in order.iter().enumerate() {
+                nodes.insert(h(full[*i].0), RetNode::Valid(full[*i].1.clone()));
+                // Whatever has arrived so far, an effective verdict never depends on later input
+                // unless a dependency is missing.
+                let st = retirement_statuses(&nodes);
+                if step == 3 {
+                    for (j, w) in want.iter().enumerate() {
+                        assert_eq!(st[&h(full[j].0)], *w, "order {order:?}");
+                    }
+                }
+            }
+        }
+        // Missing S leaves T and U unresolved.
+        let nodes: BTreeMap<Sha256, RetNode> = [0usize, 2, 3]
+            .iter()
+            .map(|i| (h(full[*i].0), RetNode::Valid(full[*i].1.clone())))
+            .collect();
+        let st = retirement_statuses(&nodes);
+        assert_eq!(st[&h(1)], RetStatus::Effective);
+        assert_eq!(st[&h(3)], RetStatus::Unresolved);
+        assert_eq!(st[&h(4)], RetStatus::Unresolved);
+    }
+
+    #[test]
+    fn chained_retirements_keep_the_retired_set_in_both_orders() {
+        // T-C10-retirement-barrier: A retires B at 10; C retires A at 4 knowing nothing.
+        for order in [[1u8, 2], [2, 1]] {
+            let rs: Vec<(u8, Retirement)> = order
+                .iter()
+                .map(|n| match n {
+                    1 => (1, ret(2, 10, &[])),
+                    _ => (2, ret(1, 4, &[])),
+                })
+                .collect();
+            let b = barrier(&rs);
+            assert_eq!(b.retired(&enrollment(2)), Retired::Yes);
+            assert_eq!(b.retired(&enrollment(1)), Retired::Yes);
+            assert_eq!(b.verdict(&enrollment(2), 11), RetVerdict::AfterRetirement);
+        }
+    }
+}

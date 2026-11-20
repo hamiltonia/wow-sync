@@ -1,0 +1,35 @@
+{
+  "schema": "wowsync.recovery-point/2",
+  "op": "09090909090909090909090909090909",
+  "group_id": "11111111111111111111111111111111",
+  "kind": "apply",
+  "package": "suite",
+  "code_package_hash": "e3b98a4da31a127d4bde6e43033f66ba274cab0eb7eb1c70ec41402bf6273dd8",
+  "created_unix_ms": 1,
+  "replaced": [
+    {
+      "name": "Suite",
+      "tree": "cba06b5736faf67e54b07b561eae94395e774c517a7d910a54369e1263ccfbd4"
+    }
+  ],
+  "installed": [],
+  "removals": [],
+  "settings": [
+    {
+      "unit": {
+        "folder": "a",
+        "identity": {
+          "account": "ACC"
+        }
+      },
+      "state": {
+        "state": "captured",
+        "checkpoint": "e44b4bd707c540bca8615b21f850fb41e02029701df241d179c1a5f3acbf5bf1",
+        "location": "local"
+      }
+    }
+  ],
+  "paired": "paired",
+  "reason": "apply",
+  "pinned": true
+}
