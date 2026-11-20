@@ -7,7 +7,9 @@ use crate::inventory::{FolderStatus, Inventory};
 use crate::layout::{blob, parse_state_name, state_record, tree_record};
 use crate::package::ClientInfo;
 use crate::paths::{FolderKey, RelPath};
-use crate::records::{encode, ApplyReport, CodeState, FolderTreeRecord};
+use crate::records::{
+    encode, ApplyReport, CodeState, FolderTreeRecord, OpKind, PendingRecord, SettingsFileOp,
+};
 use crate::target::{GroupTarget, PackageTarget};
 use crate::variant::ConfirmedVariant;
 use serde::{Deserialize, Serialize};
@@ -207,6 +209,8 @@ pub fn publish_needed(
 pub enum FolderAction {
     Install,
     Replace,
+    /// The live folder moves to its recovery slot and nothing is installed (`apply-journal/2`).
+    Remove,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -225,6 +229,14 @@ pub struct FolderApply {
     pub expected_live: ExpectedLive,
 }
 
+/// A live folder this operation moves to recovery (action `remove`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoveApply {
+    pub name: String,
+    pub key: FolderKey,
+    pub expected_live: ExpectedLive,
+}
+
 /// One package = one operation (apply.md §2.2).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackageApply {
@@ -233,6 +245,35 @@ pub struct PackageApply {
     pub target_hash: Sha256,
     pub folders: Vec<FolderApply>,
     pub explanation: Explanation,
+    pub kind: OpKind,
+    pub removes: Vec<RemoveApply>,
+    pub removals: Vec<Sha256>,
+    pub settings_ops: Vec<SettingsFileOp>,
+    pub pending_records: Vec<PendingRecord>,
+}
+
+impl PackageApply {
+    /// A pure code apply, as the slice planner builds it.
+    pub fn code_apply(
+        op: OpId,
+        package: FolderKey,
+        target_hash: Sha256,
+        folders: Vec<FolderApply>,
+        explanation: Explanation,
+    ) -> Self {
+        Self {
+            op,
+            package,
+            target_hash,
+            folders,
+            explanation,
+            kind: OpKind::Apply,
+            removes: Vec::new(),
+            removals: Vec::new(),
+            settings_ops: Vec::new(),
+            pending_records: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -334,13 +375,13 @@ pub fn plan_apply(
             continue;
         }
         folders.sort_by(|a, b| a.key.cmp(&b.key));
-        plan.packages.push(PackageApply {
-            op: new_op(),
-            package: key.clone(),
-            target_hash: version.hash,
+        plan.packages.push(PackageApply::code_apply(
+            new_op(),
+            key.clone(),
+            version.hash,
             folders,
-            explanation: why.clone(),
-        });
+            why.clone(),
+        ));
     }
     if plan.packages.is_empty() {
         return Err(if plan.skipped.is_empty() {

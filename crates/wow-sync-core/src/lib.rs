@@ -4,12 +4,14 @@
 
 pub mod admit;
 mod arch;
+pub mod authority;
 pub mod bpsv;
 pub mod exec;
 pub mod explain;
 pub mod hash;
 pub mod ids;
 pub mod inventory;
+pub mod kinds;
 pub mod layout;
 pub mod package;
 pub mod paths;

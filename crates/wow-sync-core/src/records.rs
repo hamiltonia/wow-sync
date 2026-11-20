@@ -1,7 +1,7 @@
 //! Record schemas, encoding and decoding (publication.md §2).
 
 use crate::hash::tree_hash;
-use crate::ids::{ComputerId, EnrollmentId, GroupId, OpId, Sha256};
+use crate::ids::{CheckpointRef, ComputerId, EnrollmentId, GroupId, OpId, SettingsUnit, Sha256};
 use crate::inventory::{FileEntry, FolderState, FolderStatus};
 use crate::package::ClientInfo;
 use crate::paths::{validate_folder_name, FolderKey};
@@ -40,9 +40,28 @@ impl std::fmt::Display for RecordError {
 
 pub trait Record: Serialize + DeserializeOwned {
     const SCHEMA: &'static str;
+    /// The major `encode` writes unless `write_major` says otherwise.
     const MAJOR: u32;
+    /// Majors `decode` accepts (contracts.md §2.1). Every slice record keeps `[1]`.
+    const MAJORS: &'static [u32] = &[];
     const LIMIT: usize;
     fn validate(&self) -> Result<(), String>;
+    /// The major chosen for this value on encode.
+    fn write_major(&self) -> u32 {
+        Self::MAJOR
+    }
+    /// A value decoded as `major` must not use content of a later major.
+    fn validate_major(&self, _major: u32) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+fn accepts_major<T: Record>(m: u32) -> bool {
+    if T::MAJORS.is_empty() {
+        m == T::MAJOR
+    } else {
+        T::MAJORS.contains(&m)
+    }
 }
 
 /// Pretty JSON, LF, trailing newline, `schema` first.
@@ -52,7 +71,7 @@ pub fn encode<T: Record>(r: &T) -> Vec<u8> {
     let mut out = format!(
         "{{\n  \"schema\": \"{}/{}\",\n{}",
         T::SCHEMA,
-        T::MAJOR,
+        r.write_major(),
         rest
     );
     out.push('\n');
@@ -78,21 +97,25 @@ pub fn decode<T: Record>(bytes: &[u8], limit: usize) -> Result<T, RecordError> {
     if name != T::SCHEMA {
         return Err(RecordError::UnknownSchema(schema));
     }
-    match major.parse::<u32>() {
-        Ok(m) if m == T::MAJOR => {}
+    let found = match major.parse::<u32>() {
+        Ok(m) if accepts_major::<T>(m) => m,
         Ok(m) => return Err(RecordError::UnsupportedMajor(m)),
         Err(_) => return Err(RecordError::UnknownSchema(schema)),
-    }
+    };
     let rec: T = serde_json::from_value(value).map_err(|e| RecordError::Json(e.to_string()))?;
     rec.validate().map_err(RecordError::Invalid)?;
+    rec.validate_major(found).map_err(RecordError::Invalid)?;
     Ok(rec)
 }
 
 macro_rules! record {
     ($t:ty, $schema:literal, $limit:expr, |$s:ident| $validate:block) => {
+        record!($t, $schema, 1, $limit, |$s| $validate);
+    };
+    ($t:ty, $schema:literal, $major:literal, $limit:expr, |$s:ident| $validate:block) => {
         impl Record for $t {
             const SCHEMA: &'static str = $schema;
-            const MAJOR: u32 = 1;
+            const MAJOR: u32 = $major;
             const LIMIT: usize = $limit;
             fn validate(&$s) -> Result<(), String> $validate
         }
@@ -325,6 +348,13 @@ record!(ApplyJournal, "wowsync.apply-journal", MIB, |self| {
     if self.folders.is_empty() {
         return Err("journal without folders".into());
     }
+    if self
+        .folders
+        .iter()
+        .any(|f| f.action == FolderAction::Remove)
+    {
+        return Err("a remove action needs apply-journal/2".into());
+    }
     Ok(())
 });
 
@@ -347,6 +377,500 @@ pub struct RecoveryPoint {
 record!(RecoveryPoint, "wowsync.recovery-point", 64 * KIB, |self| {
     Ok(())
 });
+
+// ---------------------------------------------------------------- C-JRN `/2` (contracts.md §2)
+//
+// The `/2` shapes are separate Rust types next to the slice types so that slice code and its
+// exhaustive matches stay unchanged. `decode_journal` and `decode_point` accept both majors.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpKind {
+    Apply,
+    Remove,
+    Restore,
+    Rollback,
+    Settings,
+    SettingsCleanup,
+}
+
+/// Where a journal or recovery-point slot lives, relative to the variant's `.wowsync` folder.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RecoverySlot(String);
+
+impl RecoverySlot {
+    pub fn new(s: &str) -> Result<Self, String> {
+        crate::paths::validate_rel_path(s).map_err(|e| format!("{e:?}"))?;
+        Ok(Self(s.to_string()))
+    }
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Serialize for RecoverySlot {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for RecoverySlot {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        RecoverySlot::new(&s).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SettingsFileOp {
+    pub unit: SettingsUnit,
+    pub live_rel: crate::paths::SettingsPath,
+    pub expected_live: ExpectedLive,
+    pub staged: Option<Sha256>,
+    pub recovery_slot: RecoverySlot,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Location {
+    Local,
+    Provider,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MissingReason {
+    Paused,
+    UnknownOwner,
+    SharedFile,
+    Unreadable,
+    TooLarge,
+    IdentityCollision,
+    NotIncluded,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum RootState {
+    Captured {
+        checkpoint: CheckpointRef,
+        location: Location,
+    },
+    Missing {
+        reason: MissingReason,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SettingsRoot {
+    pub unit: SettingsUnit,
+    pub state: RootState,
+}
+
+impl SettingsRoot {
+    pub fn captured(&self) -> bool {
+        matches!(self.state, RootState::Captured { .. })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Paired {
+    NotApplicable,
+    Paired,
+    Partial,
+    CodeOnly,
+    SettingsOnly,
+}
+
+/// The §2.3 table. `None` means no point is written: nothing was captured or replaced.
+pub fn derive_paired(code_nonempty: bool, settings: &[SettingsRoot]) -> Option<Paired> {
+    let captured = settings.iter().filter(|r| r.captured()).count();
+    if code_nonempty {
+        Some(if settings.is_empty() {
+            Paired::NotApplicable
+        } else if captured == settings.len() {
+            Paired::Paired
+        } else if captured == 0 {
+            Paired::CodeOnly
+        } else {
+            Paired::Partial
+        })
+    } else if captured >= 1 {
+        Some(Paired::SettingsOnly)
+    } else {
+        None
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingRecord {
+    pub hash: Sha256,
+    /// The canonical record bytes (UTF-8 JSON), fixed at journal creation.
+    pub bytes: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JournalFolderV2 {
+    pub name: String,
+    pub key: FolderKey,
+    pub action: FolderAction,
+    pub expected_live: ExpectedLive,
+    pub staged: Option<Sha256>,
+    pub recovery_slot: RecoverySlot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApplyJournalV2 {
+    pub op: OpId,
+    pub group_id: GroupId,
+    pub started_unix_ms: u64,
+    pub kind: OpKind,
+    pub package: FolderKey,
+    pub target_hash: Option<Sha256>,
+    pub phase: JournalPhase,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_phase: Option<JournalPhase>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub halted_by_game: bool,
+    pub folders: Vec<JournalFolderV2>,
+    #[serde(default)]
+    pub removals: Vec<Sha256>,
+    #[serde(default)]
+    pub pending_records: Vec<PendingRecord>,
+    #[serde(default)]
+    pub settings_ops: Vec<SettingsFileOp>,
+}
+
+impl ApplyJournalV2 {
+    /// A journal stays `/1` iff it is a pure code apply (contracts.md §2.2).
+    pub fn is_v1_expressible(&self) -> bool {
+        self.kind == OpKind::Apply
+            && !self.folders.is_empty()
+            && self
+                .folders
+                .iter()
+                .all(|f| matches!(f.action, FolderAction::Install | FolderAction::Replace))
+            && self.removals.is_empty()
+            && self.settings_ops.is_empty()
+            && self.pending_records.is_empty()
+            && self.target_hash.is_some()
+    }
+
+    pub fn removal_hashes_pending(&self) -> Vec<Sha256> {
+        self.pending_records.iter().map(|p| p.hash).collect()
+    }
+}
+
+/// V-JRN, the parts that need no ledger.
+fn validate_journal_v2(j: &ApplyJournalV2) -> Result<(), String> {
+    if j.phase == JournalPhase::RolledBack
+        && !matches!(
+            j.from_phase,
+            Some(JournalPhase::Staging | JournalPhase::Committing)
+        )
+    {
+        return Err("rolled_back needs from_phase staging or committing".into());
+    }
+    let has = |a: FolderAction| j.folders.iter().any(|f| f.action == a);
+    let (remove, installs) = (
+        has(FolderAction::Remove),
+        has(FolderAction::Install) || has(FolderAction::Replace),
+    );
+    let ops = !j.settings_ops.is_empty();
+    let ok = match j.kind {
+        OpKind::Apply | OpKind::Rollback => {
+            (!j.folders.is_empty() || ops) && (j.removals.is_empty() != remove)
+        }
+        OpKind::Remove => !installs && remove && !j.removals.is_empty(),
+        OpKind::Restore => !remove && j.removals.is_empty() && (!j.folders.is_empty() || ops),
+        OpKind::Settings | OpKind::SettingsCleanup => {
+            j.folders.is_empty() && j.removals.is_empty() && ops
+        }
+    };
+    if !ok {
+        return Err("journal kind and actions do not match".into());
+    }
+    for f in &j.folders {
+        let staged_ok = (f.action == FolderAction::Remove) == f.staged.is_none();
+        if !staged_ok {
+            return Err("staged content only for install and replace".into());
+        }
+    }
+    let mut keys = std::collections::BTreeSet::new();
+    if !j.folders.iter().all(|f| keys.insert(f.key.clone())) {
+        return Err("duplicate folder".into());
+    }
+    let mut units = std::collections::BTreeSet::new();
+    if !j.settings_ops.iter().all(|o| units.insert(o.unit.clone())) {
+        return Err("duplicate settings unit".into());
+    }
+    if !crate::kinds::strictly_sorted(&j.removals) {
+        return Err("removals must be sorted and unique".into());
+    }
+    for p in &j.pending_records {
+        let bytes = p.bytes.as_bytes();
+        if crate::hash::sha256(bytes) != p.hash {
+            return Err("pending record hash does not match its bytes".into());
+        }
+        crate::authority::decode_authority(bytes, &p.hash)
+            .map_err(|e| format!("pending record: {e:?}"))?;
+    }
+    Ok(())
+}
+
+record!(
+    ApplyJournalV2,
+    "wowsync.apply-journal",
+    2,
+    4 * MIB,
+    |self| { validate_journal_v2(self) }
+);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecoveryPointV2 {
+    pub op: OpId,
+    pub group_id: GroupId,
+    pub kind: OpKind,
+    pub package: FolderKey,
+    pub code_package_hash: Option<Sha256>,
+    pub created_unix_ms: u64,
+    pub replaced: Vec<TreeRef>,
+    pub installed: Vec<TreeRef>,
+    #[serde(default)]
+    pub removals: Vec<Sha256>,
+    #[serde(default)]
+    pub settings: Vec<SettingsRoot>,
+    pub paired: Paired,
+    pub reason: String,
+    pub pinned: bool,
+}
+record!(
+    RecoveryPointV2,
+    "wowsync.recovery-point",
+    2,
+    256 * KIB,
+    |self| {
+        let code = !self.replaced.is_empty() || !self.installed.is_empty();
+        match derive_paired(code, &self.settings) {
+            Some(p) if p == self.paired => Ok(()),
+            Some(_) => Err("paired does not match the code and settings parts".into()),
+            None => Err("a point with nothing captured or replaced is never written".into()),
+        }
+    }
+);
+
+/// A journal of either major, as found on disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AnyJournal {
+    V1(ApplyJournal),
+    V2(ApplyJournalV2),
+}
+
+impl AnyJournal {
+    pub fn op(&self) -> &OpId {
+        match self {
+            Self::V1(j) => &j.op,
+            Self::V2(j) => &j.op,
+        }
+    }
+}
+
+pub fn decode_journal(bytes: &[u8]) -> Result<AnyJournal, RecordError> {
+    match decode::<ApplyJournal>(bytes, ApplyJournal::LIMIT) {
+        Err(RecordError::UnsupportedMajor(2)) => {
+            decode::<ApplyJournalV2>(bytes, ApplyJournalV2::LIMIT).map(AnyJournal::V2)
+        }
+        other => other.map(AnyJournal::V1),
+    }
+}
+
+pub fn encode_journal(j: &AnyJournal) -> Vec<u8> {
+    match j {
+        AnyJournal::V1(j) => encode(j),
+        AnyJournal::V2(j) => encode(j),
+    }
+}
+
+/// A recovery point of either major.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AnyPoint {
+    V1(RecoveryPoint),
+    V2(RecoveryPointV2),
+}
+
+pub fn decode_point(bytes: &[u8]) -> Result<AnyPoint, RecordError> {
+    match decode::<RecoveryPoint>(bytes, RecoveryPoint::LIMIT) {
+        Err(RecordError::UnsupportedMajor(2)) => {
+            decode::<RecoveryPointV2>(bytes, RecoveryPointV2::LIMIT).map(AnyPoint::V2)
+        }
+        other => other.map(AnyPoint::V1),
+    }
+}
+
+/// Local-only pending report with outcomes the slice report cannot express
+/// (contracts.md §2.4). The slice decoder rejects major 2 and starts a fresh report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LocalOutcomeKind {
+    Removed,
+    AbsentAcknowledged,
+    Restored,
+    SettingsApplied,
+    SettingsKeptLocal,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalOutcome {
+    pub package: FolderKey,
+    pub kind: LocalOutcomeKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PendingReportV2 {
+    pub group_id: GroupId,
+    pub enrollment_id: EnrollmentId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report: Option<ApplyReport>,
+    #[serde(default)]
+    pub outcomes: Vec<LocalOutcome>,
+}
+record!(PendingReportV2, "wowsync.pending-report", 2, MIB, |self| {
+    let mut seen = std::collections::BTreeSet::new();
+    if !self
+        .outcomes
+        .iter()
+        .all(|o| seen.insert((o.package.clone(), o.kind as u8)))
+    {
+        return Err("duplicate outcome".into());
+    }
+    Ok(())
+});
+
+// ---------------------------------------------------------------- settings records (settings.md §3)
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckpointFile {
+    pub name: String,
+    pub size: u64,
+    pub blob: Sha256,
+}
+
+/// `wowsync.settings-checkpoint/1`. Its reference is `sha256(encode(self))`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SettingsCheckpointManifest {
+    pub unit: SettingsUnit,
+    pub files: Vec<CheckpointFile>,
+}
+record!(
+    SettingsCheckpointManifest,
+    "wowsync.settings-checkpoint",
+    64 * KIB,
+    |self| {
+        match self.files.as_slice() {
+            [] => Ok(()),
+            [f] => {
+                let want = format!("{}.lua", self.unit.folder.as_str());
+                if f.name.to_lowercase() == want {
+                    Ok(())
+                } else {
+                    Err("the file name must be the unit's folder".into())
+                }
+            }
+            _ => Err("a unit has at most one settings file".into()),
+        }
+    }
+);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AppliedResult {
+    Applied,
+    KeptLocal,
+    Paused,
+    Blocked,
+    Diagnosed,
+    Waiting,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppliedUnit {
+    pub unit: SettingsUnit,
+    pub revisions: Vec<Sha256>,
+    pub checkpoint: CheckpointRef,
+    pub result: AppliedResult,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PausedSet {
+    pub all: bool,
+    pub folders: Vec<FolderKey>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SettingsDiagnosis {
+    pub unit: SettingsUnit,
+    /// A closed kind name such as `SharedVariable`; never a path or a name.
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SettingsState {
+    pub computer_id: ComputerId,
+    pub enrollment_id: EnrollmentId,
+    pub seq: u64,
+    pub applied: Vec<AppliedUnit>,
+    pub paused: PausedSet,
+    pub included_accounts: Vec<String>,
+    pub diagnoses: Vec<SettingsDiagnosis>,
+}
+record!(SettingsState, "wowsync.settings-state", 4 * MIB, |self| {
+    let mut units = std::collections::BTreeSet::new();
+    if !self.applied.iter().all(|a| units.insert(a.unit.clone())) {
+        return Err("a unit is reported once".into());
+    }
+    Ok(())
+});
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalUnitState {
+    pub unit: SettingsUnit,
+    /// Newest first.
+    pub captures: Vec<CheckpointRef>,
+    pub basis: Vec<Sha256>,
+    pub last_applied: Option<CheckpointRef>,
+    pub pinned: bool,
+    pub authority_since: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FirstAdoption {
+    Adopt,
+    KeepMine,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SettingsLocal {
+    pub units: Vec<LocalUnitState>,
+    pub paused_folders: Vec<FolderKey>,
+    pub included_accounts: Vec<String>,
+    pub consent: bool,
+    pub first_adoption: Option<FirstAdoption>,
+}
+record!(SettingsLocal, "wowsync.settings-local", 16 * MIB, |self| {
+    let mut units = std::collections::BTreeSet::new();
+    if !self.units.iter().all(|a| units.insert(a.unit.clone())) {
+        return Err("a unit is listed once".into());
+    }
+    Ok(())
+});
+
+/// The saved-file size cap (settings.md §1.2, Q-77 PENDING OWNER). No value is approved, so this
+/// gate is `None` and settings sync on real data stays disabled; tests pass their own value.
+pub const MAX_SETTINGS_FILE_BYTES: Option<u64> = None;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LocalComputer {
