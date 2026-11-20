@@ -217,7 +217,9 @@ rejections' `folders`.
 Rollback fills two levels of `target::compose` (contracts.md §4.1):
 
 - **Level 2, rejection.** A source whose complete content is `Same`
-  (contracts.md §4.2 `same_release`, over the rejection's `folders`) as
+  (contracts.md §4.2 `same_release`, source against `rejected`, over the
+  rejection's `folders` only; other installed or missing addons and
+  folders outside F are never compared, R4D-28) as
   `rejected` of an active rejection is never a candidate, never a source
   and never kept as a target. Equal trees on some folders never make a
   source rejected: R0 `{details:U}` is `Different` from R1 `{details:U,
@@ -246,16 +248,27 @@ removed by the rollback removal (§1) instead.
   folders. If `X.recovered` is `Same` (contracts.md §4.2) as `rejected`
   of active rejections Y1…Yn, X's constraint stands for their recovered
   releases instead, repeated with a visited set (no cycles). Rejected
-  releases are dropped. If the comparison is `Unknown` (Yi's scope has a
-  folder X does not record), the sources decide: the copies of
-  `X.recovered` are the sources `Same` as it over X's `folders`; if
-  every such copy is rejected at level 2 (it is `Same` as some
-  `Yi.rejected` over Yi's scope), the chain advances to those Yi; if some
-  copy is not rejected, X's constraint stands and only that copy is a
-  source. If nothing remains, X imposes no constraint and the whole
-  ordinary result applies (contracts.md §4.3). In
+  releases are dropped. If the entry-against-entry comparison is
+  `Unknown` (Yi's scope has a folder X does not record), the sources
+  decide. The copies of `X.recovered` are the sources `Same` as it (source
+  against entry, over X's `folders` only):
+  1. **No copy** (the set is empty): the chain does **not** advance and
+     the constraint is not dropped; X's folders get
+     `RecoveredUnavailable` (below). An empty set never counts as "every
+     copy rejected" (R4D-29).
+  2. Otherwise, if **every** copy is rejected at level 2 (`Same` as some
+     `Yi.rejected` over Yi's scope), the chain advances to those Yi.
+  3. Otherwise, if some copy is `Unknown` against a `Yi.rejected` and none
+     is proven not rejected, the chain waits (nothing installed).
+  4. Otherwise some copy is not rejected: X's constraint stands and only
+     such copies are sources.
+
+  X imposes no constraint (and the whole ordinary result applies,
+  contracts.md §4.3) only when every release on the chain is proven
+  rejected: by `Same` or by step 2. In
   T-R4D23-added-folder-rollback, R0 is `Different` from R1, so the chain
-  stops at R0 and R0 is installed.
+  stops at R0 and R0 is installed. T-R4D29-empty-recovered-copies
+  exercises step 1.
 - **Composition.** The resulting trees of all live constraints for f are
   composed by contracts.md §4.4: one tree installs it; several
   different trees give `NeedsDecision(RollbackTargetsDiffer)`.
@@ -477,6 +490,8 @@ code-choice family (contracts.md §5.1); this packet produces the items.
 | **T-R4D20-rollback-dropped-folder** | R1 = {details} (2.1 dropped `details_old` with a `folder_drop` removal), R0 = {details, details_old}; roll back on A; crash at every slot | one journal: replace `details`, install `details_old`; a `rollback` re-add of `details_old` covering the drop removal; every computer reinstalls `details_old` with R0's tree; a later unrelated removal of `details_old` still wins | A-18, A-20, A-22 |
 | **T-R4D23-added-folder-rollback** | contracts.md §4.2: rejection scope {core, extra}; R1 `{core:U, extra:BAD}` rejected, R0 `{core:U}` recovered (byte-identical core); B holds R0, C holds R1 | R0 is `Different` from R1: A installs R0, B keeps R0 and is a source, C replaces R1 with R0; the chain stops at R0; no computer labels R0 as blocked; the same with the computers' local groupings swapped | A-18, A-20 |
 | **T-R4D23-dropped-folder-rollback** | scope {core, old}; R1 `{core:U}` rejected, R0 `{core:U, old:O}` recovered (identical common folder) | R0 installed with `old`; a source `{core:U}` without `old` is rejected; a source `{core:U, old:O2}` is not rejected (look-alike if its label is 2.1) | A-18, A-20 |
+| **T-R4D28-exact-source-unrelated-addon** | contracts.md §10, through the rollback flow: B holds exactly R1 `{core:U, extra:BAD}`, C holds exactly R0 `{core:U}`; each also with an unrelated addon `{z:Z}` installed, and each without it | B's copy is rejected at level 2 and is never a source; C's copy is a real copy of `recovered`, the only source, and is installed on A and B; z never changes the outcome | A-18, A-20 |
+| **T-R4D29-empty-recovered-copies** | rejection X {core} recovers R0 `{core:U}`; Y with scope {core, extra} rejects `{core:U, extra:BAD}` (entry comparison `Unknown`); no member holds R0 and no recovery point or upload of it exists | the copy set is empty: `NeedsDecision(RecoveredUnavailable)`, nothing installed; the chain does not advance and no other release is selected automatically; when a copy of R0 appears it is a source; A-38 control: evaluate "every copy rejected" over the empty set (an unchosen release is selected, test fails) | A-18, A-20 |
 | **T-R4D21-choice-over-rollback** | contracts.md §10: rejection on {a, b}; a later keep on {a} covering it | a follows the keep; b keeps the recovered tree; same result with a and b grouped or separate locally | A-18, A-20 |
 | **T-R4D9-concurrent-rollbacks** | each row of §3.2 in both delivery orders on three computers: same target; different targets (decision, R1 spreads nowhere); chain R2→R1→R0; opposite rejections (ordinary or only-blocked hold); late delivery of the covered rejection; unavailable target (`RecoveredUnavailable`, nothing changed on disk); concurrent lifts; lift vs new rejection; rollback vs removal (removed everywhere, rejection kept, re-add selects non-rejected). Same target on every computer in every order | A-18, A-20 |
 | **T-R4D9-choice-vs-rollback** | a keep that covers a rejection replaces the recovered target; a rollback that covers a keep replaces it; concurrent keep and rollback with different contents give a decision; a keep of rejected content is inert; resume ends the recovered target and R1 stays rejected | A-18, A-20 |
@@ -487,6 +502,8 @@ unconsidered newer release automatically (T-R06); report a code-only
 rollback as paired, or copy the recovery point's `paired` into the
 rejection's `settings` (T-R08 must fail); compare rejected releases by
 equal trees on common folders only (T-R4D23-added-folder-rollback must
-fail); let a lift remove a rejection it does not name
+fail); union the source's other keys into the comparison
+(T-R4D28-exact-source-unrelated-addon must fail); advance the chain on an
+empty copy set (T-R4D29-empty-recovered-copies must fail); let a lift remove a rejection it does not name
 (T-R10); order concurrent rollbacks by `written_unix_ms`
 (T-R4D9-concurrent-rollbacks must fail).

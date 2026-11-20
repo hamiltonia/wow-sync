@@ -122,6 +122,7 @@ game's ("Lists Interface 110000; this game is 110002") as information only.
 | Condition | Group decision | Local journal action |
 |---|---|---|
 | This computer is retired or not enrolled | not offered (`NotAMember`): "This computer was retired. Join the group again to make choices for it." | allowed; it is the user's own disk |
+| This computer's own retirement is unresolved (held, §2.4) | **allowed**, kept locally like a paused record: "Saved. It is shared if this computer is still in the group." It is never shown as refused for retirement | allowed |
 | WoW is running, or its state is unknown | **allowed.** The record is written and shared, because no game file changes. The apply waits: "Saved. WoW Sync applies it after you close WoW." | only actions that touch no game files; otherwise disabled with "Close WoW first" |
 | Syncing is paused | **allowed.** The record bytes and their reserved seq are kept locally and written to the shared folder on resume: "Saved. It is shared when you resume syncing." | allowed |
 | The shared folder is unavailable | allowed; written when the folder is writable again: "Saved here; not shared yet" | allowed |
@@ -164,11 +165,14 @@ game's ("Lists Interface 110000; this game is 110002") as information only.
   kept version and any version the user has not yet seen are never
   excluded by a resume; a version that only shares some unchanged
   folders with a declined one is not the declined version (exclusions
-  compare complete content, contracts.md §4.2).
+  compare the source's complete content over each exclude entry's own
+  `scope` only, contracts.md §4.2; folders that joined the addon later
+  are not compared, so the declined version is still recognised after
+  regrouping, T-R4D28-regrouped-exclusion).
 - **A newer version after a keep (Q-49, owner-accepted).** While a keep is
   live it pins the kept version. A candidate that the keep did not
-  consider (its source is `Different` from every `considered` entry by
-  complete content, contracts.md §4.2), whether demonstrably newer or
+  consider (its source is `Different` from every `considered` entry, each
+  compared over that entry's scope, contracts.md §4.2), whether demonstrably newer or
   unordered, raises `NeedsDecision(NewVersionAfterDecision)`; the kept
   version stays installed until the user chooses explicitly (contracts.md
   §5.1, §5.3). Nothing is installed automatically past a keep.
@@ -198,7 +202,7 @@ pub enum HoldScope {
     /// No game-file change is applied on this computer until the cause clears.
     AllApplies(AllHoldCause),
 }
-pub enum AllHoldCause { UnresolvedJournal { folders: Vec<FolderKey> }, GameRunning, ActivityUnknown, Paused, Retired }
+pub enum AllHoldCause { UnresolvedJournal { folders: Vec<FolderKey> }, GameRunning, ActivityUnknown, Paused, Retired, RetirementUnresolved }
 pub enum DecisionReach { Group, ThisComputer }
 pub struct StatusView { /* existing fields */ pub hold: HoldScope }
 impl PackageStatus { pub fn reach(&self) -> Option<DecisionReach> }
@@ -206,7 +210,7 @@ impl PackageStatus { pub fn reach(&self) -> Option<DecisionReach> }
 
 - `derive_status` computes `hold` from data it already has:
   `PlanBlock::UnresolvedJournal`, `GameRunning` and `ActivityUnknown` give
-  `AllApplies`; pause and retired-self are runtime inputs. Otherwise the
+  `AllApplies`; pause, retired-self and held-self are runtime inputs. Otherwise the
   addons and settings units in `NeedsDecision`, `NeedsHelp` or held give
   `Addons`.
 - `AllApplies` takes precedence over `Addons`.
@@ -320,23 +324,29 @@ There is no "conflicted retirement" state.
 
 ### 2.4 On the retired computer itself (Q-60)
 
-**Q-60 PENDING OWNER default: stop publishing and stop applying.** When a
-computer admits Retired(own enrollment) = Yes, or its own enrollment is
-held (Unresolved, contracts.md §1.10 rule 6; it resumes by itself if the
-retirement turns out Void):
+**Q-60 PENDING OWNER default: stop publishing and stop applying.** It
+applies in two cases that are shown and handled differently (R4D-31):
+**retired**, when the computer admits Retired(own enrollment) = Yes; and
+**held**, when its own enrollment is Unresolved (contracts.md §1.10 rule
+6), so the retirement is not proven and may still turn out Void.
+
+In both cases:
 
 - It **stops publishing** immediately: no state, record, index chunk or
   mirror is written, and nothing is uploaded on its behalf.
-- It **stops applying** group changes. `HoldScope::AllApplies(Retired)`.
+- It **stops applying** group changes: `HoldScope::AllApplies(Retired)`
+  when retired, `HoldScope::AllApplies(RetirementUnresolved)` when held.
 - Local addons, settings, recovery points and logs stay **untouched**.
   Nothing is uninstalled.
-- The headline is `NeedsHelp`-tone **"This computer was retired"**: "Retired
-  on 12 Jan by Laptop. Your add-ons and settings here are kept. Join the
-  group again to sync." The only group action is **Join again…**, the
-  explicit join flow (A-04, guided identity and safe-scope validation)
-  with a new enrollment id.
-- Records reserved while paused and never written (§1.3) are discarded
-  with an Activity entry. They had not been shared.
+- **Join again…** is available: the explicit join flow (A-04, guided
+  identity and safe-scope validation) with a new enrollment id.
+
+| | Retired (Yes) | Held (Unresolved) |
+|---|---|---|
+| Headline | `NeedsHelp`-tone **"This computer was retired"**: "Retired on 12 Jan by Laptop. Your add-ons and settings here are kept. Join the group again to sync." | **"Waiting for group history"**: "Another computer may have retired this one. Waiting for the rest of the group history. Your add-ons and settings here are kept." No date or "by" line is shown as fact; Details names the missing retirement record(s) and the computer that wrote the pending one |
+| Group actions | only **Join again…** | **Join again…**; otherwise wait |
+| Records reserved while paused and never written (§1.3) | discarded with an Activity entry (they had not been shared) | **kept** unwritten and pending; shown as "Waiting to share: N changes". They are not cancelled as if the retirement were proven. The user can explicitly cancel them ("Discard waiting changes…", with an Activity entry) |
+| When the status settles | stays retired until re-enrollment | turns Void: publishing and applying resume by themselves, and the kept reserved records are written with their reserved bytes and seq, as on resume from pause (§1.3). Turns Yes: it becomes the retired case, and the kept records are then discarded with an Activity entry |
 
 ### 2.5 GUI flow (A-45, A-26)
 
@@ -825,7 +835,7 @@ marks a negative case.
 | T-26-14 | GUI: Decision page keyboard flow (Tab, Space, Enter); screenshots with interaction evidence | manual A-26 |
 | **T-R4D10-new-version-after-keep** | keep V2 among unordered V2/V3 (V3 in `considered`): V3 never ends it; an unconsidered demonstrably newer V4 → `NeedsDecision(NewVersionAfterDecision)`, V2 stays installed until the user chooses; an unconsidered unordered V4′ → the same; A-38 control: auto-install V4 makes it fail (Q-49) | Neg |
 | **T-R4D10-resume-keeps-exclusions** | keep V2 declining V3, then resume without allow-again: the resume's `exclude` inherits V3; target V2; with a new V4: V4; a replay of V3's exact content: never selected (Q-50) | Neg |
-| **T-R4D23-keep-resume-shared-component** | contracts.md §4.2: kept V2 `{a:2, b:U}`, declined V3 `{a:3, b:U}`, then resume; with a and b grouped, ungrouped, and regrouped (folder c joins) between keep and resume: V2's source stays eligible and is the target; the V3 source is never selected; the carried exclude entry keeps `scope` {a, b}; A-38 control: compare on common folders only (V2 becomes excluded, test fails) | Neg |
+| **T-R4D23-keep-resume-shared-component** | contracts.md §4.2: kept V2 `{a:2, b:U}`, declined V3 `{a:3, b:U}`, then resume; with a and b grouped, ungrouped, and regrouped (folder c joins) between keep and resume: V2's source stays eligible and is the target; the V3 source is never selected; the carried exclude entry keeps `scope` {a, b}; with c joined, the declined source `{a:3, b:U, c:C}` is `Same` (never selected) and the kept source `{a:2, b:U, c:C}` is `Different` (contracts.md T-R4D28-regrouped-exclusion); A-38 controls: compare on common folders only (V2 becomes excluded, test fails); union the source's keys (the declined source waits forever, test fails) | Neg |
 | **T-R4D10-resume-allow-again** | same, but resume with `allow_again = {V3}`: V3 eligible again, target V3; `allow_again` naming a hash not inherited → the writer refuses to write it | positive / Neg |
 | **T-R4D10-vchoice-per-action** | V-CHOICE per action (contracts.md §5.2): a keep without `keep` or with `allow_again`, a keep whose `considered` lacks the kept entry, `exclude` containing `keep`, a resume with `keep`, `allow_again` overlapping `exclude`, unsorted lists, folder keys outside `folders` → each `invalid(choice_shape)`; the valid forms of each action pass | Neg |
 | **T-R4D21-partial-choice-over-choice** | contracts.md §10: keep X on {a, b}; a later keep Y on {a} covering X → a follows Y, b still follows X; same result whether a and b are grouped locally or not | positive / Neg |
@@ -843,6 +853,7 @@ marks a negative case.
 | T-45-5 | Mutual unknowing retirement A↔B (empty `retirements_known`) → both retired on every reader, in every read order (property test); with references whose targets arrive late, the intermediate states are held, never retired or un-retired (T-R4D25-partial-retirement-dag) | positive |
 | T-45-6 | B re-enrolls (new enrollment id) → joining member; the old enrollment stays retired; its old valid records stay valid via historical membership | positive |
 | T-45-7 | Retired-self: no file written to its member directory in later cycles; no apply; local addons unchanged (Q-60 default) | Neg |
+| T-R4D31-held-self | own enrollment held (a retirement of it is Unresolved): headline "Waiting for group history" with no retirement date or "by" line, never "This computer was retired"; `AllApplies(RetirementUnresolved)`; nothing published or applied; a decision made meanwhile is kept unwritten, not discarded; **Join again…** offered. Then (a) the retirement turns Void: publishing and applying resume without user action and the kept record is written with its reserved bytes; (b) it turns Yes: the retired headline appears and the kept record is discarded with an Activity entry; A-38 control: treat held as retired (kept record discarded in (a), test fails) | Neg |
 | **T-R4D11-late-retirement-three-issuers** | A retires B (cutoff 10) at A's seq 20; D learns it; then C retires A with cutoff 15 (< 20). Both delivery orders, and with a restart between. B stays retired on D; A is retired; B's states > 10 and B's records > 10 never admitted; a stale B settings revision and a stale B removal stay invalid; B never becomes master again. Same trace as contracts T-C10 | Neg |
 | T-45-8 | Two different effective retirement records of B with cutoffs 8 and 12 → Cutoff(B) = 8 in either order (MIN); a record of B at 11 is invalid in both orders, and a third retirement with cutoff 20 re-validates nothing | Neg |
 | **T-R4D16-later-cutoff-no-reauth** | contracts.md §10: A retires B at cutoff 10; B's seq-11 removal is invalid; C's retirement of B with cutoff 12 arrives later, in both orders and across a restart → the removal stays invalid; nothing B wrote above 10 is ever authority | Neg |
