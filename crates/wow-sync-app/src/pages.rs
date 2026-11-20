@@ -914,7 +914,6 @@ impl Shell {
             folders.push(self.muted(g.clone()).into_any_element());
         }
         let mut rec: Vec<AnyElement> = Vec::new();
-        let installed = s.versions.clone();
         let rows: Vec<crate::rollback_ui::ReleaseRow> = self
             .w
             .features
@@ -923,6 +922,7 @@ impl Shell {
             .filter(|r| r.package.as_str() == key)
             .cloned()
             .collect();
+        let installed = rows.iter().find(|r| r.current).map(|r| r.version.clone());
         if rows.iter().all(|r| r.current) {
             rec.push(self.muted(crate::change_ui::NO_EARLIER).into_any_element());
         }
@@ -960,7 +960,7 @@ impl Shell {
                 crate::rollback_ui::HistoryButton::GoBack(a) => {
                     let open = format!("{k}-open");
                     if self.expanded.contains(&open) {
-                        for t in crate::rollback_ui::confirm_text(&installed, &r) {
+                        for t in crate::rollback_ui::confirm_text(installed.as_deref(), &r) {
                             rec.push(div().child(SharedString::from(t)).into_any_element());
                         }
                         rec.push(

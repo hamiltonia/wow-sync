@@ -82,13 +82,23 @@ pub fn button(w: &World, r: &ReleaseRow) -> HistoryButton {
 }
 
 /// What the confirmation says before anything is queued.
-pub fn confirm_text(installed: &str, r: &ReleaseRow) -> Vec<String> {
+pub fn confirm_text(installed: Option<&str>, r: &ReleaseRow) -> Vec<String> {
+    let (replaces, blocked) = match installed {
+        Some(v) => (
+            format!("version {v}"),
+            format!("Version {v} is blocked for the group. You can allow it again later."),
+        ),
+        None => (
+            "the installed version".to_string(),
+            "The installed version is blocked for the group. You can allow it again later.".into(),
+        ),
+    };
     vec![
         format!(
-            "Go back to {} {}? Every computer in the group replaces version {installed} with {}.",
+            "Go back to {} {}? Every computer in the group replaces {replaces} with {}.",
             r.title, r.version, r.version
         ),
-        format!("Version {installed} is blocked for the group. You can allow it again later."),
+        blocked,
         "WoW Sync applies this when WoW is closed. Nothing is changed while it is running.".into(),
     ]
 }
@@ -268,10 +278,19 @@ mod tests {
 
     #[test]
     fn the_confirmation_says_what_is_blocked_and_when_it_applies() {
-        let t = confirm_text("2.1", &row("2.0", false, false));
+        let t = confirm_text(Some("2.1"), &row("2.0", false, false));
         assert!(t[0].starts_with("Go back to Details 2.0?"));
+        assert!(t[0].contains("replaces version 2.1 with 2.0"));
         assert!(t[1].contains("2.1 is blocked"));
         assert!(t[2].contains("when WoW is closed"));
+    }
+
+    #[test]
+    fn the_confirmation_never_repeats_a_summary_sentence_as_the_version() {
+        let t = confirm_text(None, &row("2.0", false, false));
+        assert!(t[0].contains("replaces the installed version with 2.0"));
+        assert!(!t[0].contains("version version"));
+        assert!(t[1].starts_with("The installed version is blocked"));
     }
 
     #[test]

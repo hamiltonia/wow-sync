@@ -1323,6 +1323,7 @@ id = "R4-app:minor-fixes"
 tier = "offline"
 tests = [
     "model::tests::settings_sync_is_a_normal_entry_and_not_labelled_coming_later",
+    "rollback_ui::tests::the_confirmation_never_repeats_a_summary_sentence_as_the_version",
 ]
 
 [[case]]
