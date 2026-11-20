@@ -11,7 +11,7 @@ use crate::choice::{
 use crate::decision::{
     Consequence, DecideError, DecideOutcome, DecisionEffect, DecisionId, DecisionItem,
     DecisionKind, DecisionOption, DecisionReach, DecisionScope, EvidenceToken, FreshEvidence,
-    OptionId, OptionLabel,
+    LocalResolution, OptionId, OptionLabel,
 };
 use crate::hash::sha256;
 use crate::hooks::DecisionHooks;
@@ -19,6 +19,7 @@ use crate::ids::Sha256;
 use crate::kinds::{ChoiceReason, CodeChoice, EnrollmentRef};
 use crate::paths::FolderKey;
 use crate::records::encode;
+use crate::target::{DecisionReason, GroupTarget, PackageCopies, PackageTarget};
 use std::collections::BTreeMap;
 
 /// The wire bytes of any authority record.
@@ -167,6 +168,117 @@ pub fn new_version_item(
     Ok(build_item(
         DecisionScope::Folders(nv.scope.clone()),
         DecisionKind::NewVersionAfterDecision,
+        DecisionReach::Group,
+        planned,
+        &basis,
+    ))
+}
+
+/// Every decision item the live state raises, each with the records its options would write:
+/// `NewVersionAfterDecision` for live keeps (Q-49), and one item per package whose target needs
+/// a decision for `Ambiguous`, `PartialCandidate`, `ChoicesDiffer` or `RollbackTargetsDiffer`.
+/// A conflict item offers a keep of each copy and a keep on this computer only; none is chosen.
+pub fn decision_items(
+    view: &ChoiceView,
+    cx: &WriteCx,
+    target: &GroupTarget,
+    packages: &[PackageCopies],
+) -> Vec<(DecisionItem, Plans)> {
+    let mut out = Vec::new();
+    for pc in packages {
+        for nv in view.new_versions(&pc.package, &pc.copies) {
+            if let Ok(item) = new_version_item(view, cx, &pc.copies, &nv) {
+                out.push(item);
+            }
+        }
+        let Some(PackageTarget::NeedsDecision { reason, .. }) =
+            target.packages.get(&pc.package.key)
+        else {
+            continue;
+        };
+        let (kind, why) = match reason {
+            DecisionReason::Ambiguous => (DecisionKind::Ambiguous, ChoiceReason::Ambiguous),
+            DecisionReason::PartialCandidate => (
+                DecisionKind::PartialCandidate,
+                ChoiceReason::PartialCandidate,
+            ),
+            DecisionReason::ChoicesDiffer => {
+                (DecisionKind::ChoicesDiffer, ChoiceReason::ChoicesDiffer)
+            }
+            DecisionReason::RollbackTargetsDiffer => (
+                DecisionKind::RollbackTargetsDiffer,
+                ChoiceReason::RollbackTargetsDiffer,
+            ),
+            _ => continue,
+        };
+        if let Some(item) = conflict_item(view, cx, pc, kind, why) {
+            out.push(item);
+        }
+    }
+    out
+}
+
+fn conflict_item(
+    view: &ChoiceView,
+    cx: &WriteCx,
+    pc: &PackageCopies,
+    kind: DecisionKind,
+    why: ChoiceReason,
+) -> Option<(DecisionItem, Plans)> {
+    let scope = pc.package.members.clone();
+    let shown: Vec<CopyEntry> = pc
+        .copies
+        .iter()
+        .map(|c| CopyEntry::from_copy(c, &scope))
+        .collect::<Result<_, _>>()
+        .ok()?;
+    let mut planned = Vec::new();
+    for (i, copy) in pc.copies.iter().enumerate() {
+        let Ok(choice) = build_keep(view, cx, why, &scope, &shown[i], &shown, &copy.source) else {
+            continue;
+        };
+        let label = copy
+            .version
+            .folders
+            .iter()
+            .find_map(|f| f.toc.version.clone())
+            .unwrap_or_default();
+        planned.push(PlannedOption {
+            option: DecisionOption {
+                id: OptionId(planned.len() as u32),
+                label: OptionLabel::Release {
+                    version_label: label,
+                },
+                holders: copy.holders.clone(),
+                consequence: Consequence {
+                    installs: scope.clone(),
+                    ..Consequence::default()
+                },
+                warning: None,
+            },
+            effect: DecisionEffect::Write(Box::new(AuthorityRecord::CodeChoice(choice))),
+        });
+    }
+    if planned.is_empty() {
+        return None;
+    }
+    planned.push(PlannedOption {
+        option: DecisionOption {
+            id: OptionId(planned.len() as u32),
+            label: OptionLabel::KeepOnThisComputer,
+            holders: vec![],
+            consequence: Consequence::default(),
+            warning: None,
+        },
+        effect: DecisionEffect::Local(LocalResolution::KeepOnThisComputer(DecisionScope::Folders(
+            scope.clone(),
+        ))),
+    });
+    let mut basis: Vec<Sha256> = pc.copies.iter().map(|c| c.version.hash).collect();
+    basis.extend(view.known_for(&scope).extra);
+    Some(build_item(
+        DecisionScope::Folders(scope),
+        kind,
         DecisionReach::Group,
         planned,
         &basis,

@@ -34,6 +34,7 @@ use wow_sync_core::admit::{
     StateFileObs,
 };
 use wow_sync_core::authority::{AuthorityRecord, Retired};
+use wow_sync_core::decide::decision_items;
 use wow_sync_core::decide::{DecideBehaviour, Standing};
 use wow_sync_core::decision::CycleCx;
 use wow_sync_core::decision::{DecideOutcome, DecisionEffect, FreshEvidence};
@@ -71,7 +72,7 @@ use wow_sync_core::status::{
     applied_here, derive_status, game_halted, headline_sentence, journal_status, remember_applied,
     render_block, render_headline, render_member, render_result, Headline, StatusInput, StatusView,
 };
-use wow_sync_core::target::{compose, GroupTarget, TargetInput, TreeAvail};
+use wow_sync_core::target::{compose, package_copies, GroupTarget, TargetInput, TreeAvail};
 use wow_sync_core::toc::TocCandidate;
 use wow_sync_core::variant::{
     assess_layout, check_join, confirm_enrolled, confirm_variant, consent_disclosures, consent_gap,
@@ -271,6 +272,10 @@ struct World {
     inventory: Inventory,
     views: Vec<MemberView>,
     target: GroupTarget,
+    offers: Vec<(
+        wow_sync_core::decision::DecisionItem,
+        wow_sync_core::decide::Plans,
+    )>,
     own_states: Vec<String>,
     /// This enrollment's newest published state, if readable.
     own_latest: Option<CodeState>,
@@ -356,6 +361,11 @@ impl SliceService {
         plans: wow_sync_core::decide::Plans,
     ) {
         self.offered = (items, plans);
+    }
+
+    /// The decisions offered after the latest cycle.
+    pub fn offered_decisions(&self) -> &[wow_sync_core::decision::DecisionItem] {
+        &self.offered.0
     }
 
     /// Runs one group command (contracts.md §9.1) against the current observed state.
@@ -1130,22 +1140,47 @@ impl SliceService {
             RemovalBehaviour::new(&self.plane.ledger, &group.group_id, &self.plane.members)
                 .with_inventory(inventory.clone(), enrollment.next_seq);
         let constraints = Constraints::for_derived(&derived);
+        let input = TargetInput {
+            group: &group,
+            variant: &variant,
+            local: &inventory,
+            local_client: &Self::client_info(&variant),
+            local_id: &computer.computer_id,
+            members: &views,
+            trees: &trees,
+        };
         let target = compose(
-            &TargetInput {
-                group: &group,
-                variant: &variant,
-                local: &inventory,
-                local_client: &Self::client_info(&variant),
-                local_id: &computer.computer_id,
-                members: &views,
-                trees: &trees,
-            },
+            &input,
             &self.plane.ledger,
             &removal_hooks,
             &held,
             &constraints,
         )
         .target;
+        let offers = {
+            let valid = wow_sync_core::choice::valid_hashes(&derived);
+            let view = wow_sync_core::choice::ChoiceView::new(&self.plane.ledger, &valid);
+            let packages = package_copies(
+                &input,
+                &enrollment.enrollment_id,
+                &self.plane.ledger,
+                &constraints,
+            );
+            decision_items(
+                &view,
+                &wow_sync_core::choice::WriteCx {
+                    group: &group.group_id,
+                    issuer: Issuer {
+                        computer_id: computer.computer_id.clone(),
+                        enrollment_id: enrollment.enrollment_id.clone(),
+                        issued_at_seq: enrollment.next_seq,
+                    },
+                    now_unix_ms: now_unix_ms() as u64,
+                },
+                &target,
+                &packages,
+            )
+        };
         let own_states =
             match provider.list(&layout::state_dir(&group.group_id, &computer.computer_id)) {
                 Ok(l) => l
@@ -1175,6 +1210,7 @@ impl SliceService {
             inventory,
             views,
             target,
+            offers,
             own_states,
             own_latest,
             titles,
@@ -1400,6 +1436,13 @@ impl SliceService {
         let mut journals_remaining = false;
         self.last_blocks.clear();
         self.settle_kept(&w, &provider);
+        if w.standing == OwnStanding::Active {
+            let (items, plans): (Vec<_>, Vec<_>) =
+                std::mem::take(&mut w.offers).into_iter().unzip();
+            self.offer_decisions(items, plans.into_iter().flatten().collect());
+        } else {
+            self.offer_decisions(vec![], vec![]);
+        }
 
         // Drop results the newest own state already carries (a crash after publishing but
         // before the store was cleared). A failure here is retried: `publish_step` refuses to

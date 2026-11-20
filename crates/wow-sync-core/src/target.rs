@@ -691,6 +691,91 @@ pub fn compose_folder(f: &FolderFacts) -> Option<FolderDecision> {
     }
 }
 
+/// Every complete copy of each package that is not rejected or excluded, for the decision items
+/// (contracts.md §5.1). A copy is one release; its holders are the enrollments that have it.
+pub struct PackageCopies {
+    pub package: Package,
+    pub copies: Vec<crate::choice::Copy>,
+}
+
+pub fn package_copies(
+    input: &TargetInput,
+    local_enrollment: &crate::ids::EnrollmentId,
+    ledger: &crate::ledger::Ledger,
+    constraints: &dyn crate::hooks::ConstraintHooks,
+) -> Vec<PackageCopies> {
+    let peers = valid_peers(input);
+    let peer_invs: Vec<Inventory> = peers.iter().map(|p| state_inventory(p.2)).collect();
+    let mut observations: Vec<&Inventory> = vec![input.local];
+    observations.extend(peer_invs.iter());
+    let enrollment_of = |id: &ComputerId| {
+        input
+            .members
+            .iter()
+            .find(|m| &m.computer == id)
+            .map(|m| m.enrollment.clone())
+    };
+    let mut out = Vec::new();
+    for pkg in group_packages(&observations) {
+        type Holder = (crate::kinds::EnrollmentRef, Source);
+        let mut by_hash: BTreeMap<Sha256, (PackageVersion, Vec<Holder>)> = BTreeMap::new();
+        if let Some(pv) = package_version(&pkg, input.local, input.local_client) {
+            by_hash
+                .entry(pv.hash)
+                .or_insert_with(|| (pv, Vec::new()))
+                .1
+                .push((
+                    crate::kinds::EnrollmentRef {
+                        computer_id: input.local_id.clone(),
+                        enrollment_id: local_enrollment.clone(),
+                    },
+                    Source::from_inventory(input.local),
+                ));
+        }
+        for (i, (id, _, state)) in peers.iter().enumerate() {
+            let Some(enrollment) = enrollment_of(id) else {
+                continue;
+            };
+            if let Some(pv) = package_version(&pkg, &peer_invs[i], &state.client) {
+                by_hash
+                    .entry(pv.hash)
+                    .or_insert_with(|| (pv, Vec::new()))
+                    .1
+                    .push((
+                        crate::kinds::EnrollmentRef {
+                            computer_id: (*id).clone(),
+                            enrollment_id: enrollment,
+                        },
+                        Source::from_state(state, true),
+                    ));
+            }
+        }
+        let mut copies = Vec::new();
+        for (_, (pv, holders)) in by_hash {
+            let holders: Vec<Holder> = holders
+                .into_iter()
+                .filter(|(_, s)| {
+                    constraints.rejected(ledger, &pkg, s) == ScopeMatch::Different
+                        && constraints.excluded(ledger, &pkg, s) == ScopeMatch::Different
+                })
+                .collect();
+            let Some((_, source)) = holders.first().cloned() else {
+                continue;
+            };
+            copies.push(crate::choice::Copy {
+                version: pv,
+                source,
+                holders: holders.into_iter().map(|(r, _)| r).collect(),
+            });
+        }
+        out.push(PackageCopies {
+            package: pkg,
+            copies,
+        });
+    }
+    out
+}
+
 /// The group target after the composition levels this foundation can evaluate. Levels 2, 5, 6
 /// and the code-choice parts of 8 come from hooks; with neutral hooks the result is exactly
 /// `compute_target` (slice behaviour).

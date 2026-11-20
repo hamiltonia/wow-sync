@@ -1939,4 +1939,101 @@ mod tests {
             Err(CommandError::UnknownRejection(rh))
         );
     }
+
+    /// A keep of `owner`'s own Alpha release, written into `owner`'s authority folder.
+    fn put_keep_of_alpha(lab: &Lab, g: &GroupId, owner: &Pc) -> Sha256 {
+        use wow_sync_core::choice::{build_keep, ChoiceView, CopyEntry, WriteCx};
+        use wow_sync_core::kinds::{ChoiceReason, ManifestFolder};
+        use wow_sync_core::ledger::Ledger;
+        use wow_sync_core::target::Source;
+        let (oc, oe) = pc_ids(owner);
+        let kept = alpha_folder(lab, g, owner);
+        let copy = CopyEntry::new(
+            vec![ManifestFolder {
+                key: kept.key.clone(),
+                name: kept.name.clone(),
+                tree: kept.tree.unwrap(),
+            }],
+            vec![oe],
+        );
+        let ledger = Ledger::new();
+        let view = ChoiceView::new(&ledger, &Default::default());
+        let keep = build_keep(
+            &view,
+            &WriteCx {
+                group: g,
+                issuer: issuer_of(owner),
+                now_unix_ms: 5,
+            },
+            ChoiceReason::Ambiguous,
+            std::slice::from_ref(&kept.key),
+            &copy,
+            &[],
+            &Source::from_state(&latest_state(lab, g, owner), true),
+        )
+        .unwrap();
+        put_authority(lab, g, &oc, &AuthorityRecord::CodeChoice(keep))
+    }
+
+    fn offered_kinds(pc: &Pc) -> Vec<wow_sync_core::decision::DecisionKind> {
+        pc.svc
+            .offered_decisions()
+            .iter()
+            .map(|i| i.reason)
+            .collect()
+    }
+
+    #[test]
+    fn a_newer_version_after_a_keep_is_offered_while_the_kept_version_stays() {
+        use wow_sync_core::decision::DecisionKind;
+        let lab = Lab::new();
+        let (mut a, _b, _c, _g) = alpha_v2_published(&lab);
+        // Control: with no keep a plain newer release is simply taken, nothing is asked.
+        synced(&mut a);
+        assert!(offered_kinds(&a).is_empty(), "{:?}", offered_kinds(&a));
+        assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v2"));
+
+        let lab = Lab::new();
+        let (mut a, _b, _c, g2) = alpha_v2_published(&lab);
+        let kh = put_keep_of_alpha(&lab, &g2, &a);
+        for _ in 0..2 {
+            synced(&mut a);
+            assert_eq!(status(&a, &g2, &kh), Some(Status::Valid));
+            assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+            assert_eq!(
+                offered_kinds(&a),
+                vec![DecisionKind::NewVersionAfterDecision]
+            );
+        }
+    }
+
+    #[test]
+    fn two_different_concurrent_keeps_raise_a_choices_differ_item() {
+        use wow_sync_core::decision::DecisionKind;
+        let lab = Lab::new();
+        let (mut a, b, _c, g) = alpha_v2_published(&lab);
+        put_keep_of_alpha(&lab, &g, &a);
+        put_keep_of_alpha(&lab, &g, &b);
+        for _ in 0..2 {
+            let r = synced(&mut a);
+            assert_eq!(
+                a.read("Alpha/main.lua").as_deref(),
+                Some("alpha-v1"),
+                "{r:?}"
+            );
+            assert!(
+                offered_kinds(&a).contains(&DecisionKind::ChoicesDiffer),
+                "{:?}",
+                offered_kinds(&a)
+            );
+        }
+        let item = a
+            .svc
+            .offered_decisions()
+            .iter()
+            .find(|i| i.reason == DecisionKind::ChoicesDiffer)
+            .unwrap()
+            .clone();
+        assert!(item.options.len() >= 2, "a choice is offered, none made");
+    }
 }

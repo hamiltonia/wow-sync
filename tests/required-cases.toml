@@ -959,6 +959,14 @@ tests = [
     "e2e::tests::decide_command_is_checked_for_freshness_and_kept_while_paused",
     "e2e::tests::allow_again_lifts_only_an_active_rejection",
 ]
+
+[[case]]
+id = "R4-integrate:decision-item-producer"
+tier = "offline"
+tests = [
+    "e2e::tests::a_newer_version_after_a_keep_is_offered_while_the_kept_version_stays",
+    "e2e::tests::two_different_concurrent_keeps_raise_a_choices_differ_item",
+]
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag
