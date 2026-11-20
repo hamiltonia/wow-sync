@@ -356,12 +356,66 @@ fn without(rules: &[PolicyRule], folder: &FolderKey) -> Vec<PolicyRule> {
         .collect()
 }
 
+/// The settings master when it is still an active computer. A retired or unresolved master is not
+/// one: nothing is shared from it and no replacement is chosen for the owner.
+pub fn active_master(w: &World) -> Option<&EnrollmentRef> {
+    let m = w.features.settings.master.as_ref()?;
+    let active = w.features.this_enrollment.as_ref() == Some(m)
+        || w.features.enrollments.iter().any(|(_, e)| e == m);
+    active.then_some(m)
+}
+
+/// The sentence at the top of the Settings sync page.
+pub fn banner_text(w: &World) -> String {
+    let d = &w.features.settings;
+    if d.policy_conflict {
+        return "The settings master was changed on two computers. Nothing is chosen for you; choose a master to share settings again.".into();
+    }
+    let name = w
+        .features
+        .master
+        .clone()
+        .unwrap_or_else(|| "The settings master".into());
+    if d.master.is_some() && active_master(w).is_none() {
+        return format!(
+            "{name} was the settings master and is no longer an active computer, so settings have no active master and are not being shared. Nothing is chosen for you; choose a master to share settings again."
+        );
+    }
+    if d.master.is_some() {
+        if w.features
+            .settings
+            .units
+            .iter()
+            .any(|u| u.status == UnitStatus::SizeLimitPending)
+        {
+            return format!(
+                "{name} is the settings master, but settings sharing is off until a size limit is approved."
+            );
+        }
+        if !d.enabled {
+            return format!(
+                "{name} is the settings master, but settings sync is off on this computer."
+            );
+        }
+        return format!(
+            "{name} shares its add-on settings with the group. Settings are never merged."
+        );
+    }
+    if d.enabled {
+        "No settings master is chosen, so settings are not shared yet.".into()
+    } else {
+        "Settings sync is off. Add-on files are synced; your add-on settings stay as they are on each computer.".into()
+    }
+}
+
 /// Per add-on: don't share it, take it from another computer, or drop the exception.
 pub fn exception_controls(w: &World, folder: &FolderKey) -> Vec<Control> {
     let d = &w.features.settings;
-    let Some(master) = d.master.clone() else {
+    let Some(master) = active_master(w).cloned() else {
         let why = if d.policy_conflict {
             "The settings master was changed on two computers. Choose one master first."
+        } else if d.master.is_some() {
+            "The settings master is no longer an active computer. Choose a new master first."
         } else {
             "Choose a settings master first; exceptions are changes to what it shares."
         };
@@ -753,6 +807,52 @@ mod tests {
             master_controls(&w).iter().all(|c| c.action.is_ok()),
             "the owner may still choose one master"
         );
+    }
+
+    #[test]
+    fn a_retired_master_is_not_shown_as_sharing_and_nothing_replaces_it() {
+        use wow_sync_runtime::PeerStanding;
+        let w = snapshot_world();
+        assert_eq!(
+            banner_text(&w),
+            "Den PC shares its add-on settings with the group. Settings are never merged."
+        );
+        assert!(active_master(&w).is_some());
+        let w = snapshot_world_with(|s| {
+            for p in &mut s.peers {
+                if !p.is_this {
+                    p.standing = PeerStanding::Retired;
+                }
+            }
+        });
+        assert!(active_master(&w).is_none());
+        let t = banner_text(&w);
+        assert!(t.contains("no active master") && !t.contains("shares its add-on settings"));
+        let c = exception_controls(&w, &folder("Details"));
+        assert_eq!(c.len(), 1);
+        assert!(c[0]
+            .action
+            .as_ref()
+            .unwrap_err()
+            .contains("no longer an active computer"));
+        assert!(
+            master_controls(&w)
+                .iter()
+                .all(|c| !matches!(&c.action, Ok(GroupAction::SetSettingsPolicy { master: Some(m), .. }) if *m == den())),
+            "the retired master is never offered or elected"
+        );
+    }
+
+    #[test]
+    fn the_banner_does_not_claim_sharing_without_consent_or_a_size_limit() {
+        use wow_sync_runtime::SettingsUnitStatus as S;
+        let (w, _) = controls_for(|_| {}, S::Disabled, true);
+        assert_eq!(
+            banner_text(&w),
+            "Den PC is the settings master, but settings sharing is off until a size limit is approved."
+        );
+        let (w, _) = controls_for(|_| {}, S::Disabled, false);
+        assert!(banner_text(&w).contains("settings sync is off on this computer"));
     }
 
     fn runtime_row(

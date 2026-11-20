@@ -1662,19 +1662,7 @@ impl Shell {
             self.content_first = Some("ss-banner".into());
             self.capture_first = false;
         }
-        let banner_text = match (
-            &self.w.features.settings.master,
-            self.w.features.settings.enabled,
-            self.w.features.settings.policy_conflict,
-        ) {
-            (_, _, true) => "The settings master was changed on two computers. Nothing is chosen for you; choose a master to share settings again.".to_string(),
-            (Some(_), _, _) => format!(
-                "{} shares its add-on settings with the group. Settings are never merged.",
-                self.w.features.master.clone().unwrap_or_else(|| "The settings master".into())
-            ),
-            (None, true, _) => "No settings master is chosen, so settings are not shared yet.".to_string(),
-            (None, false, _) => "Settings sync is off. Add-on files are synced; your add-on settings stay as they are on each computer.".to_string(),
-        };
+        let banner_text = crate::settings_ui::banner_text(&self.w);
         let banner = div()
             .id("ss-banner")
             .track_focus(&h)
