@@ -397,6 +397,78 @@ pub struct RetirementRow {
     pub is_this: bool,
 }
 
+/// Where one enrolled computer stands in the group (ops.md §2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeerStanding {
+    Active,
+    /// A retirement naming it is effective.
+    Retired,
+    /// A retirement naming it exists but is not yet settled; nothing may rely on either state.
+    RetirementUnresolved,
+}
+
+/// One enrolled computer with the exact enrollment a retire or master choice must name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PeerRow {
+    pub enrollment: wow_sync_core::kinds::EnrollmentRef,
+    /// By the name its owner chose; "another computer" when none is known.
+    pub name: String,
+    pub standing: PeerStanding,
+    /// When the retirement was written (the retiring computer's clock, milliseconds).
+    pub retired_at_ms: Option<u64>,
+    pub is_this: bool,
+}
+
+pub fn peer_rows(
+    members: &wow_sync_core::ledger::Membership,
+    ledger: &wow_sync_core::ledger::Ledger,
+    derived: &wow_sync_core::ledger::Derived,
+    names: &BTreeMap<ComputerId, String>,
+    this: &ComputerId,
+) -> Vec<PeerRow> {
+    use wow_sync_core::authority::{AuthorityRecord, RetStatus};
+    let mut standing: BTreeMap<wow_sync_core::kinds::EnrollmentRef, PeerStanding> = BTreeMap::new();
+    let mut when: BTreeMap<wow_sync_core::kinds::EnrollmentRef, u64> = BTreeMap::new();
+    for e in ledger.entries() {
+        let Some(AuthorityRecord::Retirement(r)) = ledger.record(&e.hash) else {
+            continue;
+        };
+        match derived.retirement_status.get(&e.hash) {
+            Some(RetStatus::Effective) => {
+                standing.insert(r.retired.clone(), PeerStanding::Retired);
+                when.insert(r.retired.clone(), r.written_unix_ms);
+            }
+            Some(RetStatus::Unresolved) => {
+                standing
+                    .entry(r.retired.clone())
+                    .or_insert(PeerStanding::RetirementUnresolved);
+            }
+            _ => {}
+        }
+    }
+    let mut out: Vec<PeerRow> = members
+        .pairs()
+        .map(|p| PeerRow {
+            enrollment: p.clone(),
+            name: if &p.computer_id == this {
+                "this computer".to_string()
+            } else {
+                names
+                    .get(&p.computer_id)
+                    .cloned()
+                    .unwrap_or_else(|| "another computer".into())
+            },
+            standing: standing.get(p).copied().unwrap_or(PeerStanding::Active),
+            retired_at_ms: when.get(p).copied(),
+            is_this: &p.computer_id == this,
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        (!a.is_this, &a.name, &a.enrollment).cmp(&(!b.is_this, &b.name, &b.enrollment))
+    });
+    out
+}
+
 /// An older complete release of a package that a rollback can bring back (one row per release).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeldRelease {

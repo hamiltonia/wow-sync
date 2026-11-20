@@ -239,6 +239,8 @@ pub struct StatusSnapshot {
     pub reconfirm: Option<EnrollPreview>,
     /// Typed rows for the GUI; present whenever the shared state could be read.
     pub detail: Option<StatusDetail>,
+    /// Every enrolled computer with its enrollment and standing (retire and master choices).
+    pub peers: Vec<crate::detail::PeerRow>,
     /// How much is held and why (ops.md §1.6). `None` shows no scope sentence.
     pub hold: wow_sync_core::status::HoldScope,
     /// Set when this computer's own enrollment is retired and the retirement is effective.
@@ -2031,6 +2033,13 @@ impl SliceService {
             &names,
             &w.computer.computer_id,
         );
+        let peers = crate::detail::peer_rows(
+            &self.plane.members,
+            &self.plane.ledger,
+            &derived,
+            &names,
+            &w.computer.computer_id,
+        );
         let this_retirement = retirements
             .iter()
             .find(|r| r.enrollment == w.own.enrollment_id)
@@ -2157,6 +2166,7 @@ impl SliceService {
             retained_extra_recovery: sv.retained_extra_recovery,
             reconfirm: None,
             detail: Some(detail),
+            peers,
             hold,
             this_retirement,
             retirements,

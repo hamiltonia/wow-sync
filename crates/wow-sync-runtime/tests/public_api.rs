@@ -169,9 +169,13 @@ fn every_snapshot_field_can_be_named_and_read_from_outside_the_crate() {
     use std::collections::BTreeMap;
     use wow_sync_runtime::core::status::{AllHoldCause, HoldScope, RetiredInfo};
     use wow_sync_runtime::core::update::UpdateResult;
-    use wow_sync_runtime::{HeldRelease, RemovedRow, RetirementRow, StatusSnapshot};
+    use wow_sync_runtime::{
+        HeldRelease, PeerRow, PeerStanding, RemovedRow, RetirementRow, StatusSnapshot,
+    };
 
     let st = StatusSnapshot::default();
+    let peers: &Vec<PeerRow> = &st.peers;
+    assert!(peers.is_empty() && PeerStanding::Active != PeerStanding::Retired);
     let hold: &HoldScope = &st.hold;
     assert_eq!(hold, &HoldScope::None);
     let retired: &Option<RetiredInfo> = &st.this_retirement;
