@@ -144,7 +144,7 @@ impl GithubReleases {
     }
 
     /// Test-only: a local endpoint on `localhost`, trusting the given DER roots.
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     fn for_test(url: &str, roots: &[&[u8]]) -> GithubReleases {
         let mut b = native_tls::TlsConnector::builder();
         for r in roots {
