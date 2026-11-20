@@ -5,10 +5,17 @@
 
 mod activity;
 mod control;
+mod decisions;
 mod detail;
+mod diag;
 mod discover;
 mod effects;
+mod notices;
+mod removal_cycle;
+mod rollback_flow;
 mod service;
+mod settings_cycle;
+mod updates;
 
 #[cfg(test)]
 mod e2e;

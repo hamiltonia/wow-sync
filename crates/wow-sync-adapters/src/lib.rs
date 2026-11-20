@@ -4,14 +4,19 @@
 use std::fmt;
 use std::path::{Path, PathBuf};
 
+pub mod authority_store;
 pub mod fs_install;
 pub mod fs_safe;
 pub mod fs_scan;
 pub mod localstate;
+pub mod notify;
 pub mod probe;
 pub mod provider;
+pub mod settings_store;
 pub mod sysinfo;
+pub mod update_http;
 pub mod winproc;
+pub mod wtf;
 
 #[cfg(any(test, feature = "testkit"))]
 pub mod testkit;
