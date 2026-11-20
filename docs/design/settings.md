@@ -355,16 +355,31 @@ A policy is a full snapshot each time:
   hashes (they all agree on this unit's authority, or the issuer would be
   in `PolicyConflict` and write no `auto`). An `auto` revision is valid
   only if the issuer is the unit's authority under **every** listed head.
-  The witness only proves the issuer once had authority; it never
-  overrides the reader's own view: the reader applies the revision only
-  if the issuer is also the authority under **all** policy heads the
-  reader currently knows (§5.1). If any current head the reader knows
-  disagrees, the folder is `PolicyConflict` (§5.2), and the revision
-  stays a valid node that is not applied automatically: held for the
-  user's policy choice, never silently dropped and never silently
-  applied. A listed head the reader lacks is `pending(missing_reference)`
+  The witness proves only that the issuer **had** authority when it
+  wrote the revision. Three checks stay distinct (R4D-30):
+  1. **Historical validity** (V-REVISION): an `auto` revision is valid iff
+     the issuer is the unit's authority under every listed head. A later
+     settled policy never re-checks it. P0 makes A master, A publishes
+     r, then P1 (covering P0) makes B master: r stays a valid, shared
+     node and a joining reader adopts it by §4.2 and §5.4 without
+     changing the master back to A.
+  2. **Current publication authority** (§4.1): only the computer that is
+     the unit's authority under the current heads writes new `auto`
+     revisions. A former master stops.
+  3. **Policy-conflict hold** (§5.1–§5.2): automatic apply waits only if
+     the policy heads the reader currently knows **disagree among
+     themselves** about the unit's authority. Agreement on a different
+     authority than the revision's issuer is not a conflict. Under a
+     conflict, a valid revision stays a node that is not applied
+     automatically: it waits for the user's policy choice, and is never
+     silently dropped or applied.
+
+  These checks apply to `auto` revisions only; `push`, `choice` and
+  `restore` are explicit and need no authority witness, so a peer push
+  from a non-master is never held by check 3 unless the heads really
+  conflict. A listed head the reader lacks is `pending(missing_reference)`
   as usual. No wire change: the field is the existing ≤ 8 list
-  (T-R4D4-nine-policy-heads).
+  (T-R4D4-nine-policy-heads, T-R4D30-reassigned-author).
 - There is no `rejects` field: settings-checkpoint rejection is not part
   of this design (Q-82 PENDING OWNER, [rollback.md](rollback.md) §5).
 - V-REVISION rules (V-KIND): `parents` and `policy` sorted and unique;
@@ -494,7 +509,9 @@ graph** and the **selectable heads** are separate:
 
 1. **Nodes.** Every `valid` revision of the unit is a node. Validity is the
    contract's (contracts.md §1.11) plus §3.3 and §5.1: an `auto` revision
-   from a non-authority is `invalid(not_authority)`; a revision above its
+   from an issuer that is not the authority under its **listed** policy
+   heads is `invalid(not_authority)` (never re-checked against later
+   policies, §3.3 check 1); a revision above its
    issuer's retirement cutoff is `invalid(after_retirement)`. Invalid
    revisions are not nodes. There is no settings-checkpoint rejection
    (Q-82 PENDING OWNER), so no valid node is ever excluded from
@@ -968,6 +985,7 @@ deliberate break that makes it fail).
 | T-R4D18-invalidated-basis | basis {r}, r later invalid (issuer retired below r); valid head h not descending from any valid basis element; live differs from h | case 5 `LocalDifferent(BasisNotShared)`; never first adoption (§5.4), never a silent overwrite; "Use shared settings" yields with recovery | A-20, A-45 |
 | T-R4D4-policy-parts | a policy with 1 000 folder exceptions and a choice revision with 100 parents | written with `policy_folders` / `revision_parents` parts, valid on every peer, never refused; a folder repeated in two parts is `invalid(policy_body)` | A-11, A-14, A-20 |
 | T-R4D4-nine-policy-heads | nine concurrent policy heads that all make the laptop master of folder a; the laptop's `auto` revision; then a tenth head that makes the den master of a, known only to one reader | the revision lists the 8 smallest head hashes and is valid everywhere; readers that know only the nine apply it; the reader that knows the tenth shows `PolicyConflict` for a and does not apply it, and it is neither invalid nor dropped; after a policy choice for the laptop it applies; A-38 control: validate only the listed heads (the tenth-head reader applies, test fails) | A-11, A-20 |
+| T-R4D30-reassigned-author | P0 makes A master of folder a; A publishes `auto` r; P1, covering P0, makes B master; B has no later session. Readers: (1) a member following r; (2) a newly joining computer (first adoption, §5.4); (3) an explicit push from non-master C after P1 | (1), (2): one policy head, no `PolicyConflict`; r is valid and adopted by §4.2/§5.4 with no prompt to make A master again; A writes no further `auto` revision for a; (3) the push is applied by the ordinary target rules and is not held for policy; A-38 control: re-check r's issuer against the current heads (r held as `PolicyConflict`, test fails) | A-11, A-13, A-20 |
 | T-S-paired-selection | restore code X with: an exact `/2` pairing; only local history with X's hash; two unordered remote revisions with X's hash; none | exact pairing; newest local; code-only with both offered explicitly; code-only with the A-19 warning. Never by comparing peers' `local_seq` or clocks | A-18, A-19 |
 | T-S-retention-roots | paired recovery roots, unresolved-choice heads, live removal roots and provider-location roots across prune and restart; a 16 MiB+ ledger (contracts.md T-C09) | no root pruned; unrooted checkpoints become collector candidates only; nothing claims provider recovery for them | A-16, A-17 |
 | T-S-capture-failures | read error, disk full while storing blobs, crash between blob and manifest | no partial state recorded; previous three states intact; `CaptureFailed` shown | A-17, A-22 |
@@ -989,4 +1007,5 @@ publish, so mutating the strict `>` to `>=` fails it on its own; yield on
 an unchanged head
 (T-R4D18-unchanged-head-local-change); shrink an invalid basis to empty
 (T-R4D18-invalidated-basis); validate only the listed policy witness
-(T-R4D4-nine-policy-heads).
+(T-R4D4-nine-policy-heads); re-check a historical author against a later
+settled policy (T-R4D30-reassigned-author).

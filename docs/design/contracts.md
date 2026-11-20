@@ -420,7 +420,8 @@ references never form a cycle.
    points, exactly as for Q-52; holding never removes anything. A
    computer whose own enrollment is held stops publishing and applying
    group changes until it is resolved, like a retired one (ops.md §2.4,
-   Q-60 PENDING OWNER default), and shows "Another computer may have
+   Q-60 PENDING OWNER default), but it is not shown as retired and keeps
+   its unwritten reserved decisions pending (R4D-31). It shows "Another computer may have
    retired this one. Waiting for the rest of the group history."
 7. A retired enrollment only becomes active again through explicit
    re-enrollment, which is a new enrollment id (A-45, R-03).
@@ -862,25 +863,43 @@ admitted. Sources are taken from complete states, never from a local
 package grouping, so a computer that groups the folders differently
 computes the same content.
 
-**`same_release(X, Y)`** for two entries or sources, over the keys K =
-scope(X) ∪ scope(Y) (a source's scope is every key):
+A source has **no scope of its own**: it is a complete inventory that
+answers any key asked of it (a tree, known `Absent`, or unknown for a
+folder that is not `Ok`). Its other keys are never part of a release
+identity (R4D-28).
 
-| Result | Condition |
+**`same_release`** has two forms, distinguished only by the key set K:
+
+- **Source against a recorded entry**, `same_release(m, E)`: K =
+  scope(E) **only**. An unrelated installed or missing addon, or a
+  folder outside E's scope, never affects the result.
+- **Two recorded entries**, `same_release(X, Y)`: K = scope(X) ∪
+  scope(Y). A key outside one entry's scope is unknown for that entry, so
+  differently scoped entries that agree on their overlap are `Unknown`.
+  Users never wait on such an `Unknown` from entries alone. They resolve
+  it through actual sources compared against each entry by the first
+  form (the recovered-chain row below).
+
+| Result | Condition over K |
 |---|---|
 | `Same` | for **every** k ∈ K both contents are known and equal (`Absent` = `Absent`, tree = same tree) |
 | `Different` | for **some** k ∈ K both contents are known and differ (`Absent` ≠ any tree) |
 | `Unknown` | otherwise: some content is unknown and nothing known differs |
 
-Equal trees on common keys therefore never prove equality: a folder one
-side has and the other lacks is a difference. `Unknown` is never treated
-as `Same`; each user states what it does with it:
+For a source against an entry, `Unknown` arises only from the source's
+own not-`Ok` folders inside scope(E) or an unadmitted state. It
+therefore resolves when the source's facts settle. Equal trees on common
+keys never prove equality: a folder that one side has and the other
+lacks is a difference. `Unknown` is never treated as `Same`; each user
+states what it does with it. Every user except the recovered-chain step
+compares a **source** with an entry:
 
 | User | `Same` | `Different` | `Unknown` |
 |---|---|---|---|
 | Level 2 rejection (rollback.md §3) | source never a candidate or a target | not rejected by this record | source **waits**: not a candidate, not rejected, shown "Checking against a blocked version" |
 | Exclusion (§5.3) | source never selected | not excluded | source waits, as above |
 | `considered` (Q-49, `NewerAfterRollback`) | already considered: raises nothing | not considered | no decision or notice yet; waits |
-| Recovered chain (rollback.md §3.1) | the recovered entry is rejected: follow the chain | not rejected | decided by the actual copies of the recovered release: the chain advances only if every copy is rejected at level 2 |
+| Recovered chain (rollback.md §3.1), entry against entry | the recovered entry is rejected: follow the chain | not rejected | decided by the actual copies: the sources that are `Same` as the recovered entry. If that set is **empty**, the outcome is `RecoveredUnavailable` (R4D-29). Otherwise the chain advances only if every copy in the set is rejected at level 2 (`Same` as an active rejection's `rejected`); a copy that waits makes the chain wait |
 | Look-alike (rollback.md §3.3) | — (that is level 2) | look-alike if the label also matches | waits |
 
 A source that waits is held exactly like an ineligible candidate
@@ -896,6 +915,8 @@ hash, so changed local grouping cannot change any result.
 | T-R4D23-dropped-folder-rollback | scope {core, old}; R1 `{core:U}` rejected (2.1 dropped `old`), R0 `{core:U, old:O}` recovered | R0 is `Different` (old: O ≠ Absent) and is installed with `old`; a source with `{core:U}` and no `old` is rejected; a source `{core:U, old:O2}` is `Different` and can only be a look-alike |
 | T-R4D23-keep-resume-shared-component | keep V2 `{a:2, b:U}` declining V3 `{a:3, b:U}`, then resume (no allow-again); run with a and b grouped, ungrouped, and regrouped between keep and resume (a new folder c joins the package, so the resume's `folders` = {a, b, c} while the carried V3 entry keeps `scope` {a, b}) | the source holding V2 is `Different` from the exclude entry V3 and stays eligible; the target is V2 (a:2 and b:U); the V3 source is `Same` over {a, b} and is never selected, with or without c; identical on every grouping |
 | T-R4D23-unknown-waits | as the first row, but the candidate's `extra` folder is `Unstable` | `Unknown`: neither installed nor rejected; it waits; once stable it resolves |
+| T-R4D28-exact-source-unrelated-addon | rejection scope {core, extra}: `rejected` `{core:U, extra:BAD}`, `recovered` `{core:U}`. Source m1 = `{core:U, extra:BAD}`; source m0 = `{core:U}` (extra known `Absent`). Run each once with an unrelated addon `{z:Z}` installed on the source and once with z absent | m1 is `Same` as `rejected` (rejected at level 2); m0 is `Same` as `recovered` (a real copy of the recovered release, installed); z never changes either result; A-38 control: union the source's keys into K (every result becomes `Unknown`, test fails) |
+| T-R4D28-regrouped-exclusion | carried exclude entry V3 with `scope` {a, b}, `{a:3, b:U}`; after regrouping the resume's `folders` = {a, b, c}; declined source `{a:3, b:U, c:C}`, kept source `{a:2, b:U, c:C}` | declined source `Same` over {a, b} (never selected); kept source `Different` (eligible, target); c ignored for the exclusion |
 
 ### 4.3 Ordinary selection is whole-addon (R4D-24)
 
@@ -1032,9 +1053,10 @@ No option ever makes unvalidated, unsafe or unreadable content installable
 **Exclude scope (R4D-23).** An exclusion is carried from record to record
 (Q-50), possibly into a record whose `folders` differ because grouping
 changed. Each `exclude` entry therefore keeps the `scope` it was first
-written with (the `folders` of that record), and §4.2 compares it over
-that scope only: a key of `scope` it does not list was `Absent`, a key
-outside `scope` is unknown. This is the only wire addition of
+written with (the `folders` of that record), and §4.2 compares a source
+against it over that scope only (the source-against-entry form): a key of
+`scope` it does not list was `Absent`, a key outside `scope` is never
+consulted, whatever the source has there (R4D-28). This is the only wire addition of
 R4-design-fix3; `considered`, `keep`, `rejected` and `recovered` entries
 are always written fresh over their own record's `folders`.
 
@@ -1044,8 +1066,8 @@ are always written fresh over their own record's `folders`.
   record's `known` covers whose `scope` intersects `folders`, carried
   verbatim with their `scope`;
 - **keep:** `exclude` = inherited ∪ (`considered` − `keep`, each with
-  `scope` = `folders`), minus every entry that is `Same` (§4.2) as the
-  kept source's complete content. Every copy the user saw and did not
+  `scope` = `folders`), minus every entry that the kept source is `Same`
+  as (§4.2, over that entry's scope). Every copy the user saw and did not
   keep is declined, and the kept copy is never declined;
 - **resume:** `exclude` = inherited − `allow_again`, with `allow_again` ⊆
   inherited package hashes. Resume keeps previous exclusions unless the
@@ -1086,9 +1108,11 @@ rejection or re-add naming f covers (§4.4).
   until then.
 - **Live resume:** imposes no target. Whole-addon ordinary selection
   (§4.3) applies, **filtered by its `exclude`**: a source that is `Same`
-  as an exclude entry is never selected (Q-50), whatever its version,
+  as an exclude entry over that entry's `scope` is never selected (Q-50), whatever its version,
   until a later choice that covers this resume drops it via
-  `allow_again`. A source that only shares some folders' trees with an
+  `allow_again`. Folders of the source outside the entry's `scope` (for
+  example a folder c that joined the package later) are not compared
+  (T-R4D28-regrouped-exclusion). A source that only shares some folders' trees with an
   exclude entry is `Different` and stays eligible (the kept V2 of
   T-R4D23-keep-resume-shared-component).
 - A live keep also filters by its `exclude` (relevant only if its kept
@@ -1238,7 +1262,9 @@ creates.
 
 Tests: T-C01…T-C14 and T-C06b, T-C06c (§10), plus T-R4D1-*, T-R4D4-*,
 T-R4D15-*, T-R4D16-*, T-R4D23-unknown-waits, T-R4D23-same-release-table,
-T-R4D24-no-hybrid and T-R4D25-partial-retirement-dag. T-C11 is
+T-R4D24-no-hybrid, T-R4D25-partial-retirement-dag,
+T-R4D28-exact-source-unrelated-addon and T-R4D28-regrouped-exclusion.
+T-C11 is
 offline-fixture only.
 
 **Handover.** At step-1 merge every stub file above passes to the packet
@@ -1289,7 +1315,8 @@ pub trait RemovalHooks {   // filled in removal.rs
 }
 pub trait ConstraintHooks { // choice.rs (keep/resume) and reject.rs (rejection)
     fn live_constraints(&self, l: &Ledger, f: &FolderKey) -> Vec<Constraint>;
-    // whole-source checks by `same_release` (§4.2); never per folder
+    // whole-source checks by `same_release` (§4.2), source against each
+    // recorded entry over that entry's scope only; never per folder
     fn excluded(&self, l: &Ledger, p: &Package, s: &Source) -> ScopeMatch;
     fn rejected(&self, l: &Ledger, p: &Package, s: &Source) -> ScopeMatch;
 }
@@ -1360,7 +1387,7 @@ fixed bytes where stated.
 | T-R4D21-readd-over-rollback | rejection on {a, b}; re-add of {b} covering it: b leaves the constraint, a stays constrained (owner: R4-core-removal) |
 | T-C15-decide-fresh | a record learned between showing and choosing gives `Changed`; no write happens (owner: R4-core-ops) |
 | T-R4D17-file-ownership | merge gate run by the orchestrator for every phase C packet: `git diff --name-only <base>..<packet head>` lists only files of that packet's §9 row, plus `tests\required-cases.toml` when the section check passes (outside the packet's own `# >>> section` / `# <<< section` markers the file equals the base, markers unchanged, added case ids new); a step-2 or step-3 packet touching a step-1 file (including any `lib.rs`) or another packet's file fails the gate. Counterexamples: a removal packet editing `kinds.rs` is refused; a settings packet adding a case inside the R4-core-ops section is refused; R4-notify-diag editing `wow-sync-core\src\lib.rs` is refused |
-| T-R4D23-same-release-table | `same_release` truth table (§4.2): equal on all keys; a key `Absent` on one side and a tree on the other; disjoint scopes; unknown key with nothing different (`Unknown`); unknown key plus a known difference (`Different`); the same entries under two local groupings give identical results; A-38 control: compare common keys only (T-R4D23-added-folder-rollback fails) |
+| T-R4D23-same-release-table | `same_release` truth table (§4.2), both forms. Entry against entry (K = union): equal on all keys; a key `Absent` on one side and a tree on the other; disjoint scopes (`Unknown`); overlap-equal with differing scopes (`Unknown`). Source against entry (K = entry scope only): exact match `Same` with extra source keys present or absent; an in-scope folder not `Ok` with nothing different (`Unknown`); the same plus a known difference (`Different`). The same entries under two local groupings give identical results. A-38 controls: compare common keys only (T-R4D23-added-folder-rollback fails); union the source's keys (T-R4D28-exact-source-unrelated-addon fails) |
 | T-R4D23-unknown-waits | §4.2 last row: a source with an `Unstable` folder in scope is neither a candidate nor rejected; ordinary selection does not fall back to a lesser candidate; it resolves once stable |
 | T-R4D23-added-folder-rollback, T-R4D23-dropped-folder-rollback | §4.2 rows (owner: R4-core-settings, rollback.md §10) |
 | T-R4D23-keep-resume-shared-component | §4.2 row (owner: R4-core-ops, ops.md §7) |
