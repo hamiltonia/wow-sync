@@ -10,19 +10,31 @@ use wow_sync_core::paths::FolderKey;
 use wow_sync_core::settings::{resume_preview, LocalReason, ResumeOption};
 
 /// What the unit is doing here, one per row of settings.md §9.1.
-// The snapshot has no units list yet, so only tests build most of these.
+// The service reports only some of these; the rest are built by tests.
 #[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UnitStatus {
     Off,
-    InSync { from: String },
-    Waiting { from: String },
+    /// This computer is retired and records no settings intent.
+    Retired,
+    /// Consent is given but no size limit is approved (Q-77), so nothing is read or applied.
+    SizeLimitPending,
+    /// Syncing here right now.
+    Active,
+    InSync {
+        from: String,
+    },
+    Waiting {
+        from: String,
+    },
     LocalDifferent(LocalReason),
     NoSharedCopy,
     Paused,
     NeedsChoice,
     PolicyConflict,
-    MasterAbsent { name: String },
+    MasterAbsent {
+        name: String,
+    },
     Diagnosed,
     Suspect,
     CaptureFailed,
@@ -42,12 +54,18 @@ pub struct UnitRow {
     /// The add-on's name, for sentences.
     pub addon: String,
     pub status: UnitStatus,
-    /// The checkpoint of what is live here, the thing "Share my settings" publishes.
-    pub live: Option<Sha256>,
+    /// Settings of this unit are being synced here right now.
+    pub live: bool,
+    /// This computer's latest capture, the thing "Share my settings" publishes.
+    pub latest_capture: Option<Sha256>,
+    pub can_share: bool,
     /// The competing heads of a `NeedsChoice` unit.
     pub heads: Vec<Copy>,
+    /// Every current head revision, which a choice must name.
+    pub shown_heads: Vec<Sha256>,
     /// Older saved copies that "Restore" can bring back.
     pub history: Vec<Copy>,
+    pub restore_possible: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -63,9 +81,8 @@ pub struct SettingsData {
     pub paused: Vec<wow_sync_runtime::PausedFolder>,
 }
 
-/// Why the per-add-on settings rows are not listed: the service does not report them yet.
-pub const UNITS_PENDING: &str =
-    "Per add-on and character settings are not listed here yet. Share, Choose, Restore and Pause appear when they are.";
+/// Shown when no add-on has settings to list yet.
+pub const NO_UNITS: &str = "No add-on settings are known yet. They are listed here once WoW Sync has saved or received some.";
 
 /// A button: its label and either the action it sends or why it is unavailable.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -98,6 +115,11 @@ pub fn identity_words(u: &SettingsUnit) -> String {
 pub fn status_text(s: &UnitStatus) -> String {
     match s {
         UnitStatus::Off => "Settings not shared".into(),
+        UnitStatus::Retired => "This computer is retired; its settings are not shared".into(),
+        UnitStatus::SizeLimitPending => {
+            "Settings sharing is off until a size limit is approved".into()
+        }
+        UnitStatus::Active => "Settings are syncing here".into(),
         UnitStatus::InSync { from } => format!("Settings up to date (from {from})"),
         UnitStatus::Waiting { from } => {
             format!("New settings from {from} will be used when WoW closes")
@@ -120,23 +142,27 @@ pub fn status_text(s: &UnitStatus) -> String {
 /// The buttons a unit offers beside its status (settings.md §9.1).
 pub fn unit_controls(w: &World, row: &UnitRow) -> Vec<Control> {
     let mut out = Vec::new();
+    let share = |out: &mut Vec<Control>| {
+        out.push(match (row.can_share, row.latest_capture) {
+            (true, Some(checkpoint)) => control(
+                w,
+                ActionKind::ShareSettings,
+                "Share my settings",
+                GroupAction::ShareSettings {
+                    unit: row.unit.clone(),
+                    checkpoint,
+                },
+            ),
+            _ => off(
+                "Share my settings",
+                "There is nothing saved here to share yet.",
+            ),
+        });
+    };
     match &row.status {
+        UnitStatus::Active => share(&mut out),
         UnitStatus::LocalDifferent(reason) => {
-            out.push(match row.live {
-                Some(checkpoint) => control(
-                    w,
-                    ActionKind::ShareSettings,
-                    "Share my settings",
-                    GroupAction::ShareSettings {
-                        unit: row.unit.clone(),
-                        checkpoint,
-                    },
-                ),
-                None => off(
-                    "Share my settings",
-                    "There is nothing saved here to share yet.",
-                ),
-            });
+            share(&mut out);
             if *reason != LocalReason::LocalChange {
                 out.push(control(
                     w,
@@ -149,8 +175,14 @@ pub fn unit_controls(w: &World, row: &UnitRow) -> Vec<Control> {
             }
         }
         UnitStatus::NeedsChoice => {
-            let shown: Vec<Sha256> = row.heads.iter().map(|h| h.checkpoint).collect();
-            for h in &row.heads {
+            let shown = row.shown_heads.clone();
+            if shown.is_empty() {
+                out.push(off(
+                    "Choose which settings to keep",
+                    "The competing copies are not known yet. Try again after the next check.",
+                ));
+            }
+            for h in row.heads.iter().filter(|_| !shown.is_empty()) {
                 out.push(control(
                     w,
                     ActionKind::ChooseSettings,
@@ -178,18 +210,24 @@ pub fn restore_controls(w: &World, row: &UnitRow) -> Vec<(Control, String)> {
                 c.label,
                 identity_words(&row.unit)
             );
-            (
+            let label = format!("Restore {}…", c.label);
+            let button = if row.restore_possible {
                 control(
                     w,
                     ActionKind::RestoreSettings,
-                    format!("Restore {}…", c.label),
+                    label,
                     GroupAction::RestoreSettings {
                         unit: row.unit.clone(),
                         checkpoint: c.checkpoint,
                     },
-                ),
-                confirm,
-            )
+                )
+            } else {
+                off(
+                    label,
+                    "Settings can't be restored here right now (sync is off, paused or blocked for this add-on).",
+                )
+            };
+            (button, confirm)
         })
         .collect()
 }
@@ -428,9 +466,13 @@ mod tests {
             },
             addon: "Details".into(),
             status,
-            live: Some(Sha256([1; 32])),
+            live: true,
+            latest_capture: Some(Sha256([1; 32])),
+            can_share: true,
             heads: vec![],
+            shown_heads: vec![],
             history: vec![],
+            restore_possible: true,
         }
     }
 
@@ -513,6 +555,7 @@ mod tests {
                 label: "Laptop's copy".into(),
             },
         ];
+        r.shown_heads = vec![Sha256([2; 32]), Sha256([3; 32])];
         let cs = unit_controls(&w, &r);
         assert_eq!(cs.len(), 2);
         assert_eq!(
@@ -710,5 +753,125 @@ mod tests {
             master_controls(&w).iter().all(|c| c.action.is_ok()),
             "the owner may still choose one master"
         );
+    }
+
+    fn runtime_row(
+        status: wow_sync_runtime::SettingsUnitStatus,
+    ) -> wow_sync_runtime::SettingsUnitRow {
+        let issuer = wow_sync_core::kinds::Issuer {
+            computer_id: den().computer_id,
+            enrollment_id: den().enrollment_id,
+            issued_at_seq: 1,
+        };
+        let entry = |n: u8, head: bool| wow_sync_runtime::SettingsHistoryEntry {
+            hash: Sha256([n; 32]),
+            kind: wow_sync_core::kinds::RevisionKind::Auto,
+            checkpoint: Sha256([n; 32]),
+            issuer: issuer.clone(),
+            written_unix_ms: 1_700_000_000_000,
+            is_head: head,
+        };
+        wow_sync_runtime::SettingsUnitRow {
+            unit: unit(UnitStatus::Off).unit,
+            status,
+            live: false,
+            competing: vec![],
+            shown_heads: vec![],
+            history: vec![entry(4, false), entry(5, true)],
+            restore_possible: true,
+            latest_capture: Some(Sha256([9; 32])),
+            can_share: true,
+        }
+    }
+
+    fn controls_for(
+        edit: impl FnOnce(&mut wow_sync_runtime::SettingsUnitRow),
+        status: wow_sync_runtime::SettingsUnitStatus,
+        enabled: bool,
+    ) -> (World, UnitRow) {
+        let mut r = runtime_row(status);
+        edit(&mut r);
+        let w = snapshot_world_with(|s| {
+            s.settings.enabled = enabled;
+            s.settings_units = vec![r];
+        });
+        let row = w.features.settings.units[0].clone();
+        (w, row)
+    }
+
+    #[test]
+    fn the_units_list_wires_share_choose_and_restore_from_the_snapshot() {
+        use wow_sync_runtime::{HeadChoice, SettingsUnitStatus as S};
+        let (w, row) = controls_for(|r| r.live = true, S::Active, true);
+        assert_eq!(row.status, UnitStatus::Active);
+        assert_eq!(
+            unit_controls(&w, &row)[0].action,
+            Ok(GroupAction::ShareSettings {
+                unit: row.unit.clone(),
+                checkpoint: Sha256([9; 32])
+            })
+        );
+        let rs = restore_controls(&w, &row);
+        assert_eq!(rs.len(), 1, "the current head is not offered for restore");
+        assert_eq!(
+            rs[0].0.action,
+            Ok(GroupAction::RestoreSettings {
+                unit: row.unit.clone(),
+                checkpoint: Sha256([4; 32])
+            })
+        );
+        let (w, row) = controls_for(
+            |r| {
+                r.competing = vec![
+                    HeadChoice {
+                        checkpoint: Sha256([4; 32]),
+                        revisions: vec![Sha256([4; 32])],
+                    },
+                    HeadChoice {
+                        checkpoint: Sha256([5; 32]),
+                        revisions: vec![Sha256([5; 32])],
+                    },
+                ];
+                r.shown_heads = vec![Sha256([4; 32]), Sha256([5; 32]), Sha256([6; 32])];
+            },
+            S::NeedsChoice,
+            true,
+        );
+        let cs = unit_controls(&w, &row);
+        assert_eq!(cs.len(), 2);
+        assert_eq!(
+            cs[1].action,
+            Ok(GroupAction::ChooseSettings {
+                unit: row.unit.clone(),
+                checkpoint: Sha256([5; 32]),
+                shown_heads: vec![Sha256([4; 32]), Sha256([5; 32]), Sha256([6; 32])],
+            })
+        );
+    }
+
+    #[test]
+    fn units_that_cannot_share_or_restore_say_why_and_a_missing_cap_is_not_invented() {
+        use wow_sync_runtime::SettingsUnitStatus as S;
+        let (w, row) = controls_for(
+            |r| {
+                r.can_share = false;
+                r.restore_possible = false;
+            },
+            S::Active,
+            true,
+        );
+        assert!(unit_controls(&w, &row)[0].action.is_err());
+        assert!(restore_controls(&w, &row)[0].0.action.is_err());
+        let (w, row) = controls_for(|r| r.restore_possible = false, S::Disabled, true);
+        assert_eq!(row.status, UnitStatus::SizeLimitPending);
+        assert_eq!(
+            status_text(&row.status),
+            "Settings sharing is off until a size limit is approved"
+        );
+        assert!(unit_controls(&w, &row).is_empty());
+        let (_, off_row) = controls_for(|_| {}, S::Disabled, false);
+        assert_eq!(off_row.status, UnitStatus::Off);
+        let (_, retired) = controls_for(|_| {}, S::Retired, true);
+        assert_eq!(retired.status, UnitStatus::Retired);
     }
 }

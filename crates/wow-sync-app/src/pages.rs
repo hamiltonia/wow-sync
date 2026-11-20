@@ -1685,10 +1685,7 @@ impl Shell {
         let units = self.w.features.settings.units.clone();
         let mut s: Vec<AnyElement> = Vec::new();
         if units.is_empty() {
-            s.push(
-                self.muted(crate::settings_ui::UNITS_PENDING)
-                    .into_any_element(),
-            );
+            s.push(self.muted(crate::settings_ui::NO_UNITS).into_any_element());
         }
         for (i, row) in units.iter().enumerate() {
             s.push(
@@ -1757,10 +1754,7 @@ impl Shell {
             .into_iter()
             .collect();
         if folders.is_empty() {
-            p.push(
-                self.muted(crate::settings_ui::UNITS_PENDING)
-                    .into_any_element(),
-            );
+            p.push(self.muted(crate::settings_ui::NO_UNITS).into_any_element());
         }
         for f in folders {
             p.push(

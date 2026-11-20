@@ -1249,6 +1249,8 @@ tests = [
     "settings_ui::tests::restore_says_the_current_copy_is_kept",
     "settings_ui::tests::the_snapshot_drives_master_choice_and_the_precise_resume_sheet",
     "settings_ui::tests::two_competing_masters_choose_nothing_and_block_exceptions_with_their_reason",
+    "settings_ui::tests::the_units_list_wires_share_choose_and_restore_from_the_snapshot",
+    "settings_ui::tests::units_that_cannot_share_or_restore_say_why_and_a_missing_cap_is_not_invented",
 ]
 
 [[case]]

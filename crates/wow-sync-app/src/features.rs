@@ -620,6 +620,7 @@ fn apply_peers(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot) {
         .next();
     f.master = s.settings.master_name.clone();
     apply_settings(f, &s.settings);
+    f.settings.units = settings_unit_rows(&s.settings_units, s.settings.enabled);
 }
 
 fn apply_settings(f: &mut FeatureData, s: &wow_sync_runtime::SettingsSnapshot) {
@@ -630,6 +631,68 @@ fn apply_settings(f: &mut FeatureData, s: &wow_sync_runtime::SettingsSnapshot) {
     d.exceptions = s.exceptions.clone();
     d.policy_conflict = s.policy_conflict;
     d.paused = s.paused.clone();
+}
+
+/// The settings rows as the screen shows them. `enabled` tells a missing consent from a missing
+/// size limit, which the service reports as the same `Disabled`.
+pub fn settings_unit_rows(
+    rows: &[wow_sync_runtime::SettingsUnitRow],
+    enabled: bool,
+) -> Vec<crate::settings_ui::UnitRow> {
+    use crate::settings_ui::{Copy, UnitRow, UnitStatus};
+    use wow_sync_runtime::SettingsUnitStatus as S;
+    rows.iter()
+        .map(|r| {
+            let when = |c: &wow_sync_core::ids::Sha256| {
+                r.history.iter().find(|h| &h.checkpoint == c).map(|h| {
+                    format!(
+                        "the copy from {}",
+                        crate::world::day_text(h.written_unix_ms)
+                    )
+                })
+            };
+            UnitRow {
+                unit: r.unit.clone(),
+                addon: r.unit.folder.as_str().to_string(),
+                status: match r.status {
+                    S::Retired => UnitStatus::Retired,
+                    S::Disabled if enabled => UnitStatus::SizeLimitPending,
+                    S::Disabled => UnitStatus::Off,
+                    S::NotShared => UnitStatus::NotShared,
+                    S::PolicyConflict => UnitStatus::PolicyConflict,
+                    S::Paused => UnitStatus::Paused,
+                    S::NeedsChoice => UnitStatus::NeedsChoice,
+                    S::Active => UnitStatus::Active,
+                },
+                live: r.live,
+                latest_capture: r.latest_capture,
+                can_share: r.can_share,
+                heads: r
+                    .competing
+                    .iter()
+                    .enumerate()
+                    .map(|(i, h)| Copy {
+                        checkpoint: h.checkpoint,
+                        label: when(&h.checkpoint).unwrap_or_else(|| format!("copy {}", i + 1)),
+                    })
+                    .collect(),
+                shown_heads: r.shown_heads.clone(),
+                history: r
+                    .history
+                    .iter()
+                    .filter(|h| !h.is_head)
+                    .map(|h| Copy {
+                        checkpoint: h.checkpoint,
+                        label: format!(
+                            "the copy from {}",
+                            crate::world::day_text(h.written_unix_ms)
+                        ),
+                    })
+                    .collect(),
+                restore_possible: r.restore_possible,
+            }
+        })
+        .collect()
 }
 
 /// A disabled control carries its reason; an enabled one is `Ok`.
