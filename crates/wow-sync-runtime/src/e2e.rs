@@ -2456,6 +2456,170 @@ mod tests {
         );
     }
 
+    fn settings_recovery_holds(pc: &Pc, text: &str) -> bool {
+        let mut stack = vec![pc
+            .install
+            .variant_dir
+            .join(".wowsync")
+            .join("settings-recovery")];
+        while let Some(d) = stack.pop() {
+            for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if std::fs::read_to_string(&p).is_ok_and(|t| t.contains(text)) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn pausing_settings_holds_a_units_updates_until_resume_and_resume_never_publishes() {
+        use wow_sync_core::settings::ResumeOption;
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let alpha = alpha_unit().folder;
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 2 }\n")
+        );
+        let beta = wow_sync_core::paths::validate_folder_name("Beta").unwrap();
+        assert_eq!(
+            b.svc.command(Command::PauseSettings {
+                folder: beta.clone()
+            }),
+            Err(CommandError::UnknownFolder(beta)),
+            "only an installed folder can be paused"
+        );
+        assert_eq!(
+            b.svc.command(Command::PauseSettings {
+                folder: alpha.clone()
+            }),
+            Ok(CommandOutcome::Recorded)
+        );
+        assert_eq!(
+            b.svc.command(Command::PauseSettings {
+                folder: alpha.clone()
+            }),
+            Ok(CommandOutcome::NothingToDo)
+        );
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 3 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 2 }\n"),
+            "paused: the newer copy is not applied"
+        );
+        // Resume never publishes, so "Share mine" is refused here and the unit stays paused.
+        assert_eq!(
+            b.svc.command(Command::ResumeSettings {
+                folder: alpha.clone(),
+                choice: ResumeOption::ShareMine
+            }),
+            Err(CommandError::UseShareSettings)
+        );
+        assert_eq!(
+            b.svc.command(Command::ResumeSettings {
+                folder: alpha.clone(),
+                choice: ResumeOption::StayPaused
+            }),
+            Ok(CommandOutcome::NothingToDo)
+        );
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 2 }\n")
+        );
+        assert_eq!(
+            b.svc.command(Command::ResumeSettings {
+                folder: alpha.clone(),
+                choice: ResumeOption::UseShared
+            }),
+            Ok(CommandOutcome::Recorded)
+        );
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 3 }\n")
+        );
+        assert_eq!(
+            b.svc.settings_history(&alpha_unit()).len(),
+            2,
+            "resuming wrote no revision"
+        );
+        assert_eq!(
+            b.svc.command(Command::ResumeSettings {
+                folder: alpha,
+                choice: ResumeOption::Resume
+            }),
+            Ok(CommandOutcome::NothingToDo),
+            "a unit that is not paused has nothing to resume"
+        );
+    }
+
+    #[test]
+    fn use_shared_settings_replaces_a_local_difference_and_keeps_it_as_a_recovery_copy() {
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        synced(&mut b); // the next cycle records the applied revision as the basis
+        write_wtf(&b, "Alpha", "AlphaDB = { mine = true }\n");
+        synced(&mut b);
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { mine = true }\n"),
+            "a local difference is never replaced by itself"
+        );
+        let other = wow_sync_core::ids::SettingsUnit {
+            folder: wow_sync_core::paths::validate_folder_name("Beta").unwrap(),
+            identity: wow_sync_core::ids::Identity::account("ACC").unwrap(),
+        };
+        assert_eq!(
+            b.svc.command(Command::UseSharedSettings {
+                unit: other.clone()
+            }),
+            Err(CommandError::NoSharedSettings(other)),
+            "a unit with nothing shared has nothing to use"
+        );
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { mine = true }\n")
+        );
+        assert_eq!(
+            b.svc
+                .command(Command::UseSharedSettings { unit: alpha_unit() }),
+            Ok(CommandOutcome::Recorded)
+        );
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 2 }\n")
+        );
+        assert!(settings_recovery_holds(&b, "mine = true"));
+        write_wtf(&b, "Alpha", "AlphaDB = { again = true }\n");
+        synced(&mut b);
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { again = true }\n"),
+            "the request was spent by the first yield"
+        );
+    }
+
     fn two_option_item(
         key: &wow_sync_core::paths::FolderKey,
         write: AuthorityRecord,

@@ -304,6 +304,24 @@ pub enum Command {
     /// Consent to settings sync on this computer for these accounts (settings.md §5.4). Local
     /// only; nothing of WTF is read until it is recorded.
     EnableSettings { included_accounts: Vec<String> },
+    /// "Pause settings" for one addon folder on this computer (settings.md §6): its units are
+    /// neither published nor replaced until resumed. Local only; code is not paused.
+    PauseSettings {
+        folder: wow_sync_core::paths::FolderKey,
+    },
+    /// Resume the settings of `folder` with one of the choices the resume preview offered
+    /// (settings.md §6). Resume never publishes: the share choices are refused here and are the
+    /// `ShareSettings` command. `StayPaused` changes nothing.
+    ResumeSettings {
+        folder: wow_sync_core::paths::FolderKey,
+        choice: wow_sync_core::settings::ResumeOption,
+    },
+    /// "Use shared settings" for one unit that shows "Changed here, not shared": the next
+    /// settings cycle replaces the file with the shared copy and keeps the current file as a
+    /// recovery copy (settings.md §4.2). Refused when the unit has no single shared state.
+    UseSharedSettings {
+        unit: wow_sync_core::ids::SettingsUnit,
+    },
     /// "Go back to this release": install the held release `recovered` (its package hash) of
     /// `package` and reject what is installed now for the group. The request is checked against
     /// the live state now and queued; the operation runs when the game is closed and writes the
@@ -353,6 +371,13 @@ pub enum CommandError {
     /// The rollback cannot be planned from what is live (unknown release, same release, nothing
     /// installed, files not in the shared folder). Nothing was queued.
     Rollback(crate::rollback_flow::RollbackRefusal),
+    /// No installed addon folder has this key.
+    UnknownFolder(wow_sync_core::paths::FolderKey),
+    /// The unit has no single shared settings state to use (none shared yet, or competing
+    /// choices that need a decision first).
+    NoSharedSettings(wow_sync_core::ids::SettingsUnit),
+    /// Resume never publishes: "Share mine" is the `ShareSettings` command.
+    UseShareSettings,
     Service(String),
 }
 

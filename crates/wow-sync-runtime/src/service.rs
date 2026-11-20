@@ -424,6 +424,64 @@ impl SliceService {
                 .map_err(|e| CommandError::Service(e.to_string()))?;
             return Ok(CommandOutcome::Recorded);
         }
+        if let Command::PauseSettings { folder } | Command::ResumeSettings { folder, .. } = &cmd {
+            use wow_sync_core::settings::ResumeOption::*;
+            if !w.inventory.folders.iter().any(|f| &f.key == folder) {
+                return Err(CommandError::UnknownFolder(folder.clone()));
+            }
+            let mut l = crate::settings_cycle::load_local(&self.state, &gid);
+            let paused = l.paused_folders.contains(folder);
+            let mut use_shared = false;
+            match &cmd {
+                Command::ResumeSettings { choice, .. } => {
+                    if !paused || *choice == StayPaused {
+                        return Ok(CommandOutcome::NothingToDo);
+                    }
+                    match choice {
+                        ShareMine | ShareMineInstead => return Err(CommandError::UseShareSettings),
+                        UseShared | GoBackToShared | UseSharedKeepMineAsRecovery => {
+                            use_shared = true
+                        }
+                        Resume | KeepMineHere | StayPaused => {}
+                    }
+                    l.paused_folders.retain(|f| f != folder);
+                }
+                _ => {
+                    if paused {
+                        return Ok(CommandOutcome::NothingToDo);
+                    }
+                    l.paused_folders.push(folder.clone());
+                    l.paused_folders.sort();
+                }
+            }
+            if use_shared {
+                let mut req = crate::settings_cycle::load_use_shared(&self.state, &gid);
+                for u in l.units.iter().filter(|u| &u.unit.folder == folder) {
+                    if !req.contains(&u.unit) {
+                        req.push(u.unit.clone());
+                    }
+                }
+                crate::settings_cycle::save_use_shared(&self.state, &gid, &req)
+                    .map_err(|e| CommandError::Service(e.to_string()))?;
+            }
+            crate::settings_cycle::save_local(&self.state, &gid, &l)
+                .map_err(|e| CommandError::Service(e.to_string()))?;
+            return Ok(CommandOutcome::Recorded);
+        }
+        if let Command::UseSharedSettings { unit } = &cmd {
+            let d = derive(&self.plane.ledger, &gid, &self.plane.members);
+            let g = wow_sync_core::settings::graph_from_ledger(&self.plane.ledger, &d, unit);
+            if g.pending || g.head_states.len() != 1 {
+                return Err(CommandError::NoSharedSettings(unit.clone()));
+            }
+            let mut req = crate::settings_cycle::load_use_shared(&self.state, &gid);
+            if !req.contains(unit) {
+                req.push(unit.clone());
+            }
+            crate::settings_cycle::save_use_shared(&self.state, &gid, &req)
+                .map_err(|e| CommandError::Service(e.to_string()))?;
+            return Ok(CommandOutcome::Recorded);
+        }
         let now = now_unix_ms() as u64;
         if let Command::Rollback { package, recovered } = &cmd {
             let request = crate::rollback_flow::RollbackRequest {
@@ -553,9 +611,12 @@ impl SliceService {
                     DecisionEffect::Write(Box::new(AuthorityRecord::Readd(readd)))
                 }
                 // Dispatched before observation, above.
-                Command::ReEnroll | Command::EnableSettings { .. } | Command::Rollback { .. } => {
-                    return Err(CommandError::NotAllowed)
-                }
+                Command::ReEnroll
+                | Command::EnableSettings { .. }
+                | Command::PauseSettings { .. }
+                | Command::ResumeSettings { .. }
+                | Command::UseSharedSettings { .. }
+                | Command::Rollback { .. } => return Err(CommandError::NotAllowed),
                 Command::SetSettingsPolicy { master, exceptions } => {
                     let rec = wow_sync_core::settings::build_policy(
                         &self.plane.ledger,

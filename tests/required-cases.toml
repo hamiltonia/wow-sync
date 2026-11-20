@@ -1021,6 +1021,14 @@ tests = [
     "e2e::tests::a_removal_whose_record_could_not_be_written_is_replayed_on_the_next_cycle",
     "e2e::tests::a_pending_removal_is_dropped_when_the_folder_is_installed_again",
 ]
+
+[[case]]
+id = "R4-integrate:settings-pause-resume-use-shared"
+tier = "offline"
+tests = [
+    "e2e::tests::pausing_settings_holds_a_units_updates_until_resume_and_resume_never_publishes",
+    "e2e::tests::use_shared_settings_replaces_a_local_difference_and_keeps_it_as_a_recovery_copy",
+]
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag

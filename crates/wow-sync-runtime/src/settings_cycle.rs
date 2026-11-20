@@ -293,6 +293,34 @@ pub fn save_local(state: &LocalState, group: &GroupId, l: &SettingsLocal) -> Res
     state.write_atomic(&local_name(group), &encode(l))
 }
 
+fn use_shared_name(group: &GroupId) -> String {
+    format!("settings-use-shared-{group}.json")
+}
+
+/// The units the owner asked to "Use shared settings" for, until a cycle acts on them.
+pub fn load_use_shared(state: &LocalState, group: &GroupId) -> Vec<SettingsUnit> {
+    state
+        .read(&use_shared_name(group), LOCAL_LIMIT as u64)
+        .ok()
+        .flatten()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_use_shared(
+    state: &LocalState,
+    group: &GroupId,
+    units: &[SettingsUnit],
+) -> Result<(), FsError> {
+    if units.is_empty() {
+        return state.remove(&use_shared_name(group));
+    }
+    state.write_atomic(
+        &use_shared_name(group),
+        &serde_json::to_vec(units).expect("plain data serializes"),
+    )
+}
+
 /// The folders whose selected `.toc` declares saved variables (metadata only, never Lua).
 pub fn declaring_folders(scans: &[wow_sync_core::inventory::FolderScan]) -> Vec<DeclaringFolder> {
     use wow_sync_core::toc::{select_toc, TocSelection};
@@ -397,6 +425,8 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
     }
     let mut written = false;
     let mut dirty = false;
+    let mut use_shared = load_use_shared(a.state, a.group);
+    let mut requests_changed = false;
     for unit in units {
         if scope.blocked.contains(&unit) {
             continue;
@@ -498,6 +528,19 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
             live,
             epoch_clean: eps[ei].epoch_clean,
         });
+        // An explicit "Use shared settings" turns a held local difference into a yield; every
+        // other case ignores it, and the request is spent once the unit was evaluated.
+        let case = match (&case, use_shared.contains(&unit), graph.head_states.len()) {
+            (Case::LocalDifferent(_), true, 1) => Case::Yield {
+                to: *graph.head_states.keys().next().expect("one head state"),
+                capture_first: true,
+            },
+            _ => case,
+        };
+        if !paused && use_shared.contains(&unit) {
+            use_shared.retain(|u| u != &unit);
+            requests_changed = true;
+        }
         match case {
             Case::InSync { basis } => {
                 local.units[li].basis = basis;
@@ -586,6 +629,9 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
             }
             _ => {}
         }
+    }
+    if requests_changed {
+        let _ = save_use_shared(a.state, a.group, &use_shared);
     }
     if dirty {
         let _ = save_local(a.state, a.group, &local);
