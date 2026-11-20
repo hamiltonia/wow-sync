@@ -15,6 +15,7 @@ A macOS kit the owner runs, plus the owner instructions. No crate, lock file, CI
 | `tools/mac/mem.sh` | A-29 scenarios a, b, c of `tools/mem/run.ps1`; aggregate private memory; sync start; results file with environment |
 | `tools/mac/notify-check.sh` | T-27-11: one notification through `OsNotifier`, owner confirms the name |
 | `tools/mac/update-check.sh` | T-28-13: the existing manual live-fetch test, one anonymous GET |
+| `tools/mac/bundle.sh` | Builds an unsigned (ad-hoc signed) `WoW Sync.app` (`CFBundleIdentifier=com.wowsync.app`, `CFBundleName` and `CFBundleDisplayName` "WoW Sync", `CFBundleExecutable`, `LSUIElement`, `.icns` from `assets/brand/wow_addon_sync.png` via `sips`/`iconutil`) around the release binary and installs it to `~/Applications`; `--dock`, `--dir`, `--uninstall` |
 | `tools/mac/.gitattributes` | Keeps the scripts LF on every checkout |
 | `docs/runs/run-004/MAC-OWNER.md` | Non-developer steps: install, commands, what to look at, what to send, clean-up |
 
@@ -64,6 +65,8 @@ Divergences from `tools/mac` vs `tools/mem/run.ps1`, all forced by the platform:
 | Median and seconds helpers | inline awk on sample input | PASS (median 2.5; scale 0.1 of 120 s gives 12) |
 | Lab-root guard | `check_lab_root` with Dropbox, World of Warcraft, Library and relative paths | PASS (all refused) |
 | Review against the Windows harness | read-through | done, divergences listed above |
+| Follow-up (bundle): syntax | `bash -n` and `dash -n` on all seven scripts incl. `bundle.sh` (LF copies via `git archive`) | PASS |
+| Follow-up (bundle): `pick_app` | dash with a fake bundle executable: bundle chosen when present, raw with `WOWSYNC_NO_BUNDLE=1` | PASS |
 
 Not executed, because they need macOS: everything that calls `sw_vers`, `sysctl`, `vmmap`,
 `footprint`, `xcode-select`, `stat -f`, the app, notifications, the network check, or a build.
@@ -77,6 +80,7 @@ Not executed, because they need macOS: everything that calls `sw_vers`, `sysctl`
 | A-29 macOS (at most 100 MiB aggregate; sync starts within 10 s) | owner's MacBook Pro | NOT RUN |
 | macOS build and `cargo xtask verify --tier offline` through `build.sh` | owner's MacBook Pro | NOT RUN |
 | Enrolment and tray on macOS (`run.sh enroll`) | owner's MacBook Pro | NOT RUN |
+| `bundle.sh` result (valid plist, icon, ad-hoc signature, "WoW Sync" sender) | owner's MacBook Pro | NOT RUN |
 
 Unverified assumptions (each fails visibly on the Mac, none is claimed): BSD `stat -f %Fm` gives
 fractional mtimes; `vmmap --summary` works for own processes without sudo; the app exits on SIGTERM.
@@ -97,11 +101,12 @@ fractional mtimes; `vmmap --summary` works for own processes without sudo; the a
   running app shows no notification and makes no update request on any platform. The kit calls
   `OsNotifier` directly; if R4-app wires `attach_os_services`, a runtime-path trigger for T-27-11 could
   replace the scratch program.
-- **H-4 macOS notification identity.** `crates/wow-sync-adapters/src/notify.rs` line 62 sets the app id
-  only on Windows. With `notify-rust` on macOS the toast is normally attributed to a default or
-  host application, not "WoW Sync" (Q-63: that is an A-27 FAIL, not a fallback). The kit records
-  the actual name. A fix needs a crate change (for example `set_application`) and probably an app
-  bundle.
+- **H-4 macOS notification identity (addressed in `f2597cf`, kit updated).** `notify.rs` now calls
+  `set_application("com.wowsync.app")` on macOS. The name "WoW Sync" appears only if a bundle with
+  that identifier exists, so `tools/mac/bundle.sh` builds and installs one, and `run.sh`, `mem.sh`
+  and `notify-check.sh` use it. Still NOT RUN: whether macOS then shows "WoW Sync" is the owner's
+  T-27-11 result. The bundle is ad-hoc signed only (not notarized); the owner may have to right-click
+  and Open once, and macOS may ask to allow notifications for "WoW Sync".
 - **H-5 The existing manual toast test cannot run on macOS.** `notify.rs` test
   `manual_toast_shows_the_app_name` unwraps `register_app_user_model_id`, which returns Err off Windows
   (`winproc.rs` unsupported-platform stubs). The kit avoids it with a scratch program.
@@ -109,8 +114,10 @@ fractional mtimes; `vmmap --summary` works for own processes without sudo; the a
   macOS counterpart: non-dev runs get "This computer" and a temp-directory state folder. The kit
   uses dev mode with explicit `--name` and `--state`, so it is not affected; a normal macOS start is.
 - **H-7 `local_offset_minutes` returns 0 on macOS** (`win.rs` line 114), so times shown are UTC.
-- **H-8 No app bundle or tray activation policy.** The kit runs the raw binary; Dock icon and menu-bar
-  behaviour may differ from a packaged app.
+- **H-8 Bundle limits.** The bundle is a copy of the release binary with `LSUIElement` (no Dock icon) and
+  an ad-hoc signature; it is not notarized and has no auto-update of the copy (rerun `bundle.sh` after
+  a rebuild; the scripts warn when the build is newer). Window and menu-bar behaviour inside a
+  bundle is unverified.
 
 ## Verify
 

@@ -68,6 +68,28 @@ test run and only builds; use it only if you are asked to.)
 Save the whole Terminal output of this step: select all (Cmd+A), copy (Cmd+C),
 and paste it into a text file called `build.txt`.
 
+## 2b. Install the app bundle (once, 1 minute)
+
+macOS only shows the name "WoW Sync" on a notification if a real app called
+"WoW Sync" is installed. This step creates a small one from the build.
+
+```text
+cd <CHECKOUT>
+sh tools/mac/bundle.sh
+```
+
+It creates `WoW Sync.app` in the `Applications` folder inside your home folder
+(not the system-wide one), with the WoW Sync icon, and no Dock icon (it is a
+menu-bar app; add `--dock` to the command if you would rather have one). The
+last line should say `installed:`. Run it again after every new build.
+
+The app is not signed by Apple. If macOS ever says it "cannot be opened because
+the developer cannot be verified", open the Applications folder in Finder, hold
+Control and click **WoW Sync**, choose **Open**, then **Open** again. You only need
+this once, and only if you open the app by double-clicking; the kit's
+scripts start it from Terminal and do not need it. To remove it later:
+`sh tools/mac/bundle.sh --uninstall`.
+
 ## 3. Notification check (T-27-11)
 
 ```text
@@ -76,7 +98,10 @@ sh tools/mac/notify-check.sh
 ```
 
 The first run compiles a tiny test program (a few minutes). Then a macOS
-notification should appear at the top right of the screen.
+notification should appear at the top right of the screen. It should say
+**WoW Sync** with the WoW Sync icon, because step 2b installed the app it
+belongs to. If the script warns that the bundle is not installed, run step 2b
+first. If macOS asks whether "WoW Sync" may send notifications, choose Allow.
 
 Look at it and tell the script **the application name** shown in the
 notification (the small label next to the icon, for example "WoW Sync",
@@ -186,11 +211,12 @@ the first result.
 ## 8. Clean up
 
 Run this to delete all test data (the fake lab and results) and the compiled
-files:
+files, and to remove the app bundle:
 
 ```text
 cd <CHECKOUT>
 sh tools/mac/run.sh clean
+sh tools/mac/bundle.sh --uninstall
 rm -rf /Users/Shared/WoWSyncLab
 cargo clean
 ```
@@ -203,8 +229,9 @@ WoW, Battle.net or Dropbox file, so nothing else needs undoing.
 
 ## Safety summary
 
-- Only the folder `/Users/Shared/WoWSyncLab` (and the project folder's `target`
-  folder) is written. The scripts refuse a different folder whose name looks like
+- Only the folder `/Users/Shared/WoWSyncLab`, `WoW Sync.app` in your own `Applications` folder (removable with
+  `bundle.sh --uninstall`) and the project folder's `target`
+  folder are written. The scripts refuse a different folder whose name looks like
   Dropbox, World of Warcraft, Battle.net, Blizzard or a user Library.
 - The only network traffic is the Rust and package download in steps 1 and 2 and
   the single GitHub request in step 4.

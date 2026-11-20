@@ -18,6 +18,8 @@
 # RSS (ps) is recorded for context only. Sync start = launch to the first change in the lab's
 # state or provider files, measured with a fresh synthetic change made just before each launch.
 # Synthetic data only, under the lab root. Never touches WoW, Battle.net or Dropbox.
+# Runs the executable inside the installed WoW Sync.app when tools/mac/bundle.sh has been run, else
+# target/release/wow-sync (WOWSYNC_NO_BUNDLE=1 forces the latter); the results file records which.
 set -u
 . "$(dirname "$0")/lib.sh"
 need_macos
