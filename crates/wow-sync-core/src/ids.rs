@@ -263,6 +263,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn nfc_collision_and_case_only_difference_are_diagnosed_and_not_matched() {
+        // T-C11-identity-collisions (offline fixtures; native NTFS/APFS: NOT RUN, R4D-22)
+        let composed = "Caf\u{e9}".to_string();
+        let decomposed = "Cafe\u{301}".to_string();
+        assert_ne!(composed, decomposed);
+        let found =
+            normalization_collisions(&[composed.clone(), decomposed.clone(), "Other".into()]);
+        assert_eq!(found.len(), 1);
+        let IdentityDiagnosis::NormalizationCollision { first, second } = &found[0] else {
+            panic!("wrong diagnosis");
+        };
+        let mut named = [first.clone(), second.clone()];
+        named.sort();
+        let mut want = [composed.clone(), decomposed.clone()];
+        want.sort();
+        assert_eq!(named, want);
+        // Identity text is stored NFC, so the two spellings are one identity text.
+        assert_eq!(
+            Identity::account(&composed).unwrap(),
+            Identity::account(&decomposed).unwrap()
+        );
+        // No collision without a differing byte form.
+        assert!(normalization_collisions(&[composed.clone(), composed]).is_empty());
+
+        let a = Identity::character("Acc", "Realm", "Thrall").unwrap();
+        let b = Identity::character("Acc", "Realm", "THRALL").unwrap();
+        assert!(a.differs_only_by_case(&b) && b.differs_only_by_case(&a));
+        assert!(!a.differs_only_by_case(&a));
+        assert_ne!(a, b, "identities compare exactly");
+        let other = Identity::character("Acc", "Realm", "Jaina").unwrap();
+        assert!(!a.differs_only_by_case(&other));
+    }
+
+    #[test]
     fn ids_require_32_lowercase_hex() {
         assert!(ComputerId::parse(&"a".repeat(32)).is_ok());
         assert_eq!(ComputerId::parse("abc"), Err(IdError::BadLength(3)));

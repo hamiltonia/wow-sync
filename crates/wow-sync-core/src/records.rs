@@ -1100,6 +1100,58 @@ mod contract_tests {
     }
 
     #[test]
+    fn pending_report_v2_is_replaced_by_the_slice_and_never_enters_a_state() {
+        // T-C07-pending-report-v2
+        use crate::testkit::{computer, enrollment};
+        let v2 = PendingReportV2 {
+            group_id: group_id(),
+            enrollment_id: enrollment(1),
+            report: None,
+            outcomes: vec![LocalOutcome {
+                package: key("suite"),
+                kind: LocalOutcomeKind::Removed,
+            }],
+        };
+        let bytes = encode(&v2);
+        assert!(matches!(
+            decode::<PendingReport>(&bytes, PendingReport::LIMIT),
+            Err(RecordError::UnsupportedMajor(2))
+        ));
+        assert_eq!(decode::<PendingReportV2>(&bytes, MIB).unwrap(), v2);
+        // The slice report is still major 1 and round-trips unchanged.
+        let v1 = PendingReport {
+            group_id: group_id(),
+            enrollment_id: enrollment(1),
+            report: Some(ApplyReport {
+                op: op(1),
+                basis: vec![BasisEntry {
+                    computer_id: computer(1),
+                    seq: 1,
+                }],
+                results: vec![ReportResult {
+                    package: key("suite"),
+                    result: ReportKind::Applied,
+                    package_hash: None,
+                }],
+            }),
+        };
+        let b1 = encode(&v1);
+        assert!(String::from_utf8_lossy(&b1).contains("pending-report/1"));
+        assert_eq!(decode::<PendingReport>(&b1, MIB).unwrap(), v1);
+        // No new outcome kind can be written as a slice report kind, so an old peer's decoder
+        // never sees one in `code-state/1.apply_report`.
+        for k in [
+            "removed",
+            "absent_acknowledged",
+            "restored",
+            "settings_applied",
+            "settings_kept_local",
+        ] {
+            assert!(serde_json::from_str::<ReportKind>(&format!("\"{k}\"")).is_err());
+        }
+    }
+
+    #[test]
     fn journal_v1_and_v2_golden_bytes() {
         // T-C05-journal-v1-golden, T-C01
         golden(
