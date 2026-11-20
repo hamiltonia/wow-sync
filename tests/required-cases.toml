@@ -1094,6 +1094,16 @@ tests = [
 # <<< section: R4-notify-diag
 
 # >>> section: R4-app
+[[case]]
+id = "R4-app:feature-gating"
+tier = "offline"
+tests = [
+    "features::tests::nothing_is_wired_on_this_base_and_each_control_says_why",
+    "features::tests::a_wired_action_is_enabled_and_a_retired_computer_cannot_publish",
+    "features::tests::a_held_computer_may_still_choose_and_the_choice_is_kept",
+    "features::tests::hold_sentences_follow_the_typed_scope",
+    "features::tests::every_result_has_its_own_plain_sentence",
+]
 # <<< section: R4-app
 
 # >>> section: R4-mac-kit

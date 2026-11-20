@@ -225,6 +225,7 @@ pub struct World {
     pub provider_error: Option<String>,
     pub stale_secs: Option<i64>,
     pub reconfirm: Option<Reconfirm>,
+    pub features: crate::features::FeatureData,
     pub activity: Vec<ActivityItem>,
     pub update: UpdateInfo,
     pub last_shared_secs: Option<i64>,
@@ -366,6 +367,7 @@ impl World {
             provider_error: None,
             stale_secs: None,
             reconfirm: None,
+            features: Default::default(),
             activity: Vec::new(),
             update: UpdateInfo {
                 current: app_version.to_string(),

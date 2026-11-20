@@ -14,6 +14,7 @@ mod assets;
 mod backend;
 mod brand;
 mod consent;
+mod features;
 mod model;
 mod pages;
 mod setup;
