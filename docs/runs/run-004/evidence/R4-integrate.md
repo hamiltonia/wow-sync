@@ -278,6 +278,46 @@ complete copy.
 - A-38: mapping condition made never-true -> that test fails; reverted, diff clean.
 - Deferred: the app bundle itself (R4-app / packaging).
 
+## Pass 13: snapshot gaps for R4-app (items 1-3)
+
+All new data is on `wow_sync_runtime::StatusSnapshot` (returned by `Service::status()`); types are
+re-exported from the crate root. Fields that would break an app struct literal
+(`RetirementRow` at `features.rs:759`, `RemovedRow` at `removed_ui.rs:50`) were not extended;
+separate fields/types carry the data instead.
+
+| Need | Exact path | Meaning for the GUI |
+|---|---|---|
+| Retire target, master choice | `StatusSnapshot.peers: Vec<wow_sync_runtime::PeerRow>` | `enrollment: EnrollmentRef` is the pair `Command::Retire { subject }` and `Command::SetSettingsPolicy { master }` take; `name`; `standing: PeerStanding::{Active, Retired, RetirementUnresolved}` (offer Retire only for `Active`, not `is_this`); `retired_at_ms: Option<u64>` is the retirement date |
+| Settings consent, accounts | `StatusSnapshot.settings: wow_sync_runtime::SettingsSnapshot` `.enabled`, `.accounts` | `EnableSettings` state and included accounts |
+| Master and exceptions | `settings.master: Option<EnrollmentRef>`, `.master_name`, `.exceptions: Vec<PolicyRule>`, `.policy_conflict` | `policy_conflict` means competing policies: choose nothing for the owner |
+| Paused folders and resume sheet | `settings.paused: Vec<wow_sync_runtime::PausedFolder { folder, here_changed, shared_newer }>` | feed `core::settings::resume_preview(here_changed, shared_newer)`; a folder absent from `paused` is not paused |
+| Restore of removed addon | `StatusSnapshot.removal_hashes: Vec<Sha256>`, parallel to `StatusSnapshot.removed` (same index) | the value for `Command::RestoreRemoved { removal }` |
+| Allow again | `StatusSnapshot.rejected_releases: Vec<wow_sync_runtime::RejectedRelease { folders, label, release, rejections, rejected_at_ms }>` | `rejections` is the value for `Command::AllowAgain { rejections }`; `rejected_at_ms` is the held/rejected date for that row |
+| Rollback `older_peer` | `StatusSnapshot.older_peer: Option<String>` | name of a live, not retired computer whose code-state lacks `rejection/1` (or has no features); show the warning before Rollback |
+
+- Tests: `e2e::tests::the_snapshot_lists_every_enrollment_with_its_standing_and_the_retirement_date`,
+  `e2e::tests::the_snapshot_reports_settings_master_accounts_and_what_a_paused_folder_would_meet`,
+  `e2e::tests::the_snapshot_settings_stay_disabled_and_unpaused_without_consent_or_cap`,
+  `detail::older_peer_tests::*`, and snapshot assertions in
+  `e2e::tests::allow_again_lifts_only_an_active_rejection` and
+  `e2e::tests::restoring_a_removed_addon_brings_it_back_and_it_is_not_removed_again`; the
+  outside-the-crate naming is in `tests/public_api.rs`.
+- Negative cases: a retired peer is not Active and the retirer is not retired; nothing is paused or
+  enabled without consent/cap; a lifted rejection leaves the list; a retired computer is never the
+  older peer.
+- A-38 controls (edit-tool mutation, named test fails, revert, `git diff --exit-code` clean):
+
+| Item | Mutation | Failed test |
+|---|---|---|
+| 1 peers | effective retirement mapped to `Active` | `the_snapshot_lists_every_enrollment_with_its_standing_and_the_retirement_date` |
+| 2 settings | `shared_newer` ignores the applied basis (`|| true`) | `the_snapshot_reports_settings_master_accounts_and_what_a_paused_folder_would_meet` |
+| 3 older peer | retired computers no longer excluded | `a_retired_computer_is_never_the_older_peer` |
+
+- DEFERRED: held-release date (no recorded source; `rejected_at_ms` covers rejected releases only);
+  the settings units list (status, live, heads, history) that Share/Choose/Restore settings need;
+  item 4 (diagnostics `os_version`, `process_memory_mib`, journals, DataAtRisk producer) not done
+  this pass.
+
 ## Verification
 
 Final tree: `cargo xtask verify --tier offline` PASS; `cargo xtask verify --tier native` PASS

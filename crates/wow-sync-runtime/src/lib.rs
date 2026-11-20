@@ -27,7 +27,7 @@ pub use control::{
 };
 pub use detail::{
     strip_colour_codes, CandidateRow, FolderRow, HeldRelease, MemberRow, PackageRow, PeerRow,
-    PeerStanding, RemovedRow, RetirementRow, StatusDetail,
+    PeerStanding, RejectedRelease, RemovedRow, RetirementRow, StatusDetail,
 };
 pub use diag::{ExportError, SaveError};
 pub use discover::{
@@ -41,7 +41,7 @@ pub use service::{
     AppliedLine, EnrollPreview, EnrollRequest, GroupInfo, JoinChoice, PackageLine, PreviewKind,
     ReconfirmRequest, ServiceConfig, ServiceError, SliceService, StatusSnapshot, SyncReport,
 };
-pub use settings_cycle::SettingsHistoryEntry;
+pub use settings_cycle::{PausedFolder, SettingsHistoryEntry, SettingsSnapshot};
 pub use updates::{system_clock, Clock, Started, UpdateService, UpdateView};
 
 pub use wow_sync_core as core;

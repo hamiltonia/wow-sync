@@ -2047,6 +2047,13 @@ mod tests {
         let removal = removal_hash(&lab, &g, &ac);
         synced(&mut b);
         assert_eq!(b.read("Alpha/main.lua"), None, "the removal applied first");
+        let snap = b.svc.status();
+        assert_eq!(snap.removed.len(), 1);
+        assert_eq!(
+            snap.removal_hashes,
+            vec![removal],
+            "the snapshot carries the hash RestoreRemoved takes"
+        );
 
         let ghost = sha256(b"no such removal");
         assert_eq!(
@@ -2421,6 +2428,67 @@ mod tests {
             }
         }
         assert!(found, "the replaced file is kept in settings-recovery");
+    }
+
+    #[test]
+    fn the_snapshot_reports_settings_master_accounts_and_what_a_paused_folder_would_meet() {
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let alpha = alpha_unit().folder;
+        let (sa, sb) = (a.svc.status().settings, b.svc.status().settings);
+        assert!(sa.enabled && sb.enabled);
+        assert_eq!(sb.accounts, vec!["ACC".to_string()]);
+        assert_eq!(sb.master, Some(ref_of(&a)));
+        assert_eq!(sb.master_name, Some(a.svc.status().computer_name));
+        assert!(sb.paused.is_empty(), "nothing is paused yet");
+
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        synced(&mut b);
+        b.svc
+            .command(Command::PauseSettings {
+                folder: alpha.clone(),
+            })
+            .unwrap();
+        let s = b.svc.status().settings;
+        assert_eq!(s.paused.len(), 1);
+        assert!(
+            !s.paused[0].here_changed && !s.paused[0].shared_newer,
+            "{s:?}"
+        );
+
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 3 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        let s = b.svc.status().settings;
+        assert!(
+            s.paused[0].shared_newer && !s.paused[0].here_changed,
+            "{s:?}"
+        );
+
+        write_wtf(&b, "Alpha", "AlphaDB = { mine = true }\n");
+        synced(&mut b);
+        let s = b.svc.status().settings;
+        assert!(
+            s.paused[0].shared_newer && s.paused[0].here_changed,
+            "{s:?}"
+        );
+        assert_eq!(s.paused[0].folder, alpha);
+    }
+
+    #[test]
+    fn the_snapshot_settings_stay_disabled_and_unpaused_without_consent_or_cap() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        a.addon_with("Alpha", "alpha-v1", SV_TOC);
+        a.create();
+        synced(&mut a);
+        let s = a.svc.status().settings;
+        assert!(!s.enabled && s.accounts.is_empty() && s.master.is_none());
+        assert!(s.paused.is_empty() && !s.policy_conflict);
     }
 
     #[test]
@@ -3154,6 +3222,19 @@ mod tests {
         };
         let rh = put_authority(&lab, &g, &ac, &AuthorityRecord::Rejection(rej));
         synced(&mut a);
+        let snap = a.svc.status();
+        assert_eq!(
+            snap.rejected_releases.len(),
+            1,
+            "{:?}",
+            snap.rejected_releases
+        );
+        let row = &snap.rejected_releases[0];
+        assert_eq!(row.rejections, vec![rh]);
+        assert_eq!(row.label, "3.0");
+        assert_eq!(row.release, hash(&bad));
+        assert_eq!(row.rejected_at_ms, 5);
+        assert_eq!(snap.older_peer, None, "every test slice honours rollback");
         let unknown = sha256(b"no such rejection");
         assert_eq!(
             a.svc.command(Command::AllowAgain {
@@ -3176,6 +3257,10 @@ mod tests {
         };
         synced(&mut a);
         assert_eq!(status(&a, &g, &lift), Some(Status::Valid));
+        assert!(
+            a.svc.status().rejected_releases.is_empty(),
+            "a lifted rejection leaves the allow-again list"
+        );
         // The rejection is no longer active, so it cannot be lifted twice.
         assert_eq!(
             a.svc.command(Command::AllowAgain {

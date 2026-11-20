@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use wow_sync_core::admit::{MemberLatest, MemberView};
 use wow_sync_core::explain::{render_named, Explanation};
-use wow_sync_core::ids::ComputerId;
+use wow_sync_core::ids::{ComputerId, Sha256};
 use wow_sync_core::inventory::{FolderScan, FolderState, Inventory};
 use wow_sync_core::paths::FolderKey;
 use wow_sync_core::status::{confirmations, MemberSummary, PackageStatus, StatusView};
@@ -584,12 +584,91 @@ pub fn review_needed(reconfirm_pending: bool, base: wow_sync_core::status::Headl
 }
 
 /// Live removals as rows, with provenance by computer name (UG-22). Nothing is decided here.
+#[cfg(test)]
 pub fn removed_rows(
     ledger: &wow_sync_core::ledger::Ledger,
     derived: &wow_sync_core::ledger::Derived,
     names: &BTreeMap<ComputerId, String>,
     this: &ComputerId,
 ) -> Vec<RemovedRow> {
+    removed_rows_keyed(ledger, derived, names, this)
+        .into_iter()
+        .map(|(row, _)| row)
+        .collect()
+}
+
+/// The release a rollback rejected and that is still rejected (the "Allow again" list).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RejectedRelease {
+    pub folders: Vec<String>,
+    pub label: String,
+    /// The rejected package; the id a later same-release candidate is compared with.
+    pub release: Sha256,
+    /// The record hashes `Command::AllowAgain { rejections }` takes.
+    pub rejections: Vec<Sha256>,
+    /// When the rejection was written (the rejecting computer's clock, milliseconds).
+    pub rejected_at_ms: u64,
+}
+
+/// Active rejections, one row per rejected release, grouping every record that rejects it.
+pub fn rejected_releases(
+    ledger: &wow_sync_core::ledger::Ledger,
+    derived: &wow_sync_core::ledger::Derived,
+) -> Vec<RejectedRelease> {
+    let mut out: Vec<RejectedRelease> = Vec::new();
+    for (hash, r) in wow_sync_core::reject::RejectBehaviour::new(derived).active(ledger) {
+        if let Some(row) = out
+            .iter_mut()
+            .find(|x| x.release == r.rejected.package_hash)
+        {
+            row.rejections.push(hash);
+            row.rejected_at_ms = row.rejected_at_ms.max(r.written_unix_ms);
+            continue;
+        }
+        out.push(RejectedRelease {
+            folders: r
+                .rejected
+                .folders
+                .iter()
+                .map(|t| t.key.to_string())
+                .collect(),
+            label: r.rejected.version_label.clone(),
+            release: r.rejected.package_hash,
+            rejections: vec![hash],
+            rejected_at_ms: r.written_unix_ms,
+        });
+    }
+    out
+}
+
+/// The first live computer whose software predates rollback (no `rejection/1`), by name.
+/// It would keep installing a rejected release, so a rollback must say so first.
+pub fn older_peer(views: &[wow_sync_core::admit::MemberView], peers: &[PeerRow]) -> Option<String> {
+    use wow_sync_core::admit::MemberLatest;
+    views
+        .iter()
+        .filter(|v| {
+            !peers.iter().any(|p| {
+                p.enrollment.enrollment_id == v.enrollment && p.standing == PeerStanding::Retired
+            })
+        })
+        .find_map(|v| match &v.latest {
+            MemberLatest::Valid { state, .. }
+                if !state.features.iter().any(|f| f == "rejection/1") =>
+            {
+                Some(v.display_name.clone())
+            }
+            _ => None,
+        })
+}
+
+/// Live removals with the record hash `Command::RestoreRemoved { removal }` takes.
+pub fn removed_rows_keyed(
+    ledger: &wow_sync_core::ledger::Ledger,
+    derived: &wow_sync_core::ledger::Derived,
+    names: &BTreeMap<ComputerId, String>,
+    this: &ComputerId,
+) -> Vec<(RemovedRow, Sha256)> {
     use wow_sync_core::authority::AuthorityRecord;
     let name = |c: &ComputerId| -> String {
         if c == this {
@@ -617,15 +696,90 @@ pub fn removed_rows(
                 })
                 .map(|e| name(&e.computer_id))
                 .collect();
-            out.push(RemovedRow {
-                title: strip_colour_codes(&r.title),
-                folders: r.folders.iter().map(|m| m.name.clone()).collect(),
-                provenance: format!("{} {}", name(&r.issuer.computer_id), how(r.evidence)),
-                awaiting,
-            });
+            out.push((
+                RemovedRow {
+                    title: strip_colour_codes(&r.title),
+                    folders: r.folders.iter().map(|m| m.name.clone()).collect(),
+                    provenance: format!("{} {}", name(&r.issuer.computer_id), how(r.evidence)),
+                    awaiting,
+                },
+                *h,
+            ));
         }
     }
     out
+}
+
+#[cfg(test)]
+mod older_peer_tests {
+    use super::*;
+    use crate::removal_cycle::fixtures::{addon, computer, enrollment, group_id, inventory};
+    use wow_sync_core::package::ClientInfo;
+    use wow_sync_core::records::{CodeState, FEATURES};
+
+    fn view(n: u8, features: &[&str]) -> MemberView {
+        let inv = inventory(vec![addon("Alpha", Some("1"), "a")]);
+        MemberView {
+            computer: computer(n),
+            enrollment: enrollment(n),
+            display_name: format!("pc{n}"),
+            latest: MemberLatest::Valid {
+                seq: 1,
+                state: Box::new(CodeState {
+                    group_id: group_id(),
+                    computer_id: computer(n),
+                    enrollment_id: enrollment(n),
+                    seq: 1,
+                    product: "wowf".into(),
+                    app_version: "0.0.0".into(),
+                    written_unix_ms: 1,
+                    client: ClientInfo {
+                        build_version: Some("1.15.8".into()),
+                        toc_mapping: "validated-plain/1".into(),
+                    },
+                    inventory_complete: true,
+                    folders: inv.folders,
+                    apply_report: None,
+                    authority_index: None,
+                    features: features.iter().map(|f| f.to_string()).collect(),
+                }),
+            },
+        }
+    }
+
+    fn peer(n: u8, standing: PeerStanding) -> PeerRow {
+        PeerRow {
+            enrollment: wow_sync_core::kinds::EnrollmentRef {
+                computer_id: computer(n),
+                enrollment_id: enrollment(n),
+            },
+            name: format!("pc{n}"),
+            standing,
+            retired_at_ms: None,
+            is_this: false,
+        }
+    }
+
+    #[test]
+    fn a_live_computer_without_rejection_support_is_the_older_peer() {
+        let peers = [peer(2, PeerStanding::Active), peer(3, PeerStanding::Active)];
+        let current = view(2, FEATURES);
+        let old = view(3, &["authority/1"]);
+        assert_eq!(older_peer(std::slice::from_ref(&current), &peers), None);
+        assert_eq!(older_peer(&[current, old], &peers), Some("pc3".to_string()));
+        let none_at_all = view(3, &[]);
+        assert_eq!(
+            older_peer(&[none_at_all], &peers),
+            Some("pc3".to_string()),
+            "a slice that predates features counts as older"
+        );
+    }
+
+    #[test]
+    fn a_retired_computer_is_never_the_older_peer() {
+        let peers = [peer(3, PeerStanding::Retired)];
+        assert_eq!(older_peer(&[view(3, &[])], &peers), None);
+    }
 }
 
 #[cfg(test)]

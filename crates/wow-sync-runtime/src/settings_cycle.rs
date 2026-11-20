@@ -293,6 +293,74 @@ pub fn save_local(state: &LocalState, group: &GroupId, l: &SettingsLocal) -> Res
     state.write_atomic(&local_name(group), &encode(l))
 }
 
+/// One paused folder with what a resume would meet (settings.md resume sheet inputs).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PausedFolder {
+    pub folder: wow_sync_core::paths::FolderKey,
+    /// This computer's saved settings differ from the last shared state it applied.
+    pub here_changed: bool,
+    /// The shared settings moved on to a revision this computer has not applied.
+    pub shared_newer: bool,
+}
+
+/// The settings facts the GUI needs: consent, accounts, who is master and what is paused.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SettingsSnapshot {
+    pub enabled: bool,
+    pub accounts: Vec<String>,
+    /// The single policy's master; `None` when there is no policy, no master or a conflict.
+    pub master: Option<EnrollmentRef>,
+    pub master_name: Option<String>,
+    pub exceptions: Vec<wow_sync_core::kinds::PolicyRule>,
+    /// Several competing policies exist: nothing is chosen for the owner.
+    pub policy_conflict: bool,
+    pub paused: Vec<PausedFolder>,
+}
+
+pub fn settings_snapshot(
+    local: &SettingsLocal,
+    ledger: &wow_sync_core::ledger::Ledger,
+    derived: &wow_sync_core::ledger::Derived,
+    names: &std::collections::BTreeMap<wow_sync_core::ids::EnrollmentId, String>,
+) -> SettingsSnapshot {
+    let heads = wow_sync_core::settings::policy_heads(ledger, derived);
+    let (master, exceptions, policy_conflict) = match heads.as_slice() {
+        [one] => (one.master.clone(), one.rules.clone(), false),
+        [] => (None, Vec::new(), false),
+        _ => (None, Vec::new(), true),
+    };
+    let mut paused: Vec<PausedFolder> = Vec::new();
+    for folder in &local.paused_folders {
+        let (mut here_changed, mut shared_newer) = (false, false);
+        for u in local.units.iter().filter(|u| &u.unit.folder == folder) {
+            let graph = wow_sync_core::settings::graph_from_ledger(ledger, derived, &u.unit);
+            let latest = u.captures.first();
+            here_changed |= latest.is_some()
+                && latest != u.last_applied.as_ref()
+                && (u.last_applied.is_some() || !graph.heads.is_empty());
+            shared_newer |= !graph.pending
+                && graph.head_states.len() == 1
+                && graph.heads.iter().any(|h| !u.basis.contains(h));
+        }
+        paused.push(PausedFolder {
+            folder: folder.clone(),
+            here_changed,
+            shared_newer,
+        });
+    }
+    SettingsSnapshot {
+        enabled: local.consent,
+        accounts: local.included_accounts.clone(),
+        master_name: master
+            .as_ref()
+            .and_then(|m| names.get(&m.enrollment_id).cloned()),
+        master,
+        exceptions,
+        policy_conflict,
+        paused,
+    }
+}
+
 fn use_shared_name(group: &GroupId) -> String {
     format!("settings-use-shared-{group}.json")
 }
