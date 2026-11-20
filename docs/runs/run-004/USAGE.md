@@ -17,7 +17,7 @@ Baseline: the cumulative orchestrator-session total at run-004 start is
 | 7 | R4-core-removal | implementation / claude-sonnet-5.5 | `e741ccb0` | 380.5 | Merged (`4162541`); lost uncommitted removal.rs via `git checkout --` during a mutation control, re-implemented as a same-task follow-up; 6 A-38 controls fail as expected; both tiers PASS; service.rs wiring + target/explain/status variants DEFERRED |
 | 8 | R4-core-settings | implementation / claude-sonnet-5.5 | `50cfd494` | 406.1 | Merged (`5ba828a`); both tiers PASS; only 3 of 15 A-38 controls run; ledger.rs rejects mixed-kind parents (contradicts settings.md §3.3, needs fix); hooks/rollback_flow wiring thin; Q-77 keeps real settings sync disabled |
 | 9 | R4-core-ops | implementation / claude-sonnet-5.5 | `8aee2e45` | 281.8 | Merged `c706ab7`; both tiers PASS; 5 A-38 controls fail as expected; hooks not wired into target/service/control (integration gap), kept queue not persisted (runtime lacks serde_json), 3 item builders missing |
-| 10 | R4-integrate | implementation / claude-sonnet-5.5 | `47b27b1b` | — | Running. First pass stopped with no changes: the runtime has no authority plane or §9.1 control surface, and code-state lacks `authority_index` (unmet C1). Scope widened by the orchestrator (records/plan, ledger serde, minimal proto/app match arms) and staged A–D |
+| 10 | R4-integrate | implementation / claude-sonnet-5.5 | `47b27b1b` | 240.7 (pass 1+2) | Pass 1 stopped with no changes: the runtime has no authority plane or §9.1 control surface, and code-state lacks `authority_index` (unmet C1). Scope widened by the orchestrator (records/plan, ledger serde, minimal proto/app match arms) and staged A–D. Pass 2: stage A + code-state `authority_index` merged `735fa36` (A `affc3a4`, B-part-1 `7abfb7d`); stage B sent as a follow-up |
 
 Follow-up R4-core-settings (worker 8, same agent): a #[cfg(windows)] junction test was listed in an offline case, so main CI `c0d6a93` failed on macOS. Fixed in `577a8ca` (moved to native case `R4-core-settings:adapters-native`), merged `cb9931e`.
 
@@ -39,5 +39,6 @@ Stopped at the owner barrier: R4D-28 needs an owner-authorized bounded amendment
 | Design PASS (recheck4 merged) | 23,002.6 | 5,589.6 |
 | C1 foundation merged | 24,397.4 | 6,984.4 |
 | C2 step 2 merged (removal, settings, ops) | 25,581.2 | 8,168.2 |
+| C3 partial (integrate A) merged | 26,022.0 | 8,609.0 |
 
 Design review passed. Phase C remains blocked only on the PENDING OWNER product questions.
