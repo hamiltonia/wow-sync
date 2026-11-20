@@ -106,6 +106,8 @@ pub enum Act {
     Setup(SetupAct),
     Reconfirm(ReconfAct),
     CopyVersion,
+    /// A group command from a feature screen, sent to the sync thread as it is.
+    Group(crate::features::GroupAction),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -187,6 +189,7 @@ pub struct Shell {
     pub seen_version: u64,
     pub loaded: bool,
     pub message: String,
+    seen_group_result: u64,
     pub preview_lines: Vec<String>,
     pub app_version: String,
     pub closing_quits: bool,
@@ -280,6 +283,7 @@ impl Shell {
             seen_version: u64::MAX,
             loaded: false,
             message: String::new(),
+            seen_group_result: 0,
             preview_lines: Vec::new(),
             app_version,
             closing_quits: false,
@@ -443,6 +447,14 @@ impl Shell {
                 .as_ref()
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
+            w.features.caps = crate::features::Capabilities::runtime();
+            w.features.decisions = g.decisions.clone();
+            if let Some(r) = &g.group_result {
+                if r.seq != self.seen_group_result {
+                    self.seen_group_result = r.seq;
+                    self.notice = Some(crate::features::result_text(r.kind, &r.result));
+                }
+            }
             (
                 w,
                 g.message.clone(),
@@ -677,6 +689,10 @@ impl Shell {
             Act::Setup(a) => self.setup_act(a),
             Act::Reconfirm(a) => self.reconf_act(a),
             Act::CopyVersion => self.copied = true,
+            Act::Group(a) => match crate::features::gate(&self.w, a.kind()) {
+                Ok(()) => self.send(Cmd::Group(a)),
+                Err(why) => self.notice = Some(why),
+            },
         }
         let _ = window;
         cx.notify();

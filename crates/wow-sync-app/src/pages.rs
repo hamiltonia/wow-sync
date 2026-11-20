@@ -928,6 +928,100 @@ impl Shell {
         col.into_any_element()
     }
 
+    fn decision_card_view(
+        &mut self,
+        card: crate::decisions_ui::DecisionCard,
+        back: impl IntoElement,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let pal = self.pal();
+        let mut col = self
+            .body_col()
+            .child(back)
+            .child(self.heading(&format!("{}: choose what to keep", card.title), 1))
+            .child(div().child(SharedString::from(card.why.clone())));
+        if let Some(line) = card.hold_line.clone() {
+            col = col.child(self.muted(line));
+        }
+        if let Some(note) = crate::decisions_ui::standing_note(&self.w) {
+            col = col.child(self.muted(note));
+        }
+        if let Some(note) = card.no_options_note.clone() {
+            col = col.child(self.muted(note));
+        }
+        let gate = crate::decisions_ui::choosing_gate(&self.w);
+        for o in card.options.clone() {
+            let ack_key = format!("ack-{}", o.id.0);
+            let acked = self.expanded.contains(&ack_key);
+            let mut inner: Vec<AnyElement> = vec![div()
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(SharedString::from(o.label.clone()))
+                .into_any_element()];
+            if !o.holders.is_empty() {
+                inner.push(self.muted(o.holders.clone()).into_any_element());
+            }
+            for e in &o.effects {
+                inner.push(
+                    div()
+                        .child(SharedString::from(e.clone()))
+                        .into_any_element(),
+                );
+            }
+            if let Some(wn) = &o.warning {
+                inner.push(
+                    div()
+                        .text_color(rgb(pal.fg(Tone::Help)))
+                        .child(SharedString::from(wn.clone()))
+                        .into_any_element(),
+                );
+                inner.push(
+                    self.btn(
+                        &ack_key,
+                        if acked {
+                            "Understood (selected)"
+                        } else {
+                            "I understand this"
+                        },
+                        Bk::Link,
+                        Act::ToggleExpand(ack_key.clone()),
+                        cx,
+                    )
+                    .into_any_element(),
+                );
+            }
+            let key = format!("choose-{}", o.id.0);
+            let btn = match crate::decisions_ui::choose(&self.w, &card, o.id, acked) {
+                Ok(a) => self.btn(&key, "Keep this", Bk::Primary, Act::Group(a), cx),
+                Err(why) => self.btn_off(&key, "Keep this", &why, cx),
+            };
+            inner.push(btn.into_any_element());
+            if gate.is_ok() && o.needs_confirm && !acked {
+                inner.push(
+                    self.muted("Tick the box above to continue.")
+                        .into_any_element(),
+                );
+            }
+            col = col.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(u(6.))
+                    .p(u(16.))
+                    .rounded(u(8.))
+                    .bg(rgb(pal.surface))
+                    .border_1()
+                    .border_color(rgb(pal.divider))
+                    .children(inner),
+            );
+        }
+        if let Err(why) = gate {
+            col = col.child(self.muted(why));
+        }
+        col = col.child(self.muted(card.reach.clone()));
+        col = col.child(self.btn("decide-later", "Decide later", Bk::Secondary, Act::Back, cx));
+        col.into_any_element()
+    }
+
     fn decision_view(&mut self, key: &str, cx: &mut Context<Self>) -> AnyElement {
         let pal = self.pal();
         let back = self.back_link(
@@ -938,6 +1032,15 @@ impl Shell {
             },
             cx,
         );
+        let cards = crate::decisions_ui::cards(&self.w);
+        if let Some(card) = cards.into_iter().find(|c| match &c.id.0 {
+            wow_sync_core::decision::DecisionScope::Folders(ks) => {
+                ks.iter().any(|k| k.as_str() == key)
+            }
+            _ => false,
+        }) {
+            return self.decision_card_view(card, back, cx);
+        }
         let Some(a) = self.w.addon(key).cloned() else {
             return self
                 .body_col()

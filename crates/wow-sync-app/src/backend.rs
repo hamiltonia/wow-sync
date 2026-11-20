@@ -3,6 +3,7 @@
 //! Pause is persisted by the runtime (UG-2). Quit-when-safe goes through `QuitGate` (UG-17): a
 //! sync cycle is one step, and the thread only reads commands between steps.
 
+use crate::features::{ActionKind, ActionResult, GroupAction};
 use crate::world::SetupData;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
@@ -32,6 +33,22 @@ pub enum Cmd {
     Enroll(Target, EnrollRequest),
     Reconfirm(ReconfirmRequest),
     SaveSettings(AppSettings),
+    /// A group command from a feature screen; its result is published for the screen to show.
+    Group(GroupAction),
+}
+
+/// The outcome of the last group command, with a counter so a screen shows each result once.
+#[derive(Clone, Debug)]
+pub struct GroupResult {
+    pub seq: u64,
+    pub kind: ActionKind,
+    pub result: ActionResult,
+}
+
+/// Runs a group action on the service. The one place the app turns a screen's choice into a
+/// runtime command.
+pub fn dispatch(svc: &mut SliceService, a: &GroupAction) -> ActionResult {
+    ActionResult::from_outcome(svc.command(a.to_command()))
 }
 
 #[derive(Default)]
@@ -54,6 +71,9 @@ pub struct Shared {
     pub setup: Option<SetupData>,
     pub enrolled_now: bool,
     pub shared_root: Option<PathBuf>,
+    /// What core currently offers the owner to decide (typed; the app renders the words).
+    pub decisions: Vec<wow_sync_core::decision::DecisionItem>,
+    pub group_result: Option<GroupResult>,
 }
 
 pub type SharedState = Arc<Mutex<Shared>>;
@@ -157,10 +177,12 @@ fn now_ms() -> i64 {
 
 fn refresh(svc: &mut SliceService, shared: &SharedState, wake: &Sender<()>, checked: bool) {
     let st = svc.status();
+    let decisions = svc.offered_decisions().to_vec();
     let (pause, act, settings) = (svc.pause_state(), svc.activity_log(300), svc.app_settings());
     publish(shared, wake, |g| {
         g.started = true;
         g.snapshot = st;
+        g.decisions = decisions;
         g.paused_since = match pause {
             PauseState::Paused { since_ms } => Some(since_ms),
             _ => None,
@@ -273,6 +295,18 @@ fn run(
                 if let Some(s) = svc.as_ref() {
                     let _ = s.save_app_settings(&st);
                     publish(&shared, &wake, |g| g.settings = st);
+                }
+                continue;
+            }
+            Some(Cmd::Group(a)) => {
+                if let Some(s) = svc.as_mut() {
+                    let result = dispatch(s, &a);
+                    let kind = a.kind();
+                    publish(&shared, &wake, |g| {
+                        let seq = g.group_result.as_ref().map_or(1, |r| r.seq + 1);
+                        g.group_result = Some(GroupResult { seq, kind, result });
+                    });
+                    refresh(s, &shared, &wake, false);
                 }
                 continue;
             }

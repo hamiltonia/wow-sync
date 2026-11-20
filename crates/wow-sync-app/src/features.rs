@@ -2,17 +2,20 @@
 //! settings, About, diagnostics). Pure: no GPUI types, so it runs on every platform.
 //!
 //! The app never builds a group record itself. It renders what core returns and hands the choice
-//! back as a [`GroupAction`]. `backend::dispatch` is the one place that sends an action to the
-//! sync service. Until the runtime exports its command types (see evidence, "Handover to
-//! R4-integrate. The screens that consume these types are not built yet, hence the allow.
+//! back as a [`GroupAction`]; `backend` is the one place that sends it to the sync service as a
+//! runtime `Command`. Controls whose runtime command does not exist yet (updates, diagnostics,
+//! notification choices) are shown disabled with an honest reason.
+//! Some fields are filled only once the snapshot fields of R4-integrate merge, hence the allow.
 #![allow(dead_code)]
 
 use crate::world::World;
 use wow_sync_core::decision::{DecisionId, DecisionItem, DecisionScope, EvidenceToken, OptionId};
-use wow_sync_core::ids::Sha256;
-use wow_sync_core::kinds::{ChoiceReason, EnrollmentRef};
+use wow_sync_core::ids::{SettingsUnit, Sha256};
+use wow_sync_core::kinds::{ChoiceReason, EnrollmentRef, PolicyRule};
 use wow_sync_core::paths::FolderKey;
+use wow_sync_core::settings::ResumeOption;
 use wow_sync_core::status::{AllHoldCause, HoldScope};
+use wow_sync_runtime::{Command, CommandError, CommandOutcome, RollbackRefusal};
 
 /// Every action a feature screen can ask for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,31 +28,26 @@ pub enum ActionKind {
     AllowAgain,
     Rollback,
     RestoreRemoved,
+    RestoreRemovedSettings,
     SetSettingsPolicy,
     ShareSettings,
     EnableSettings,
-    SettingsPause,
-    SettingsResume,
-    SettingsUseShared,
-    SettingsRestore,
+    PauseSettings,
+    ResumeSettings,
+    UseSharedSettings,
+    ChooseSettings,
+    RestoreSettings,
     CheckUpdates,
     ExportDiagnostics,
     SaveNoticePrefs,
 }
 
 impl ActionKind {
-    /// Whether the runtime has a command or query for it on the current base (evidence control
-    /// map). The rest are handed over to R4-integrate.
+    /// Whether the runtime has a command for it on the current base (evidence control map).
     pub fn has_runtime_command(self) -> bool {
         !matches!(
             self,
-            ActionKind::SettingsPause
-                | ActionKind::SettingsResume
-                | ActionKind::SettingsUseShared
-                | ActionKind::SettingsRestore
-                | ActionKind::CheckUpdates
-                | ActionKind::ExportDiagnostics
-                | ActionKind::SaveNoticePrefs
+            ActionKind::CheckUpdates | ActionKind::ExportDiagnostics | ActionKind::SaveNoticePrefs
         )
     }
 
@@ -66,11 +64,12 @@ impl ActionKind {
                 | ActionKind::RestoreRemoved
                 | ActionKind::SetSettingsPolicy
                 | ActionKind::ShareSettings
+                | ActionKind::ChooseSettings
         )
     }
 }
 
-/// The actions the sync thread can actually dispatch. Empty on this base.
+/// The actions the sync thread can dispatch.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Capabilities {
     wired: Vec<ActionKind>,
@@ -86,6 +85,32 @@ impl Capabilities {
 
     pub fn has(&self, k: ActionKind) -> bool {
         self.wired.contains(&k)
+    }
+
+    /// Everything `backend` can send to the service today.
+    pub fn runtime() -> Self {
+        use ActionKind::*;
+        [
+            Decide,
+            Keep,
+            Resume,
+            Retire,
+            ReEnroll,
+            AllowAgain,
+            Rollback,
+            RestoreRemoved,
+            RestoreRemovedSettings,
+            SetSettingsPolicy,
+            ShareSettings,
+            EnableSettings,
+            PauseSettings,
+            ResumeSettings,
+            UseSharedSettings,
+            ChooseSettings,
+            RestoreSettings,
+        ]
+        .into_iter()
+        .fold(Self::default(), Self::with)
     }
 }
 
@@ -107,6 +132,10 @@ pub enum GroupAction {
     RestoreRemoved {
         removal: Sha256,
     },
+    RestoreRemovedSettings {
+        removal: Sha256,
+        unit: SettingsUnit,
+    },
     Keep {
         scope: Vec<FolderKey>,
         copy: Sha256,
@@ -121,6 +150,36 @@ pub enum GroupAction {
         package: FolderKey,
         recovered: Sha256,
     },
+    SetSettingsPolicy {
+        master: Option<EnrollmentRef>,
+        exceptions: Vec<PolicyRule>,
+    },
+    ShareSettings {
+        unit: SettingsUnit,
+        checkpoint: Sha256,
+    },
+    EnableSettings {
+        included_accounts: Vec<String>,
+    },
+    PauseSettings {
+        folder: FolderKey,
+    },
+    ResumeSettings {
+        folder: FolderKey,
+        choice: ResumeOption,
+    },
+    UseSharedSettings {
+        unit: SettingsUnit,
+    },
+    ChooseSettings {
+        unit: SettingsUnit,
+        checkpoint: Sha256,
+        shown_heads: Vec<Sha256>,
+    },
+    RestoreSettings {
+        unit: SettingsUnit,
+        checkpoint: Sha256,
+    },
 }
 
 impl GroupAction {
@@ -131,9 +190,79 @@ impl GroupAction {
             GroupAction::ReEnroll => ActionKind::ReEnroll,
             GroupAction::AllowAgain { .. } => ActionKind::AllowAgain,
             GroupAction::RestoreRemoved { .. } => ActionKind::RestoreRemoved,
+            GroupAction::RestoreRemovedSettings { .. } => ActionKind::RestoreRemovedSettings,
             GroupAction::Keep { .. } => ActionKind::Keep,
             GroupAction::Resume { .. } => ActionKind::Resume,
             GroupAction::Rollback { .. } => ActionKind::Rollback,
+            GroupAction::SetSettingsPolicy { .. } => ActionKind::SetSettingsPolicy,
+            GroupAction::ShareSettings { .. } => ActionKind::ShareSettings,
+            GroupAction::EnableSettings { .. } => ActionKind::EnableSettings,
+            GroupAction::PauseSettings { .. } => ActionKind::PauseSettings,
+            GroupAction::ResumeSettings { .. } => ActionKind::ResumeSettings,
+            GroupAction::UseSharedSettings { .. } => ActionKind::UseSharedSettings,
+            GroupAction::ChooseSettings { .. } => ActionKind::ChooseSettings,
+            GroupAction::RestoreSettings { .. } => ActionKind::RestoreSettings,
+        }
+    }
+
+    /// The runtime command carrying exactly the typed fields the screen chose.
+    pub fn to_command(&self) -> Command {
+        match self.clone() {
+            GroupAction::Decide {
+                item,
+                option,
+                shown,
+            } => Command::Decide {
+                item,
+                option,
+                shown,
+            },
+            GroupAction::Retire { subject } => Command::Retire { subject },
+            GroupAction::ReEnroll => Command::ReEnroll,
+            GroupAction::AllowAgain { rejections } => Command::AllowAgain { rejections },
+            GroupAction::RestoreRemoved { removal } => Command::RestoreRemoved { removal },
+            GroupAction::RestoreRemovedSettings { removal, unit } => {
+                Command::RestoreRemovedSettings { removal, unit }
+            }
+            GroupAction::Keep { scope, copy, why } => Command::Keep { scope, copy, why },
+            GroupAction::Resume {
+                scope,
+                allow_again,
+                why,
+            } => Command::Resume {
+                scope,
+                allow_again,
+                why,
+            },
+            GroupAction::Rollback { package, recovered } => {
+                Command::Rollback { package, recovered }
+            }
+            GroupAction::SetSettingsPolicy { master, exceptions } => {
+                Command::SetSettingsPolicy { master, exceptions }
+            }
+            GroupAction::ShareSettings { unit, checkpoint } => {
+                Command::ShareSettings { unit, checkpoint }
+            }
+            GroupAction::EnableSettings { included_accounts } => {
+                Command::EnableSettings { included_accounts }
+            }
+            GroupAction::PauseSettings { folder } => Command::PauseSettings { folder },
+            GroupAction::ResumeSettings { folder, choice } => {
+                Command::ResumeSettings { folder, choice }
+            }
+            GroupAction::UseSharedSettings { unit } => Command::UseSharedSettings { unit },
+            GroupAction::ChooseSettings {
+                unit,
+                checkpoint,
+                shown_heads,
+            } => Command::ChooseSettings {
+                unit,
+                checkpoint,
+                shown_heads,
+            },
+            GroupAction::RestoreSettings { unit, checkpoint } => {
+                Command::RestoreSettings { unit, checkpoint }
+            }
         }
     }
 }
@@ -160,13 +289,75 @@ pub enum ActionResult {
     Failed(String),
 }
 
+impl ActionResult {
+    pub fn from_outcome(r: Result<CommandOutcome, CommandError>) -> Self {
+        match r {
+            Ok(CommandOutcome::Written(_) | CommandOutcome::ReEnrolled) => Self::Written,
+            Ok(CommandOutcome::Kept) => Self::Kept,
+            Ok(CommandOutcome::Local(_) | CommandOutcome::Recorded) => Self::Local,
+            Ok(CommandOutcome::NothingToDo) => Self::NothingToDo,
+            Err(CommandError::Decide(wow_sync_core::decision::DecideError::Changed)) => {
+                Self::Changed
+            }
+            Err(CommandError::Settings(wow_sync_core::settings::SettingsWriteError::Changed)) => {
+                Self::Changed
+            }
+            Err(CommandError::NotAllowed) => Self::NotAllowed,
+            Err(CommandError::Rollback(RollbackRefusal::NotAvailable)) => Self::NotAvailable,
+            Err(CommandError::Rollback(RollbackRefusal::SameRelease)) => {
+                Self::Failed("that release is already installed".into())
+            }
+            Err(CommandError::Rollback(RollbackRefusal::NotInstalled)) => {
+                Self::Failed("nothing of that add-on is installed here".into())
+            }
+            Err(CommandError::Rollback(RollbackRefusal::UnknownRelease(_))) => {
+                Self::Failed("that release is no longer held".into())
+            }
+            Err(CommandError::Decide(_)) => Self::Failed("that choice is no longer offered".into()),
+            Err(CommandError::UnknownRejection(_)) => {
+                Self::Failed("that exclusion is not active any more".into())
+            }
+            Err(CommandError::EmptySelection) => Self::Failed("nothing was selected".into()),
+            Err(CommandError::UnknownCopy(_)) => {
+                Self::Failed("that copy is no longer held by the group".into())
+            }
+            Err(CommandError::UnknownRemoval(_)) => {
+                Self::Failed("that removal is not in the group history".into())
+            }
+            Err(CommandError::UnknownCheckpoint(_)) => {
+                Self::Failed("that settings copy is not available".into())
+            }
+            Err(CommandError::Settings(_)) => {
+                Self::Failed("the settings choice is not valid now".into())
+            }
+            Err(CommandError::Write(_)) => Self::Failed("the choice could not be written".into()),
+            Err(CommandError::UnknownFolder(_)) => {
+                Self::Failed("that add-on is not known here".into())
+            }
+            Err(CommandError::NoSharedSettings(_)) => {
+                Self::Failed("there is no single shared copy of those settings to use".into())
+            }
+            Err(CommandError::UseShareSettings) => {
+                Self::Failed("resuming never shares your settings; use Share my settings".into())
+            }
+            Err(CommandError::Service(_)) => {
+                Self::Failed("the sync service could not do that".into())
+            }
+        }
+    }
+}
+
 /// The sentence shown after an action (decision flows: ops.md §1.3, rollback.md §1).
 pub fn result_text(kind: ActionKind, r: &ActionResult) -> String {
     match r {
         ActionResult::Written => match kind {
             ActionKind::Retire => "Retired. It is shared with the group.".into(),
-            ActionKind::Rollback => "Going back is queued. It is applied when WoW is closed.".into(),
+            ActionKind::ReEnroll => "This computer joined the group again.".into(),
+            ActionKind::Rollback => {
+                "Going back is queued. It is applied when WoW is closed.".into()
+            }
             ActionKind::RestoreRemoved => "Restored for every computer in the group.".into(),
+            ActionKind::AllowAgain => "Allowed again for every computer in the group.".into(),
             _ => "Saved and shared with the group.".into(),
         },
         ActionResult::Kept => "Saved. It is shared when you resume syncing.".into(),
@@ -324,7 +515,7 @@ mod tests {
         let w = w();
         let e = gate(&w, ActionKind::Decide).unwrap_err();
         assert_eq!(e, NOT_WIRED);
-        let e = gate(&w, ActionKind::SettingsPause).unwrap_err();
+        let e = gate(&w, ActionKind::CheckUpdates).unwrap_err();
         assert_eq!(e, NEEDS_UPDATE);
     }
 
@@ -387,6 +578,51 @@ mod tests {
             hold_sentence(&w).unwrap(),
             "Nothing is updated on this computer until this is resolved."
         );
+    }
+
+    #[test]
+    fn runtime_outcomes_and_refusals_map_to_distinct_results() {
+        use wow_sync_core::decision::DecideError;
+        let r = |e| ActionResult::from_outcome(Err(e));
+        assert_eq!(
+            r(CommandError::Decide(DecideError::Changed)),
+            ActionResult::Changed
+        );
+        assert_eq!(r(CommandError::NotAllowed), ActionResult::NotAllowed);
+        assert_eq!(
+            r(CommandError::Rollback(RollbackRefusal::NotAvailable)),
+            ActionResult::NotAvailable
+        );
+        assert!(matches!(
+            r(CommandError::Rollback(RollbackRefusal::SameRelease)),
+            ActionResult::Failed(_)
+        ));
+        assert_eq!(
+            ActionResult::from_outcome(Ok(CommandOutcome::Kept)),
+            ActionResult::Kept
+        );
+        assert_eq!(
+            ActionResult::from_outcome(Ok(CommandOutcome::NothingToDo)),
+            ActionResult::NothingToDo
+        );
+    }
+
+    #[test]
+    fn an_action_becomes_the_command_with_the_same_typed_fields() {
+        let a = GroupAction::Rollback {
+            package: wow_sync_core::paths::validate_folder_name("Bagnon").unwrap(),
+            recovered: Sha256([9; 32]),
+        };
+        assert_eq!(
+            a.to_command(),
+            Command::Rollback {
+                package: wow_sync_core::paths::validate_folder_name("Bagnon").unwrap(),
+                recovered: Sha256([9; 32]),
+            }
+        );
+        assert_eq!(a.kind(), ActionKind::Rollback);
+        assert!(Capabilities::runtime().has(ActionKind::Rollback));
+        assert!(!Capabilities::runtime().has(ActionKind::CheckUpdates));
     }
 
     #[test]

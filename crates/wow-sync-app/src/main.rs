@@ -14,6 +14,7 @@ mod assets;
 mod backend;
 mod brand;
 mod consent;
+mod decisions_ui;
 mod features;
 mod model;
 mod pages;
