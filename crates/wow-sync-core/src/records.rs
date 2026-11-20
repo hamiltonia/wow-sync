@@ -156,6 +156,9 @@ pub struct MemberRecord {
     pub app_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retired: Option<bool>,
+    /// Enrollments this computer held before it re-enrolled; grow-only (contracts.md §1.5).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub previous_enrollments: Vec<EnrollmentId>,
 }
 record!(MemberRecord, "wowsync.member", 64 * KIB, |self| {
     if self.retired == Some(true) {

@@ -1754,6 +1754,76 @@ mod tests {
         assert!(authority_files(&lab, &g, &bc).is_empty());
     }
 
+    #[test]
+    fn a_retired_computer_cannot_publish_until_it_re_enrolls() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        synced(&mut a);
+        let (_, old_enrollment) = pc_ids(&b);
+        assert_eq!(
+            a.svc.command(Command::ReEnroll),
+            Ok(CommandOutcome::NothingToDo),
+            "an active computer has nothing to join again"
+        );
+        a.svc
+            .command(Command::Retire {
+                subject: ref_of(&b),
+            })
+            .unwrap();
+        synced(&mut a);
+        for _ in 0..2 {
+            let r = synced(&mut b);
+            assert!(r.published.is_none(), "retired: {r:?}");
+        }
+        b.addon("Beta", "beta-v1");
+        assert!(synced(&mut b).published.is_none());
+        assert_eq!(
+            a.read("Beta/main.lua"),
+            None,
+            "nothing a retired computer holds reaches the group"
+        );
+        assert_eq!(
+            b.svc.command(Command::ReEnroll),
+            Ok(CommandOutcome::ReEnrolled)
+        );
+        let r = synced(&mut b);
+        assert!(r.published.is_some(), "re-enrolled: {r:?}");
+        synced(&mut a);
+        synced(&mut a);
+        let bc = pc_ids(&b).0;
+        let enrollments: Vec<_> = a
+            .svc
+            .plane()
+            .members
+            .pairs()
+            .filter(|p| p.computer_id == bc)
+            .map(|p| p.enrollment_id.clone())
+            .collect();
+        assert_eq!(enrollments.len(), 2, "{enrollments:?}");
+        assert!(enrollments.contains(&old_enrollment), "history is kept");
+        assert_eq!(
+            a.read("Beta/main.lua").as_deref(),
+            Some("beta-v1"),
+            "the re-enrolled computer's addon reaches the group"
+        );
+        // The old enrollment is still retired: re-enrollment is not an undo of the record.
+        assert_eq!(
+            a.svc.command(Command::Retire {
+                subject: wow_sync_core::kinds::EnrollmentRef {
+                    computer_id: pc_ids(&b).0,
+                    enrollment_id: old_enrollment,
+                }
+            }),
+            Ok(CommandOutcome::NothingToDo)
+        );
+    }
+
     fn two_option_item(
         key: &wow_sync_core::paths::FolderKey,
         write: AuthorityRecord,

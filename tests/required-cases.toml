@@ -974,6 +974,13 @@ tier = "offline"
 tests = [
     "e2e::tests::keep_and_resume_commands_pin_and_release_a_typed_scope",
 ]
+
+[[case]]
+id = "R4-integrate:re-enrollment-command"
+tier = "offline"
+tests = [
+    "e2e::tests::a_retired_computer_cannot_publish_until_it_re_enrolls",
+]
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag

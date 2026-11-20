@@ -373,6 +373,9 @@ impl SliceService {
 
     /// Runs one group command (contracts.md §9.1) against the current observed state.
     pub fn command(&mut self, cmd: Command) -> Result<CommandOutcome, CommandError> {
+        if cmd == Command::ReEnroll {
+            return self.re_enroll();
+        }
         let w = self
             .observe_world(false)
             .map_err(|e| CommandError::Service(e.to_string()))?;
@@ -456,6 +459,8 @@ impl SliceService {
                     })?;
                     DecisionEffect::Write(Box::new(AuthorityRecord::Lift(lift)))
                 }
+                // Dispatched before observation, above.
+                Command::ReEnroll => return Err(CommandError::NotAllowed),
                 Command::Keep { scope, copy, why } => {
                     let valid = wow_sync_core::choice::valid_hashes(&derived);
                     let view = wow_sync_core::choice::ChoiceView::new(&self.plane.ledger, &valid);
@@ -548,6 +553,50 @@ impl SliceService {
                 Ok(CommandOutcome::Kept)
             }
         }
+    }
+
+    /// Explicit re-enrollment of a retired (or held) computer: a new enrollment id for the same
+    /// computer, recorded in `member.json` with the old ids kept (ops.md §2.3 item 6). The old
+    /// enrollment stays retired and its records stay valid.
+    fn re_enroll(&mut self) -> Result<CommandOutcome, CommandError> {
+        let svc = |e: &dyn std::fmt::Display| CommandError::Service(e.to_string());
+        let w = self.observe_world(false).map_err(|e| svc(&e))?;
+        if w.standing == OwnStanding::Active {
+            return Ok(CommandOutcome::NothingToDo);
+        }
+        let provider = self.open_provider().map_err(|e| svc(&e))?;
+        let me = w.computer.computer_id.clone();
+        let old = provider
+            .read(&layout::member_record(&w.group.group_id, &me), SMALL)
+            .map_err(|e| svc(&e))
+            .and_then(|b| decode::<MemberRecord>(&b, SMALL as usize).map_err(|e| svc(&e)))?;
+        let enrollment_id = EnrollmentId::parse(&random_id_hex()).expect("random id");
+        let mut previous = old.previous_enrollments.clone();
+        previous.push(w.enrollment.enrollment_id.clone());
+        previous.sort();
+        previous.dedup();
+        let member = MemberRecord {
+            enrollment_id: enrollment_id.clone(),
+            enrolled_unix_ms: now_unix_ms() as u64,
+            app_version: self.cfg.app_version.clone(),
+            previous_enrollments: previous,
+            ..old
+        };
+        provider
+            .write_atomic(
+                &layout::member_record(&w.group.group_id, &me),
+                &encode(&member),
+                me.as_str(),
+            )
+            .map_err(|e| svc(&e))?;
+        let mut le = w.enrollment.clone();
+        le.enrollment_id = enrollment_id;
+        le.next_seq = 1;
+        self.state
+            .write_atomic("enrollment.json", &encode(&le))
+            .map_err(|e| svc(&e))?;
+        let _ = self.state.append_audit("re-enrolled this computer");
+        Ok(CommandOutcome::ReEnrolled)
     }
 
     /// The sequence number a record used is never handed out again.
@@ -968,6 +1017,7 @@ impl SliceService {
             enrolled_unix_ms: now,
             app_version: self.cfg.app_version.clone(),
             retired: None,
+            previous_enrollments: vec![],
         };
         provider
             .write_atomic(
@@ -1115,6 +1165,9 @@ impl SliceService {
             if let Ok(rec) = &m.member {
                 if rec.computer_id == m.computer {
                     self.plane.add_member(&m.computer, &rec.enrollment_id);
+                    for p in &rec.previous_enrollments {
+                        self.plane.add_member(&m.computer, p);
+                    }
                 }
             }
             for f in &m.files {

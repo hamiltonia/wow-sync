@@ -240,6 +240,7 @@ pub fn member_record(c: &ComputerId) -> MemberRecord {
         enrolled_unix_ms: 1,
         app_version: "0.0.0-test".into(),
         retired: None,
+        previous_enrollments: vec![],
     }
 }
 

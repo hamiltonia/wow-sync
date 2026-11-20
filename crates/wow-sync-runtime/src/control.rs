@@ -269,6 +269,8 @@ pub enum Command {
     AllowAgain {
         rejections: Vec<wow_sync_core::ids::Sha256>,
     },
+    /// "Join again…": explicit re-enrollment of this computer after it was retired.
+    ReEnroll,
     /// Keep one release of the folders in `scope` (typed folder keys, UQ-2). `copy` is the package
     /// hash of a release currently held in the group; `why` is the reason the owner was shown.
     Keep {
@@ -293,6 +295,9 @@ pub enum CommandOutcome {
     Kept,
     /// Only this computer changed.
     Local(wow_sync_core::decision::LocalResolution),
+    /// Following a retirement (or a held status) this computer joined again under a new
+    /// enrollment; the old enrollment stays retired.
+    ReEnrolled,
     /// The command had no effect to make (for example the subject is already retired).
     NothingToDo,
 }
