@@ -621,7 +621,7 @@ mod tests {
         ));
     }
 
-    fn snapshot_world() -> World {
+    fn snapshot_world_with(edit: impl FnOnce(&mut wow_sync_runtime::StatusSnapshot)) -> World {
         use wow_sync_runtime::{PausedFolder, PeerRow, PeerStanding};
         let mut s = wow_sync_runtime::StatusSnapshot::default();
         let this = EnrollmentRef {
@@ -659,9 +659,14 @@ mod tests {
                 shared_newer: true,
             },
         ];
+        edit(&mut s);
         let mut w = world();
         crate::features::apply_snapshot(&mut w.features, &s);
         w
+    }
+
+    fn snapshot_world() -> World {
+        snapshot_world_with(|_| {})
     }
 
     #[test]
@@ -693,9 +698,11 @@ mod tests {
 
     #[test]
     fn two_competing_masters_choose_nothing_and_block_exceptions_with_their_reason() {
-        let mut w = snapshot_world();
-        w.features.settings.master = None;
-        w.features.settings.policy_conflict = true;
+        let w = snapshot_world_with(|s| {
+            s.settings.master = None;
+            s.settings.master_name = None;
+            s.settings.policy_conflict = true;
+        });
         let c = exception_controls(&w, &folder("Details"));
         assert_eq!(c.len(), 1);
         assert!(c[0].action.as_ref().unwrap_err().contains("two computers"));
