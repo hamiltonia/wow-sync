@@ -203,11 +203,13 @@ fn refresh(svc: &mut SliceService, shared: &SharedState, wake: &Sender<()>, chec
     });
 }
 
+type Attach = fn(&mut SliceService) -> Result<(), wow_sync_runtime::ServiceError>;
+
 /// Opens the service and, when `attach` is given, attaches the OS notifier and update source.
 /// A failed attach costs notifications and update checks only; sync still runs.
 fn open_service(
     cfg: ServiceConfig,
-    attach: Option<fn(&mut SliceService) -> Result<(), wow_sync_runtime::ServiceError>>,
+    attach: Option<Attach>,
 ) -> Result<SliceService, wow_sync_runtime::ServiceError> {
     let mut s = SliceService::new(cfg)?;
     if let Some(f) = attach {
@@ -218,11 +220,9 @@ fn open_service(
     Ok(s)
 }
 
-fn os_attach(
-    o: &BackendOptions,
-) -> Option<fn(&mut SliceService) -> Result<(), wow_sync_runtime::ServiceError>> {
+fn os_attach(o: &BackendOptions) -> Option<Attach> {
     o.os_services
-        .then_some(SliceService::attach_os_services as fn(&mut SliceService) -> _)
+        .then_some(SliceService::attach_os_services as Attach)
 }
 
 fn run(
