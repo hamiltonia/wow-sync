@@ -294,6 +294,7 @@ separate fields/types carry the data instead.
 | Restore of removed addon | `StatusSnapshot.removal_hashes: Vec<Sha256>`, parallel to `StatusSnapshot.removed` (same index) | the value for `Command::RestoreRemoved { removal }` |
 | Allow again | `StatusSnapshot.rejected_releases: Vec<wow_sync_runtime::RejectedRelease { folders, label, release, rejections, rejected_at_ms }>` | `rejections` is the value for `Command::AllowAgain { rejections }`; `rejected_at_ms` is the held/rejected date for that row |
 | Rollback `older_peer` | `StatusSnapshot.older_peer: Option<String>` | name of a live, not retired computer whose code-state lacks `rejection/1` (or has no features); show the warning before Rollback |
+| Settings units (Share, Choose, Restore) | `StatusSnapshot.settings_units: Vec<wow_sync_runtime::SettingsUnitRow>` | per unit: `status: SettingsUnitStatus::{Retired, Disabled, NotShared, PolicyConflict, Paused, NeedsChoice, Active}`; `live` (syncing now, only `Active`); `competing: Vec<HeadChoice { checkpoint, revisions }>` (value for `Command::ChooseSettings { checkpoint }`; empty unless the unit needs a choice and this computer may make it); `shown_heads` (value for `ChooseSettings { shown_heads }`); `history: Vec<SettingsHistoryEntry>` oldest first, `entry.checkpoint` is the value for `Command::RestoreSettings { checkpoint }`; `restore_possible`; `latest_capture` (value for `Command::ShareSettings { checkpoint }`) and `can_share` |
 
 - Tests: `e2e::tests::the_snapshot_lists_every_enrollment_with_its_standing_and_the_retirement_date`,
   `e2e::tests::the_snapshot_reports_settings_master_accounts_and_what_a_paused_folder_would_meet`,
@@ -312,9 +313,14 @@ separate fields/types carry the data instead.
 | 1 peers | effective retirement mapped to `Active` | `the_snapshot_lists_every_enrollment_with_its_standing_and_the_retirement_date` |
 | 2 settings | `shared_newer` ignores the applied basis (`|| true`) | `the_snapshot_reports_settings_master_accounts_and_what_a_paused_folder_would_meet` |
 | 3 older peer | retired computers no longer excluded | `a_retired_computer_is_never_the_older_peer` |
+| 4 settings units | retired computers made actionable | `the_snapshot_units_offer_no_actionable_heads_when_disabled_or_retired` |
 
+- Settings units test: `e2e::tests::the_snapshot_units_carry_the_heads_choose_takes_and_the_history_restore_takes`
+  drives Choose and Restore using only snapshot values; negative
+  `e2e::tests::the_snapshot_units_offer_no_actionable_heads_when_disabled_or_retired` (production
+  cap `None` -> `Disabled`; a retired computer -> `Retired`; neither has heads, Share or Restore).
+  A-38: retired computers made actionable -> the negative test fails; reverted, diff clean.
 - DEFERRED: held-release date (no recorded source; `rejected_at_ms` covers rejected releases only);
-  the settings units list (status, live, heads, history) that Share/Choose/Restore settings need;
   item 4 (diagnostics `os_version`, `process_memory_mib`, journals, DataAtRisk producer) not done
   this pass.
 
