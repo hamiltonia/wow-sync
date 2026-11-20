@@ -144,9 +144,8 @@ scan (R1 = inventory of the package's folders; R0 = the tree records of the chos
 from the shared folder) and queues `rollback-request-<group>.json`. `sync_once` rebuilds the
 input when Active and the game is not running, reserves the record sequence, puts the rollback
 `PackageApply` first and drops colliding packages. The request is consumed either way (a
-refused one is reported in `apply_note`). Known gap: if the recovered release's files are no
-longer in the shared folder the request is refused (`NotAvailable`); there is no local-recovery
-source for R0 (`effects.rs` stages from the provider only). Settings of a rollback are
+refused one is reported in `apply_note`). R0 is staged from the provider or, when its blobs
+are gone, from a local recovery point (`NotAvailable` only if neither has it). Settings of a rollback are
 `NotApplicable` (code only); `actual_settings_result` stays unwired.
 
 ### A-38 (item 5)
@@ -156,14 +155,24 @@ source for R0 (`effects.rs` stages from the provider only). Settings of a rollba
 | Non-master push accepted without explicit intent | `build_push` emits `RevisionKind::Auto` | `e2e::tests::settings_policy_and_push_commands_record_explicit_intent_only` (failed; reverted, `git diff --exit-code` clean) |
 | Settings yield dropped | `target_case` pattern `FirstAdoption(to) \| Yield{..}` → `FirstAdoption(to)` | `e2e::tests::a_non_master_routine_write_yields_to_the_master_and_keeps_a_recovery_copy` (failed; reverted, clean) |
 | Unrouted rollback | rollback plan not inserted into the apply plan (`rollback.filter(\|_\| false)`) | `e2e::tests::a_rollback_installs_the_recovered_release_and_an_offline_peer_cannot_bring_the_rejected_one_back` (failed at the v1 assertion; reverted, clean) |
+| R0 staged from local recovery | fallback returns `Err(NotFound)` | `e2e::tests::a_rollback_stages_the_recovered_release_from_a_local_recovery_point` (failed; reverted, clean) |
+| Pending removal not replayed | `observe` returns only newly matured removals | `e2e::tests::a_removal_whose_record_could_not_be_written_is_replayed_on_the_next_cycle` (failed; reverted, clean) |
 
 ## Open items
 
-- **Crash between observe-save and the removal-record write loses the removal.**
-  `RemovalStore::observe` saves the matured observation, then the record is written. A crash
-  between the two removes the observation without a record. Proposed fix: persist the pending
-  `ObservedRemoval`s in local state before writing, replay them at the next cycle, and clear
-  them once the record write succeeds. Owner: `removal_cycle.rs`/`service.rs`.
+- **Crash between observe-save and the removal-record write (FIXED, `afa7f59`).**
+  `RemovalStore::observe` now persists matured removals in `removal-pending-<group>.json`
+  before consuming the observation and returns them every pass until `clear_pending` (called
+  after the record write). A pending removal whose folder is installed again is dropped.
+  Tests: `a_removal_whose_record_could_not_be_written_is_replayed_on_the_next_cycle`,
+  `a_pending_removal_is_dropped_when_the_folder_is_installed_again`. A-38: returning only newly
+  matured removals (no replay) made the first test fail (`e2e.rs:1317`); reverted, clean.
+  Residual: a crash between the record write and `clear_pending` may write a duplicate removal.
+- **R0 local source (DONE, `fb6c8b4`).** rollback.md §1 step 4 allows R0 from a local recovery
+  point; `effects.rs` falls back to `.wowsync/recovery` when the provider blob is missing.
+  Test `a_rollback_stages_the_recovered_release_from_a_local_recovery_point` (R0 gone from the
+  shared folder → A succeeds; B without a recovery point gets `NotAvailable`, nothing changes).
+  A-38: fallback forced to `Err(NotFound)` failed the test; reverted, clean.
 - **Peers' index chunks** (§1.12 step 1, pending-unreadable refs) are not read; directory
   listing plus verbatim mirrors cover it.
 - **Level 5 (stale copy)** is not in `compose`; the `PartialCandidate` nuance for a no-tree
@@ -174,13 +183,11 @@ source for R0 (`effects.rs` stages from the provider only). Settings of a rollba
 
 ## DEFERRED (not built; each needs the named change)
 
-- **Item 3 (this turn)** (`control.rs`, `service.rs`, `settings_cycle.rs`): settings
-  pause/resume/choose/restore/confirm/use-shared and settings removal-restore, dispatch only
-  using the existing settings core functions. Not started.
-- **Item 4 (this turn)** (`removal_cycle.rs`, `service.rs::removal_steps`): the crash-hazard fix
-  described in Open items. Not started.
-- **Item 5 (this turn)**: `TooLarge` split persistence; probably needs `kinds.rs` (not on the
-  file list), so it would be reported, not edited. Not started.
+- **Settings commands (this turn's item 3)** (`control.rs`, `service.rs`, `settings_cycle.rs`):
+  settings pause/resume/choose/restore/confirm/use-shared and settings removal-restore, dispatch
+  only using the existing settings core functions. Not started (stopped at an item boundary).
+- **`TooLarge` split persistence (this turn's item 4)**: needs `kinds.rs` (split only) plus the
+  writer and a reader-reconstruction test. Not started.
 - **Rest of the §9.1 surface** (`control.rs`): a capture command producing the checkpoint;
   policies over 256 rules need parts.
 - **Cross-packet items** and stage D A-38 controls not listed above.
