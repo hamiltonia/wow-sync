@@ -1024,6 +1024,73 @@ tests = [
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag
+[[case]]
+id = "R4-notify-diag:notice-planner"
+tier = "offline"
+tests = [
+    "notice::tests::a_conflict_while_gaming_waits_and_notifies_once_on_game_exit",
+    "notice::tests::an_unchanged_condition_over_100_cycles_notifies_once",
+    "notice::tests::app_update_is_one_notice_per_tag_and_defers_while_gaming",
+    "notice::tests::data_at_risk_is_sent_at_once_while_gaming_and_recurs_after_an_hour",
+    "notice::tests::five_applied_items_make_one_summary_with_three_names_and_a_count",
+    "notice::tests::held_summaries_release_as_at_most_two_notices_and_resolved_items_drop",
+    "notice::tests::ledger_and_held_set_are_bounded_and_an_evicted_key_notifies_again",
+    "notice::tests::ledger_survives_a_restart_without_repeating",
+    "notice::tests::needs_me_off_silences_every_os_notice_kind_without_a_burst_later",
+    "notice::tests::recurrence_after_clearing_waits_for_the_quiet_period",
+    "notice::tests::unknown_game_state_is_treated_as_gaming",
+    "notices::tests::the_ledger_is_saved_before_the_notice_is_delivered",
+    "notices::tests::the_needs_me_switch_suppresses_delivery",
+    "notices::tests::while_the_game_runs_summaries_wait_and_data_risk_does_not",
+]
+
+[[case]]
+id = "R4-notify-diag:update-notice"
+tier = "offline"
+tests = [
+    "update::tests::parse_latest_accepts_both_tag_forms_and_rejects_everything_else",
+    "update::tests::the_release_link_is_built_from_the_exact_tag_only",
+    "update::tests::due_follows_setting_interval_ready_delay_and_clock_changes",
+    "update_http::tests::request_has_exactly_the_documented_headers_and_no_query",
+    "update_http::tests::redirects_follow_only_https_on_the_two_hosts",
+    "update_http::tests::only_update_http_names_the_transport_or_an_unlisted_url",
+    "updates::tests::scheduled_check_waits_for_readiness_the_setting_and_the_interval",
+    "updates::tests::failures_show_only_the_fixed_text_and_log_one_activity_line",
+    "updates::tests::notice_event_is_raised_once_per_release_tag",
+    "updates::tests::update_code_has_no_filesystem_or_install_access",
+    "updates::tests::a_manual_check_during_a_scheduled_one_joins_it_with_one_request",
+    "updates::tests::the_attempt_is_saved_before_the_request_so_a_killed_worker_is_not_retried_at_once",
+    "updates::tests::no_request_is_sent_when_the_attempt_cannot_be_saved",
+]
+
+[[case]]
+id = "R4-notify-diag:diagnostics-export"
+tier = "offline"
+tests = [
+    "diagnostics::tests::planted_private_strings_do_not_appear_in_a_successful_export",
+    "diagnostics::tests::a_string_forced_into_a_typed_field_is_refused_whole",
+    "diagnostics::tests::the_export_is_bounded_with_omitted_markers",
+    "diagnostics::tests::source_file_contents_never_appear",
+    "diagnostics::tests::a_planted_folder_name_appears_only_as_a_folder_name_that_passes_the_pattern",
+    "diagnostics::tests::fingerprints_appear_only_when_asked_and_only_as_twelve_hex_digits",
+    "diagnostics::tests::version_information_is_only_a_class",
+    "diagnostics::tests::planted_secret_in_every_free_string_source_never_reaches_the_export",
+    "diag::tests::the_shared_folder_and_install_roots_are_refused_however_they_are_spelled",
+    "diag::tests::no_scheduled_path_calls_the_export",
+]
+
+[[case]]
+id = "R4-notify-diag:windows-transport-and-toast-identity"
+tier = "native"
+tests = [
+    "update_http::tls_tests::a_trusted_valid_certificate_succeeds_and_sends_only_the_documented_request",
+    "update_http::tls_tests::untrusted_expired_and_wrong_host_certificates_fail_before_any_request",
+    "update_http::tls_tests::redirect_to_http_to_another_host_and_a_fourth_redirect_fail_without_fetching",
+    "update_http::tls_tests::http_errors_and_oversized_bodies_fail",
+    "update_http::tls_tests::an_unreachable_endpoint_is_offline",
+    "update_http::tls_tests::environment_proxy_settings_are_ignored",
+    "winproc::tests::toast_identity_registers_updates_and_removes_a_scoped_key",
+]
 # <<< section: R4-notify-diag
 
 # >>> section: R4-app

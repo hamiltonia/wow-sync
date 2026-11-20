@@ -13,6 +13,12 @@ testkit = []
 [dependencies]
 sha2 = { workspace = true }
 getrandom = { workspace = true }
+# OS notifications (ops.md §3.3, D-24 P4-2). MIT OR Apache-2.0; Windows toasts and macOS via its
+# platform backends, already in Cargo.lock through GPUI.
+notify-rust = "=4.19.0"
+# One daily GET to GitHub Releases (ops.md §4.4, D-24 P4-1). Blocking client, OS TLS only.
+ureq = { version = "=2.12.1", default-features = false, features = ["native-tls"] }
+native-tls = "=0.2.18"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = [
@@ -20,4 +26,6 @@ windows-sys = { workspace = true, features = [
     "Win32_System_Threading",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_Storage_FileSystem",
+    "Win32_UI_Shell",
+    "Win32_System_Registry",
 ] }

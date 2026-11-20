@@ -239,6 +239,181 @@ pub fn observe_variant(_variant_dir: &Path) -> (ProcessActivity, u32) {
     (ProcessActivity::Unknown("unsupported platform".into()), 0)
 }
 
+/// Application ids are registry key names and appear in toasts: a small closed alphabet.
+pub fn app_id_ok(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+#[cfg(windows)]
+mod toast_identity {
+    use super::app_id_ok;
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegCreateKeyW, RegDeleteTreeW, RegGetValueW, RegSetValueExW,
+        HKEY_CURRENT_USER, REG_SZ, RRF_RT_REG_SZ,
+    };
+    use windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+
+    fn wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    fn key_path(id: &str) -> Vec<u16> {
+        wide(&format!("Software\\Classes\\AppUserModelId\\{id}"))
+    }
+
+    fn set_str(key: windows_sys::Win32::System::Registry::HKEY, name: &str, v: &str) -> u32 {
+        let data = wide(v);
+        // SAFETY: `data` is a live NUL-terminated UTF-16 buffer; the byte count covers it.
+        unsafe {
+            RegSetValueExW(
+                key,
+                wide(name).as_ptr(),
+                0,
+                REG_SZ,
+                data.as_ptr() as *const u8,
+                (data.len() * 2) as u32,
+            )
+        }
+    }
+
+    /// Registers the toast identity under HKCU (no elevation). Idempotent.
+    pub fn register(id: &str, display_name: &str, icon_uri: Option<&str>) -> Result<(), String> {
+        if !app_id_ok(id) {
+            return Err("invalid application id".into());
+        }
+        let path = key_path(id);
+        let mut key = std::ptr::null_mut();
+        // SAFETY: `path` is NUL-terminated; `key` receives a handle closed below.
+        let rc = unsafe { RegCreateKeyW(HKEY_CURRENT_USER, path.as_ptr(), &mut key) };
+        if rc != 0 {
+            return Err(format!("registry create failed ({rc})"));
+        }
+        let mut rc = set_str(key, "DisplayName", display_name);
+        if rc == 0 {
+            if let Some(icon) = icon_uri {
+                rc = set_str(key, "IconUri", icon);
+            }
+        }
+        // SAFETY: `key` was opened above.
+        unsafe { RegCloseKey(key) };
+        if rc != 0 {
+            return Err(format!("registry write failed ({rc})"));
+        }
+        Ok(())
+    }
+
+    pub fn unregister(id: &str) -> Result<(), String> {
+        if !app_id_ok(id) {
+            return Err("invalid application id".into());
+        }
+        let path = key_path(id);
+        // SAFETY: `path` is NUL-terminated.
+        let rc = unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, path.as_ptr()) };
+        // ERROR_FILE_NOT_FOUND: already absent.
+        if rc == 0 || rc == 2 {
+            Ok(())
+        } else {
+            Err(format!("registry delete failed ({rc})"))
+        }
+    }
+
+    pub fn display_name(id: &str) -> Option<String> {
+        if !app_id_ok(id) {
+            return None;
+        }
+        let path = key_path(id);
+        let mut buf = [0u16; 256];
+        let mut len = std::mem::size_of_val(&buf) as u32;
+        // SAFETY: the buffer and its byte length are consistent.
+        let rc = unsafe {
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                path.as_ptr(),
+                wide("DisplayName").as_ptr(),
+                RRF_RT_REG_SZ,
+                std::ptr::null_mut(),
+                buf.as_mut_ptr() as *mut _,
+                &mut len,
+            )
+        };
+        if rc != 0 {
+            return None;
+        }
+        let n = (len as usize / 2).saturating_sub(1);
+        Some(String::from_utf16_lossy(&buf[..n]))
+    }
+
+    pub fn set_process_id(id: &str) -> Result<(), String> {
+        if !app_id_ok(id) {
+            return Err("invalid application id".into());
+        }
+        let w = wide(id);
+        // SAFETY: `w` is NUL-terminated and outlives the call.
+        let hr = unsafe { SetCurrentProcessExplicitAppUserModelID(w.as_ptr()) };
+        if hr >= 0 {
+            Ok(())
+        } else {
+            Err(format!("setting the process id failed ({hr:#x})"))
+        }
+    }
+}
+
+/// Registers the toast identity so notifications show the app name (ops.md §3.3).
+#[cfg(windows)]
+pub fn register_app_user_model_id(
+    id: &str,
+    display_name: &str,
+    icon_uri: Option<&str>,
+) -> Result<(), String> {
+    toast_identity::register(id, display_name, icon_uri)
+}
+
+#[cfg(not(windows))]
+pub fn register_app_user_model_id(
+    _id: &str,
+    _display_name: &str,
+    _icon_uri: Option<&str>,
+) -> Result<(), String> {
+    Err("unsupported platform".into())
+}
+
+/// Removes the registration (tests and uninstall).
+#[cfg(windows)]
+pub fn unregister_app_user_model_id(id: &str) -> Result<(), String> {
+    toast_identity::unregister(id)
+}
+
+#[cfg(not(windows))]
+pub fn unregister_app_user_model_id(_id: &str) -> Result<(), String> {
+    Err("unsupported platform".into())
+}
+
+/// Associates this process with the registered id.
+#[cfg(windows)]
+pub fn set_process_app_user_model_id(id: &str) -> Result<(), String> {
+    toast_identity::set_process_id(id)
+}
+
+#[cfg(not(windows))]
+pub fn set_process_app_user_model_id(_id: &str) -> Result<(), String> {
+    Err("unsupported platform".into())
+}
+
+/// The registered display name, if any.
+#[cfg(windows)]
+pub fn registered_app_display_name(id: &str) -> Option<String> {
+    toast_identity::display_name(id)
+}
+
+#[cfg(not(windows))]
+pub fn registered_app_display_name(_id: &str) -> Option<String> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -415,5 +590,41 @@ mod tests {
         let _ = child.kill();
         let _ = child.wait();
         assert_eq!(a, ProcessActivity::NotRunning);
+    }
+
+    #[test]
+    fn app_ids_are_a_small_closed_alphabet() {
+        for ok in ["WoWSync.App", "a-b_c.1", &"x".repeat(128)] {
+            assert!(app_id_ok(ok), "{ok}");
+        }
+        for bad in ["", &"x".repeat(129), "a\\b", "a/b", "a b", "é", "a\0b"] {
+            assert!(!app_id_ok(bad), "{bad:?}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn toast_identity_registers_updates_and_removes_a_scoped_key() {
+        let id = format!("WoWSyncTest.{}", crate::sysinfo::random_id_hex());
+        assert_eq!(registered_app_display_name(&id), None);
+        register_app_user_model_id(&id, "WoW Sync Test", None).unwrap();
+        assert_eq!(
+            registered_app_display_name(&id).as_deref(),
+            Some("WoW Sync Test")
+        );
+        register_app_user_model_id(&id, "Renamed", Some("file:///x.png")).unwrap();
+        assert_eq!(registered_app_display_name(&id).as_deref(), Some("Renamed"));
+        unregister_app_user_model_id(&id).unwrap();
+        assert_eq!(registered_app_display_name(&id), None);
+        unregister_app_user_model_id(&id).unwrap();
+
+        for bad in ["", "a\\b", "..\\x", "a b"] {
+            assert!(
+                register_app_user_model_id(bad, "x", None).is_err(),
+                "{bad:?}"
+            );
+            assert!(unregister_app_user_model_id(bad).is_err(), "{bad:?}");
+            assert!(set_process_app_user_model_id(bad).is_err(), "{bad:?}");
+        }
     }
 }
