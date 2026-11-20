@@ -1085,6 +1085,16 @@ tests = [
 ]
 
 [[case]]
+id = "R4-integrate:snapshot-restore-data"
+tier = "offline"
+tests = [
+    "detail::older_peer_tests::a_live_computer_without_rejection_support_is_the_older_peer",
+    "detail::older_peer_tests::a_retired_computer_is_never_the_older_peer",
+    "e2e::tests::allow_again_lifts_only_an_active_rejection",
+    "e2e::tests::restoring_a_removed_addon_brings_it_back_and_it_is_not_removed_again",
+]
+
+[[case]]
 id = "R4-integrate:snapshot-peers"
 tier = "offline"
 tests = [

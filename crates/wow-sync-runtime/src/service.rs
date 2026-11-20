@@ -253,6 +253,12 @@ pub struct StatusSnapshot {
     pub held_releases: Vec<crate::detail::HeldRelease>,
     /// Packages the group removed and that are still removed.
     pub removed: Vec<crate::detail::RemovedRow>,
+    /// Parallel to `removed`: the record hash `Command::RestoreRemoved { removal }` takes.
+    pub removal_hashes: Vec<Sha256>,
+    /// Releases a rollback rejected, with the hashes `Command::AllowAgain` takes.
+    pub rejected_releases: Vec<crate::detail::RejectedRelease>,
+    /// Name of a live computer too old to honour a rollback, when there is one.
+    pub older_peer: Option<String>,
     /// Every known enrollment id with the name its computer's owner chose.
     pub enrollment_names: BTreeMap<EnrollmentId, String>,
     /// "Review needed" (ops.md §1.7): a guided reconfirmation is pending and neither
@@ -2078,12 +2084,16 @@ impl SliceService {
             &w.enrollment.enrollment_id,
             &enrollment_names,
         );
-        let removed = crate::detail::removed_rows(
+        let keyed = crate::detail::removed_rows_keyed(
             &self.plane.ledger,
             &derived,
             &names,
             &w.computer.computer_id,
         );
+        let removal_hashes: Vec<Sha256> = keyed.iter().map(|(_, h)| *h).collect();
+        let removed: Vec<crate::detail::RemovedRow> = keyed.into_iter().map(|(r, _)| r).collect();
+        let rejected_releases = crate::detail::rejected_releases(&self.plane.ledger, &derived);
+        let older_peer = crate::detail::older_peer(&w.views, &peers);
         let sv: StatusView = derive_status(&StatusInput {
             target: &w.target,
             members: &w.views,
@@ -2181,6 +2191,9 @@ impl SliceService {
             retirements,
             held_releases,
             removed,
+            removal_hashes,
+            rejected_releases,
+            older_peer,
             enrollment_names,
             review_needed: false,
             update: self.updates.as_ref().and_then(|u| u.last_result()),

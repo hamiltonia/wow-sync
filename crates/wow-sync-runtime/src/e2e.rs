@@ -2047,6 +2047,13 @@ mod tests {
         let removal = removal_hash(&lab, &g, &ac);
         synced(&mut b);
         assert_eq!(b.read("Alpha/main.lua"), None, "the removal applied first");
+        let snap = b.svc.status();
+        assert_eq!(snap.removed.len(), 1);
+        assert_eq!(
+            snap.removal_hashes,
+            vec![removal],
+            "the snapshot carries the hash RestoreRemoved takes"
+        );
 
         let ghost = sha256(b"no such removal");
         assert_eq!(
@@ -3215,6 +3222,19 @@ mod tests {
         };
         let rh = put_authority(&lab, &g, &ac, &AuthorityRecord::Rejection(rej));
         synced(&mut a);
+        let snap = a.svc.status();
+        assert_eq!(
+            snap.rejected_releases.len(),
+            1,
+            "{:?}",
+            snap.rejected_releases
+        );
+        let row = &snap.rejected_releases[0];
+        assert_eq!(row.rejections, vec![rh]);
+        assert_eq!(row.label, "3.0");
+        assert_eq!(row.release, hash(&bad));
+        assert_eq!(row.rejected_at_ms, 5);
+        assert_eq!(snap.older_peer, None, "every test slice honours rollback");
         let unknown = sha256(b"no such rejection");
         assert_eq!(
             a.svc.command(Command::AllowAgain {
@@ -3237,6 +3257,10 @@ mod tests {
         };
         synced(&mut a);
         assert_eq!(status(&a, &g, &lift), Some(Status::Valid));
+        assert!(
+            a.svc.status().rejected_releases.is_empty(),
+            "a lifted rejection leaves the allow-again list"
+        );
         // The rejection is no longer active, so it cannot be lifted twice.
         assert_eq!(
             a.svc.command(Command::AllowAgain {

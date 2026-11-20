@@ -176,6 +176,10 @@ fn every_snapshot_field_can_be_named_and_read_from_outside_the_crate() {
 
     let st = StatusSnapshot::default();
     let peers: &Vec<PeerRow> = &st.peers;
+    let rejected: &Vec<wow_sync_runtime::RejectedRelease> = &st.rejected_releases;
+    let hashes: &Vec<wow_sync_runtime::core::ids::Sha256> = &st.removal_hashes;
+    let older: &Option<String> = &st.older_peer;
+    assert!(rejected.is_empty() && hashes.is_empty() && older.is_none());
     let settings: &SettingsSnapshot = &st.settings;
     let paused: &Vec<PausedFolder> = &settings.paused;
     assert!(!settings.enabled && paused.is_empty() && !settings.policy_conflict);
