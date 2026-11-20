@@ -1280,9 +1280,14 @@ impl Shell {
                 );
             }
             let key = format!("choose-{}", o.id.0);
+            let name = o.choose_name();
             let btn = match crate::decisions_ui::choose(&self.w, &card, o.id, acked) {
-                Ok(a) => self.btn(&key, "Keep this", Bk::Primary, Act::Group(a), cx),
-                Err(why) => self.btn_off(&key, "Keep this", &why, cx),
+                Ok(a) => self
+                    .btn(&key, "Keep this", Bk::Primary, Act::Group(a), cx)
+                    .aria_label(SharedString::from(name)),
+                Err(why) => self
+                    .btn_off(&key, "Keep this", &why, cx)
+                    .aria_label(SharedString::from(format!("{name}, unavailable: {why}"))),
             };
             inner.push(btn.into_any_element());
             if gate.is_ok() && o.needs_confirm && !acked {

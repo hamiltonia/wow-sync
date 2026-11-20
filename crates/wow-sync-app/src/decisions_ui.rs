@@ -23,6 +23,19 @@ pub struct OptionRow {
     pub needs_confirm: bool,
 }
 
+impl OptionRow {
+    /// Name for assistive technology: the release, who holds it and what choosing it does, so the
+    /// identical "Keep this" buttons on one page are told apart.
+    pub fn choose_name(&self) -> String {
+        let mut parts = vec![format!("Keep this: {}", self.label)];
+        if !self.holders.is_empty() {
+            parts.push(self.holders.clone());
+        }
+        parts.extend(self.effects.iter().cloned());
+        parts.join(". ")
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DecisionCard {
     pub id: DecisionId,
@@ -343,6 +356,24 @@ mod tests {
             holder,
             None,
         )
+    }
+
+    #[test]
+    fn identical_keep_buttons_have_distinct_names_with_release_holder_and_consequence() {
+        let w = world(vec![item(
+            vec![release(1, "5.1", DEN), release(2, "5.0", THIS)],
+            DecisionKind::Ambiguous,
+        )]);
+        let c = cards(&w).remove(0);
+        let a = c.options[0].choose_name();
+        let b = c.options[1].choose_name();
+        assert_ne!(a, b);
+        assert!(a.contains("Keep version 5.1") && a.contains("Held by Den PC"));
+        assert!(b.contains("Keep version 5.0") && b.contains("Held by This computer"));
+        assert!(
+            c.options[0].effects.iter().all(|e| a.contains(e.as_str())),
+            "the consequence is part of the name"
+        );
     }
 
     #[test]
