@@ -101,6 +101,10 @@ skip silently.
   (a step-2 worker lost its work this way).
 - Keep existing tests passing. Don't weaken assertions.
 
+## Amendment 1 (orchestrator, after the first pass)
+
+The first pass found that the premise was false. `service.rs` is still the slice cycle, with no ledger, authority reading or hook calls. `control.rs` has none of the §9.1 commands, and code-state lacks `authority_index`. The scope is widened to build these, staged A (ledger fix + persistence), B (authority plane in the cycle), C (control surface), D (rollback inputs, cross-packet items, A-38). Additional files: core `records.rs`, `plan.rs`; `wow-sync-proto\src\model.rs` and `wow-sync-app\src\{model,world}.rs`, only for explicit match arms on new variants (no new UI); golden fixtures only where contracts require the `authority_index` change.
+
 ## Gate and evidence
 
 - **Verification:** offline and native verify pass on the final tree;
