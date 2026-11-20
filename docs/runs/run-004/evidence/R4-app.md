@@ -173,10 +173,23 @@ file picker). `settings_ui.rs`, `rollback_ui.rs` keep `allow(dead_code)`.
 A-38 (all caught, reverted, tree clean): peers (accepting non-Active), settings (dropping
 `policy_conflict`), removed (`get(0)` instead of `get(index)`), allow-again (filter always true).
 
-Still disabled, with the reason shown in the GUI: Share, Choose, Restore settings and Pause
-(`UNITS_PENDING`: no settings units list yet); Turn on settings sync (no list of accounts to
+Still disabled, with the reason shown in the GUI: Turn on settings sync (no list of accounts to
 choose from; `enable_control` unused); Keep and Resume (no screen). Narrow `dead_code` allows remain
 on `UnitStatus`, `enable_control`, and the rollback outcome/summary types.
+
+## 6d. Settings units connected (main `4b7c31b`)
+
+Commit `16e6bf5`: `settings_units` to `SettingsData.units` (`features::settings_unit_rows`).
+Share needs `can_share` plus `latest_capture`; Choose uses `competing` and `shown_heads`; Restore
+uses non-head `history` entries and is gated by `restore_possible`. A `Disabled` row with consent on
+is shown as "Settings sharing is off until a size limit is approved" (Q-77, no cap invented); with
+consent off it is "Settings not shared". A-38: showing head entries as restorable (caught by
+`the_units_list_wires_share_choose_and_restore_from_the_snapshot`), reverted, tree clean.
+
+Still disabled: Share/Restore on any unit whose `can_share`/`restore_possible` is false (no capture,
+no history, consent off, paused/blocked, or retired); every unit while the production cap is unset;
+Turn on settings sync (no account list); Keep/Resume screens; Cancel is not the default focus in the
+retire panel; diagnostics journals, `process_memory_mib`, `os_version` empty and no save file picker.
 
 ## 7. Verify
 
