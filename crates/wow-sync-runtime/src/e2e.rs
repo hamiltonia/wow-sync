@@ -3454,6 +3454,54 @@ mod tests {
     }
 
     #[test]
+    fn the_snapshot_lists_every_enrollment_with_its_standing_and_the_retirement_date() {
+        use crate::detail::PeerStanding;
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        synced(&mut a);
+        let before = a.svc.status();
+        assert_eq!(before.peers.len(), 2, "{:?}", before.peers);
+        assert!(before
+            .peers
+            .iter()
+            .all(|p| p.standing == PeerStanding::Active));
+        let theirs = before.peers.iter().find(|p| !p.is_this).unwrap();
+        assert_eq!(
+            theirs.enrollment,
+            ref_of(&b),
+            "retire must name this exact pair"
+        );
+        assert_eq!(theirs.name, b.svc.status().computer_name);
+        assert!(before.peers[0].is_this && before.peers[0].name == "this computer");
+
+        a.svc
+            .command(Command::Retire {
+                subject: ref_of(&b),
+            })
+            .unwrap();
+        synced(&mut a);
+        let after = a.svc.status();
+        let theirs = after.peers.iter().find(|p| !p.is_this).unwrap();
+        assert_eq!(theirs.standing, PeerStanding::Retired);
+        let mine = after.peers.iter().find(|p| p.is_this).unwrap();
+        assert_eq!(
+            mine.standing,
+            PeerStanding::Active,
+            "the retirer is not retired"
+        );
+        assert!(
+            theirs.retired_at_ms.is_some_and(|t| t > 0),
+            "the date is carried"
+        );
+    }
+
+    #[test]
     fn the_snapshot_hold_follows_pause_and_a_pending_decision_never_raises_review_needed() {
         use wow_sync_core::status::{AllHoldCause, HoldScope};
         let lab = Lab::new();

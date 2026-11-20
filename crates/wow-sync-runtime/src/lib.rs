@@ -26,8 +26,8 @@ pub use control::{
     AppToggles, Command, CommandError, CommandOutcome, PauseState, QuitGate, StopState,
 };
 pub use detail::{
-    strip_colour_codes, CandidateRow, FolderRow, HeldRelease, MemberRow, PackageRow, RemovedRow,
-    RetirementRow, StatusDetail,
+    strip_colour_codes, CandidateRow, FolderRow, HeldRelease, MemberRow, PackageRow, PeerRow,
+    PeerStanding, RemovedRow, RetirementRow, StatusDetail,
 };
 pub use diag::{ExportError, SaveError};
 pub use discover::{

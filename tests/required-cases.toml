@@ -1077,6 +1077,13 @@ tests = [
 ]
 
 [[case]]
+id = "R4-integrate:snapshot-peers"
+tier = "offline"
+tests = [
+    "e2e::tests::the_snapshot_lists_every_enrollment_with_its_standing_and_the_retirement_date",
+]
+
+[[case]]
 id = "R4-integrate:macos-notification-identity"
 tier = "offline"
 tests = [
