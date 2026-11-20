@@ -182,6 +182,13 @@ fn every_snapshot_field_can_be_named_and_read_from_outside_the_crate() {
     assert!(rejected.is_empty() && hashes.is_empty() && older.is_none());
     let settings: &SettingsSnapshot = &st.settings;
     let paused: &Vec<PausedFolder> = &settings.paused;
+    let units: &Vec<wow_sync_runtime::SettingsUnitRow> = &st.settings_units;
+    assert!(units.is_empty());
+    assert_ne!(
+        wow_sync_runtime::SettingsUnitStatus::Active,
+        wow_sync_runtime::SettingsUnitStatus::Disabled
+    );
+    let _: Option<&wow_sync_runtime::HeadChoice> = None;
     assert!(!settings.enabled && paused.is_empty() && !settings.policy_conflict);
     assert!(peers.is_empty() && PeerStanding::Active != PeerStanding::Retired);
     let hold: &HoldScope = &st.hold;

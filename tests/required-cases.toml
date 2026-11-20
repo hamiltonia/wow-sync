@@ -1095,6 +1095,14 @@ tests = [
 ]
 
 [[case]]
+id = "R4-integrate:snapshot-settings-units"
+tier = "offline"
+tests = [
+    "e2e::tests::the_snapshot_units_carry_the_heads_choose_takes_and_the_history_restore_takes",
+    "e2e::tests::the_snapshot_units_offer_no_actionable_heads_when_disabled_or_retired",
+]
+
+[[case]]
 id = "R4-integrate:snapshot-peers"
 tier = "offline"
 tests = [

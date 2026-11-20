@@ -750,6 +750,129 @@ pub fn settings_history(
     out
 }
 
+/// Why a unit's settings are or are not syncing here, most blocking reason first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsUnitStatus {
+    /// This computer is retired: it records no settings intent.
+    Retired,
+    /// No consent on this computer (or no approved size cap, Q-77): nothing is read or applied.
+    Disabled,
+    /// A policy exception keeps this folder's settings on each computer.
+    NotShared,
+    /// Competing policies disagree about this folder; nothing is chosen for the owner.
+    PolicyConflict,
+    Paused,
+    /// Competing shared revisions exist; the owner picks one (`Command::ChooseSettings`).
+    NeedsChoice,
+    Active,
+}
+
+/// One of the competing shared states Choose offers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeadChoice {
+    /// The value `Command::ChooseSettings { checkpoint }` takes.
+    pub checkpoint: wow_sync_core::ids::CheckpointRef,
+    /// The revisions currently at this state (equal heads are one state).
+    pub revisions: Vec<wow_sync_core::ids::Sha256>,
+}
+
+/// Everything the Settings screen needs for one unit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SettingsUnitRow {
+    pub unit: SettingsUnit,
+    pub status: SettingsUnitStatus,
+    /// Settings of this unit are being synced here right now.
+    pub live: bool,
+    /// Empty unless the unit needs a choice and this computer may make it.
+    pub competing: Vec<HeadChoice>,
+    /// The value `Command::ChooseSettings { shown_heads }` takes: every current head revision.
+    pub shown_heads: Vec<wow_sync_core::ids::Sha256>,
+    /// Oldest first; the `checkpoint` of an entry is what `Command::RestoreSettings` takes.
+    pub history: Vec<SettingsHistoryEntry>,
+    pub restore_possible: bool,
+    /// The value `Command::ShareSettings { checkpoint }` takes: this computer's latest capture.
+    pub latest_capture: Option<wow_sync_core::ids::CheckpointRef>,
+    pub can_share: bool,
+}
+
+pub fn settings_units(
+    local: &SettingsLocal,
+    ledger: &wow_sync_core::ledger::Ledger,
+    derived: &wow_sync_core::ledger::Derived,
+    retired_self: bool,
+    cap_enabled: bool,
+) -> Vec<SettingsUnitRow> {
+    use wow_sync_core::authority::AuthorityRecord;
+    use wow_sync_core::settings::{authority_for, graph_from_ledger, policy_heads, Authority};
+    let mut units: std::collections::BTreeSet<SettingsUnit> =
+        local.units.iter().map(|u| u.unit.clone()).collect();
+    for e in ledger.entries() {
+        if let Some(AuthorityRecord::SettingsRevision(r)) = ledger.record(&e.hash) {
+            units.insert(r.unit.clone());
+        }
+    }
+    let heads = policy_heads(ledger, derived);
+    units
+        .into_iter()
+        .map(|unit| {
+            let authority = authority_for(&heads, &unit.folder);
+            let graph = graph_from_ledger(ledger, derived, &unit);
+            let history = settings_history(ledger, derived, &unit);
+            let latest_capture = local
+                .units
+                .iter()
+                .find(|u| u.unit == unit)
+                .and_then(|u| u.captures.first().copied());
+            let paused = local.paused_folders.contains(&unit.folder);
+            let blocked = matches!(authority, Authority::NotShared | Authority::Conflict);
+            let actionable =
+                !retired_self && local.consent && cap_enabled && !heads.is_empty() && !blocked;
+            let competing: Vec<HeadChoice> = if actionable && graph.head_states.len() > 1 {
+                graph
+                    .head_states
+                    .iter()
+                    .map(|(c, r)| HeadChoice {
+                        checkpoint: *c,
+                        revisions: r.clone(),
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let status = if retired_self {
+                SettingsUnitStatus::Retired
+            } else if !local.consent || !cap_enabled {
+                SettingsUnitStatus::Disabled
+            } else if authority == Authority::NotShared {
+                SettingsUnitStatus::NotShared
+            } else if authority == Authority::Conflict {
+                SettingsUnitStatus::PolicyConflict
+            } else if paused {
+                SettingsUnitStatus::Paused
+            } else if !competing.is_empty() {
+                SettingsUnitStatus::NeedsChoice
+            } else {
+                SettingsUnitStatus::Active
+            };
+            SettingsUnitRow {
+                shown_heads: if competing.is_empty() {
+                    Vec::new()
+                } else {
+                    graph.heads.clone()
+                },
+                live: status == SettingsUnitStatus::Active,
+                restore_possible: actionable && !history.is_empty(),
+                can_share: actionable && latest_capture.is_some(),
+                latest_capture,
+                competing,
+                history,
+                status,
+                unit,
+            }
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
