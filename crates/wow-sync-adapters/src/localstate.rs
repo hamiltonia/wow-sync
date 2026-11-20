@@ -8,6 +8,10 @@ use std::io::Write;
 use std::path::Path;
 
 const AUDIT_LIMIT: u64 = 1024 * 1024;
+pub const NOTICES_FILE: &str = "notices.json";
+pub const NOTICES_LIMIT: u64 = 64 * 1024;
+pub const UPDATE_CHECK_FILE: &str = "update_check.json";
+pub const UPDATE_CHECK_LIMIT: u64 = 4096;
 
 pub struct LocalState {
     root: Root,
@@ -163,12 +167,61 @@ impl LocalState {
             _file: crate::fs_install::hold_lock(&path)?,
         })
     }
+
+    /// The notification ledger (`notices.json`, ops.md §3.2). None = absent.
+    pub fn read_notices(&self) -> Result<Option<Vec<u8>>, FsError> {
+        self.read(NOTICES_FILE, NOTICES_LIMIT)
+    }
+
+    pub fn write_notices(&self, bytes: &[u8]) -> Result<(), FsError> {
+        self.write_bounded(NOTICES_FILE, NOTICES_LIMIT, bytes)
+    }
+
+    /// The update-check state (`update_check.json`, ops.md §4.2). None = absent.
+    pub fn read_update_check(&self) -> Result<Option<Vec<u8>>, FsError> {
+        self.read(UPDATE_CHECK_FILE, UPDATE_CHECK_LIMIT)
+    }
+
+    pub fn write_update_check(&self, bytes: &[u8]) -> Result<(), FsError> {
+        self.write_bounded(UPDATE_CHECK_FILE, UPDATE_CHECK_LIMIT, bytes)
+    }
+
+    fn write_bounded(&self, name: &str, limit: u64, bytes: &[u8]) -> Result<(), FsError> {
+        if bytes.len() as u64 > limit {
+            return Err(FsError::new(
+                FsErrorKind::TooLarge,
+                &self.root.path().join(name),
+                "state file would exceed its limit",
+            ));
+        }
+        self.write_atomic(name, bytes)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testkit::TempDir;
+
+    #[test]
+    fn notice_and_update_state_files_round_trip_within_their_limits() {
+        let t = TempDir::new();
+        let ls = LocalState::open_at(&t.path().join("state")).unwrap();
+        assert_eq!(ls.read_notices().unwrap(), None);
+        assert_eq!(ls.read_update_check().unwrap(), None);
+        ls.write_notices(b"{\"n\":1}").unwrap();
+        ls.write_update_check(b"{\"u\":1}").unwrap();
+        assert_eq!(ls.read_notices().unwrap().unwrap(), b"{\"n\":1}");
+        assert_eq!(ls.read_update_check().unwrap().unwrap(), b"{\"u\":1}");
+        let big = vec![b'x'; UPDATE_CHECK_LIMIT as usize + 1];
+        assert_eq!(
+            ls.write_update_check(&big).unwrap_err().kind,
+            FsErrorKind::TooLarge
+        );
+        assert_eq!(ls.read_update_check().unwrap().unwrap(), b"{\"u\":1}");
+        let big = vec![b'x'; NOTICES_LIMIT as usize + 1];
+        assert!(ls.write_notices(&big).is_err());
+    }
 
     #[test]
     fn remove_deletes_a_file_and_tolerates_absence() {
