@@ -285,7 +285,7 @@ mod tests {
 
     fn json(tag: &str, draft: bool, pre: bool) -> Vec<u8> {
         format!(
-            r#"{{"tag_name":"{tag}","draft":{draft},"prerelease":{pre},"name":"x","body":"hi","html_url":"https://evil.example/x"}}"#
+            r#"{{"tag_name":"{tag}","draft":{draft},"prerelease":{pre},"name":"x","body":"hi","html_url":"https://github.com/hamiltonia/wow-sync/releases/tag/v9.9.9"}}"#
         )
         .into_bytes()
     }
