@@ -160,14 +160,9 @@ when empty, so golden fixtures are unchanged), `RemovalStore::forget_group_remov
   `build_inventory`, a private test-only settings cap (production stays `None`, Q-77), the
   policy/revision builders, the per-unit step (capture, `target_case`, publish `Auto`, plan the
   apply) and `SetPolicy`/`ConfirmSettingsHere`. Not started; real-data settings sync stays off.
-- **Rest of the §9.1 surface** (`control.rs`): not built, so no variant is declared for them:
-  keep and resume (typed scope), explicit re-enrollment, `Rollback` (needs live R1/R0, stage D),
-  settings master/exception/push/pause/resume/choose/restore/confirm/use-shared,
-  `SettingsHistory`, removal recovery/restore commands (functions exist in `removal_cycle.rs`
-  but are not routed). `ExportDiagnostics`, `CheckUpdates`, `AppSettings` remain as before.
-- **Decision item producer:** nothing in the cycle builds `DecisionItem`s from live state;
-  `offer_decisions` is the hook the producer (compose's `NeedsDecision`, `new_version_item`)
-  must call.
+- **Rest of the §9.1 surface** (`control.rs`): `Rollback` (needs live R1/R0, stage D); settings
+  pause/resume/choose/restore/confirm/use-shared and settings removal-restore; a capture command
+  producing the checkpoint; policies over 256 rules need parts.
 - **Rollback inputs from live scans, cross-packet items, `TooLarge` split persistence**
   (probably `kinds.rs`), the stage D A-38 controls.
 
