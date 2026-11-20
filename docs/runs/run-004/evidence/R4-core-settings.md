@@ -33,6 +33,10 @@ Q-49/Q-50 preserved. Q-77 has no approved value: `MAX_SETTINGS_FILE_BYTES` stays
 
 Not run as mutations (time budget): non-authority publish, missing-parent-as-root, collapse equal heads, policy-by-package, yield-on-unchanged, basis-shrunk, single-witness, historical author re-check, auto-elect master, exact-content match, three-state limit, different-account apply. Those behaviours have positive/negative unit tests but no mutation evidence.
 
+## Correction (CI fix)
+
+`wtf::tests::a_junction_at_an_account_is_unsafe_and_nothing_beneath_it_is_read` is `#[cfg(windows)]` but was listed in the offline case `R4-core-settings:adapters-and-cycle`; the offline tier also runs on macOS, where it did not run and failed required-cases. It now sits in the native case `R4-core-settings:adapters-native`. The offline case lists 10 tests. A scan of the crates for `cfg(windows|target_os|unix)` found no other gated test among those I listed.
+
 ## Deviations / open issues
 
 - `ledger.rs` `kind_rules` (not owned) accepts a `SettingsRevision` parent only if unit and kind both equal; mixed-kind chains (push -> auto) become invalid, contradicting settings.md §3.3. Needs a fix by the ledger owner. My tests exercise abstract `RevNode` graphs, not ledger-level mixed-kind chains.

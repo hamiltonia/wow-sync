@@ -824,13 +824,18 @@ tests = [
     "settings_store::tests::blobs_round_trip_deduplicate_and_detect_corruption",
     "settings_store::tests::local_metadata_survives_a_restart_and_a_failed_write_keeps_the_previous",
     "wtf::tests::a_file_that_would_run_code_is_only_hashed",
-    "wtf::tests::a_junction_at_an_account_is_unsafe_and_nothing_beneath_it_is_read",
     "wtf::tests::an_oversized_file_is_listed_but_not_read_and_no_wtf_is_empty",
     "wtf::tests::lists_only_the_two_shapes_with_size_and_hash",
     "settings_cycle::tests::a_failing_store_records_no_state",
     "settings_cycle::tests::the_apply_plan_is_settings_only_with_the_scanned_expectation",
     "settings_cycle::tests::without_a_cap_nothing_syncs_and_a_file_changed_after_the_scan_is_not_stored",
     "settings_cycle::tests::the_scope_reads_only_owned_files_and_a_capture_stores_blob_then_manifest",
+]
+[[case]]
+id = "R4-core-settings:adapters-native"
+tier = "native"
+tests = [
+    "wtf::tests::a_junction_at_an_account_is_unsafe_and_nothing_beneath_it_is_read",
 ]
 # <<< section: R4-core-settings
 
