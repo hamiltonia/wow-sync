@@ -2,13 +2,17 @@
 //! the sync, update or notification paths does. The text itself is built by
 //! `wow_sync_core::diagnostics`.
 
-// Not yet reachable from `lib.rs` (R4-integrate re-exports it); drop this allowance then.
-#![allow(dead_code)]
-
+use crate::control::ActivityEntry;
+use crate::service::StatusSnapshot;
 use std::path::{Path, PathBuf};
 use wow_sync_core::diagnostics::{
-    build, DiagnosticsInput, Export, ExportOptions, ExportRefused, RedactionContext,
+    build, ActivityKind, ActivityRow, AddonRow, AddonStatus, ComputerRow, CpuArch,
+    DiagnosticsInput, EnrollmentState, ErrorKind, ErrorRow, Export, ExportOptions, ExportRefused,
+    HoldKind, IdentityStatus, OsFamily, PlanBlockKind, ReasonKind, RedactionContext, ReportState,
+    SourceText, Toggles, Tri, VariantKind, VariantRow,
 };
+use wow_sync_core::status::{AllHoldCause, HoldScope, MemberSummary, PackageStatus};
+use wow_sync_core::target::DecisionReason;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SaveError {
@@ -102,6 +106,196 @@ pub fn export_and_save(
     let export = export_diagnostics(input, ctx, options).map_err(ExportError::Refused)?;
     save_export(&export, dest, forbidden).map_err(ExportError::Save)?;
     Ok(export)
+}
+
+fn activity_kind(kind: &str) -> ActivityKind {
+    match kind {
+        "applied" => ActivityKind::Applied,
+        "recovered" => ActivityKind::Recovery,
+        "decision" => ActivityKind::Decision,
+        "retirement" => ActivityKind::Retirement,
+        "paused" => ActivityKind::Paused,
+        "resumed" => ActivityKind::Resumed,
+        "update-check-failed" => ActivityKind::UpdateCheckFailed,
+        "export-refused" => ActivityKind::ExportRefused,
+        "error" => ActivityKind::Error,
+        _ => ActivityKind::Other,
+    }
+}
+
+fn reason_kind(r: &DecisionReason) -> ReasonKind {
+    match r {
+        DecisionReason::Ambiguous => ReasonKind::Ambiguous,
+        DecisionReason::NoCompatibleToc => ReasonKind::UnusableMetadata,
+        DecisionReason::DifferentTocMapping => ReasonKind::DifferentTocMapping,
+        DecisionReason::UnvalidatedTocMapping => ReasonKind::UnvalidatedTocMapping,
+        DecisionReason::PartialCandidate => ReasonKind::PartialCandidate,
+        DecisionReason::ChoicesDiffer => ReasonKind::ChoicesDiffer,
+        DecisionReason::RollbackTargetsDiffer => ReasonKind::RollbackTargetsDiffer,
+    }
+}
+
+fn addon_status(s: &PackageStatus) -> (AddonStatus, ReasonKind) {
+    match s {
+        PackageStatus::InSync
+        | PackageStatus::Available
+        | PackageStatus::AppliedHere
+        | PackageStatus::ConfirmedBy(_) => (AddonStatus::Ok, ReasonKind::None),
+        PackageStatus::NeedsDecision(r) => (AddonStatus::NeedsDecision, reason_kind(r)),
+        PackageStatus::Unavailable | PackageStatus::NotSynced | PackageStatus::Held => {
+            (AddonStatus::Waiting, ReasonKind::None)
+        }
+        PackageStatus::Removing => (AddonStatus::Removed, ReasonKind::None),
+        PackageStatus::Interrupted | PackageStatus::NeedsHelp(_) | PackageStatus::Blocked(_) => {
+            (AddonStatus::NeedsHelp, ReasonKind::None)
+        }
+    }
+}
+
+/// The export input from a live snapshot. Only classes and counts are carried; texts that could
+/// hold private data stay out (the core build refuses any that slip in).
+pub fn input_from(
+    snap: &StatusSnapshot,
+    toggles: Toggles,
+    activity: &[ActivityEntry],
+    now_unix_ms: i64,
+) -> DiagnosticsInput {
+    let detail = snap.detail.as_ref();
+    let label = detail
+        .map(|d| d.variant_label.to_lowercase())
+        .unwrap_or_default();
+    let kind = if label.contains("forever") {
+        VariantKind::Forever
+    } else if label.contains("era") {
+        VariantKind::ClassicEra
+    } else if label.contains("retail") {
+        VariantKind::Retail
+    } else {
+        VariantKind::Other
+    };
+    let hold_scope = match &snap.hold {
+        HoldScope::None => HoldKind::None,
+        HoldScope::Addons(_) => HoldKind::Addons,
+        HoldScope::AllApplies(_) => HoldKind::AllApplies,
+    };
+    let plan_blocks = match &snap.hold {
+        HoldScope::AllApplies(c) => vec![match c {
+            AllHoldCause::UnresolvedJournal { .. } => PlanBlockKind::UnresolvedJournal,
+            AllHoldCause::GameRunning => PlanBlockKind::GameRunning,
+            AllHoldCause::ActivityUnknown => PlanBlockKind::ActivityUnknown,
+            AllHoldCause::Paused => PlanBlockKind::Paused,
+            AllHoldCause::Retired => PlanBlockKind::Retired,
+            AllHoldCause::RetirementUnresolved => PlanBlockKind::RetirementUnresolved,
+        }],
+        HoldScope::None | HoldScope::Addons(_) => Vec::new(),
+    };
+    let computers = detail
+        .map(|d| {
+            d.members
+                .iter()
+                .map(|m| ComputerRow {
+                    is_this_computer: m.is_this,
+                    enrollment: if snap
+                        .retirements
+                        .iter()
+                        .any(|r| r.computer.to_string() == m.id)
+                    {
+                        EnrollmentState::Retired
+                    } else {
+                        EnrollmentState::Active
+                    },
+                    report: match m.state {
+                        MemberSummary::NoState => ReportState::NeverReported,
+                        MemberSummary::Usable => ReportState::Current,
+                        MemberSummary::Unusable
+                        | MemberSummary::Regressed
+                        | MemberSummary::Invalid => ReportState::Stale,
+                    },
+                    last_report_age_hours: m
+                        .seen_locally_at
+                        .map(|t| ((now_unix_ms - t).max(0) / 3_600_000) as u32),
+                    watermark_seq: 0,
+                    display_name: m.name.clone(),
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let addons = detail
+        .map(|d| {
+            d.packages
+                .iter()
+                .map(|p| {
+                    let (status, reason) = addon_status(&p.status);
+                    AddonRow {
+                        folder_name: p.key.clone(),
+                        status,
+                        candidate_count: p.candidates.len() as u32,
+                        reason,
+                        hold: HoldKind::None,
+                        source_text: SourceText::default(),
+                        fingerprint: None,
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    DiagnosticsInput {
+        app_version: env!("CARGO_PKG_VERSION"),
+        build_commit: option_env!("WOWSYNC_BUILD_COMMIT").unwrap_or("dev"),
+        toggles,
+        schema_majors: vec![("authority", 1)],
+        os: if cfg!(windows) {
+            OsFamily::Windows
+        } else if cfg!(target_os = "macos") {
+            OsFamily::MacOs
+        } else {
+            OsFamily::Other
+        },
+        os_version: None,
+        arch: if cfg!(target_arch = "x86_64") {
+            CpuArch::X64
+        } else if cfg!(target_arch = "aarch64") {
+            CpuArch::Arm64
+        } else {
+            CpuArch::Other
+        },
+        process_memory_mib: None,
+        wow_running: match detail.map(|d| &d.game) {
+            Some(wow_sync_core::plan::Activity::NotRunning) => Tri::No,
+            Some(wow_sync_core::plan::Activity::Running { .. }) => Tri::Yes,
+            _ => Tri::Unknown,
+        },
+        variants: vec![VariantRow {
+            kind,
+            identity: IdentityStatus::Verified,
+            addon_count: addons.len() as u32,
+        }],
+        computers,
+        addons,
+        hold_scope,
+        plan_blocks,
+        journals: Vec::new(),
+        activity: activity
+            .iter()
+            .filter_map(|a| {
+                Some(ActivityRow {
+                    at_unix_secs: a.unix_ms? / 1000,
+                    kind: activity_kind(&a.kind),
+                    computer: None,
+                })
+            })
+            .collect(),
+        errors: snap
+            .provider_error
+            .iter()
+            .map(|e| ErrorRow {
+                kind: ErrorKind::Provider,
+                io: None,
+                os_code: None,
+                message: e.clone(),
+            })
+            .collect(),
+    }
 }
 
 #[cfg(test)]

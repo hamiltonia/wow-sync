@@ -382,8 +382,136 @@ fn how(e: wow_sync_core::kinds::RemovalEvidence) -> &'static str {
     }
 }
 
+/// One effective retirement as a row of the Computers "Retired" group (ops.md §2.2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetirementRow {
+    pub computer: ComputerId,
+    pub enrollment: wow_sync_core::ids::EnrollmentId,
+    /// The retired computer, by the name its owner chose.
+    pub name: String,
+    /// Who retired it, by name.
+    pub retired_by: String,
+    pub retired_by_id: ComputerId,
+    /// Its records after this sequence number are ignored.
+    pub cutoff_seq: u64,
+    pub is_this: bool,
+}
+
+/// An older complete release of a package that a rollback can bring back (one row per release).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeldRelease {
+    pub package: FolderKey,
+    pub title: String,
+    /// Pass this to `Command::Rollback { recovered }`.
+    pub release: wow_sync_core::ids::Sha256,
+    pub label: String,
+    /// Computers that hold this release, by name.
+    pub holders: Vec<String>,
+}
+
+/// Effective retirements only; unresolved ones are reported through the hold, not as rows.
+pub fn retirement_rows(
+    ledger: &wow_sync_core::ledger::Ledger,
+    derived: &wow_sync_core::ledger::Derived,
+    names: &BTreeMap<ComputerId, String>,
+    this: &ComputerId,
+) -> Vec<RetirementRow> {
+    use wow_sync_core::authority::{AuthorityRecord, RetStatus};
+    let name = |c: &ComputerId| -> String {
+        if c == this {
+            "this computer".to_string()
+        } else {
+            names
+                .get(c)
+                .cloned()
+                .unwrap_or_else(|| "another computer".into())
+        }
+    };
+    let mut out = Vec::new();
+    for e in ledger.entries() {
+        if derived.retirement_status.get(&e.hash) != Some(&RetStatus::Effective) {
+            continue;
+        }
+        let Some(AuthorityRecord::Retirement(r)) = ledger.record(&e.hash) else {
+            continue;
+        };
+        out.push(RetirementRow {
+            computer: r.retired.computer_id.clone(),
+            enrollment: r.retired.enrollment_id.clone(),
+            name: name(&r.retired.computer_id),
+            retired_by: name(&r.issuer.computer_id),
+            retired_by_id: r.issuer.computer_id.clone(),
+            cutoff_seq: r.cutoff_seq,
+            is_this: &r.retired.computer_id == this,
+        });
+    }
+    out
+}
+
+/// The non-installed releases of every package this computer has installed. Rejected and
+/// excluded releases are already absent from `copies`.
+pub fn held_releases(
+    copies: &[wow_sync_core::target::PackageCopies],
+    inventory: &Inventory,
+    titles: &BTreeMap<String, String>,
+    own: &wow_sync_core::ids::EnrollmentId,
+    names: &BTreeMap<wow_sync_core::ids::EnrollmentId, String>,
+) -> Vec<HeldRelease> {
+    let mut out = Vec::new();
+    for pc in copies {
+        let installed = pc
+            .copies
+            .iter()
+            .any(|c| c.holders.iter().any(|h| &h.enrollment_id == own));
+        if !installed {
+            continue;
+        }
+        let display = inventory.get(&pc.package.display);
+        let title = titles
+            .get(pc.package.key.as_str())
+            .cloned()
+            .or_else(|| display.map(|f| f.name.clone()))
+            .unwrap_or_else(|| pc.package.display.to_string());
+        for c in &pc.copies {
+            if c.holders.iter().any(|h| &h.enrollment_id == own) {
+                continue;
+            }
+            out.push(HeldRelease {
+                package: pc.package.key.clone(),
+                title: title.clone(),
+                release: c.version.hash,
+                label: c
+                    .version
+                    .folders
+                    .iter()
+                    .find(|f| f.key == pc.package.display)
+                    .and_then(|f| f.toc.version.clone())
+                    .unwrap_or_default(),
+                holders: c
+                    .holders
+                    .iter()
+                    .map(|h| {
+                        names
+                            .get(&h.enrollment_id)
+                            .cloned()
+                            .unwrap_or_else(|| "another computer".into())
+                    })
+                    .collect(),
+            });
+        }
+    }
+    out
+}
+
+/// "Review needed" (ops.md §1.7, UQ-1): a pending guided reconfirmation shows it, but never
+/// over `NeedsHelp` or `Error`, and Paused or Working never hide it. A pending decision alone
+/// does not raise it (Q-59).
+pub fn review_needed(reconfirm_pending: bool, base: wow_sync_core::status::Headline) -> bool {
+    use wow_sync_core::status::Headline as H;
+    reconfirm_pending && !matches!(base, H::NeedsHelp | H::Error)
+}
+
 /// Live removals as rows, with provenance by computer name (UG-22). Nothing is decided here.
-#[allow(dead_code)]
 pub fn removed_rows(
     ledger: &wow_sync_core::ledger::Ledger,
     derived: &wow_sync_core::ledger::Derived,

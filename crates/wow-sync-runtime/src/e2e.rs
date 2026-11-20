@@ -3,7 +3,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::control::{Command, CommandError, CommandOutcome};
+    use crate::control::{AppToggles, Command, CommandError, CommandOutcome};
     use crate::removal_cycle::RemovalStore;
     use crate::*;
     use std::path::{Path, PathBuf};
@@ -3394,5 +3394,328 @@ mod tests {
             .unwrap()
             .clone();
         assert!(item.options.len() >= 2, "a choice is offered, none made");
+    }
+
+    fn name_of(pc: &mut Pc) -> String {
+        pc.svc.status().computer_name
+    }
+
+    fn hash_of_alpha(lab: &Lab, g: &GroupId, pc: &Pc) -> Sha256 {
+        let f = alpha_folder(lab, g, pc);
+        wow_sync_core::hash::package_hash(&[(f.key.clone(), f.tree.unwrap())])
+    }
+
+    #[test]
+    fn the_snapshot_reports_retirements_and_the_retired_computers_hold() {
+        use wow_sync_core::status::{AllHoldCause, HoldScope};
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        synced(&mut a);
+        let before = a.svc.status();
+        assert!(before.retirements.is_empty(), "{:?}", before.retirements);
+        assert!(before.this_retirement.is_none());
+        assert_eq!(before.hold, HoldScope::None);
+
+        a.svc
+            .command(Command::Retire {
+                subject: ref_of(&b),
+            })
+            .unwrap();
+        synced(&mut a);
+        synced(&mut b);
+        let (a_name, b_name) = (a.svc.status().computer_name, b.svc.status().computer_name);
+        let sa = a.svc.status();
+        assert_eq!(sa.retirements.len(), 1, "{:?}", sa.retirements);
+        assert_eq!(sa.retirements[0].name, b_name);
+        assert_eq!(sa.retirements[0].retired_by, "this computer");
+        assert!(!sa.retirements[0].is_this);
+        assert!(sa.this_retirement.is_none(), "the retirer is not retired");
+        assert_eq!(sa.hold, HoldScope::None);
+
+        let sb = b.svc.status();
+        assert_eq!(sb.retirements.len(), 1);
+        assert!(sb.retirements[0].is_this);
+        assert_eq!(sb.retirements[0].retired_by, a_name);
+        let info = sb.this_retirement.expect("b knows it is retired");
+        assert_eq!(info.retired_by, pc_ids(&a).0);
+        assert_eq!(sb.hold, HoldScope::AllApplies(AllHoldCause::Retired));
+        assert!(!sb.review_needed);
+        assert_eq!(
+            sb.enrollment_names.get(&pc_ids(&b).1),
+            Some(&b_name),
+            "the retired enrollment still has a name"
+        );
+    }
+
+    #[test]
+    fn the_snapshot_hold_follows_pause_and_a_pending_decision_never_raises_review_needed() {
+        use wow_sync_core::status::{AllHoldCause, HoldScope};
+        let lab = Lab::new();
+        let (mut a, b, _c, g) = alpha_v2_published(&lab);
+        a.svc.set_paused(true).unwrap();
+        assert_eq!(
+            a.svc.status().hold,
+            HoldScope::AllApplies(AllHoldCause::Paused)
+        );
+        a.svc.set_paused(false).unwrap();
+        assert_eq!(a.svc.status().hold, HoldScope::None);
+
+        put_keep_of_alpha(&lab, &g, &a);
+        put_keep_of_alpha(&lab, &g, &b);
+        synced(&mut a);
+        synced(&mut a);
+        let st = a.svc.status();
+        assert!(
+            matches!(&st.hold, HoldScope::Addons(v) if !v.is_empty()),
+            "{:?}",
+            st.hold
+        );
+        assert!(
+            !st.review_needed,
+            "a pending decision is not a reconfirmation (Q-59)"
+        );
+    }
+
+    #[test]
+    fn review_needed_never_hides_needs_help_or_error() {
+        use wow_sync_core::status::Headline as H;
+        for (pending, base, shown) in [
+            (true, H::Ok, true),
+            (true, H::Working, true),
+            (true, H::Waiting, true),
+            (true, H::NeedsHelp, false),
+            (true, H::Error, false),
+            (false, H::Ok, false),
+            (false, H::Waiting, false),
+        ] {
+            assert_eq!(
+                crate::detail::review_needed(pending, base),
+                shown,
+                "{pending} {base:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_snapshot_lists_held_releases_but_never_the_installed_one() {
+        let lab = Lab::new();
+        let (mut a, mut b, _c, g) = alpha_v2_published(&lab);
+        let v1 = hash_of_alpha(&lab, &g, &a);
+        let v2 = hash_of_alpha(&lab, &g, &b);
+        let b_name = name_of(&mut b);
+        let held = a.svc.status().held_releases;
+        assert!(held.iter().all(|h| h.release != v1), "{held:?}");
+        let row = held
+            .iter()
+            .find(|h| h.release == v2)
+            .expect("b's newer release is held");
+        assert_eq!(row.package.as_str(), "alpha");
+        assert!(row.holders.contains(&b_name), "{row:?}");
+        let rollback = a.svc.command(Command::Rollback {
+            package: row.package.clone(),
+            recovered: row.release,
+        });
+        assert!(
+            !matches!(rollback, Err(CommandError::UnknownCopy(_))),
+            "a listed release is one the command accepts: {rollback:?}"
+        );
+    }
+
+    #[test]
+    fn the_snapshot_lists_removed_addons_with_who_has_not_acknowledged() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        let mut c = lab.pc("c");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        c.join(&g);
+        synced(&mut c);
+        synced(&mut b);
+        assert!(b.svc.status().removed.is_empty());
+        a_removes_alpha(&mut a, &g);
+        synced(&mut b);
+        let (a_name, c_name) = (name_of(&mut a), name_of(&mut c));
+        let removed = b.svc.status().removed;
+        assert_eq!(removed.len(), 1, "{removed:?}");
+        assert_eq!(removed[0].folders, vec!["Alpha".to_string()]);
+        assert!(removed[0].provenance.contains(&a_name), "{removed:?}");
+        assert!(
+            removed[0].awaiting.contains(&c_name),
+            "the offline computer has not acknowledged: {removed:?}"
+        );
+    }
+
+    fn recording() -> std::sync::Arc<wow_sync_adapters::notify::RecordingNotifier> {
+        std::sync::Arc::new(wow_sync_adapters::notify::RecordingNotifier::new())
+    }
+
+    fn release_json(tag: &str) -> Vec<u8> {
+        format!("{{\"tag_name\":\"{tag}\"}}").into_bytes()
+    }
+
+    fn fake_releases(
+        tags: &[&str],
+    ) -> std::sync::Arc<wow_sync_adapters::update_http::FakeReleases> {
+        std::sync::Arc::new(wow_sync_adapters::update_http::FakeReleases::new(
+            tags.iter().map(|t| Ok(release_json(t))).collect(),
+        ))
+    }
+
+    #[test]
+    fn an_applied_change_is_announced_once_and_not_when_summaries_are_off() {
+        use wow_sync_core::notice::{NoticeKind, NoticePolicy};
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        let mut c = lab.pc("c");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        let (nb, nc) = (recording(), recording());
+        b.join(&g);
+        c.join(&g);
+        b.svc
+            .attach_notifier(nb.clone(), NoticePolicy::default())
+            .unwrap();
+        c.svc
+            .attach_notifier(nc.clone(), NoticePolicy::default())
+            .unwrap();
+        c.svc
+            .save_toggles(&AppToggles {
+                notify_summaries: false,
+                ..AppToggles::default()
+            })
+            .unwrap();
+        assert_eq!(synced(&mut b).applied.len(), 1);
+        assert_eq!(synced(&mut c).applied.len(), 1);
+        assert_eq!(nb.sent().len(), 1, "{:?}", nb.sent());
+        assert!(nb.sent()[0].body.contains("alpha"), "{:?}", nb.sent());
+        assert!(!nb.sent()[0].urgent);
+        synced(&mut b);
+        assert_eq!(nb.sent().len(), 1, "an unchanged cycle announces nothing");
+        assert!(nc.sent().is_empty(), "summaries off: {:?}", nc.sent());
+        let _ = NoticeKind::Summary;
+    }
+
+    #[test]
+    fn an_update_check_fills_the_snapshot_and_a_new_release_is_announced_once() {
+        use wow_sync_core::notice::NoticePolicy;
+        use wow_sync_core::update::UpdateResult;
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        a.addon("Alpha", "alpha-v1");
+        a.create();
+        assert_eq!(
+            a.svc.command(Command::CheckUpdates),
+            Err(CommandError::UpdatesUnavailable)
+        );
+        assert_eq!(a.svc.status().update, None);
+        let source = fake_releases(&["v9.9.9", "v9.9.9"]);
+        let notes = recording();
+        a.svc
+            .attach_updates(source.clone(), system_clock())
+            .unwrap();
+        a.svc
+            .attach_notifier(notes.clone(), NoticePolicy::default())
+            .unwrap();
+        a.svc
+            .save_toggles(&AppToggles {
+                update_check: false,
+                ..AppToggles::default()
+            })
+            .unwrap();
+        synced(&mut a);
+        a.svc.wait_for_updates();
+        assert_eq!(source.calls(), 0, "automatic check is off");
+        assert_eq!(
+            a.svc.command(Command::CheckUpdates),
+            Ok(CommandOutcome::UpdateCheck(Started::Started)),
+            "a manual check works with the automatic one off"
+        );
+        a.svc.wait_for_updates();
+        assert_eq!(source.calls(), 1);
+        assert!(matches!(
+            a.svc.status().update,
+            Some(UpdateResult::Available { ref tag, .. }) if tag == "v9.9.9"
+        ));
+        synced(&mut a);
+        let sent: Vec<_> = notes
+            .sent()
+            .into_iter()
+            .filter(|n| n.body.contains("9.9.9"))
+            .collect();
+        assert_eq!(sent.len(), 1, "{:?}", notes.sent());
+        synced(&mut a);
+        synced(&mut a);
+        let again = notes
+            .sent()
+            .into_iter()
+            .filter(|n| n.body.contains("9.9.9"))
+            .count();
+        assert_eq!(again, 1, "the same release is not announced twice");
+    }
+
+    #[test]
+    fn diagnostics_preview_and_save_match_and_never_land_in_the_shared_or_install_folders() {
+        use crate::diag::{ExportError, SaveError};
+        use wow_sync_core::diagnostics::ExportOptions;
+        let lab = Lab::new();
+        let mut a = lab.pc("workstation-one");
+        a.addon("Alpha", "alpha-v1");
+        a.create();
+        synced(&mut a);
+        let options = ExportOptions::default();
+        let Ok(CommandOutcome::Exported(preview)) =
+            a.svc.command(Command::ExportDiagnostics { options })
+        else {
+            panic!("preview refused");
+        };
+        assert!(
+            preview.text.contains("alpha"),
+            "folder names are on by default: {}",
+            preview.text
+        );
+        assert!(
+            !preview.text.contains("workstation-one"),
+            "{}",
+            preview.text
+        );
+        let shared = lab.shared.to_string_lossy().into_owned();
+        assert!(!preview.text.contains(&shared));
+
+        let out = lab.tmp.join("elsewhere");
+        std::fs::create_dir(&out).unwrap();
+        let dest = out.join("diagnostics.txt");
+        let Ok(CommandOutcome::Exported(saved)) = a.svc.command(Command::SaveDiagnostics {
+            options,
+            dest: dest.clone(),
+        }) else {
+            panic!("save refused");
+        };
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), saved.text);
+
+        for forbidden in [lab.shared.clone(), a.install.root.clone()] {
+            let bad = forbidden.join("diagnostics.txt");
+            assert_eq!(
+                a.svc.command(Command::SaveDiagnostics {
+                    options,
+                    dest: bad.clone()
+                }),
+                Err(CommandError::Export(ExportError::Save(
+                    SaveError::ForbiddenLocation
+                )))
+            );
+            assert!(!bad.exists(), "nothing is written into {forbidden:?}");
+        }
     }
 }

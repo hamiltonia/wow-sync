@@ -358,8 +358,9 @@ pub fn render_result(r: &PackageResult) -> String {
 /// Journals present on disk split into interrupted packages and packages needing help
 /// (apply.md §4: a `needs_help` journal waits for the user; any other phase is resumable).
 /// How much is held (ops.md §1.6). `AllApplies` takes precedence over `Addons`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum HoldScope {
+    #[default]
     None,
     Addons(Vec<DecisionScope>),
     AllApplies(AllHoldCause),

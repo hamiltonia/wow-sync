@@ -98,6 +98,61 @@ impl AppSettings {
     }
 }
 
+const TOGGLES_FILE: &str = "toggles.txt";
+
+/// The three automatic behaviours the owner can switch off (ops.md §3.2, §4.2). Kept apart from
+/// [`AppSettings`] so saving the window settings never resets them. A missing or damaged file
+/// means all on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppToggles {
+    /// Check for updates automatically.
+    pub update_check: bool,
+    /// Notify when changes were applied.
+    pub notify_summaries: bool,
+    /// Notify when something needs the owner (action needed, data at risk, app update).
+    pub notify_needs_me: bool,
+}
+
+impl Default for AppToggles {
+    fn default() -> Self {
+        AppToggles {
+            update_check: true,
+            notify_summaries: true,
+            notify_needs_me: true,
+        }
+    }
+}
+
+impl AppToggles {
+    pub fn load(state: &LocalState) -> AppToggles {
+        let mut s = AppToggles::default();
+        let Ok(Some(b)) = state.read(TOGGLES_FILE, SMALL) else {
+            return s;
+        };
+        for line in String::from_utf8_lossy(&b).lines() {
+            match line.trim() {
+                "update_check=0" => s.update_check = false,
+                "notify_summaries=0" => s.notify_summaries = false,
+                "notify_needs_me=0" => s.notify_needs_me = false,
+                _ => {}
+            }
+        }
+        s
+    }
+
+    pub fn save(&self, state: &LocalState) -> Result<(), String> {
+        let text = format!(
+            "update_check={}\nnotify_summaries={}\nnotify_needs_me={}\n",
+            u8::from(self.update_check),
+            u8::from(self.notify_summaries),
+            u8::from(self.notify_needs_me),
+        );
+        state
+            .write_atomic(TOGGLES_FILE, text.as_bytes())
+            .map_err(|e| e.to_string())
+    }
+}
+
 /// What a quit request does right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StopState {
@@ -352,6 +407,19 @@ pub enum Command {
         package: wow_sync_core::paths::FolderKey,
         recovered: wow_sync_core::ids::Sha256,
     },
+    /// "Check for updates": works with the automatic check off (ops.md §4.2). The result is
+    /// read from `StatusSnapshot::update` once the check finishes.
+    CheckUpdates,
+    /// Builds the diagnostics export for the preview (ops.md §5). Nothing is saved.
+    ExportDiagnostics {
+        options: wow_sync_core::diagnostics::ExportOptions,
+    },
+    /// Builds the same export and saves exactly that text to `dest`. The shared folder and the
+    /// install roots are refused.
+    SaveDiagnostics {
+        options: wow_sync_core::diagnostics::ExportOptions,
+        dest: std::path::PathBuf,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -369,6 +437,11 @@ pub enum CommandOutcome {
     Recorded,
     /// The command had no effect to make (for example the subject is already retired).
     NothingToDo,
+    /// What `CheckUpdates` did: started a check, joined one in flight, or was debounced.
+    UpdateCheck(crate::updates::Started),
+    /// The export text for the preview (`ExportDiagnostics`) or the text that was saved
+    /// (`SaveDiagnostics`).
+    Exported(wow_sync_core::diagnostics::Export),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -400,6 +473,10 @@ pub enum CommandError {
     NoSharedSettings(wow_sync_core::ids::SettingsUnit),
     /// Resume never publishes: "Share mine" is the `ShareSettings` command.
     UseShareSettings,
+    /// No update service is attached, so there is nothing to check.
+    UpdatesUnavailable,
+    /// The export was refused (private data found) or could not be saved.
+    Export(crate::diag::ExportError),
     Service(String),
 }
 
@@ -511,6 +588,28 @@ mod tests {
         };
         v.save(&s).unwrap();
         assert_eq!(AppSettings::load(&s), v);
+    }
+
+    #[test]
+    fn toggles_default_on_persist_apart_from_the_window_settings() {
+        let t = TempDir::new();
+        let s = st(&t);
+        let on = AppToggles::default();
+        assert!(on.update_check && on.notify_summaries && on.notify_needs_me);
+        assert_eq!(AppToggles::load(&s), on);
+        let v = AppToggles {
+            update_check: false,
+            notify_summaries: false,
+            notify_needs_me: true,
+        };
+        v.save(&s).unwrap();
+        AppSettings {
+            closing_quits: true,
+            first_close_seen: true,
+        }
+        .save(&s)
+        .unwrap();
+        assert_eq!(AppToggles::load(&s), v, "saving window settings keeps them");
     }
 
     #[test]
