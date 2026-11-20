@@ -37,8 +37,33 @@ check_lab_root() {
     mkdir -p "$LAB_ROOT" 2>/dev/null || die "cannot create $LAB_ROOT (set WOWSYNC_LAB_ROOT=<dir> to use another neutral folder)"
 }
 
+# The app bundle that tools/mac/bundle.sh installs. macOS shows "WoW Sync" as the notification
+# sender only when this bundle (identifier com.wowsync.app) exists.
+BUNDLE_DIR=${WOWSYNC_BUNDLE_DIR:-$HOME/Applications}
+BUNDLE_APP="$BUNDLE_DIR/WoW Sync.app"
+BUNDLE_EXE="$BUNDLE_APP/Contents/MacOS/wow-sync"
+RAW_APP="$APP"
+APP_KIND=raw
+
+# Uses the installed bundle's executable when present (same binary, shipped layout), unless
+# WOWSYNC_NO_BUNDLE=1. Sets APP and APP_KIND (bundle or raw).
+pick_app() {
+    if [ "${WOWSYNC_NO_BUNDLE:-0}" != 1 ] && [ -x "$BUNDLE_EXE" ]; then
+        APP="$BUNDLE_EXE"
+        APP_KIND=bundle
+        if [ -x "$RAW_APP" ] && [ "$RAW_APP" -nt "$BUNDLE_EXE" ]; then
+            note "WARNING: the release build is newer than the installed bundle; run: sh tools/mac/bundle.sh"
+        fi
+    else
+        APP="$RAW_APP"
+        APP_KIND=raw
+    fi
+}
+
 need_release_build() {
+    pick_app
     [ -x "$APP" ] && [ -x "$DEV" ] || die "release build missing; run tools/mac/build.sh first"
+    note "app: $APP_KIND ($APP)"
 }
 
 # Creates a synthetic lab (install, provider, state) and marks it as ours.
@@ -135,6 +160,7 @@ env_report() {
     printf 'cpu: %s\n' "$(sysctl -n machdep.cpu.brand_string 2>/dev/null)"
     printf 'ram_gib: %s\n' "$(sysctl -n hw.memsize 2>/dev/null | awk '{ printf "%.0f", $1 / 1073741824 }')"
     printf 'rustc: %s\n' "$(rustc --version 2>/dev/null)"
+    printf 'app: %s\n' "$APP_KIND"
     printf 'commit: %s\n' "$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null)"
     printf 'branch: %s\n' "$(git -C "$REPO" rev-parse --abbrev-ref HEAD 2>/dev/null)"
 }

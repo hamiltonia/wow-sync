@@ -4,9 +4,10 @@
 #   sh tools/mac/notify-check.sh
 # It builds a tiny scratch program (outside the repository, under the lab root) that calls the same
 # OsNotifier the runtime uses (`OsNotifier::with_app_id(APP_ID)`, as in
-# crates/wow-sync-runtime/src/service.rs `attach_os_services`) once, with synthetic text. Nothing in the
-# repository is changed. A failure to show the notification, or a name other than "WoW Sync", is a
-# macOS A-27 FAIL (Q-63), not a fallback pass.
+# crates/wow-sync-runtime/src/service.rs `attach_os_services`) once, with synthetic text. OsNotifier asks
+# macOS to send as com.wowsync.app, so run `sh tools/mac/bundle.sh` first: the name "WoW Sync" shows
+# only if that app bundle is installed. Nothing in the repository is changed. A failure to show the
+# notification, or a name other than "WoW Sync", is a macOS A-27 FAIL (Q-63), not a fallback pass.
 set -u
 . "$(dirname "$0")/lib.sh"
 need_macos
@@ -60,8 +61,16 @@ note "building the scratch program (first build takes a few minutes)"
 (cd "$D" && cargo build --release) || die "scratch build failed (copy the messages above into your report)"
 
 OUTFILE="$LAB_ROOT/notify-check-result.txt"
+pick_app
+if [ -f "$BUNDLE_APP/Contents/Info.plist" ] && grep -q '<string>com.wowsync.app</string>' "$BUNDLE_APP/Contents/Info.plist"; then
+    BUNDLE_STATE="installed at $BUNDLE_APP"
+else
+    BUNDLE_STATE="NOT installed (run: sh tools/mac/bundle.sh); macOS will show a default sender, not WoW Sync"
+    note "WARNING: bundle $BUNDLE_STATE"
+fi
 {
     echo "T-27-11 macOS notification check"
+    echo "bundle: $BUNDLE_STATE"
     env_report
 } >"$OUTFILE"
 

@@ -6,6 +6,8 @@
 # The lab is $LAB_ROOT/main (default /Users/Shared/WoWSyncLab/main). Developer mode (--dev) is used,
 # exactly as the Windows harness does: it points the app at the lab's install, provider and state folders only.
 # The app is stopped with Ctrl-C in this Terminal window (this script stops only the process it started).
+# If tools/mac/bundle.sh has installed WoW Sync.app, the executable inside the bundle is run (the same
+# binary, in its shipped layout); set WOWSYNC_NO_BUNDLE=1 to run target/release/wow-sync instead.
 set -u
 . "$(dirname "$0")/lib.sh"
 need_macos
