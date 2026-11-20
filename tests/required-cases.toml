@@ -1115,6 +1115,20 @@ tier = "offline"
 tests = [
     "notify::tests::the_product_id_maps_to_the_bundle_id_and_a_scoped_id_is_kept",
 ]
+
+[[case]]
+id = "R4-integrate:snapshot-available-accounts"
+tier = "offline"
+tests = [
+    "e2e::tests::the_snapshot_lists_the_account_folders_consent_can_include",
+]
+
+[[case]]
+id = "R4-integrate:diagnostics-journals"
+tier = "offline"
+tests = [
+    "e2e::tests::the_diagnostics_export_records_the_journals_left_on_disk",
+]
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag

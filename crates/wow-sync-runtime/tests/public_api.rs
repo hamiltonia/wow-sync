@@ -190,6 +190,7 @@ fn every_snapshot_field_can_be_named_and_read_from_outside_the_crate() {
     );
     let _: Option<&wow_sync_runtime::HeadChoice> = None;
     assert!(!settings.enabled && paused.is_empty() && !settings.policy_conflict);
+    let _: &Vec<String> = &settings.available_accounts;
     assert!(peers.is_empty() && PeerStanding::Active != PeerStanding::Retired);
     let hold: &HoldScope = &st.hold;
     assert_eq!(hold, &HoldScope::None);

@@ -268,6 +268,8 @@ pub struct StatusSnapshot {
     pub review_needed: bool,
     /// The newest update-check result; `None` until an update service has run.
     pub update: Option<wow_sync_core::update::UpdateResult>,
+    /// One entry per apply journal on disk, for the diagnostics export (ops.md §5.3 Holds).
+    pub journal_states: Vec<wow_sync_core::diagnostics::JournalState>,
 }
 
 impl StatusSnapshot {
@@ -2037,12 +2039,17 @@ impl SliceService {
                     .map(|n| (p.enrollment_id.clone(), n.clone()))
             })
             .collect();
-        let settings = crate::settings_cycle::settings_snapshot(
+        let mut settings = crate::settings_cycle::settings_snapshot(
             &crate::settings_cycle::load_local(&self.state, &w.group.group_id),
             &self.plane.ledger,
             &derived,
             &enrollment_names,
         );
+        settings.available_accounts = if w.standing == OwnStanding::Active {
+            crate::settings_cycle::available_accounts(&self.variant_dir())
+        } else {
+            Vec::new()
+        };
         let retirements = crate::detail::retirement_rows(
             &self.plane.ledger,
             &derived,
@@ -2207,6 +2214,13 @@ impl SliceService {
             enrollment_names,
             review_needed: false,
             update: self.updates.as_ref().and_then(|u| u.last_result()),
+            journal_states: {
+                use wow_sync_core::diagnostics::JournalState as J;
+                std::iter::repeat_n(J::Pending, interrupted.len())
+                    .chain(std::iter::repeat_n(J::NeedsHelp, needs_help.len()))
+                    .chain(std::iter::repeat_n(J::Other, unknown_journals.len()))
+                    .collect()
+            },
         }
     }
 
