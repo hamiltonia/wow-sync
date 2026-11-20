@@ -1686,7 +1686,37 @@ impl Shell {
             .child(self.heading("Settings sync", 1))
             .child(banner);
 
-        // Master
+        if !self.w.features.settings.enabled {
+            let accounts = self.w.features.settings.available_accounts.clone();
+            let mut a: Vec<AnyElement> = vec![div()
+                .child("Choose which WoW accounts share their add-on settings. Nothing is included until you choose.")
+                .into_any_element()];
+            let mut chosen = Vec::new();
+            for name in &accounts {
+                let key = format!("ss-acct-{name}");
+                let on = self.expanded.contains(&key);
+                if on {
+                    chosen.push(name.clone());
+                }
+                let label = format!(
+                    "Account {name}: {}",
+                    if on { "included" } else { "not included" }
+                );
+                a.push(
+                    self.btn(
+                        &key,
+                        &label,
+                        Bk::Secondary,
+                        Act::ToggleExpand(key.clone()),
+                        cx,
+                    )
+                    .into_any_element(),
+                );
+            }
+            let c = crate::settings_ui::enable_control(&self.w, &chosen);
+            a.extend(self.control_buttons("ss-enable", vec![c], cx));
+            col = col.child(self.panel("Turn on settings sync", a));
+        }
         let mut m: Vec<AnyElement> = vec![div()
             .child("One computer shares its add-on settings with the group automatically. Choosing a master shares settings for every add-on, including add-ons found later.")
             .into_any_element()];

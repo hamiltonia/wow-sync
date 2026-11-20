@@ -627,6 +627,7 @@ fn apply_settings(f: &mut FeatureData, s: &wow_sync_runtime::SettingsSnapshot) {
     let d = &mut f.settings;
     d.enabled = s.enabled;
     d.accounts = s.accounts.clone();
+    d.available_accounts = s.available_accounts.clone();
     d.master = s.master.clone();
     d.exceptions = s.exceptions.clone();
     d.policy_conflict = s.policy_conflict;

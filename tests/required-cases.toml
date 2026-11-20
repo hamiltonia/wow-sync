@@ -1264,6 +1264,7 @@ tests = [
     "settings_ui::tests::the_snapshot_drives_master_choice_and_the_precise_resume_sheet",
     "settings_ui::tests::two_competing_masters_choose_nothing_and_block_exceptions_with_their_reason",
     "decisions_ui::tests::identical_keep_buttons_have_distinct_names_with_release_holder_and_consequence",
+    "settings_ui::tests::turning_on_offers_only_listed_accounts_from_the_snapshot",
     "settings_ui::tests::the_units_list_wires_share_choose_and_restore_from_the_snapshot",
     "settings_ui::tests::a_retired_master_is_not_shown_as_sharing_and_nothing_replaces_it",
     "settings_ui::tests::the_banner_does_not_claim_sharing_without_consent_or_a_size_limit",

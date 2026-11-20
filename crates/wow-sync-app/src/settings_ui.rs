@@ -74,6 +74,8 @@ pub struct SettingsData {
     pub exceptions: Vec<PolicyRule>,
     pub master: Option<EnrollmentRef>,
     pub accounts: Vec<String>,
+    /// Account folders found on this computer that settings sync could include.
+    pub available_accounts: Vec<String>,
     pub enabled: bool,
     /// Competing master choices exist; nothing is chosen for the owner.
     pub policy_conflict: bool,
@@ -477,10 +479,21 @@ pub fn exception_controls(w: &World, folder: &FolderKey) -> Vec<Control> {
 }
 
 /// "Share settings for these accounts" before settings sync is on.
-// Waits for the list of accounts to choose from (not in the snapshot).
-#[allow(dead_code)]
+/// "Turn on settings sync" for the accounts the owner ticked. Only accounts the snapshot lists are
+/// offered, and nothing is chosen for the owner.
 pub fn enable_control(w: &World, chosen: &[String]) -> Control {
-    if chosen.is_empty() {
+    let listed: Vec<String> = chosen
+        .iter()
+        .filter(|a| w.features.settings.available_accounts.contains(a))
+        .cloned()
+        .collect();
+    if w.features.settings.available_accounts.is_empty() {
+        return off(
+            "Turn on settings sync",
+            "No WoW account folder was found on this computer to include.",
+        );
+    }
+    if listed.is_empty() {
         return off("Turn on settings sync", "Choose at least one account.");
     }
     control(
@@ -488,7 +501,7 @@ pub fn enable_control(w: &World, chosen: &[String]) -> Control {
         ActionKind::EnableSettings,
         "Turn on settings sync",
         GroupAction::EnableSettings {
-            included_accounts: chosen.to_vec(),
+            included_accounts: listed,
         },
     )
 }
@@ -686,7 +699,8 @@ mod tests {
         assert_eq!(cs[0].label, "Share my settings");
         assert_eq!(cs[0].action, Err(RETIRED_REASON.into()));
         assert_eq!(master_controls(&w)[0].action, Err(RETIRED_REASON.into()));
-        let w = world();
+        let mut w = world();
+        w.features.settings.available_accounts = vec!["ERIC".into()];
         assert!(enable_control(&w, &[]).action.is_err());
         assert_eq!(
             enable_control(&w, &["ERIC".into()]).action,
@@ -694,6 +708,28 @@ mod tests {
                 included_accounts: vec!["ERIC".into()]
             })
         );
+    }
+
+    #[test]
+    fn turning_on_offers_only_listed_accounts_from_the_snapshot() {
+        let w = snapshot_world_with(|s| {
+            s.settings.enabled = false;
+            s.settings.available_accounts = vec!["ACC".into(), "ZED".into()];
+        });
+        assert_eq!(w.features.settings.available_accounts, ["ACC", "ZED"]);
+        assert_eq!(
+            enable_control(&w, &["ZED".into(), "NOPE".into()]).action,
+            Ok(GroupAction::EnableSettings {
+                included_accounts: vec!["ZED".into()]
+            })
+        );
+        assert_eq!(
+            enable_control(&w, &["NOPE".into()]).action,
+            Err("Choose at least one account.".into())
+        );
+        let none = snapshot_world_with(|s| s.settings.available_accounts.clear());
+        let why = enable_control(&none, &["ACC".into()]).action.unwrap_err();
+        assert!(why.contains("No WoW account folder"));
     }
 
     #[test]
