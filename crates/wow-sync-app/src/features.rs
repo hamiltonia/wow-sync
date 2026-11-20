@@ -516,10 +516,9 @@ impl Default for FeatureData {
     }
 }
 
-/// Fill what the status snapshot carries: standing, hold, retired computers and held releases.
-/// Not in the snapshot yet (handover): enrollments of active peers, settings units, the master,
-/// rejected releases to allow again and an older-peer flag; those stay empty and their controls
-/// say why they are unavailable.
+/// Fill what the status snapshot carries: standing, hold, peers, retired computers, held and
+/// rejected releases, removed rows, the older-peer flag and the settings facts. Still absent
+/// (handover): the settings units list, so Share, Choose, Restore and Pause say why they are off.
 pub fn apply_snapshot(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot) {
     f.hold = s.hold.clone();
     f.review_needed = s.review_needed;
@@ -912,6 +911,7 @@ mod tests {
         }
     }
 
+    #[allow(clippy::field_reassign_with_default)]
     #[test]
     fn only_active_other_computers_can_be_retired_and_the_retirement_date_is_shown() {
         use wow_sync_runtime::PeerStanding::*;
@@ -963,6 +963,7 @@ mod tests {
         assert_eq!(f.retired[0].on, "12 January");
     }
 
+    #[allow(clippy::field_reassign_with_default)]
     #[test]
     fn rejected_releases_become_allow_again_rows_and_mark_the_held_release_blocked() {
         let mut s = wow_sync_runtime::StatusSnapshot::default();
