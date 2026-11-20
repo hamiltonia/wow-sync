@@ -2008,6 +2008,120 @@ mod tests {
     }
 
     #[test]
+    fn keep_and_resume_commands_pin_and_release_a_typed_scope() {
+        use wow_sync_core::choice::WriteError;
+        use wow_sync_core::hash::package_hash;
+        use wow_sync_core::kinds::ChoiceReason;
+        let lab = Lab::new();
+        let (mut a, b, _c, g) = alpha_v2_published(&lab);
+        let key = alpha_folder(&lab, &g, &a).key;
+        let v1 = alpha_folder(&lab, &g, &a).tree.unwrap();
+        let v2 = package_hash(&[(key.clone(), alpha_folder(&lab, &g, &b).tree.unwrap())]);
+        let scope = vec![key.clone()];
+        let why = ChoiceReason::Ambiguous;
+        // Negative cases write nothing.
+        let ghost = sha256(b"no such release");
+        assert_eq!(
+            a.svc.command(Command::Keep {
+                scope: scope.clone(),
+                copy: ghost,
+                why
+            }),
+            Err(CommandError::UnknownCopy(ghost))
+        );
+        assert_eq!(
+            a.svc.command(Command::Keep {
+                scope: vec![],
+                copy: ghost,
+                why
+            }),
+            Err(CommandError::UnknownCopy(ghost))
+        );
+        assert_eq!(
+            a.svc.command(Command::Resume {
+                scope: scope.clone(),
+                allow_again: vec![ghost],
+                why
+            }),
+            Err(CommandError::Write(WriteError::AllowAgainNotInherited(
+                ghost
+            )))
+        );
+        assert_eq!(
+            a.svc.command(Command::Resume {
+                scope: vec![],
+                allow_again: vec![],
+                why
+            }),
+            Err(CommandError::Write(WriteError::EmptyScope))
+        );
+        let (ac, _) = pc_ids(&a);
+        assert!(authority_files(&lab, &g, &ac).is_empty());
+
+        let kept = package_hash(&[(key.clone(), v1)]);
+        let out = a
+            .svc
+            .command(Command::Keep {
+                scope: scope.clone(),
+                copy: kept,
+                why,
+            })
+            .unwrap();
+        let CommandOutcome::Written(kh) = out else {
+            panic!("{out:?}")
+        };
+        for _ in 0..2 {
+            synced(&mut a);
+            assert_eq!(status(&a, &g, &kh), Some(Status::Valid));
+            assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        }
+        assert!(
+            offered_kinds(&a).is_empty(),
+            "the newer release was shown when the keep was made, so it is not new"
+        );
+        let out = a
+            .svc
+            .command(Command::Resume {
+                scope: scope.clone(),
+                allow_again: vec![],
+                why,
+            })
+            .unwrap();
+        let CommandOutcome::Written(rh) = out else {
+            panic!("{out:?}")
+        };
+        for _ in 0..2 {
+            synced(&mut a);
+        }
+        assert_eq!(status(&a, &g, &rh), Some(Status::Valid));
+        assert_eq!(
+            a.read("Alpha/main.lua").as_deref(),
+            Some("alpha-v1"),
+            "a resume inherits the exclusion of the release the keep passed over (Q-50)"
+        );
+        let out = a
+            .svc
+            .command(Command::Resume {
+                scope,
+                allow_again: vec![v2],
+                why,
+            })
+            .unwrap();
+        let CommandOutcome::Written(ah) = out else {
+            panic!("{out:?}")
+        };
+        for _ in 0..2 {
+            synced(&mut a);
+        }
+        assert_eq!(status(&a, &g, &ah), Some(Status::Valid));
+        assert_eq!(
+            a.read("Alpha/main.lua").as_deref(),
+            Some("alpha-v2"),
+            "allowing the excluded release again lets the group's newer release in"
+        );
+    }
+
+    #[test]
     fn two_different_concurrent_keeps_raise_a_choices_differ_item() {
         use wow_sync_core::decision::DecisionKind;
         let lab = Lab::new();

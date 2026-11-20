@@ -72,7 +72,9 @@ use wow_sync_core::status::{
     applied_here, derive_status, game_halted, headline_sentence, journal_status, remember_applied,
     render_block, render_headline, render_member, render_result, Headline, StatusInput, StatusView,
 };
-use wow_sync_core::target::{compose, package_copies, GroupTarget, TargetInput, TreeAvail};
+use wow_sync_core::target::{
+    compose, package_copies, GroupTarget, PackageCopies, TargetInput, TreeAvail,
+};
 use wow_sync_core::toc::TocCandidate;
 use wow_sync_core::variant::{
     assess_layout, check_join, confirm_enrolled, confirm_variant, consent_disclosures, consent_gap,
@@ -276,6 +278,7 @@ struct World {
         wow_sync_core::decision::DecisionItem,
         wow_sync_core::decide::Plans,
     )>,
+    copies: Vec<PackageCopies>,
     own_states: Vec<String>,
     /// This enrollment's newest published state, if readable.
     own_latest: Option<CodeState>,
@@ -452,6 +455,66 @@ impl SliceService {
                         LiftError::Empty => CommandError::EmptySelection,
                     })?;
                     DecisionEffect::Write(Box::new(AuthorityRecord::Lift(lift)))
+                }
+                Command::Keep { scope, copy, why } => {
+                    let valid = wow_sync_core::choice::valid_hashes(&derived);
+                    let view = wow_sync_core::choice::ChoiceView::new(&self.plane.ledger, &valid);
+                    let pc = w
+                        .copies
+                        .iter()
+                        .find(|p| {
+                            !scope.is_empty() && scope.iter().all(|k| p.package.members.contains(k))
+                        })
+                        .ok_or(CommandError::UnknownCopy(copy))?;
+                    let chosen = pc
+                        .copies
+                        .iter()
+                        .find(|c| c.version.hash == copy)
+                        .ok_or(CommandError::UnknownCopy(copy))?;
+                    let shown: Vec<_> = pc
+                        .copies
+                        .iter()
+                        .map(|c| wow_sync_core::choice::CopyEntry::from_copy(c, &scope))
+                        .collect::<Result<_, _>>()
+                        .map_err(CommandError::Write)?;
+                    let kept = wow_sync_core::choice::CopyEntry::from_copy(chosen, &scope)
+                        .map_err(CommandError::Write)?;
+                    let rec = wow_sync_core::choice::build_keep(
+                        &view,
+                        &wow_sync_core::choice::WriteCx {
+                            group: &gid,
+                            issuer,
+                            now_unix_ms: now,
+                        },
+                        why,
+                        &scope,
+                        &kept,
+                        &shown,
+                        &chosen.source,
+                    )
+                    .map_err(CommandError::Write)?;
+                    DecisionEffect::Write(Box::new(AuthorityRecord::CodeChoice(rec)))
+                }
+                Command::Resume {
+                    scope,
+                    allow_again,
+                    why,
+                } => {
+                    let valid = wow_sync_core::choice::valid_hashes(&derived);
+                    let view = wow_sync_core::choice::ChoiceView::new(&self.plane.ledger, &valid);
+                    let rec = wow_sync_core::choice::build_resume(
+                        &view,
+                        &wow_sync_core::choice::WriteCx {
+                            group: &gid,
+                            issuer,
+                            now_unix_ms: now,
+                        },
+                        why,
+                        &scope,
+                        &allow_again,
+                    )
+                    .map_err(CommandError::Write)?;
+                    DecisionEffect::Write(Box::new(AuthorityRecord::CodeChoice(rec)))
                 }
             }
         };
@@ -1157,15 +1220,15 @@ impl SliceService {
             &constraints,
         )
         .target;
+        let copies = package_copies(
+            &input,
+            &enrollment.enrollment_id,
+            &self.plane.ledger,
+            &constraints,
+        );
         let offers = {
             let valid = wow_sync_core::choice::valid_hashes(&derived);
             let view = wow_sync_core::choice::ChoiceView::new(&self.plane.ledger, &valid);
-            let packages = package_copies(
-                &input,
-                &enrollment.enrollment_id,
-                &self.plane.ledger,
-                &constraints,
-            );
             decision_items(
                 &view,
                 &wow_sync_core::choice::WriteCx {
@@ -1178,7 +1241,7 @@ impl SliceService {
                     now_unix_ms: now_unix_ms() as u64,
                 },
                 &target,
-                &packages,
+                &copies,
             )
         };
         let own_states =
@@ -1211,6 +1274,7 @@ impl SliceService {
             views,
             target,
             offers,
+            copies,
             own_states,
             own_latest,
             titles,

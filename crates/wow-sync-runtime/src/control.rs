@@ -269,6 +269,20 @@ pub enum Command {
     AllowAgain {
         rejections: Vec<wow_sync_core::ids::Sha256>,
     },
+    /// Keep one release of the folders in `scope` (typed folder keys, UQ-2). `copy` is the package
+    /// hash of a release currently held in the group; `why` is the reason the owner was shown.
+    Keep {
+        scope: Vec<wow_sync_core::paths::FolderKey>,
+        copy: wow_sync_core::ids::Sha256,
+        why: wow_sync_core::kinds::ChoiceReason,
+    },
+    /// Resume following the group for `scope`. `allow_again` names inherited exclusions to lift
+    /// (Q-50); one that is not inherited is refused.
+    Resume {
+        scope: Vec<wow_sync_core::paths::FolderKey>,
+        allow_again: Vec<wow_sync_core::ids::Sha256>,
+        why: wow_sync_core::kinds::ChoiceReason,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -291,6 +305,11 @@ pub enum CommandError {
     /// A named rejection is not active (never existed, or already allowed again).
     UnknownRejection(wow_sync_core::ids::Sha256),
     EmptySelection,
+    /// The choice could not be written (empty scope, a folder outside it, an exclusion that is
+    /// not inherited).
+    Write(wow_sync_core::choice::WriteError),
+    /// No release with this package hash is currently held for the scope.
+    UnknownCopy(wow_sync_core::ids::Sha256),
     Service(String),
 }
 

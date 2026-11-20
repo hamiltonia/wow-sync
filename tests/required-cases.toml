@@ -967,6 +967,13 @@ tests = [
     "e2e::tests::a_newer_version_after_a_keep_is_offered_while_the_kept_version_stays",
     "e2e::tests::two_different_concurrent_keeps_raise_a_choices_differ_item",
 ]
+
+[[case]]
+id = "R4-integrate:keep-and-resume-commands"
+tier = "offline"
+tests = [
+    "e2e::tests::keep_and_resume_commands_pin_and_release_a_typed_scope",
+]
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag
