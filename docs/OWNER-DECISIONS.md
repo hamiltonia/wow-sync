@@ -170,6 +170,23 @@ Answers from an interactive review session with the orchestrator.
   - UI direction.
   - Run-003 scope and credit ceiling.
 
+### D-25: Run-004 design defaults accepted (2026-11-20)
+
+- The owner replied "accept defaults" to the run-004 design questions.
+  The conservative defaults recorded in
+  [questions.md](design/questions.md) for Q-55, Q-57, Q-58, Q-60, Q-61,
+  Q-63, Q-64, Q-77, Q-78, Q-81, Q-82, Q-84, Q-85, Q-86 and Q-87 are now
+  owner decisions.
+- **Q-77:** no settings-file size value is approved. Settings sync on real
+  data stays disabled until the owner approves a value; tests use a
+  test-only cap.
+- **Q-63:** native macOS notifications are required; an in-app-only
+  fallback is not accepted.
+- **R4D-28:** the owner said "continue" at the design barrier after the
+  design-fix retries were exhausted. The orchestrator took that as approval
+  of one bounded correction plus one independent recheck, which then passed
+  (`99e4877`).
+
 ### D-24: Run-004 plan approved (2026-11-17)
 
 - The owner approved [run-004 PLAN.md](runs/run-004/PLAN.md) as written,
@@ -360,4 +377,5 @@ phase D barrier.
 | 2026-11-17 | D-20 | Restored the D-20 heading that `f92a61a` accidentally deleted (R3-review RV-10) | `ee244ef` |
 | 2026-11-17 | D-22 | App icon art committed and used as is; owner accepts trademark risk | `8601907` |
 | 2026-11-17 | D-23 | Run-004 scope and 20,000 AIU ceiling; R3D-13 simplify; DA-1 yes, DA-2 to DA-4 deferred; UQ-1/UQ-2 yes; A-31 deferred; Mac available | `1dbd81e` |
-| 2026-11-17 | D-24 | Run-004 plan approved; P4-1 GitHub Releases check yes; P4-2 notification crate yes | this commit |
+| 2026-11-17 | D-24 | Run-004 plan approved; P4-1 GitHub Releases check yes; P4-2 notification crate yes | `573615b` |
+| 2026-11-20 | D-25 | Run-004 design defaults accepted for Q-55..Q-87 pending set; Q-77 no value (real settings sync disabled); R4D-28 bounded fix | this commit |
