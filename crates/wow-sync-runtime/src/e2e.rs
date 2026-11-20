@@ -1283,6 +1283,77 @@ mod tests {
     }
 
     #[test]
+    fn a_removal_whose_record_could_not_be_written_is_replayed_on_the_next_cycle() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let g = a.create();
+        a.addon("Alpha", "alpha-v1");
+        synced(&mut a);
+        let (ac, _) = pc_ids(&a);
+        // The write of the record fails (a file where its folder belongs) after the
+        // observation was consumed: the window of a crash between the two.
+        let dir = provider_file(&lab, &layout::authority_dir(&g, &ac));
+        let _ = std::fs::remove_dir(&dir);
+        std::fs::write(&dir, b"in the way").unwrap();
+        std::fs::remove_dir_all(a.install.addons.join("Alpha")).unwrap();
+        let st = LocalState::open_at(&a.cfg.state_dir).unwrap();
+        let store = RemovalStore::new(&st, g.clone());
+        let (base, mut obs) = store.load();
+        let key = base.packages.keys().next().expect("a baseline").clone();
+        obs.gone.insert(key, (1, 1));
+        store.save(&base, &obs).unwrap();
+        let r = synced(&mut a);
+        assert!(
+            r.apply_note
+                .as_deref()
+                .is_some_and(|n| n.contains("removal record not written")),
+            "{r:?}"
+        );
+        assert!(dir.is_file(), "nothing was written");
+        a.restart();
+        std::fs::remove_file(&dir).unwrap();
+        synced(&mut a);
+        let files = authority_files(&lab, &g, &ac);
+        assert_eq!(files.len(), 2, "the removal and its ack: {files:?}");
+        let h = removal_hash(&lab, &g, &ac);
+        assert_eq!(status(&a, &g, &h), Some(Status::Valid));
+        synced(&mut a);
+        assert_eq!(
+            authority_files(&lab, &g, &ac).len(),
+            2,
+            "replayed once, not again"
+        );
+    }
+
+    #[test]
+    fn a_pending_removal_is_dropped_when_the_folder_is_installed_again() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let g = a.create();
+        a.addon("Alpha", "alpha-v1");
+        synced(&mut a);
+        let (ac, _) = pc_ids(&a);
+        let dir = provider_file(&lab, &layout::authority_dir(&g, &ac));
+        let _ = std::fs::remove_dir(&dir);
+        std::fs::write(&dir, b"in the way").unwrap();
+        std::fs::remove_dir_all(a.install.addons.join("Alpha")).unwrap();
+        let st = LocalState::open_at(&a.cfg.state_dir).unwrap();
+        let store = RemovalStore::new(&st, g.clone());
+        let (base, mut obs) = store.load();
+        let key = base.packages.keys().next().expect("a baseline").clone();
+        obs.gone.insert(key, (1, 1));
+        store.save(&base, &obs).unwrap();
+        synced(&mut a);
+        std::fs::remove_file(&dir).unwrap();
+        a.addon("Alpha", "alpha-v1");
+        synced(&mut a);
+        assert!(
+            authority_files(&lab, &g, &ac).is_empty(),
+            "an addon that is back is not removed from the group"
+        );
+    }
+
+    #[test]
     fn records_from_non_members_and_forged_copies_are_not_admitted() {
         let lab = Lab::new();
         let mut a = lab.pc("a");
@@ -1706,6 +1777,61 @@ mod tests {
                 "the rejected release is not installed: {r:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_rollback_stages_the_recovered_release_from_a_local_recovery_point() {
+        use wow_sync_core::hash::package_hash;
+        use wow_sync_core::records::decode_tree;
+        let lab = Lab::new();
+        let (mut a, b, c, g) = alpha_v2_published(&lab);
+        let v1 = alpha_folder(&lab, &g, &c);
+        let tree = v1.tree.unwrap();
+        let v1_hash = package_hash(&[(v1.key.clone(), tree)]);
+        // A follows B to v2; its recovery point now holds v1.
+        synced(&mut a);
+        assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v2"));
+        // v1 leaves the shared folder: its files and its tree record.
+        let rec_rel = layout::tree_record(&g, &tree);
+        let rec = std::fs::read(provider_file(&lab, &rec_rel)).unwrap();
+        for f in decode_tree(&rec, &tree).unwrap().files {
+            std::fs::remove_file(provider_file(&lab, &layout::blob(&g, &f.sha256))).unwrap();
+        }
+        std::fs::remove_file(provider_file(&lab, &rec_rel)).unwrap();
+
+        // B changed v1 to v2 by hand: no recovery point holds v1 anywhere, so it is refused.
+        let mut b = b;
+        synced(&mut b);
+        let (bc, _) = pc_ids(&b);
+        let before = authority_files(&lab, &g, &bc);
+        assert_eq!(
+            b.svc.command(Command::Rollback {
+                package: v1.key.clone(),
+                recovered: v1_hash,
+            }),
+            Err(CommandError::Rollback(
+                crate::rollback_flow::RollbackRefusal::NotAvailable
+            ))
+        );
+        synced(&mut b);
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v2"));
+        assert_eq!(authority_files(&lab, &g, &bc), before, "nothing written");
+
+        assert_eq!(
+            a.svc.command(Command::Rollback {
+                package: v1.key.clone(),
+                recovered: v1_hash,
+            }),
+            Ok(CommandOutcome::Recorded)
+        );
+        let r = synced(&mut a);
+        assert_eq!(
+            a.read("Alpha/main.lua").as_deref(),
+            Some("alpha-v1"),
+            "{r:?}"
+        );
+        let (ac, _) = pc_ids(&a);
+        assert!(!authority_files(&lab, &g, &ac).is_empty(), "{r:?}");
     }
 
     // ------------------------------------------------ control commands (R4-integrate C1)

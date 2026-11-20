@@ -15,7 +15,7 @@ use wow_sync_core::layout;
 use wow_sync_core::ledger::derive;
 use wow_sync_core::paths::FolderKey;
 use wow_sync_core::plan::{ExpectedLive, PackageApply};
-use wow_sync_core::records::{decode_tree, SettingsRoot};
+use wow_sync_core::records::{decode_tree, FolderTreeRecord, SettingsRoot};
 use wow_sync_core::reject::{
     plan_rollback, LiveFolder, RollbackError, RollbackInput, TargetFolder,
 };
@@ -80,6 +80,7 @@ pub(crate) struct PlanArgs<'a> {
     pub copies: &'a [PackageCopies],
     pub plane: &'a Plane,
     pub provider: &'a ProviderRoot,
+    pub variant_dir: &'a std::path::Path,
     pub op: OpId,
     pub seq: u64,
     pub now_unix_ms: u64,
@@ -143,6 +144,14 @@ pub(crate) fn plan_requested(a: &PlanArgs) -> Result<PackageApply, RollbackRefus
             .read(&layout::tree_record(a.group, &tree), TREE_LIMIT)
             .ok()
             .and_then(|b| decode_tree(&b, &tree).ok())
+            .or_else(|| {
+                crate::effects::local_release(a.variant_dir, &f.name, &tree).map(|l| {
+                    FolderTreeRecord {
+                        tree,
+                        files: l.files,
+                    }
+                })
+            })
             .ok_or(RollbackRefusal::NotAvailable)?;
         r0.push(TargetFolder {
             key: f.key.clone(),

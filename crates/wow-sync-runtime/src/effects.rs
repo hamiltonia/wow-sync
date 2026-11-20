@@ -4,7 +4,7 @@ use crate::activity::ActivitySource;
 use wow_sync_adapters::authority_store;
 use wow_sync_adapters::fs_install::SettingsSlot as AdSettingsSlot;
 use wow_sync_adapters::fs_install::{InstallArea, InstallLock, Slot as AdSlot};
-use wow_sync_adapters::fs_safe::Root;
+use wow_sync_adapters::fs_safe::{ReparsePolicy, Root};
 use wow_sync_adapters::fs_scan::{snapshot_folder, ScannedFile, Snapshot};
 use wow_sync_adapters::localstate::LocalState;
 use wow_sync_adapters::provider::{ObjectObs, ProviderRoot};
@@ -22,7 +22,9 @@ use wow_sync_core::layout;
 use wow_sync_core::layout::blob;
 use wow_sync_core::paths::{validate_rel_path, FolderKey};
 use wow_sync_core::plan::{Activity, FolderApply, ObjectRef, ObjectSource};
-use wow_sync_core::records::{decode, encode, ApplyJournal, PendingReport, RecoveryPoint};
+use wow_sync_core::records::{
+    decode, decode_point, encode, AnyPoint, ApplyJournal, PendingReport, RecoveryPoint,
+};
 use wow_sync_core::records::{ApplyJournalV2, PendingRecord, RecoveryPointV2, SettingsFileOp};
 use wow_sync_core::report::{finalized_result, record_pending};
 
@@ -179,6 +181,87 @@ impl<'a> RealEffects<'a> {
         }
         Ok(())
     }
+
+    fn stage_from_recovery(&mut self, op: &OpId, f: &FolderApply) -> Result<(), EffectError> {
+        let found = local_release(self.variant_dir, &f.name, &f.tree.tree)
+            .ok_or_else(|| EffectError::new(EffectErrorKind::NotFound, "release not held"))?;
+        let work = Root::open(&self.variant_dir.join(".wowsync"), ReparsePolicy::RejectAll)
+            .map_err(map_err)?;
+        for file in &f.tree.files {
+            let rel = format!(
+                "recovery/{}/{}/{}/{}",
+                found.pkg,
+                found.op,
+                f.name,
+                file.path.as_str()
+            );
+            let mut src = work.open_read(&rel, OBJECT_LIMIT).map_err(map_err)?;
+            self.area
+                .stage_file(
+                    op.as_str(),
+                    &f.name,
+                    file.path.as_str(),
+                    &mut src,
+                    file.sha256.0,
+                    file.size,
+                )
+                .map_err(map_err)?;
+        }
+        Ok(())
+    }
+}
+
+/// A release of one folder held in a local recovery point.
+pub(crate) struct LocalRelease {
+    pkg: String,
+    op: String,
+    pub files: Vec<FileEntry>,
+}
+
+/// The folder `name` with tree `tree`, if some local recovery point still holds exactly that
+/// content (the scan is verified against the tree hash, never trusted from the metadata).
+pub(crate) fn local_release(
+    variant_dir: &std::path::Path,
+    name: &str,
+    tree: &Sha256,
+) -> Option<LocalRelease> {
+    let area = InstallArea::open(variant_dir).ok()?;
+    let work = Root::open(&variant_dir.join(".wowsync"), ReparsePolicy::RejectAll).ok()?;
+    for pkg in work.list("recovery").ok()?.into_iter().filter(|e| e.is_dir) {
+        let Ok(points) = area.list_recovery(&pkg.name) else {
+            continue;
+        };
+        for (op, bytes) in points {
+            let replaced = match decode_point(&bytes) {
+                Ok(AnyPoint::V1(p)) => p.replaced,
+                Ok(AnyPoint::V2(p)) => p.replaced,
+                Err(_) => continue,
+            };
+            if !replaced.iter().any(|t| t.name == name && t.tree == *tree) {
+                continue;
+            }
+            let slot = AdSlot::Recovery {
+                pkg: &pkg.name,
+                op: &op,
+                folder: name,
+            };
+            let Ok(Some(files)) = area.hash_slot(slot) else {
+                continue;
+            };
+            let Ok(mut files) = entries(files) else {
+                continue;
+            };
+            files.sort_by(|a, b| a.path.as_str().as_bytes().cmp(b.path.as_str().as_bytes()));
+            if tree_hash(&files) == *tree {
+                return Some(LocalRelease {
+                    pkg: pkg.name,
+                    op,
+                    files,
+                });
+            }
+        }
+    }
+    None
 }
 
 impl PublishEffects for RealEffects<'_> {
@@ -297,10 +380,15 @@ impl ApplyEffects for RealEffects<'_> {
     fn stage_folder(&mut self, op: &OpId, f: &FolderApply) -> Result<(), EffectError> {
         for file in &f.tree.files {
             let rel = blob(&self.group, &file.sha256);
-            let mut src = self
-                .provider
-                .open_read(&rel, OBJECT_LIMIT)
-                .map_err(map_err)?;
+            let mut src = match self.provider.open_read(&rel, OBJECT_LIMIT) {
+                Ok(s) => s,
+                // A file the shared folder no longer holds may still lie in a local recovery
+                // point (rollback.md §1 step 4); the staged copy is hash-verified either way.
+                Err(e) if e.kind == FsErrorKind::NotFound => {
+                    return self.stage_from_recovery(op, f);
+                }
+                Err(e) => return Err(map_err(e)),
+            };
             self.area
                 .stage_file(
                     op.as_str(),

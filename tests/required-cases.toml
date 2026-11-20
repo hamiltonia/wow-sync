@@ -1011,6 +1011,15 @@ id = "R4-integrate:rollback"
 tier = "offline"
 tests = [
     "e2e::tests::a_rollback_installs_the_recovered_release_and_an_offline_peer_cannot_bring_the_rejected_one_back",
+    "e2e::tests::a_rollback_stages_the_recovered_release_from_a_local_recovery_point",
+]
+
+[[case]]
+id = "R4-integrate:removal-replay"
+tier = "offline"
+tests = [
+    "e2e::tests::a_removal_whose_record_could_not_be_written_is_replayed_on_the_next_cycle",
+    "e2e::tests::a_pending_removal_is_dropped_when_the_folder_is_installed_again",
 ]
 # <<< section: R4-integrate
 

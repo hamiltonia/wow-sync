@@ -448,6 +448,7 @@ impl SliceService {
                 copies: &w.copies,
                 plane: &self.plane,
                 provider: &provider,
+                variant_dir: &self.variant_dir(),
                 op: OpId::parse(&random_id_hex()).expect("random id"),
                 seq: w.enrollment.next_seq,
                 now_unix_ms: now,
@@ -1826,6 +1827,7 @@ impl SliceService {
                         copies: &w.copies,
                         plane: &self.plane,
                         provider: &provider,
+                        variant_dir: &variant_dir,
                         op: gen(),
                         seq: next_seq,
                         now_unix_ms: now_unix_ms() as u64,
@@ -2087,6 +2089,7 @@ impl SliceService {
                     &AuthorityRecord::Removal(rec),
                 ) {
                     Ok(_) => {
+                        RemovalStore::new(state, gid.clone()).clear_pending(&r.package);
                         next_seq += 1;
                         written = true;
                     }
