@@ -33,6 +33,10 @@ pub enum PackageStatus {
     Unavailable,
     /// A folder of the package is blocked for this client and is not synchronized.
     NotSynced,
+    /// The group removed this package; it is being or has been moved to recovery here.
+    Removing,
+    /// Removal history for this package is still arriving or a hold applies: nothing changes yet.
+    Held,
     Interrupted,
     NeedsHelp(String),
     Blocked(PlanBlock),
@@ -178,6 +182,8 @@ pub fn derive_status(input: &StatusInput) -> StatusView {
                     }
                     PackageTarget::Unavailable { why } => (PackageStatus::Unavailable, why.clone()),
                     PackageTarget::NotSynced { why } => (PackageStatus::NotSynced, why.clone()),
+                    PackageTarget::Remove { why } => (PackageStatus::Removing, why.clone()),
+                    PackageTarget::Held { why } => (PackageStatus::Held, why.clone()),
                     PackageTarget::Chosen { why, .. } => match input.blocks.first() {
                         Some(b) => (PackageStatus::Blocked(b.clone()), why.clone()),
                         None => (PackageStatus::Available, why.clone()),

@@ -42,6 +42,8 @@ pub fn next_action(status: &PackageStatus, _why: &Explanation, game_running: boo
         PackageStatus::NeedsDecision(_) => NextAction::ChooseCopy,
         PackageStatus::NeedsHelp(_) => NextAction::ResolveHelp,
         PackageStatus::NotSynced => NextAction::NotSynced,
+        PackageStatus::Removing => NextAction::ApplyOnNextSync,
+        PackageStatus::Held => NextAction::Nothing,
     }
 }
 

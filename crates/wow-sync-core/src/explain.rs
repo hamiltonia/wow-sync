@@ -124,6 +124,10 @@ pub enum Explanation {
     GroupedBy {
         edges: Vec<String>,
     },
+    /// The group removed this package; it is moved to recovery here, never reinstalled.
+    RemovedByGroup,
+    /// Nothing is installed or removed yet: removal history for it is still being learned.
+    WaitingForGroupHistory,
 }
 
 fn another_computer(_: &ComputerId) -> String {
@@ -280,5 +284,7 @@ pub fn render_named(e: &Explanation, name_of: &dyn Fn(&ComputerId) -> String) ->
         }
         Unsupported { folder, why } => format!("{folder} is not supported: {why}"),
         GroupedBy { edges } => format!("grouped because: {}", edges.join("; ")),
+        RemovedByGroup => "removed by the group; it is kept in recovery here".to_string(),
+        WaitingForGroupHistory => "waiting for the group's removal history".to_string(),
     }
 }

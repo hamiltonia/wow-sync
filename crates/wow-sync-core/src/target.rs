@@ -61,6 +61,15 @@ pub enum PackageTarget {
     NotSynced {
         why: Explanation,
     },
+    /// The group removed this package: it is not installed or kept as a target here.
+    Remove {
+        why: Explanation,
+    },
+    /// Removal history for this package is still arriving or a local hold applies: nothing is
+    /// installed or removed yet.
+    Held {
+        why: Explanation,
+    },
 }
 
 /// The package content this computer should end up with (for `InSync` and `Chosen`).

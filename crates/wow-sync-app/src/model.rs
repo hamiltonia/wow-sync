@@ -338,6 +338,8 @@ pub fn status_label(w: &World, s: &PackageStatus) -> Label {
             label("Waiting for WoW to close", Tone::Waiting, Icon::Hourglass)
         }
         PackageStatus::Blocked(_) => label("Waiting", Tone::Waiting, Icon::Hourglass),
+        PackageStatus::Removing => label("Removing", Tone::Working, Icon::Sync),
+        PackageStatus::Held => label("Waiting", Tone::Waiting, Icon::Hourglass),
         PackageStatus::Unavailable => label("Waiting for Dropbox", Tone::Waiting, Icon::Hourglass),
         PackageStatus::Interrupted => label("Update interrupted", Tone::Waiting, Icon::Hourglass),
         PackageStatus::NeedsDecision(_) => label("Needs your decision", Tone::Help, Icon::Alert),
@@ -441,9 +443,11 @@ pub fn counts(w: &World) -> Counts {
                 c.up_to_date += 1
             }
             PackageStatus::Available => c.ready += 1,
-            PackageStatus::Unavailable | PackageStatus::Blocked(_) | PackageStatus::Interrupted => {
-                c.waiting += 1
-            }
+            PackageStatus::Unavailable
+            | PackageStatus::Blocked(_)
+            | PackageStatus::Interrupted
+            | PackageStatus::Removing
+            | PackageStatus::Held => c.waiting += 1,
             PackageStatus::NeedsDecision(_) => c.needs_decision += 1,
             PackageStatus::NeedsHelp(_) => c.needs_help += 1,
             PackageStatus::NotSynced => c.not_synced += 1,
