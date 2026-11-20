@@ -413,6 +413,10 @@ pub struct FeatureData {
     pub retired: Vec<RetiredComputer>,
     /// Rejected releases the owner may allow again. Pending snapshot field (R4-integrate).
     pub allow_again: Vec<crate::computers_ui::AllowAgainRow>,
+    /// Held releases per add-on for the history list. Pending snapshot field (R4-integrate).
+    pub history: Vec<crate::rollback_ui::ReleaseRow>,
+    /// Name of a live member whose WoW Sync can't block versions (Q-84), which blocks go-back.
+    pub older_peer: Option<String>,
     /// Name of the settings master, when one is chosen.
     pub master: Option<String>,
 }
@@ -427,6 +431,8 @@ impl Default for FeatureData {
             enrollments: Vec::new(),
             retired: Vec::new(),
             allow_again: Vec::new(),
+            history: Vec::new(),
+            older_peer: None,
             master: None,
         }
     }

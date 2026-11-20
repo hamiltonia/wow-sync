@@ -885,7 +885,85 @@ impl Shell {
             folders.push(self.muted(g.clone()).into_any_element());
         }
         let restore = self.btn_off("restore", "Restore…", "coming later", cx);
-        let rec: Vec<AnyElement> = vec![restore.into_any_element()];
+        let mut rec: Vec<AnyElement> = vec![restore.into_any_element()];
+        let installed = s.versions.clone();
+        let rows: Vec<crate::rollback_ui::ReleaseRow> = self
+            .w
+            .features
+            .history
+            .iter()
+            .filter(|r| r.package.as_str() == key)
+            .cloned()
+            .collect();
+        for (j, r) in rows.into_iter().enumerate() {
+            let mut line = format!("Version {}, held since {}", r.version, r.held_since);
+            if r.current {
+                line.push_str(" (installed now)");
+            }
+            if let Some(chip) = crate::rollback_ui::blocked_chip(&r) {
+                line.push_str(&format!(" [{chip}]"));
+            }
+            rec.push(div().child(SharedString::from(line)).into_any_element());
+            let k = format!("rb-{j}");
+            match crate::rollback_ui::button(&self.w, &r) {
+                crate::rollback_ui::HistoryButton::None => {}
+                crate::rollback_ui::HistoryButton::Disabled { label, reason } => {
+                    rec.push(self.btn_off(&k, label, &reason, cx).into_any_element());
+                    rec.push(self.muted(reason).into_any_element());
+                }
+                crate::rollback_ui::HistoryButton::AllowAgain(a) => {
+                    rec.push(
+                        self.btn(
+                            &k,
+                            crate::rollback_ui::ALLOW_AGAIN,
+                            Bk::Secondary,
+                            Act::Group(a),
+                            cx,
+                        )
+                        .into_any_element(),
+                    );
+                }
+                crate::rollback_ui::HistoryButton::GoBack(a) => {
+                    let open = format!("{k}-open");
+                    if self.expanded.contains(&open) {
+                        for t in crate::rollback_ui::confirm_text(&installed, &r) {
+                            rec.push(div().child(SharedString::from(t)).into_any_element());
+                        }
+                        rec.push(
+                            self.btn(
+                                &format!("{k}-go"),
+                                "Go back",
+                                Bk::Primary,
+                                Act::Group(a),
+                                cx,
+                            )
+                            .into_any_element(),
+                        );
+                        rec.push(
+                            self.btn(
+                                &format!("{k}-no"),
+                                "Cancel",
+                                Bk::Secondary,
+                                Act::ToggleExpand(open),
+                                cx,
+                            )
+                            .into_any_element(),
+                        );
+                    } else {
+                        rec.push(
+                            self.btn(
+                                &k,
+                                crate::rollback_ui::GO_BACK,
+                                Bk::Secondary,
+                                Act::ToggleExpand(open),
+                                cx,
+                            )
+                            .into_any_element(),
+                        );
+                    }
+                }
+            }
+        }
         let mut det: Vec<AnyElement> = vec![self
             .disclosure("addon-details", "Details", cx)
             .into_any_element()];

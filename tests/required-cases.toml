@@ -1163,6 +1163,17 @@ tests = [
     "computers_ui::tests::allow_again_carries_exactly_the_rejections_shown",
 ]
 
+[[case]]
+id = "R4-app:rollback"
+tier = "offline"
+tests = [
+    "rollback_ui::tests::each_state_gets_the_right_action",
+    "rollback_ui::tests::go_back_is_disabled_with_a_reason_when_it_cannot_be_planned",
+    "rollback_ui::tests::partial_and_code_only_are_warnings_and_paired_is_not",
+    "rollback_ui::tests::the_confirmation_says_what_is_blocked_and_when_it_applies",
+    "rollback_ui::tests::a_temporary_exception_shows_its_size",
+]
+
 # <<< section: R4-app
 
 # >>> section: R4-mac-kit
