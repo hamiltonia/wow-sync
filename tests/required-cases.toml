@@ -712,6 +712,71 @@ tests = [
 # <<< section: R4-core-removal
 
 # >>> section: R4-core-settings
+[[case]]
+id = "R4-core-settings:settings-core"
+tier = "offline"
+tests = [
+    "settings_tests::a_child_before_its_parent_waits_and_is_never_a_root",
+    "settings_tests::a_dirty_epoch_holds_with_its_own_reason",
+    "settings_tests::a_reassigned_author_stays_valid_and_never_prompts",
+    "settings_tests::account_unit_never_matches_another_identity",
+    "settings_tests::an_invalid_parent_is_absent_not_a_root_and_an_invalid_basis_is_not_shared",
+    "settings_tests::authority_is_per_folder_with_exceptions_and_never_elected",
+    "settings_tests::capture_classification_follows_the_incomplete_write_rules",
+    "settings_tests::equal_heads_are_one_state_and_all_stay_parents",
+    "settings_tests::every_root_kind_keeps_its_checkpoint",
+    "settings_tests::nfc_colliding_accounts_are_diagnosed_and_neither_syncs",
+    "settings_tests::nine_policy_heads_witness_set_and_a_tenth_head_conflict",
+    "settings_tests::non_authority_yields_with_recovery_and_an_unchanged_head_never_yields",
+    "settings_tests::only_the_authority_publishes_and_only_what_changed_completely",
+    "settings_tests::paired_selection_order_and_no_cross_computer_ordering",
+    "settings_tests::paused_and_pending_never_apply",
+    "settings_tests::policy_is_keyed_by_folder_so_regrouping_changes_nothing",
+    "settings_tests::resume_explains_each_row_and_never_publishes",
+    "settings_tests::scope_blocks_only_the_affected_units",
+    "settings_tests::scope_owns_only_the_two_shapes_and_never_the_excluded_files",
+    "settings_tests::scope_shape_needs_the_matching_declaration_and_an_included_account",
+    "settings_tests::the_authority_epoch_holds_an_experiment_and_needs_a_strictly_later_capture",
+    "settings_tests::three_states_survive_and_pins_extend_then_prune_back",
+    "settings_tests::undo_then_next_session_keeps_one_head_state",
+    "settings_tests::without_an_approved_cap_real_data_sync_is_disabled",
+    "settings_tests::zero_nodes_with_a_policy_is_no_shared_copy_and_every_revision_invalid_too",
+]
+[[case]]
+id = "R4-core-settings:rejection-rollback"
+tier = "offline"
+tests = [
+    "reject_tests::a_lift_ends_only_the_rejections_it_names",
+    "reject_tests::a_look_alike_of_a_blocked_version_is_found_by_label_and_different_content",
+    "reject_tests::a_newer_candidate_after_a_rollback_is_a_notice_unless_it_was_considered",
+    "reject_tests::a_planned_rollback_blocks_its_own_release_once_published",
+    "reject_tests::a_record_covering_a_rejection_ends_it_for_the_folders_it_names_only",
+    "reject_tests::a_rejection_blocks_exact_content_over_its_own_folders_only",
+    "reject_tests::a_rollback_of_the_same_release_or_of_nothing_is_refused",
+    "reject_tests::a_rollback_replaces_installs_and_removes_by_the_folder_difference",
+    "reject_tests::concurrent_rollbacks_with_different_targets_leave_two_constraints",
+    "reject_tests::old_clients_stop_a_group_rollback",
+    "reject_tests::only_valid_records_count_and_the_default_has_no_effect",
+    "reject_tests::the_chain_follows_rejected_recoveries_and_a_cycle_ends",
+    "reject_tests::the_recovered_chain_decides_from_sources_in_four_branches",
+    "rollback_flow::tests::the_result_reports_what_was_restored_not_what_was_expected",
+]
+[[case]]
+id = "R4-core-settings:adapters-and-cycle"
+tier = "offline"
+tests = [
+    "settings_store::tests::a_manifest_without_its_blob_is_refused_and_leaves_nothing",
+    "settings_store::tests::blobs_round_trip_deduplicate_and_detect_corruption",
+    "settings_store::tests::local_metadata_survives_a_restart_and_a_failed_write_keeps_the_previous",
+    "wtf::tests::a_file_that_would_run_code_is_only_hashed",
+    "wtf::tests::a_junction_at_an_account_is_unsafe_and_nothing_beneath_it_is_read",
+    "wtf::tests::an_oversized_file_is_listed_but_not_read_and_no_wtf_is_empty",
+    "wtf::tests::lists_only_the_two_shapes_with_size_and_hash",
+    "settings_cycle::tests::a_failing_store_records_no_state",
+    "settings_cycle::tests::the_apply_plan_is_settings_only_with_the_scanned_expectation",
+    "settings_cycle::tests::without_a_cap_nothing_syncs_and_a_file_changed_after_the_scan_is_not_stored",
+    "settings_cycle::tests::the_scope_reads_only_owned_files_and_a_capture_stores_blob_then_manifest",
+]
 # <<< section: R4-core-settings
 
 # >>> section: R4-core-ops
