@@ -71,6 +71,12 @@ You may change only these files, plus your evidence:
 
 If you need any other file, stop and report. That is a contract change.
 
+**Amendment 1 (orchestrator).** `crates\wow-sync-core\src\arch.rs` is
+added for one change only: add `"unicode-normalization"` to the pinned
+core dependency list in `arch::tests::core_sources_use_no_os_io_or_clock`.
+That is the dependency contracts §3.3 calls for. The rest of the guard
+stays unchanged.
+
 ## Required details
 
 1. **Modules and types.**
