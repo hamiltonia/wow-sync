@@ -243,6 +243,8 @@ pub struct StatusSnapshot {
     pub peers: Vec<crate::detail::PeerRow>,
     /// Settings consent, accounts, master and paused folders.
     pub settings: crate::settings_cycle::SettingsSnapshot,
+    /// Per settings unit: status, live, competing heads, history and whether Share is possible.
+    pub settings_units: Vec<crate::settings_cycle::SettingsUnitRow>,
     /// How much is held and why (ops.md §1.6). `None` shows no scope sentence.
     pub hold: wow_sync_core::status::HoldScope,
     /// Set when this computer's own enrollment is retired and the retirement is effective.
@@ -2062,6 +2064,13 @@ impl SliceService {
                 retired_by: r.retired_by_id.clone(),
                 cutoff_seq: r.cutoff_seq,
             });
+        let settings_units = crate::settings_cycle::settings_units(
+            &crate::settings_cycle::load_local(&self.state, &w.group.group_id),
+            &self.plane.ledger,
+            &derived,
+            this_retirement.is_some(),
+            self.settings_cap.is_some(),
+        );
         let unresolved: Vec<FolderKey> = interrupted
             .iter()
             .cloned()
@@ -2186,6 +2195,7 @@ impl SliceService {
             detail: Some(detail),
             peers,
             settings,
+            settings_units,
             hold,
             this_retirement,
             retirements,

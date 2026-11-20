@@ -2791,6 +2791,119 @@ mod tests {
     }
 
     #[test]
+    fn the_snapshot_units_carry_the_heads_choose_takes_and_the_history_restore_takes() {
+        use crate::settings_cycle::SettingsUnitStatus as S;
+        let lab = Lab::new();
+        let (mut a, mut b, g) = settings_pair(&lab, true, Some(1 << 20));
+        let unit = alpha_unit();
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        synced(&mut b);
+        let calm = b.svc.status().settings_units;
+        assert_eq!(calm.len(), 1, "{calm:?}");
+        assert_eq!(calm[0].status, S::Active);
+        assert!(calm[0].live && calm[0].competing.is_empty() && calm[0].shown_heads.is_empty());
+        assert!(calm[0].can_share && calm[0].latest_capture.is_some());
+        assert_eq!(calm[0].history.len(), 1);
+
+        let mine = stored_checkpoint(&b, &unit, b"AlphaDB = { mine = true }\n");
+        let out = b
+            .svc
+            .command(Command::ShareSettings {
+                unit: unit.clone(),
+                checkpoint: mine,
+            })
+            .unwrap();
+        let CommandOutcome::Written(push) = out else {
+            panic!("{out:?}")
+        };
+        let (bc, _) = pc_ids(&b);
+        let held = provider_file(&lab, &layout::authority_record(&g, &bc, &push));
+        let held_bytes = std::fs::read(&held).unwrap();
+        std::fs::remove_file(&held).unwrap();
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 3 }\n");
+        synced(&mut a);
+        synced(&mut a);
+        std::fs::write(&held, held_bytes).unwrap();
+        synced(&mut b);
+
+        let row = b.svc.status().settings_units.remove(0);
+        assert_eq!(row.status, S::NeedsChoice);
+        assert!(!row.live);
+        assert_eq!(row.competing.len(), 2, "{row:?}");
+        assert_eq!(row.shown_heads.len(), 2);
+        assert!(row.history.len() >= 3);
+        let pick = row.competing[0].checkpoint;
+        assert!(matches!(
+            b.svc.command(Command::ChooseSettings {
+                unit: unit.clone(),
+                checkpoint: pick,
+                shown_heads: row.shown_heads.clone(),
+            }),
+            Ok(CommandOutcome::Written(_))
+        ));
+        synced(&mut b);
+        synced(&mut a);
+        synced(&mut b);
+        let after = b.svc.status().settings_units.remove(0);
+        assert_eq!(after.status, S::Active, "{after:?}");
+        assert!(after.competing.is_empty());
+
+        let earlier = after.history[0].checkpoint;
+        assert!(matches!(
+            b.svc.command(Command::RestoreSettings {
+                unit: unit.clone(),
+                checkpoint: earlier,
+            }),
+            Ok(CommandOutcome::Written(_))
+        ));
+        synced(&mut b);
+        let restored = b.svc.status().settings_units.remove(0);
+        assert!(restored.history.len() > after.history.len());
+    }
+
+    #[test]
+    fn the_snapshot_units_offer_no_actionable_heads_when_disabled_or_retired() {
+        use crate::settings_cycle::SettingsUnitStatus as S;
+        let lab = Lab::new();
+        // The production cap is None (Q-77): nothing is actionable.
+        let (mut a, mut b, _g) = settings_pair(&lab, true, None);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        for row in b.svc.status().settings_units {
+            assert_eq!(row.status, S::Disabled);
+            assert!(!row.live && !row.can_share && !row.restore_possible);
+            assert!(row.competing.is_empty() && row.shown_heads.is_empty());
+        }
+
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        a.svc
+            .command(Command::Retire {
+                subject: ref_of(&b),
+            })
+            .unwrap();
+        synced(&mut a);
+        synced(&mut b);
+        let rows = b.svc.status().settings_units;
+        assert!(!rows.is_empty());
+        for row in rows {
+            assert_eq!(row.status, S::Retired);
+            assert!(!row.live && !row.can_share && !row.restore_possible);
+            assert!(row.competing.is_empty());
+        }
+    }
+
+    #[test]
     fn restore_settings_writes_a_restore_revision_and_the_unit_returns_to_that_copy() {
         use wow_sync_core::kinds::RevisionKind;
         let lab = Lab::new();
