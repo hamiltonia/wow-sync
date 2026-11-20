@@ -105,8 +105,38 @@ stage A ledger-rule mutation.
 | `detail.rs`, proto `scenario.rs` | no edit needed |
 | proto and app `model.rs` `decision_title`/`decision_reason` | arms for `ChoicesDiffer` and `RollbackTargetsDiffer` (NeedsDecision with `candidates: []`; the detail view renders an empty candidate list) |
 
-No new UI was added. The app can drive `Decide`, `Retire` and `AllowAgain` through
-`SliceService::command`; the other commands do not exist yet.
+No new UI was added. Commands go through `SliceService::command` (`control.rs`). The orchestrator
+accepted the core `decision.rs` match-arm change and the `e2e.rs` service tests.
+
+### Command handover
+
+| Command | Parameters | UI meaning | Errors |
+|---|---|---|---|
+| `Decide` | item, choice, freshness | answer an offered decision; stale → `Changed` | `Decide`, `NotAllowed` |
+| `Retire` / `ReEnroll` | computer / none | retire; explicit re-enrollment of a retired computer (`previous_enrollments`) | `NotAllowed` |
+| `AllowAgain` | rejection | allow a rejected release again | `UnknownRejection` |
+| `Keep` | scope, copy, why | pin a copy for a typed scope (Q-50 exclusions inherited) | `UnknownCopy`, `EmptySelection`, `Write` |
+| `Resume` | scope, allow_again, why | release a keep | `Write` |
+| `RestoreRemoved` | removal | bring back code and settings of a removed addon | `UnknownRemoval` |
+| `SetSettingsPolicy` | master, exceptions | record master and per-addon exceptions | `Settings(NotLive/BadRule/TooManyRules)` |
+| `ShareSettings` | unit, checkpoint | explicit push of a stored checkpoint | `UnknownCheckpoint`, `Settings(NoPolicy/NotShared/HistoryIncomplete)` |
+| query `settings_history(unit)` | unit | graph nodes, oldest first | none |
+| query `offered_decisions()` | none | decision items from live state | none |
+
+Intent is recorded only; settings apply (C0) is not wired.
+
+### Item 1–5 additions
+
+`target::package_copies`, `decide::decision_items`, `MemberRecord.previous_enrollments` (skipped
+when empty, so golden fixtures are unchanged), `RemovalStore::forget_group_removed`/`forget_keys`
+(fixes a stale presence baseline that re-removed a restored addon), settings builders
+`build_policy`/`build_push`.
+
+### A-38 (item 5)
+
+| Control | Mutation | Failing test |
+|---|---|---|
+| Non-master push accepted without explicit intent | `build_push` emits `RevisionKind::Auto` | `e2e::tests::settings_policy_and_push_commands_record_explicit_intent_only` (failed; reverted, `git diff --exit-code` clean) |
 
 ## Open items
 
