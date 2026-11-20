@@ -124,6 +124,18 @@ pub enum Explanation {
     GroupedBy {
         edges: Vec<String>,
     },
+    /// The group removed this package; it is moved to recovery here, never reinstalled.
+    RemovedByGroup,
+    /// Nothing is installed or removed yet: removal history for it is still being learned.
+    WaitingForGroupHistory,
+    /// A source is being compared with a blocked or declined version: nothing is chosen yet.
+    CheckingAgainstBlocked,
+    /// Every available copy is a blocked or declined version.
+    OnlyBlockedVersions,
+    /// Different computers recorded different choices for the same folder.
+    ConcurrentDecisions,
+    /// A recorded group choice or rollback fixes this version.
+    ChosenByGroupRecord,
 }
 
 fn another_computer(_: &ComputerId) -> String {
@@ -280,5 +292,13 @@ pub fn render_named(e: &Explanation, name_of: &dyn Fn(&ComputerId) -> String) ->
         }
         Unsupported { folder, why } => format!("{folder} is not supported: {why}"),
         GroupedBy { edges } => format!("grouped because: {}", edges.join("; ")),
+        RemovedByGroup => "removed by the group; it is kept in recovery here".to_string(),
+        WaitingForGroupHistory => "waiting for the group's removal history".to_string(),
+        CheckingAgainstBlocked => "checking a copy against a blocked version".to_string(),
+        OnlyBlockedVersions => "every available copy is a blocked or declined version".to_string(),
+        ConcurrentDecisions => {
+            "different computers recorded different choices for this add-on".to_string()
+        }
+        ChosenByGroupRecord => "restoring the version the group chose".to_string(),
     }
 }

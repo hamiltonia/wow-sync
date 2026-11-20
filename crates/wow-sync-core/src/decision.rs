@@ -51,6 +51,8 @@ impl From<DecisionReason> for DecisionKind {
             DecisionReason::DifferentTocMapping => Self::DifferentTocMapping,
             DecisionReason::UnvalidatedTocMapping => Self::UnvalidatedTocMapping,
             DecisionReason::PartialCandidate => Self::PartialCandidate,
+            DecisionReason::ChoicesDiffer => Self::ChoicesDiffer,
+            DecisionReason::RollbackTargetsDiffer => Self::RollbackTargetsDiffer,
         }
     }
 }

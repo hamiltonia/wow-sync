@@ -7,20 +7,78 @@
 #![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::path::Path;
 use wow_sync_adapters::authority_store;
 use wow_sync_adapters::localstate::LocalState;
 use wow_sync_adapters::provider::ProviderRoot;
 use wow_sync_adapters::{FsError, FsErrorKind};
+use wow_sync_core::authority::decode_authority;
 use wow_sync_core::authority::AuthorityRecord;
 use wow_sync_core::decide::encode_authority;
 use wow_sync_core::decision::{DecideError, DecisionEffect, LocalResolution};
 use wow_sync_core::hash::sha256;
-use wow_sync_core::ids::{ComputerId, GroupId, Sha256};
+use wow_sync_core::ids::{ComputerId, EnrollmentId, GroupId, Sha256};
+use wow_sync_core::kinds::{AuthorityIndexChunk, AuthorityRef, EnrollmentRef, MAX_INDEX_BYTES};
 use wow_sync_core::layout;
+use wow_sync_core::ledger::{
+    append_index_refs, decode_segment, derive, encode_segments, read_index_chain, Body, Entry,
+    IndexHead, Ledger, Membership, Status,
+};
+use wow_sync_core::records::{decode, AuthorityIndexHead};
 use wow_sync_core::retire::OwnStanding;
 
 const AUTHORITY_LIMIT: u64 = 16 * 1024 * 1024;
+
+/// The two constraint behaviours as one `ConstraintHooks`: keeps and exclusions from the code
+/// choices, level-2 rejection and recovered targets from the rejections.
+pub(crate) struct Constraints {
+    choice: wow_sync_core::choice::ChoiceBehaviour,
+    reject: wow_sync_core::reject::RejectBehaviour,
+}
+
+impl Constraints {
+    pub(crate) fn for_derived(d: &wow_sync_core::ledger::Derived) -> Self {
+        Self {
+            choice: wow_sync_core::choice::ChoiceBehaviour::for_derived(d),
+            reject: wow_sync_core::reject::RejectBehaviour::new(d),
+        }
+    }
+}
+
+impl wow_sync_core::hooks::ConstraintHooks for Constraints {
+    fn live_constraints(
+        &self,
+        l: &Ledger,
+        f: &wow_sync_core::paths::FolderKey,
+    ) -> Vec<wow_sync_core::decision::Constraint> {
+        let mut out = self.choice.live_constraints(l, f);
+        for c in self.reject.live_constraints(l, f) {
+            if !out.contains(&c) {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    fn excluded(
+        &self,
+        l: &Ledger,
+        p: &wow_sync_core::package::Package,
+        s: &wow_sync_core::target::Source,
+    ) -> wow_sync_core::target::ScopeMatch {
+        self.choice.excluded(l, p, s)
+    }
+
+    fn rejected(
+        &self,
+        l: &Ledger,
+        p: &wow_sync_core::package::Package,
+        s: &wow_sync_core::target::Source,
+    ) -> wow_sync_core::target::ScopeMatch {
+        self.reject.rejected(l, p, s)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -220,6 +278,366 @@ pub(crate) fn write_record(
         ));
     }
     authority_store::put_record(provider, &rel, &r.bytes, AUTHORITY_LIMIT, me.as_str())
+}
+
+// ---------------------------------------------------------------- the authority plane
+
+const MEMBERSHIP_FILE: &str = "authority-membership.json";
+const DISMISSED_FILE: &str = "authority-dismissed.json";
+const LOCAL_LIMIT: u64 = 16 * 1024 * 1024;
+
+fn segment_name(i: u32) -> String {
+    format!("authority-ledger-{i:08}.json")
+}
+
+fn object_name(h: &Sha256) -> String {
+    format!("authority-object-{h}.json")
+}
+
+#[derive(Serialize, Deserialize)]
+struct DismissedWire {
+    dismissed: Vec<Sha256>,
+}
+
+/// The learned records and the historical membership of one group (contracts.md §1.7, §1.10).
+/// Both are grow-only. The local files are flat names in the local state directory because
+/// that directory takes no sub-paths; the content is the contract's segment, object and
+/// membership data.
+#[derive(Debug, Default)]
+pub(crate) struct Plane {
+    pub ledger: Ledger,
+    pub members: Membership,
+    saved: BTreeSet<Sha256>,
+    fresh: Vec<(Sha256, Vec<u8>)>,
+    dirty: bool,
+}
+
+impl Plane {
+    /// Whatever cannot be read is simply not loaded: the shared folder teaches it again, and
+    /// nothing local is ever treated as proof that something is absent.
+    pub(crate) fn load(state: &LocalState) -> Plane {
+        let mut p = Plane::default();
+        if let Some(m) = state
+            .read(MEMBERSHIP_FILE, LOCAL_LIMIT)
+            .ok()
+            .flatten()
+            .and_then(|b| serde_json::from_slice::<Membership>(&b).ok())
+        {
+            p.members = m;
+        }
+        let mut entries = Vec::new();
+        for i in 0.. {
+            let Ok(Some(b)) = state.read(&segment_name(i), LOCAL_LIMIT) else {
+                break;
+            };
+            let Ok(seg) = decode_segment(&b) else { break };
+            entries.extend(seg.entries);
+        }
+        for e in entries {
+            let bytes = state
+                .read(&object_name(&e.hash), LOCAL_LIMIT)
+                .ok()
+                .flatten();
+            let mut from = e.learned_from.iter();
+            p.ledger.learn(
+                e.hash,
+                e.kind,
+                e.folders.clone(),
+                from.next(),
+                bytes.as_deref(),
+            );
+            for c in from {
+                p.ledger.learn(e.hash, e.kind, Vec::new(), Some(c), None);
+            }
+            if let Some(seq) = e.mirrored_seq {
+                p.ledger.mark_mirrored(&e.hash, seq);
+            }
+            if bytes.is_some() {
+                p.saved.insert(e.hash);
+            }
+        }
+        if let Some(d) = state
+            .read(DISMISSED_FILE, LOCAL_LIMIT)
+            .ok()
+            .flatten()
+            .and_then(|b| serde_json::from_slice::<DismissedWire>(&b).ok())
+        {
+            for h in d.dismissed {
+                p.ledger.dismiss(h);
+            }
+        }
+        p
+    }
+
+    /// Record bytes first, then the entry listing, so a listed entry never lacks its bytes
+    /// unless the write failed (and then it simply loads as unreadable).
+    pub(crate) fn save(&mut self, state: &LocalState) -> Result<(), FsError> {
+        if !self.dirty && self.fresh.is_empty() {
+            return Ok(());
+        }
+        for (h, b) in std::mem::take(&mut self.fresh) {
+            if let Err(e) = state.write_atomic(&object_name(&h), &b) {
+                self.fresh.push((h, b));
+                return Err(e);
+            }
+            self.saved.insert(h);
+        }
+        let entries: Vec<_> = self.ledger.entries().cloned().collect();
+        for (i, seg) in encode_segments(&entries).iter().enumerate() {
+            state.write_atomic(&segment_name(i as u32), seg)?;
+        }
+        state.write_atomic(
+            MEMBERSHIP_FILE,
+            &serde_json::to_vec(&self.members).expect("plain data serializes"),
+        )?;
+        let dismissed = DismissedWire {
+            dismissed: self.ledger.dismissed().iter().copied().collect(),
+        };
+        state.write_atomic(
+            DISMISSED_FILE,
+            &serde_json::to_vec(&dismissed).expect("plain data serializes"),
+        )?;
+        self.dirty = false;
+        Ok(())
+    }
+
+    pub(crate) fn mark_dirty(&mut self) {
+        self.dirty = true;
+    }
+
+    /// The verbatim bytes of a learned record, whether still unsaved or already stored locally.
+    pub(crate) fn bytes(&self, state: &LocalState, h: &Sha256) -> Option<Vec<u8>> {
+        let b = self
+            .fresh
+            .iter()
+            .find(|(f, _)| f == h)
+            .map(|(_, b)| b.clone())
+            .or_else(|| state.read(&object_name(h), LOCAL_LIMIT).ok().flatten())?;
+        (&sha256(&b) == h).then_some(b)
+    }
+
+    /// Marks records as listed in the own index from `seq` on, once that state is published.
+    pub(crate) fn mark_listed(&mut self, hashes: &[Sha256], seq: u64) {
+        for h in hashes {
+            self.ledger.mark_mirrored(h, seq);
+        }
+        if !hashes.is_empty() {
+            self.dirty = true;
+        }
+    }
+
+    pub(crate) fn add_member(&mut self, c: &ComputerId, e: &EnrollmentId) {
+        if !self.members.contains(c, e) {
+            self.members.add(c, e);
+            self.dirty = true;
+        }
+    }
+
+    /// Learns a record's verbatim bytes. A copy that does not hash to its name, does not decode,
+    /// or has an unknown schema teaches nothing here.
+    pub(crate) fn learn_bytes(&mut self, h: Sha256, from: Option<&ComputerId>, bytes: &[u8]) {
+        if let Some(Body::Record(_)) = self.ledger.body(&h) {
+            if let Some(e) = self.ledger.entry(&h).map(|e| e.kind) {
+                self.ledger.learn(h, e, Vec::new(), from, None);
+            }
+            return;
+        }
+        let Ok(r) = decode_authority(bytes, &h) else {
+            return;
+        };
+        self.ledger
+            .learn(h, r.kind(), Vec::new(), from, Some(bytes));
+        self.fresh.push((h, bytes.to_vec()));
+        self.dirty = true;
+    }
+}
+
+/// Writes one of this computer's own records (write-if-absent, read back) and learns it, so it is
+/// in the ledger before anything is computed from it (contracts.md §1.12 step 3).
+pub(crate) fn write_own_record(
+    plane: &mut Plane,
+    provider: &ProviderRoot,
+    group: &GroupId,
+    me: &ComputerId,
+    r: &AuthorityRecord,
+) -> Result<Sha256, FsError> {
+    let bytes = encode_authority(r);
+    let h = sha256(&bytes);
+    let rel = layout::authority_record(group, me, &h);
+    authority_store::put_record(provider, &rel, &bytes, AUTHORITY_LIMIT, me.as_str())?;
+    plane.learn_bytes(h, Some(me), &bytes);
+    Ok(h)
+}
+
+/// What the next own state carries for the authority index, and what to mark once it is published.
+#[derive(Debug, Default)]
+pub(crate) struct OwnIndex {
+    pub head: Option<AuthorityIndexHead>,
+    /// Records this plan lists for the first time.
+    pub newly: Vec<Sha256>,
+    /// Records the published chain already lists but the ledger had not marked (a lost mark).
+    pub adopt: Vec<Sha256>,
+    pub note: Option<String>,
+}
+
+/// Mirrors every newly valid record into the own `authority\` and lists it in the own index
+/// (contracts.md §1.6, §1.12 step 4 and repair). Only the own directory is ever written: a good
+/// own copy is left alone, a missing one is written and a damaged one is repaired
+/// (`put_record`). A failed repair keeps the record listed and says so. Index chunks are
+/// immutable and written before the state that names them.
+pub(crate) fn plan_own_index(
+    plane: &Plane,
+    state: &LocalState,
+    provider: &ProviderRoot,
+    group: &GroupId,
+    own: &EnrollmentRef,
+    published: Option<AuthorityIndexHead>,
+) -> OwnIndex {
+    let mut out = OwnIndex {
+        head: published,
+        ..OwnIndex::default()
+    };
+    let derived = derive(&plane.ledger, group, &plane.members);
+    let mut candidates: Vec<&Entry> = plane
+        .ledger
+        .entries()
+        .filter(|e| e.mirrored_seq.is_none() && derived.status_of(&e.hash) == Some(&Status::Valid))
+        .collect();
+    if candidates.is_empty() {
+        return out;
+    }
+    let chain_head = match published {
+        None => None,
+        Some(h) => {
+            let fetch = |c: &Sha256| {
+                provider
+                    .read(
+                        &layout::authority_index_chunk(group, &own.computer_id, c),
+                        MAX_INDEX_BYTES as u64,
+                    )
+                    .ok()
+            };
+            let read = read_index_chain(
+                &IndexHead {
+                    head: h.head,
+                    total: h.total,
+                },
+                group,
+                &own.enrollment_id,
+                &Default::default(),
+                &fetch,
+            );
+            if read.error.is_some() {
+                out.note = Some("the own authority index could not be read; not extended".into());
+                return out;
+            }
+            let listed: BTreeSet<Sha256> = read.refs.iter().map(|r| r.hash).collect();
+            out.adopt = candidates
+                .iter()
+                .map(|e| e.hash)
+                .filter(|h| listed.contains(h))
+                .collect();
+            candidates.retain(|e| !listed.contains(&e.hash));
+            let bytes = fetch(&h.head);
+            bytes
+                .and_then(|b| decode::<AuthorityIndexChunk>(&b, MAX_INDEX_BYTES).ok())
+                .map(|c| (h.head, c))
+        }
+    };
+    if published.is_some() && chain_head.is_none() {
+        out.note = Some("the own authority index could not be read; not extended".into());
+        return out;
+    }
+    let mut refs = Vec::new();
+    for e in candidates {
+        let Some(bytes) = plane.bytes(state, &e.hash) else {
+            continue;
+        };
+        let rel = layout::authority_record(group, &own.computer_id, &e.hash);
+        if authority_store::put_record(
+            provider,
+            &rel,
+            &bytes,
+            AUTHORITY_LIMIT,
+            own.computer_id.as_str(),
+        )
+        .is_err()
+        {
+            out.note = Some("A damaged copy could not be repaired".into());
+        }
+        refs.push(AuthorityRef {
+            hash: e.hash,
+            kind: e.kind,
+            folders: e.folders.clone(),
+        });
+    }
+    if refs.is_empty() {
+        return out;
+    }
+    refs.sort_by_key(|r| r.hash);
+    out.newly = refs.iter().map(|r| r.hash).collect();
+    let total = published.map_or(0, |h| h.total);
+    let (files, head) = append_index_refs(
+        group,
+        &own.enrollment_id,
+        chain_head.as_ref().map(|(h, c)| (h, c)),
+        total,
+        refs,
+    );
+    for (h, bytes) in files {
+        let rel = layout::authority_index_chunk(group, &own.computer_id, &h);
+        if authority_store::put_record(
+            provider,
+            &rel,
+            &bytes,
+            MAX_INDEX_BYTES as u64,
+            own.computer_id.as_str(),
+        )
+        .is_err()
+        {
+            out.newly.clear();
+            out.note = Some("the authority index could not be written; will retry".into());
+            return out;
+        }
+    }
+    out.head = Some(AuthorityIndexHead {
+        head: head.head,
+        total: head.total,
+    });
+    out
+}
+
+/// Reads every member's `authority\` listing (own and mirrors, retired members and members whose
+/// newest state is unusable included) into the plane (contracts.md §1.12 steps 1–3).
+pub(crate) fn learn_from_directories(
+    plane: &mut Plane,
+    provider: &ProviderRoot,
+    group: &GroupId,
+    computers: &[ComputerId],
+) {
+    for c in computers {
+        let Ok(names) = authority_store::list_names(provider, &layout::authority_dir(group, c))
+        else {
+            continue;
+        };
+        for n in names {
+            let Some(stem) = n.strip_suffix(".json") else {
+                continue;
+            };
+            let Ok(h) = Sha256::parse(stem) else { continue };
+            if let Some(Body::Record(_)) = plane.ledger.body(&h) {
+                plane.learn_bytes(h, Some(c), &[]);
+                continue;
+            }
+            let Ok(bytes) = provider.read(
+                &layout::authority_record(group, c, &h),
+                wow_sync_core::kinds::MAX_RECORD_BYTES as u64,
+            ) else {
+                continue;
+            };
+            plane.learn_bytes(h, Some(c), &bytes);
+        }
+    }
 }
 
 #[cfg(test)]

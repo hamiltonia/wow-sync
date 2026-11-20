@@ -283,6 +283,8 @@ fn kind_of(p: &PackageRow, peers: &[&MemberRow]) -> Kind {
         PackageStatus::NeedsHelp(_) => Kind::NeedsHelp,
         PackageStatus::NeedsDecision(r) => Kind::NeedsDecision(*r),
         PackageStatus::Blocked(_) => Kind::Blocked,
+        PackageStatus::Removing => Kind::Available,
+        PackageStatus::Held => Kind::Blocked,
     }
 }
 

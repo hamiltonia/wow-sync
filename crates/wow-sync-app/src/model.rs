@@ -338,6 +338,8 @@ pub fn status_label(w: &World, s: &PackageStatus) -> Label {
             label("Waiting for WoW to close", Tone::Waiting, Icon::Hourglass)
         }
         PackageStatus::Blocked(_) => label("Waiting", Tone::Waiting, Icon::Hourglass),
+        PackageStatus::Removing => label("Removing", Tone::Working, Icon::Sync),
+        PackageStatus::Held => label("Waiting", Tone::Waiting, Icon::Hourglass),
         PackageStatus::Unavailable => label("Waiting for Dropbox", Tone::Waiting, Icon::Hourglass),
         PackageStatus::Interrupted => label("Update interrupted", Tone::Waiting, Icon::Hourglass),
         PackageStatus::NeedsDecision(_) => label("Needs your decision", Tone::Help, Icon::Alert),
@@ -441,9 +443,11 @@ pub fn counts(w: &World) -> Counts {
                 c.up_to_date += 1
             }
             PackageStatus::Available => c.ready += 1,
-            PackageStatus::Unavailable | PackageStatus::Blocked(_) | PackageStatus::Interrupted => {
-                c.waiting += 1
-            }
+            PackageStatus::Unavailable
+            | PackageStatus::Blocked(_)
+            | PackageStatus::Interrupted
+            | PackageStatus::Removing
+            | PackageStatus::Held => c.waiting += 1,
             PackageStatus::NeedsDecision(_) => c.needs_decision += 1,
             PackageStatus::NeedsHelp(_) => c.needs_help += 1,
             PackageStatus::NotSynced => c.not_synced += 1,
@@ -698,6 +702,8 @@ fn decision_title(r: DecisionReason) -> &'static str {
         DecisionReason::NoCompatibleToc => "a copy has no readable add-on file list",
         DecisionReason::DifferentTocMapping => "the copies read their file lists differently",
         DecisionReason::UnvalidatedTocMapping => "a copy has client-specific files",
+        DecisionReason::ChoicesDiffer => "computers chose different versions",
+        DecisionReason::RollbackTargetsDiffer => "computers went back to different versions",
     }
 }
 
@@ -731,6 +737,12 @@ pub fn decision_reason(_w: &World, a: &Addon, r: DecisionReason) -> String {
         }
         DecisionReason::UnvalidatedTocMapping => {
             "This add-on has client-specific .toc files that WoW Sync does not handle yet.".into()
+        }
+        DecisionReason::ChoicesDiffer => {
+            "Different computers chose different versions of this add-on.".into()
+        }
+        DecisionReason::RollbackTargetsDiffer => {
+            "Different computers went back to different versions of this add-on.".into()
         }
     }
 }
