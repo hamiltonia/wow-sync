@@ -1267,7 +1267,7 @@ mod v2 {
             w.sort();
             assert_eq!(got.2, w, "reserved records not written exactly once");
         }
-        for (_, bytes) in fx.points.iter() {
+        for bytes in fx.points.values() {
             match decode_point(bytes).expect("point decodes") {
                 AnyPoint::V2(p) => assert!(!p.pinned, "pinned point left behind"),
                 AnyPoint::V1(p) => assert!(!p.pinned),
@@ -1399,7 +1399,7 @@ mod v2 {
         let (_sc, plan, mut fx) = apply_fixture();
         fx.crash_after = Some(3);
         run_apply(&plan, &mut fx);
-        for (_, bytes) in fx.journals.iter() {
+        for bytes in fx.journals.values() {
             assert!(matches!(decode_journal(bytes), Ok(AnyJournal::V1(_))));
             assert!(String::from_utf8_lossy(bytes).contains("apply-journal/1"));
         }
@@ -1435,7 +1435,7 @@ mod v2 {
         fx.activity_script.clear();
         fx.launch_after_renames = None;
         settle2(&mut fx);
-        assert!(fx.pending_written.is_empty() || fx.live.get("AlphaX").is_none());
+        assert!(fx.pending_written.is_empty() || !fx.live.contains_key("AlphaX"));
     }
 
     #[test]

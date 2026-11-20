@@ -1,8 +1,7 @@
 # Evidence: R4-core-contracts (run-004, phase C, step 1)
 
 Branch `run004/R4-core-contracts` in `D:\GitHub\wow-sync.worktrees\R4-core-contracts`, from main 313b5fb.
-Status: **PARTIAL.** Foundation types, validation, ledger/barrier, same-release and composition, neutral
-stubs and the tests listed below are done. The items under "Deferred" are NOT done.
+Status: **DONE except the items under "Still deferred"** (real-effects wiring for `/2`, owned elsewhere).
 
 ## Verification (actual, Windows)
 
@@ -40,7 +39,7 @@ The helper `testkit::golden` fails on a missing file unless `WOWSYNC_BLESS=1`.
 | T-R4D23 common keys only | `same_release` skips keys the source lacks | `same_release_table` FAILED, exit 101 |
 | T-R4D23 union of keys | `same_release_entries` uses only one entry's scope | `same_release_regrouped_exclusion` and `same_release_unknown_waits` FAILED, exit 101 |
 | T-R4D25 representative | DAG never marks a node void for an effective dependency | `partial_retirement_dag_is_order_and_restart_stable` and `retirement_by_a_retired_issuer_is_void` FAILED, exit 101 |
-| T-R4D24 per-folder selection | **NOT DEMONSTRATED**: the slice selects per package, so no per-folder selection exists to mutate; the no-hybrid test asserts the observable result only | not run |
+| T-R4D24 per-folder selection | ambiguous branch of `target.rs` projects each candidate onto each folder and picks the newest per folder | `no_hybrid_of_two_releases_in_one_package` FAILED, exit 101; restored |
 
 ## Design decisions and ambiguities
 
@@ -56,23 +55,48 @@ The helper `testkit::golden` fails on a missing file unless `WOWSYNC_BLESS=1`.
 - `InvalidReason::Kind` strings are the first word of the validator message.
 - `compose` records removed and deferred sets and does not mutate `effective`.
 - `MAX_SETTINGS_FILE_BYTES` is `None` pending Q-77; tests pass a test-only value.
-- V-JRN ledger-level checks (each remove folder named by a listed removal; each listed removal valid or
-  pending) are not in the journal validator.
 - Process note: one test block was appended to `authority.rs` with a .NET `AppendAllText` call instead of the
   edit tool. Content is plain test code and visible in the diff.
 
 ## Deferred / not done (hand over to the owners)
 
-- Executor: `/2` journal creation, the `remove` action, `pending_records` reserve/finalize and
-  `recover_interrupted` for `/2` (T-C06 beyond decode behaviour, T-C06c crash slots, T-R4D1-mixed-update-drop
-  recovery). Today a `/2` journal is `NeedsHelp`, kept, and blocks applies (slice behaviour).
-- T-C06b (runtime `UnknownJournal` listing), T-C07 (pending report `/2` vs slice decoder).
-- T-C08, T-R4D4-1024-issuers-readd, T-R4D4-mirror-only-readd, T-R4D4-full-policy, T-C12 (index chain).
-- T-C11 offline fixtures for NFC collisions (the NFC helpers are implemented; the named diagnoses are not tested here).
-- Golden files for the remaining kinds (readd, code-choice, rejection, lift, policy, revision, part, index chunk).
-- `admit.rs` gained `barrier_gate`/`apply_barrier`; no end-to-end admission test yet.
-- Runtime `control.rs`, `service.rs`, `effects.rs`, `activity.rs`: not changed (would not be needed for compile).
-- Adapter `fs_install.rs`, `fs_safe.rs`, `provider.rs`, `testkit.rs`: not changed.
+Still deferred:
+
+- **Real effects for `/2`:** `RealEffects` and `Faulty` (runtime `effects.rs`, not owned) do not forward the new
+  `ApplyEffects` methods (`write_journal_v2`, `write_recovery_point_v2`, `write_pending_record`, settings file
+  moves). The trait defaults refuse, so a `/2` operation fails safely at journal creation with no live change.
+  Settings file moves also need `fs_safe`/`WtfScope` adapters (not owned). Owners of the step-2 packets wire these.
+- `admit.rs` `barrier_gate`/`apply_barrier`: no end-to-end admission test yet.
+- Native T-C11 identity collisions: NOT RUN (R4D-22).
+- Q-77 settings file cap: `None` pending the owner decision.
+
+## Done since the first pass (all offline, Windows)
+
+- **Executor `/2`** (`exec.rs`, `exec_tests.rs::v2`): journals for every §2.2 kind, `remove`, `pending_records`
+  reserve/finalize (bytes written only after verify), `recover_interrupted` for `/1` and `/2`.
+  T-C06c crash slots for all 6 kinds, re-entrant recovery, T-R4D1-mixed-update-drop from each slot, T-C05
+  (a pure-code apply still writes a `/1` journal, bytes unchanged), changed-settings replan, game-running stop,
+  unsupported-port failure.
+- **V-JRN ledger checks** (`ledger::validate_journal_against_ledger`): `removal_not_valid`,
+  `remove_folder_unnamed`. A removal is acceptable if the ledger says Valid, or a pending Ack record names it.
+- **T-C06b**: `control::split_journals`/`UnknownJournal`; `service.rs` lists undecodable journals as a status
+  block and never deletes them (test `control::tests::an_undecodable_journal_is_listed_by_name_and_the_known_ones_are_kept`;
+  the view uses the same `blocks`). `StatusSnapshot` unchanged (additive via `blocks`).
+- **T-C07, T-C08, T-R4D4-1024-issuers-readd, T-R4D4-mirror-only-readd, T-R4D4-full-policy, T-C12, T-C11 offline**
+  (NFC collision and case-only), via `kinds::pack_items`/`pack_known` and ledger part/index-chain readers.
+- **Golden fixtures** for readd, code-choice, rejection, lift, policy, revision, part, index chunk
+  (15 goldens in total).
+- **Line endings (T-C01):** `fixtures\contracts\.gitattributes` = `* -text`; fixtures renormalized (`i/lf w/lf attr/-text`).
+  Proof: deleted `apply-journal-1.json`, `git checkout --` restored it, SHA256 7013A5A8… identical before/after,
+  golden test passes.
+- **T-R4D24 control:** `target.rs` mutated to choose per folder in the ambiguous branch;
+  `no_hybrid_of_two_releases_in_one_package` FAILED, exit 101; restored with `git checkout -- target.rs`.
+- **Additional ambiguity choices:** settings fingerprint is ignored (`ExpectedLive::Tree.tree` is the file hash);
+  `read_parts` is stricter (a part reached twice gives `bad_part`, a wrong `of` gives `wrong_reference`);
+  `pack_items` inline budget 48 KiB, parts at most 60 KiB, fan-out at most 16; index `processed` maps hash to
+  cumulative ref count.
+- Test counts (`cargo test --workspace`): core 225, adapters 50 (3 ignored), runtime 47, app 23, proto 11,
+  xtask 26; 0 failed. Both verify tiers PASS. New cases added to `tests\required-cases.toml`.
 
 ## Stubs and owners
 

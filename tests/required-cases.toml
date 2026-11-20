@@ -676,6 +676,30 @@ tests = [
     "ledger::tests::segments_reload_past_sixteen_mib",
     "authority_store::tests::own_bad_copy_is_repaired_and_a_good_one_is_never_rewritten",
 ]
+
+[[case]]
+id = "R4-core-contracts:executor-v2-and-ledger-writers"
+tier = "offline"
+tests = [
+    "exec::tests::v2::crash_slots_recover_to_exactly_old_or_new_for_every_kind",
+    "exec::tests::v2::crash_during_recovery_is_reentrant_for_every_kind",
+    "exec::tests::v2::every_kind_applies_and_writes_its_reserved_records",
+    "exec::tests::v2::the_reserved_bytes_are_written_after_verify_not_before",
+    "exec::tests::v2::mixed_update_drop_uses_one_v2_journal_and_recovers_from_each_slot",
+    "exec::tests::v2::pure_code_apply_still_writes_a_v1_journal",
+    "exec::tests::v2::changed_settings_file_replans_without_touching_live",
+    "exec::tests::v2::a_running_game_stops_a_remove_without_a_live_change",
+    "exec::tests::v2::an_unsupported_port_fails_before_any_live_change",
+    "ledger::tests::journal_removals_must_be_valid_and_name_every_remove_folder",
+    "ledger::tests::readd_after_1024_issuers_moves_seen_into_parts_and_waits_for_every_part",
+    "ledger::tests::readd_with_unreadable_issuer_indexes_lists_every_record_in_extra_parts",
+    "ledger::tests::a_policy_of_5000_folders_round_trips_in_parts_and_a_duplicate_is_policy_body",
+    "ledger::tests::index_chain_replaces_a_partial_head_and_reports_a_broken_chain_without_forgetting",
+    "ledger::tests::golden_bytes_of_every_remaining_kind_part_and_index_chunk",
+    "records::contract_tests::pending_report_v2_is_replaced_by_the_slice_and_never_enters_a_state",
+    "ids::tests::nfc_collision_and_case_only_difference_are_diagnosed_and_not_matched",
+    "control::tests::an_undecodable_journal_is_listed_by_name_and_the_known_ones_are_kept",
+]
 # <<< section: R4-core-contracts
 
 # >>> section: R4-core-removal

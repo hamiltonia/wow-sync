@@ -896,16 +896,15 @@ impl SliceService {
         })
     }
 
-    fn journals(&self, area: &InstallArea) -> Vec<ApplyJournal> {
-        area.read_journals()
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|(_, b)| decode::<ApplyJournal>(&b, 1024 * 1024).ok())
-            .collect()
+    fn journals(
+        &self,
+        area: &InstallArea,
+    ) -> (Vec<ApplyJournal>, Vec<crate::control::UnknownJournal>) {
+        crate::control::split_journals(area.read_journals().unwrap_or_default())
     }
 
     fn snapshot(&mut self, w: &World, area: &InstallArea) -> StatusSnapshot {
-        let journals = self.journals(area);
+        let (journals, unknown_journals) = self.journals(area);
         let (interrupted, needs_help) = journal_status(&journals);
         let mut retained: Vec<RecoveryPoint> = Vec::new();
         let keys: Vec<FolderKey> = w.target.packages.keys().cloned().collect();
@@ -1008,7 +1007,12 @@ impl SliceService {
                 })
                 .collect(),
             members: sv.members.iter().map(render_member).collect(),
-            blocks: sv.blocks.iter().map(render_block).collect(),
+            blocks: sv
+                .blocks
+                .iter()
+                .map(render_block)
+                .chain(unknown_journals.iter().map(|u| u.render()))
+                .collect(),
             recovery_note: (!retained.is_empty() || !interrupted.is_empty()).then(|| {
                 format!(
                     "{} recovery point(s) kept, {} interrupted update(s)",

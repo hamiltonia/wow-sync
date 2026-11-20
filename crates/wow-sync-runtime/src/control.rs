@@ -213,10 +213,63 @@ pub fn read_activity(state: &LocalState, limit: usize) -> Vec<ActivityEntry> {
     all
 }
 
+/// A journal or recovery point this version cannot decode (contracts.md §2.2, R4D-1). It is
+/// listed to the user and never deleted; core keeps blocking applies while it exists.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct UnknownJournal {
+    pub file: String,
+}
+
+impl UnknownJournal {
+    pub fn render(&self) -> String {
+        format!(
+            "An interrupted-update record ({}) was written by a different version and is kept; \
+             updates stay on hold until it is resolved",
+            self.file
+        )
+    }
+}
+
+/// Splits stored journal files into the slice journals the status view understands and the
+/// files nothing here can read. `/2` journals that decode are owned by their operation's flow.
+pub fn split_journals(
+    files: Vec<(String, Vec<u8>)>,
+) -> (
+    Vec<wow_sync_core::records::ApplyJournal>,
+    Vec<UnknownJournal>,
+) {
+    use wow_sync_core::records::{decode_journal, AnyJournal};
+    let (mut known, mut unknown) = (Vec::new(), Vec::new());
+    for (file, bytes) in files {
+        match decode_journal(&bytes) {
+            Ok(AnyJournal::V1(j)) => known.push(j),
+            Ok(AnyJournal::V2(_)) => {}
+            Err(_) => unknown.push(UnknownJournal { file }),
+        }
+    }
+    (known, unknown)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use wow_sync_adapters::testkit::TempDir;
+
+    #[test]
+    fn an_undecodable_journal_is_listed_by_name_and_the_known_ones_are_kept() {
+        // T-C06b-unknown-journal-listed (control and view text; service uses the same split)
+        let (known, unknown) = split_journals(vec![
+            (
+                "b".repeat(32),
+                b"{\"schema\":\"wowsync.apply-journal/9\"}".to_vec(),
+            ),
+            ("c".repeat(32), b"not json".to_vec()),
+        ]);
+        assert!(known.is_empty());
+        let files: Vec<&str> = unknown.iter().map(|u| u.file.as_str()).collect();
+        assert_eq!(files, vec!["b".repeat(32), "c".repeat(32)]);
+        assert!(unknown[0].render().contains(&"b".repeat(32)));
+    }
 
     fn st(t: &TempDir) -> LocalState {
         LocalState::open_at(&t.join("state")).unwrap()
