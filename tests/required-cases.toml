@@ -699,6 +699,12 @@ tests = [
     "records::contract_tests::pending_report_v2_is_replaced_by_the_slice_and_never_enters_a_state",
     "ids::tests::nfc_collision_and_case_only_difference_are_diagnosed_and_not_matched",
     "control::tests::an_undecodable_journal_is_listed_by_name_and_the_known_ones_are_kept",
+    "ledger::tests::the_ledger_barrier_gates_member_states_end_to_end",
+    "fs_install::tests::settings_files_stage_move_and_hash_inside_the_wtf_scope",
+    "fs_install::tests::settings_paths_cannot_leave_the_account_scope",
+    "effects::tests::a_v2_apply_with_a_remove_and_settings_runs_through_the_real_effects",
+    "effects::tests::a_settings_only_apply_changes_just_the_file_and_keeps_the_old_copy_for_recovery",
+    "effects::tests::a_crash_at_every_effect_recovers_to_exactly_old_or_new_with_the_real_adapters",
 ]
 # <<< section: R4-core-contracts
 

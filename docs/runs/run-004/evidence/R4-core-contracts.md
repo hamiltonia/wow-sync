@@ -1,7 +1,7 @@
 # Evidence: R4-core-contracts (run-004, phase C, step 1)
 
 Branch `run004/R4-core-contracts` in `D:\GitHub\wow-sync.worktrees\R4-core-contracts`, from main 313b5fb.
-Status: **DONE except the items under "Still deferred"** (real-effects wiring for `/2`, owned elsewhere).
+Status: **DONE except the items under "Still deferred"** (native T-C11, Q-77).
 
 ## Verification (actual, Windows)
 
@@ -62,11 +62,6 @@ The helper `testkit::golden` fails on a missing file unless `WOWSYNC_BLESS=1`.
 
 Still deferred:
 
-- **Real effects for `/2`:** `RealEffects` and `Faulty` (runtime `effects.rs`, not owned) do not forward the new
-  `ApplyEffects` methods (`write_journal_v2`, `write_recovery_point_v2`, `write_pending_record`, settings file
-  moves). The trait defaults refuse, so a `/2` operation fails safely at journal creation with no live change.
-  Settings file moves also need `fs_safe`/`WtfScope` adapters (not owned). Owners of the step-2 packets wire these.
-- `admit.rs` `barrier_gate`/`apply_barrier`: no end-to-end admission test yet.
 - Native T-C11 identity collisions: NOT RUN (R4D-22).
 - Q-77 settings file cap: `None` pending the owner decision.
 
@@ -95,8 +90,25 @@ Still deferred:
   `read_parts` is stricter (a part reached twice gives `bad_part`, a wrong `of` gives `wrong_reference`);
   `pack_items` inline budget 48 KiB, parts at most 60 KiB, fan-out at most 16; index `processed` maps hash to
   cumulative ref count.
-- Test counts (`cargo test --workspace`): core 225, adapters 50 (3 ignored), runtime 47, app 23, proto 11,
-  xtask 26; 0 failed. Both verify tiers PASS. New cases added to `tests\required-cases.toml`.
+- **Real effects wiring (ownership corrected: owned by this packet):**
+  - Runtime `effects.rs`: `RealEffects` and `Faulty` forward `write_journal_v2`, `write_recovery_point_v2`,
+    `write_pending_record`, `settings_stage`, `settings_hash`, `settings_rename`, `discard_settings_staging`;
+    `remove_recovery` also drops `settings-recovery/<op>`.
+  - Adapters: `fs_safe::WtfScope` (opens `<variant>/WTF`, only `Account/...` relative paths, no traversal, `\`,
+    drive colon or NUL; `OutsideRoot` otherwise); `fs_install::SettingsSlot` (Live/Staging/Recovery) with
+    `stage_settings`, `settings_hash`, `settings_rename` (refuses an existing destination), staging and recovery
+    cleanup. `stage_file` is a thin wrapper over `stage_at`; slice behaviour unchanged.
+  - Tests (synthetic temp dirs): runtime `effects::tests` x3 (a `/2` remove plus settings apply, settings-only apply
+    keeping the old copy for recovery, `Faulty` crash at every effect recovers to exactly old or new, T-C06c at
+    runtime level); adapters `fs_install::tests` x2 (staging, move, hash inside WTF; scope escape rejected).
+  - Reading: `write_pending_record` writes the record write-if-absent only. Index head and chunk appends belong
+    to the next state publication (the head lives in the state record).
+- **Admission end-to-end** (`ledger::tests::the_ledger_barrier_gates_member_states_end_to_end`): a state above an
+  effective retirement cutoff is never admitted (`apply_barrier` makes it unusable/retired); an unresolved
+  retirement holds the record as `pending(retirement_unresolved)` and `barrier_gate` gives `Held` above the hold cut.
+- Test counts (`cargo test --workspace`): core 226, adapters 52 (3 ignored), runtime 50, app 23, proto 11,
+  xtask 26; 0 failed. Clippy `-D warnings` clean. Both verify tiers PASS (exit 0). New cases are in
+  `tests\required-cases.toml`.
 
 ## Stubs and owners
 

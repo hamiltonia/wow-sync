@@ -2,7 +2,7 @@
 //! Deletion happens only inside `<variant>/.wowsync/{staging,recovery,journal}`;
 //! `AddOns` content is never deleted, only renamed away.
 
-use crate::fs_safe::{validate_segment, ReparsePolicy, Root};
+use crate::fs_safe::{validate_segment, ReparsePolicy, Root, WtfScope};
 use crate::fs_scan::{ScanOptions, ScannedFile, Snapshot};
 use crate::{FsError, FsErrorKind};
 use sha2::{Digest, Sha256};
@@ -13,6 +13,7 @@ use std::path::Path;
 pub struct InstallArea {
     addons: Root,
     work: Root,
+    variant_dir: std::path::PathBuf,
 }
 
 pub struct InstallLock {
@@ -36,6 +37,17 @@ pub enum Slot<'a> {
 }
 
 const JOURNAL_LIMIT: u64 = 4 * 1024 * 1024;
+/// Upper bound for hashing one saved-settings file; the product cap is Q-77 (pending).
+const SETTINGS_READ_LIMIT: u64 = 256 * 1024 * 1024;
+
+/// A saved-settings file location (contracts.md §2.2): the live file, its staged copy or the
+/// copy kept for recovery. Staging and recovery live under `.wowsync`, beside the folder slots.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsSlot<'a> {
+    Live { rel: &'a str },
+    Staging { op: &'a str, idx: usize },
+    Recovery { op: &'a str, idx: usize },
+}
 
 fn seg(path: &Path, s: &str) -> Result<(), FsError> {
     validate_segment(s)
@@ -86,7 +98,11 @@ impl InstallArea {
         for d in ["staging", "recovery", "journal"] {
             work.ensure_dir(d)?;
         }
-        Ok(InstallArea { addons, work })
+        Ok(InstallArea {
+            addons,
+            work,
+            variant_dir: variant_dir.to_path_buf(),
+        })
     }
 
     /// Exclusive lock excluding other WoW Sync instances only; a stale lock file with
@@ -143,11 +159,23 @@ impl InstallArea {
         seg(p, op)?;
         seg(p, folder)?;
         let rel_in_work = format!("staging/{op}/{folder}/{rel}");
+        self.stage_at(&rel_in_work, rel, src, expect, size)
+    }
+
+    fn stage_at(
+        &self,
+        rel_in_work: &str,
+        rel: &str,
+        src: &mut dyn Read,
+        expect: [u8; 32],
+        size: u64,
+    ) -> Result<(), FsError> {
+        let p = self.work.path();
         let tmp_name = format!(".wowsync-{}.tmp", crate::sysinfo::random_id_hex());
         let mut written = (0u64, [0u8; 32]);
         let target = self
             .work
-            .write_atomic_with(&rel_in_work, &tmp_name, &mut |f| {
+            .write_atomic_with(rel_in_work, &tmp_name, &mut |f| {
                 let mut h = Sha256::new();
                 let mut buf = vec![0u8; 64 * 1024];
                 let mut total = 0u64;
@@ -344,6 +372,125 @@ impl InstallArea {
         seg(self.work.path(), op)?;
         self.work.remove_tree(&format!("staging/{op}"))
     }
+
+    /// Root and relative path of a settings slot; `None` when the live scope does not exist
+    /// and `create` is false.
+    fn settings_locate(
+        &self,
+        slot: SettingsSlot<'_>,
+        create: bool,
+    ) -> Result<Option<(Root, String)>, FsError> {
+        let p = self.work.path();
+        match slot {
+            SettingsSlot::Live { rel } => {
+                WtfScope::check_rel(rel)?;
+                let Some(scope) = WtfScope::open(&self.variant_dir, create)? else {
+                    return Ok(None);
+                };
+                Ok(Some((scope.root().clone(), rel.to_string())))
+            }
+            SettingsSlot::Staging { op, idx } => {
+                seg(p, op)?;
+                Ok(Some((
+                    self.work.clone(),
+                    format!("settings-staging/{op}/{idx}"),
+                )))
+            }
+            SettingsSlot::Recovery { op, idx } => {
+                seg(p, op)?;
+                Ok(Some((
+                    self.work.clone(),
+                    format!("settings-recovery/{op}/{idx}"),
+                )))
+            }
+        }
+    }
+
+    /// Copies `src` to the staging slot of file `idx`, verifying size and hash on the way in
+    /// and again on disk.
+    pub fn stage_settings(
+        &self,
+        op: &str,
+        idx: usize,
+        src: &mut dyn Read,
+        expect: [u8; 32],
+        size: u64,
+    ) -> Result<(), FsError> {
+        seg(self.work.path(), op)?;
+        self.stage_at(
+            &format!("settings-staging/{op}/{idx}"),
+            "settings file",
+            src,
+            expect,
+            size,
+        )
+    }
+
+    /// SHA-256 of a settings file slot; `None` = absent. A directory or a reparse point is an
+    /// error, never absent.
+    pub fn settings_hash(&self, slot: SettingsSlot<'_>) -> Result<Option<[u8; 32]>, FsError> {
+        let Some((root, rel)) = self.settings_locate(slot, false)? else {
+            return Ok(None);
+        };
+        let mut f = match root.open_read(&rel, SETTINGS_READ_LIMIT) {
+            Ok(f) => f,
+            Err(e) if e.kind == FsErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        let path = root.join(&rel)?;
+        let (_, h) = crate::fs_safe::sha256_stream(&path, &mut f, SETTINGS_READ_LIMIT)?;
+        Ok(Some(h))
+    }
+
+    /// Single same-volume file rename; fails if the destination exists or the source is not a
+    /// plain file. A missing `WTF` is created only when it is the destination's scope.
+    pub fn settings_rename(
+        &self,
+        from: SettingsSlot<'_>,
+        to: SettingsSlot<'_>,
+    ) -> Result<(), FsError> {
+        let (fr, frel) = self
+            .settings_locate(from, false)?
+            .ok_or_else(|| FsError::new(FsErrorKind::NotFound, &self.variant_dir, "no WTF"))?;
+        let (tr, trel) = self
+            .settings_locate(to, true)?
+            .ok_or_else(|| FsError::new(FsErrorKind::NotFound, &self.variant_dir, "no WTF"))?;
+        let src = fr.join(&frel)?;
+        if fr.check_components(&frel)?.is_dir {
+            return Err(FsError::new(
+                FsErrorKind::NotPlainFile,
+                &src,
+                "settings slot is a directory",
+            ));
+        }
+        let dst = tr.join(&trel)?;
+        match tr.check_components(&trel) {
+            Ok(_) => {
+                return Err(FsError::new(
+                    FsErrorKind::AlreadyExists,
+                    &dst,
+                    "destination exists",
+                ))
+            }
+            Err(e) if e.kind == FsErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+        let parent_rel = trel.rsplit_once('/').map(|x| x.0).unwrap_or("");
+        tr.ensure_dir(parent_rel)?;
+        std::fs::rename(&src, &dst).map_err(|e| FsError::from_io(&src, &e))
+    }
+
+    /// Deletes `settings-staging/<op>`. Idempotent.
+    pub fn remove_settings_staging(&self, op: &str) -> Result<(), FsError> {
+        seg(self.work.path(), op)?;
+        self.work.remove_tree(&format!("settings-staging/{op}"))
+    }
+
+    /// Deletes `settings-recovery/<op>`. Idempotent.
+    pub fn remove_settings_recovery(&self, op: &str) -> Result<(), FsError> {
+        seg(self.work.path(), op)?;
+        self.work.remove_tree(&format!("settings-recovery/{op}"))
+    }
 }
 
 fn read_all(root: &Root, rel: &str, limit: u64) -> Result<Vec<u8>, FsError> {
@@ -390,6 +537,74 @@ mod tests {
             bytes.len() as u64,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn settings_files_stage_move_and_hash_inside_the_wtf_scope() {
+        let (_t, inst, area) = setup();
+        let rel = "Account/ACCT/SavedVariables/Alpha.lua";
+        let live = SettingsSlot::Live { rel };
+        let staging = SettingsSlot::Staging { op: "op1", idx: 0 };
+        let recovery = SettingsSlot::Recovery { op: "op1", idx: 0 };
+        // No WTF yet: the live file is simply absent.
+        assert_eq!(area.settings_hash(live).unwrap(), None);
+        let old = b"old settings";
+        let new = b"new settings";
+        area.stage_settings("op1", 0, &mut &new[..], sha(new), new.len() as u64)
+            .unwrap();
+        assert_eq!(area.settings_hash(staging).unwrap(), Some(sha(new)));
+        // Installing into a missing WTF creates it inside the variant folder.
+        area.settings_rename(staging, live).unwrap();
+        assert_eq!(area.settings_hash(live).unwrap(), Some(sha(new)));
+        assert_eq!(area.settings_hash(staging).unwrap(), None);
+        // Replace: live moves to recovery, a staged copy moves in; no destination is overwritten.
+        area.stage_settings("op1", 0, &mut &old[..], sha(old), old.len() as u64)
+            .unwrap();
+        let e = area.settings_rename(staging, live).unwrap_err();
+        assert_eq!(e.kind, FsErrorKind::AlreadyExists);
+        area.settings_rename(live, recovery).unwrap();
+        area.settings_rename(staging, live).unwrap();
+        assert_eq!(area.settings_hash(live).unwrap(), Some(sha(old)));
+        assert_eq!(area.settings_hash(recovery).unwrap(), Some(sha(new)));
+        assert!(inst.variant_dir.join("WTF").join("Account").is_dir());
+        area.remove_settings_recovery("op1").unwrap();
+        area.remove_settings_staging("op1").unwrap();
+        assert_eq!(area.settings_hash(recovery).unwrap(), None);
+        // A mismatching copy is refused and leaves nothing staged.
+        let e = area
+            .stage_settings("op2", 0, &mut &new[..], sha(old), new.len() as u64)
+            .unwrap_err();
+        assert_eq!(e.kind, FsErrorKind::HashMismatch);
+        assert_eq!(
+            area.settings_hash(SettingsSlot::Staging { op: "op2", idx: 0 })
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn settings_paths_cannot_leave_the_account_scope() {
+        let (_t, _inst, area) = setup();
+        for rel in [
+            "../AddOns/Alpha/Alpha.toc",
+            "Account/../Config.wtf",
+            "Account/A/../../x.lua",
+            "Config.wtf",
+            "Account",
+            "Account/C:/x.lua",
+            "Account\\A\\x.lua",
+            "/Account/A/x.lua",
+            "Account/A/NUL.lua",
+        ] {
+            let e = area
+                .settings_hash(SettingsSlot::Live { rel })
+                .expect_err(rel);
+            assert_eq!(e.kind, FsErrorKind::OutsideRoot, "{rel}: {e}");
+        }
+        let e = area
+            .settings_hash(SettingsSlot::Staging { op: "../x", idx: 0 })
+            .unwrap_err();
+        assert_eq!(e.kind, FsErrorKind::OutsideRoot);
     }
 
     #[test]

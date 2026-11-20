@@ -1043,6 +1043,89 @@ mod tests {
     }
 
     #[test]
+    fn the_ledger_barrier_gates_member_states_end_to_end() {
+        // A-38 admission: a record above the cutoff is never admitted; an unresolved retirement
+        // holds as pending(retirement_unresolved) and waits instead of being judged.
+        use crate::admit::{
+            admit_member_states, apply_barrier, barrier_gate, BarrierGate, MemberLatest, MemberObs,
+            StateFileObs,
+        };
+        use crate::layout::state_file_name;
+        use crate::records::AdmissionWatermarks;
+        use crate::testkit;
+
+        let member_obs = |n: u8, seq: u64| {
+            let m = testkit::member_record(&computer(n));
+            let inv = testkit::inventory(vec![testkit::addon("Suite", Some("1.0"), "a")]);
+            let bytes = encode(&testkit::member_state(&computer(n), seq, &inv));
+            MemberObs {
+                computer: computer(n),
+                files: vec![StateFileObs {
+                    name: state_file_name(&m.enrollment_id, seq),
+                    size: bytes.len() as u64,
+                    cloud_only: false,
+                }],
+                member: Ok(m),
+                newest_bytes: Some(Ok(bytes)),
+            }
+        };
+        let admit = |barrier: &crate::authority::Barrier, n: u8, seq: u64| {
+            let (views, _) = admit_member_states(
+                &testkit::group_record(),
+                &[member_obs(n, seq)],
+                &AdmissionWatermarks::empty(group_id()),
+            );
+            apply_barrier(views, barrier)
+        };
+
+        // Effective retirement of computer 2 at cutoff 2.
+        let mut l = Ledger::new();
+        let after = learn(&mut l, &removal(2, 3), AuthorityKind::Removal);
+        learn(&mut l, &retirement(1, 2, 2), AuthorityKind::Retirement);
+        let d = derive(&l, &group_id(), &members(&[1, 2]));
+        assert_eq!(
+            d.status_of(&after),
+            Some(&Status::Invalid(InvalidReason::AfterRetirement))
+        );
+        let e2 = enrollment(2);
+        assert_eq!(barrier_gate(&d.barrier, &e2, 2), BarrierGate::Admitted);
+        assert_eq!(
+            barrier_gate(&d.barrier, &e2, 3),
+            BarrierGate::AfterRetirement
+        );
+        let (kept, retired) = admit(&d.barrier, 2, 3);
+        assert!(kept.is_empty(), "a retired member contributes no state");
+        assert_eq!(retired, vec![e2.clone()]);
+        let (kept, _) = admit(&d.barrier, 1, 3);
+        assert!(matches!(kept[0].latest, MemberLatest::Valid { seq: 3, .. }));
+
+        // A retirement that depends on a record nobody has: unresolved, not void.
+        let mut l = Ledger::new();
+        let mut unresolved = retirement(1, 2, 2);
+        unresolved.retirements_known = vec![sha256(b"not here")];
+        learn(&mut l, &unresolved, AuthorityKind::Retirement);
+        let held = learn(&mut l, &removal(2, 3), AuthorityKind::Removal);
+        let before_cut = learn(&mut l, &removal(2, 2), AuthorityKind::Removal);
+        let d = derive(&l, &group_id(), &members(&[1, 2]));
+        assert_eq!(
+            d.status_of(&held),
+            Some(&Status::Pending(PendingReason::RetirementUnresolved))
+        );
+        assert_eq!(d.status_of(&before_cut), Some(&Status::Valid));
+        assert_eq!(barrier_gate(&d.barrier, &e2, 3), BarrierGate::Held);
+        assert_eq!(barrier_gate(&d.barrier, &e2, 2), BarrierGate::Admitted);
+        let (kept, retired) = admit(&d.barrier, 2, 3);
+        assert!(retired.is_empty());
+        assert!(
+            matches!(&kept[0].latest, MemberLatest::Unusable { seq: 3, reason } if reason.contains("retirement")),
+            "{:?}",
+            kept[0].latest
+        );
+        let (kept, _) = admit(&d.barrier, 2, 2);
+        assert!(matches!(kept[0].latest, MemberLatest::Valid { seq: 2, .. }));
+    }
+
+    #[test]
     fn segments_reload_past_sixteen_mib() {
         // T-C09-ledger-segments
         let names: Vec<FolderKey> = (0..2000)
