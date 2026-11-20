@@ -1543,48 +1543,245 @@ impl Shell {
             self.content_first = Some("ss-banner".into());
             self.capture_first = false;
         }
+        let banner_text = match (&self.w.features.settings.master, self.w.features.settings.enabled) {
+            (Some(_), _) => format!(
+                "{} shares its add-on settings with the group. Settings are never merged.",
+                self.w.features.master.clone().unwrap_or_else(|| "The settings master".into())
+            ),
+            (None, true) => "No settings master is chosen, so settings are not shared yet.".to_string(),
+            (None, false) => "Settings sync is off. Add-on files are synced; your add-on settings stay as they are on each computer.".to_string(),
+        };
         let banner = div()
             .id("ss-banner")
             .track_focus(&h)
             .tab_stop(true)
             .role(Role::Status)
-            .aria_label("Settings sync is not available yet. Only add-on files are synced now; your add-on settings stay as they are on each computer.")
+            .aria_label(SharedString::from(banner_text.clone()))
             .border_2()
             .border_color(gpui::transparent_black())
             .focus_visible(move |s| s.border_color(rgb(pal.focus)))
             .p(u(14.))
             .rounded(u(8.))
             .bg(rgb(pal.fill(Tone::Unknown)))
-            .child("Settings sync is not available yet. Only add-on files are synced now; your add-on settings stay as they are on each computer.");
+            .child(SharedString::from(banner_text));
         let mut col = self
             .body_col()
             .child(self.heading("Settings sync", 1))
             .child(banner);
-        let panels: [(&str, &str, &str); 5] = [
-            ("Settings master", "One computer shares its add-on settings with the group automatically. Choosing a master shares settings for every add-on, including add-ons found later.", "Change master…"),
-            ("Exceptions", "Per add-on, take settings from a different computer than the master.", "Add an exception…"),
-            ("Share my settings", "Send this computer's settings for selected add-ons to every computer, including the master.", "Share settings…"),
-            ("Pause settings", "Protected settings are not shared or replaced. When you resume, you'll see any differences first.", "Pause all settings on this computer"),
-            ("Settings choices", "When two computers deliberately changed the same add-on's settings, you choose which to keep. Settings are never merged.", "Review choices…"),
-        ];
-        for (i, (t, d, b)) in panels.iter().enumerate() {
-            let btn = self.btn_off(&format!("ss-{i}"), b, "coming later", cx);
-            col = col.child(self.panel(
-                t,
-                vec![
-                        div()
-                            .text_size(u(12.))
-                            .text_color(rgb(pal.fg(Tone::Unknown)))
-                            .child("Coming later")
-                            .into_any_element(),
-                        div()
-                            .child(SharedString::from(d.to_string()))
-                            .into_any_element(),
-                        btn.into_any_element(),
-                    ],
-            ));
+
+        // Master
+        let mut m: Vec<AnyElement> = vec![div()
+            .child("One computer shares its add-on settings with the group automatically. Choosing a master shares settings for every add-on, including add-ons found later.")
+            .into_any_element()];
+        if self.expanded.contains("ss-master-open") {
+            let cs = crate::settings_ui::master_controls(&self.w);
+            m.extend(self.control_buttons("ss-master", cs, cx));
+            m.push(
+                self.btn(
+                    "ss-master-close",
+                    "Close",
+                    Bk::Secondary,
+                    Act::ToggleExpand("ss-master-open".into()),
+                    cx,
+                )
+                .into_any_element(),
+            );
+        } else {
+            m.push(
+                self.btn(
+                    "ss-master-open",
+                    "Change master…",
+                    Bk::Secondary,
+                    Act::ToggleExpand("ss-master-open".into()),
+                    cx,
+                )
+                .into_any_element(),
+            );
         }
+        col = col.child(self.panel("Settings master", m));
+
+        // Exceptions, per add-on
+        let mut e: Vec<AnyElement> = vec![self
+            .muted("Per add-on, take settings from a different computer than the master, or don't share it.")
+            .into_any_element()];
+        let keys: Vec<(String, String)> = self
+            .w
+            .addons
+            .iter()
+            .map(|a| (a.key.clone(), a.title.clone()))
+            .collect();
+        for (key, title) in keys {
+            let Ok(folder) = wow_sync_core::paths::validate_folder_name(&key) else {
+                continue;
+            };
+            let open = format!("ss-exc-{key}");
+            e.push(div().child(SharedString::from(title)).into_any_element());
+            if self.expanded.contains(&open) {
+                let cs = crate::settings_ui::exception_controls(&self.w, &folder);
+                e.extend(self.control_buttons(&open, cs, cx));
+                e.push(
+                    self.btn(
+                        &format!("{open}-close"),
+                        "Close",
+                        Bk::Secondary,
+                        Act::ToggleExpand(open.clone()),
+                        cx,
+                    )
+                    .into_any_element(),
+                );
+            } else {
+                e.push(
+                    self.btn(
+                        &open,
+                        "Add an exception…",
+                        Bk::Secondary,
+                        Act::ToggleExpand(open.clone()),
+                        cx,
+                    )
+                    .into_any_element(),
+                );
+            }
+        }
+        col = col.child(self.panel("Exceptions", e));
+
+        // Settings for each account or character
+        let units = self.w.features.settings.units.clone();
+        let mut s: Vec<AnyElement> = Vec::new();
+        if units.is_empty() {
+            s.push(
+                self.muted("No add-on settings are tracked on this computer yet.")
+                    .into_any_element(),
+            );
+        }
+        for (i, row) in units.iter().enumerate() {
+            s.push(
+                div()
+                    .child(SharedString::from(format!(
+                        "{}, {}: {}",
+                        row.addon,
+                        crate::settings_ui::identity_words(&row.unit),
+                        crate::settings_ui::status_text(&row.status)
+                    )))
+                    .into_any_element(),
+            );
+            let cs = crate::settings_ui::unit_controls(&self.w, row);
+            s.extend(self.control_buttons(&format!("ss-u{i}"), cs, cx));
+            for (j, (c, sentence)) in crate::settings_ui::restore_controls(&self.w, row)
+                .into_iter()
+                .enumerate()
+            {
+                let open = format!("ss-u{i}-r{j}");
+                if self.expanded.contains(&open) {
+                    s.push(div().child(SharedString::from(sentence)).into_any_element());
+                    s.extend(self.control_buttons(
+                        &format!("{open}-go"),
+                        vec![crate::settings_ui::Control {
+                            label: "Restore".into(),
+                            action: c.action,
+                        }],
+                        cx,
+                    ));
+                    s.push(
+                        self.btn(
+                            &format!("{open}-no"),
+                            "Cancel",
+                            Bk::Secondary,
+                            Act::ToggleExpand(open),
+                            cx,
+                        )
+                        .into_any_element(),
+                    );
+                } else {
+                    s.push(
+                        self.btn(
+                            &open,
+                            &c.label,
+                            Bk::Secondary,
+                            Act::ToggleExpand(open.clone()),
+                            cx,
+                        )
+                        .into_any_element(),
+                    );
+                }
+            }
+        }
+        col = col.child(self.panel("Settings choices and sharing", s));
+
+        // Pause and resume
+        let mut p: Vec<AnyElement> = vec![div()
+            .child("Protected settings are not shared or replaced. When you resume, you'll see any differences first.")
+            .into_any_element()];
+        let paused = self.w.features.settings.paused.clone();
+        let folders: Vec<wow_sync_core::paths::FolderKey> = units
+            .iter()
+            .map(|r| r.unit.folder.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        for f in folders {
+            p.push(
+                div()
+                    .child(SharedString::from(f.as_str().to_string()))
+                    .into_any_element(),
+            );
+            if paused.contains(&f) {
+                let open = format!("ss-resume-{}", f.as_str());
+                if self.expanded.contains(&open) {
+                    let cs = crate::settings_ui::resume_controls(&self.w, &f, false, false);
+                    p.extend(self.control_buttons(&open, cs, cx));
+                    p.push(
+                        self.btn(
+                            &format!("{open}-stay"),
+                            "Stay paused",
+                            Bk::Secondary,
+                            Act::ToggleExpand(open),
+                            cx,
+                        )
+                        .into_any_element(),
+                    );
+                } else {
+                    p.push(
+                        self.btn(
+                            &open,
+                            "Resume…",
+                            Bk::Secondary,
+                            Act::ToggleExpand(open.clone()),
+                            cx,
+                        )
+                        .into_any_element(),
+                    );
+                }
+            } else {
+                let c = crate::settings_ui::pause_control(&self.w, &f);
+                p.extend(self.control_buttons(&format!("ss-pause-{}", f.as_str()), vec![c], cx));
+            }
+        }
+        col = col.child(self.panel("Pause settings", p));
         col.into_any_element()
+    }
+
+    /// A button per control; an unavailable one is disabled and says why.
+    fn control_buttons(
+        &mut self,
+        prefix: &str,
+        cs: Vec<crate::settings_ui::Control>,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let mut out = Vec::new();
+        for (i, c) in cs.into_iter().enumerate() {
+            let k = format!("{prefix}-{i}");
+            match c.action {
+                Ok(a) => out.push(
+                    self.btn(&k, &c.label, Bk::Secondary, Act::Group(a), cx)
+                        .into_any_element(),
+                ),
+                Err(reason) => {
+                    out.push(self.btn_off(&k, &c.label, &reason, cx).into_any_element());
+                    out.push(self.muted(reason).into_any_element());
+                }
+            }
+        }
+        out
     }
 
     // ------------------------------------------------------------ App settings

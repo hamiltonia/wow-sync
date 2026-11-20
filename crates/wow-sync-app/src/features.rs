@@ -419,6 +419,8 @@ pub struct FeatureData {
     pub older_peer: Option<String>,
     /// Name of the settings master, when one is chosen.
     pub master: Option<String>,
+    /// Settings units, policy and accounts. Pending snapshot field (R4-integrate).
+    pub settings: crate::settings_ui::SettingsData,
 }
 
 impl Default for FeatureData {
@@ -434,6 +436,7 @@ impl Default for FeatureData {
             history: Vec::new(),
             older_peer: None,
             master: None,
+            settings: Default::default(),
         }
     }
 }

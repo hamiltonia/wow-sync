@@ -20,6 +20,7 @@ mod features;
 mod model;
 mod pages;
 mod rollback_ui;
+mod settings_ui;
 mod setup;
 mod theme;
 mod ui;
