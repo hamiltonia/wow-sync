@@ -2,9 +2,6 @@
 //! the attempt time persisted before any request is made. A check never downloads, installs or
 //! touches game or install files; it only records a result.
 
-// Not yet reachable from `lib.rs` (R4-integrate re-exports it); drop this allowance then.
-#![allow(dead_code)]
-
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use wow_sync_adapters::localstate::LocalState;
@@ -217,6 +214,11 @@ impl UpdateService {
         while s.in_flight.is_some() {
             s = self.inner.idle.wait(s).unwrap_or_else(|e| e.into_inner());
         }
+    }
+
+    /// The newest finished check's result; `None` before any.
+    pub fn last_result(&self) -> Option<UpdateResult> {
+        self.lock().check.last_result.clone()
     }
 
     pub fn view(&self) -> UpdateView {

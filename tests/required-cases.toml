@@ -1052,6 +1052,28 @@ id = "R4-integrate:public-api-exports"
 tier = "offline"
 tests = [
     "every_command_can_be_built_and_every_refusal_named_from_outside_the_crate",
+    "every_snapshot_field_can_be_named_and_read_from_outside_the_crate",
+]
+
+[[case]]
+id = "R4-integrate:status-snapshot-data"
+tier = "offline"
+tests = [
+    "e2e::tests::the_snapshot_reports_retirements_and_the_retired_computers_hold",
+    "e2e::tests::the_snapshot_hold_follows_pause_and_a_pending_decision_never_raises_review_needed",
+    "e2e::tests::review_needed_never_hides_needs_help_or_error",
+    "e2e::tests::the_snapshot_lists_held_releases_but_never_the_installed_one",
+    "e2e::tests::the_snapshot_lists_removed_addons_with_who_has_not_acknowledged",
+]
+
+[[case]]
+id = "R4-integrate:notify-update-diagnostics-wiring"
+tier = "offline"
+tests = [
+    "e2e::tests::an_applied_change_is_announced_once_and_not_when_summaries_are_off",
+    "e2e::tests::an_update_check_fills_the_snapshot_and_a_new_release_is_announced_once",
+    "e2e::tests::diagnostics_preview_and_save_match_and_never_land_in_the_shared_or_install_folders",
+    "control::tests::toggles_default_on_persist_apart_from_the_window_settings",
 ]
 # <<< section: R4-integrate
 

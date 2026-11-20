@@ -209,6 +209,59 @@ are gone, from a local recovery point (`NotAvailable` only if neither has it). S
   a peer cannot fetch a plain push's blob until something uploads it.
 - **Cross-packet items** and stage D A-38 controls not listed above.
 
+## Pass 11: snapshot data, notify/update/diagnostics wiring, handover paths
+
+Commits: item 2 `10413c5` (runtime `StatusSnapshot` data), item 3 `ac9cf40` (wiring).
+
+### Snapshot (`wow_sync_runtime::StatusSnapshot`, from `SliceService::status()`)
+New fields: `hold`, `this_retirement`, `retirements: Vec<RetirementRow>`,
+`held_releases: Vec<HeldRelease>`, `removed: Vec<RemovedRow>`, `enrollment_names`,
+`review_needed: bool` (ops.md §1.7 precedence; never hides needs-help/error), `update:
+Option<UpdateResult>`. By orchestrator decision the core `Headline`/`StatusView`/`MemberStatus`
+are unchanged; R4-app derives the "review needed" headline from `review_needed`.
+
+### Notify/update/diagnostics wiring (item 3)
+- **Orchestrator-visible deviation:** the three toggles are NOT on `AppSettings`. Adding fields
+  broke the struct literal at `crates\wow-sync-app\src\app.rs:686` (not my file). They live in
+  `wow_sync_runtime::AppToggles { update_check, notify_summaries, notify_needs_me }` (all default
+  on, own file `toggles.txt`, so saving the window settings never resets them). Access:
+  `SliceService::{toggles, save_toggles}`. If you want them on `AppSettings`, R4-app must change
+  app.rs:686 first.
+- New commands: `Command::CheckUpdates` -> `CommandOutcome::UpdateCheck(Started)`;
+  `Command::ExportDiagnostics{options: ExportOptions}` -> `CommandOutcome::Exported(Export)`
+  (preview text); `Command::SaveDiagnostics{options, dest: PathBuf}` -> `Exported(Export)`, refused
+  with `CommandError::Export(ExportError)` when `dest` is under the shared folder or install
+  roots (also logged as an `export-refused` activity line). `CommandError::UpdatesUnavailable`
+  when no update service is attached.
+- Service hooks: `attach_os_services()` at startup (Windows: AUMID registration, `OsNotifier`,
+  `GithubReleases`); `attach_notifier`, `attach_updates` for fakes; `NoticeRunner::after_cycle`
+  runs at each cycle end (ActionNeeded from decisions and retirement, summaries from applied
+  changes, AppUpdate once per tag).
+- **Fix in R4-notify-diag `notices.rs`:** `after_cycle` returned early on an unchanged ledger, so
+  summary-only notices were never delivered; it now returns early only when nothing changed and
+  nothing is to notify.
+- Tests (offline): the three e2e tests plus `control::tests::toggles_default_on_persist_apart_from_the_window_settings`.
+
+### A-38 (pass 11)
+| Item | Mutation | Failing test |
+|---|---|---|
+| 2 | `retired: false` in `HoldInputs` | `the_snapshot_reports_retirements_and_the_retired_computers_hold` |
+| 3 | empty `forbidden` list for SaveDiagnostics | `diagnostics_preview_and_save_match_and_never_land_in_the_shared_or_install_folders` |
+
+Both reverted; `git diff --exit-code` clean.
+
+### Handover paths (R4-app)
+`wow_sync_runtime::{Command, CommandOutcome, CommandError, RollbackRefusal, SettingsHistoryEntry,
+StatusSnapshot, HeldRelease, RemovedRow, RetirementRow, AppSettings, AppToggles, ExportError,
+SaveError, Started, UpdateService, UpdateView, NoticeRunner, CycleOutcome, Clock, system_clock}`;
+core types via `wow_sync_runtime::core::{status::{HoldScope, RetiredInfo}, update::UpdateResult,
+diagnostics::ExportOptions}`.
+
+### New open items
+No DataAtRisk notice producer; diagnostics `journals` empty, `process_memory_mib`/`os_version`
+None, dropbox root empty; peers' index chunks not read; `held_releases` lists every non-installed
+complete copy.
+
 ## Verification
 
 Final tree: `cargo xtask verify --tier offline` PASS; `cargo xtask verify --tier native` PASS

@@ -2,13 +2,15 @@
 //! This compiles from outside the crate, so a type that is not exported fails the build.
 
 use wow_sync_runtime::core::decision::{DecisionId, DecisionScope, EvidenceToken, OptionId};
+use wow_sync_runtime::core::diagnostics::ExportOptions;
 use wow_sync_runtime::core::hash::sha256;
 use wow_sync_runtime::core::ids::{ComputerId, EnrollmentId, Identity, SettingsUnit};
 use wow_sync_runtime::core::kinds::{ChoiceReason, EnrollmentRef};
 use wow_sync_runtime::core::paths::validate_folder_name;
 use wow_sync_runtime::core::settings::ResumeOption;
 use wow_sync_runtime::{
-    Command, CommandError, CommandOutcome, RollbackRefusal, SettingsHistoryEntry,
+    Command, CommandError, CommandOutcome, ExportError, RollbackRefusal, SaveError,
+    SettingsHistoryEntry, Started,
 };
 
 fn unit() -> SettingsUnit {
@@ -27,6 +29,8 @@ fn outcome_name(o: &CommandOutcome) -> &'static str {
         CommandOutcome::ReEnrolled => "re-enrolled",
         CommandOutcome::Recorded => "recorded",
         CommandOutcome::NothingToDo => "nothing",
+        CommandOutcome::UpdateCheck(_) => "update-check",
+        CommandOutcome::Exported(_) => "exported",
     }
 }
 
@@ -50,6 +54,9 @@ fn command_name(c: &Command) -> &'static str {
         Command::RestoreSettings { .. } => "restore-settings",
         Command::RestoreRemovedSettings { .. } => "restore-removed-settings",
         Command::Rollback { .. } => "rollback",
+        Command::CheckUpdates => "check-updates",
+        Command::ExportDiagnostics { .. } => "export-diagnostics",
+        Command::SaveDiagnostics { .. } => "save-diagnostics",
     }
 }
 
@@ -121,14 +128,28 @@ fn every_command_can_be_built_and_every_refusal_named_from_outside_the_crate() {
             package: folder,
             recovered: hash,
         },
+        Command::CheckUpdates,
+        Command::ExportDiagnostics {
+            options: ExportOptions::default(),
+        },
+        Command::SaveDiagnostics {
+            options: ExportOptions::default(),
+            dest: std::path::PathBuf::from("diagnostics.txt"),
+        },
     ];
     let mut names: Vec<_> = commands.iter().map(command_name).collect();
     names.sort_unstable();
     names.dedup();
-    assert_eq!(names.len(), 17, "one of each command");
+    assert_eq!(names.len(), 20, "one of each command");
 
     assert_eq!(outcome_name(&CommandOutcome::Written(hash)), "written");
     assert_eq!(outcome_name(&CommandOutcome::Kept), "kept");
+    assert_eq!(
+        outcome_name(&CommandOutcome::UpdateCheck(Started::Debounced)),
+        "update-check"
+    );
+    let refused_export = CommandError::Export(ExportError::Save(SaveError::ForbiddenLocation));
+    assert_ne!(refused_export, CommandError::UpdatesUnavailable);
 
     let refused = CommandError::Rollback(RollbackRefusal::UnknownRelease(hash));
     assert_eq!(
@@ -141,4 +162,29 @@ fn every_command_can_be_built_and_every_refusal_named_from_outside_the_crate() {
     );
     let history: Vec<SettingsHistoryEntry> = Vec::new();
     assert!(history.is_empty());
+}
+
+#[test]
+fn every_snapshot_field_can_be_named_and_read_from_outside_the_crate() {
+    use std::collections::BTreeMap;
+    use wow_sync_runtime::core::status::{AllHoldCause, HoldScope, RetiredInfo};
+    use wow_sync_runtime::core::update::UpdateResult;
+    use wow_sync_runtime::{HeldRelease, RemovedRow, RetirementRow, StatusSnapshot};
+
+    let st = StatusSnapshot::default();
+    let hold: &HoldScope = &st.hold;
+    assert_eq!(hold, &HoldScope::None);
+    let retired: &Option<RetiredInfo> = &st.this_retirement;
+    assert!(retired.is_none());
+    let rows: &Vec<RetirementRow> = &st.retirements;
+    let held: &Vec<HeldRelease> = &st.held_releases;
+    let removed: &Vec<RemovedRow> = &st.removed;
+    let names: &BTreeMap<EnrollmentId, String> = &st.enrollment_names;
+    let update: &Option<UpdateResult> = &st.update;
+    assert!(rows.is_empty() && held.is_empty() && removed.is_empty() && names.is_empty());
+    assert!(!st.review_needed && update.is_none());
+    assert_ne!(
+        HoldScope::AllApplies(AllHoldCause::Retired),
+        HoldScope::AllApplies(AllHoldCause::Paused)
+    );
 }
