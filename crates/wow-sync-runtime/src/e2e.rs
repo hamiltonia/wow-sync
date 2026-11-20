@@ -2456,6 +2456,549 @@ mod tests {
         );
     }
 
+    fn settings_recovery_holds(pc: &Pc, text: &str) -> bool {
+        let mut stack = vec![pc
+            .install
+            .variant_dir
+            .join(".wowsync")
+            .join("settings-recovery")];
+        while let Some(d) = stack.pop() {
+            for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if std::fs::read_to_string(&p).is_ok_and(|t| t.contains(text)) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn pausing_settings_holds_a_units_updates_until_resume_and_resume_never_publishes() {
+        use wow_sync_core::settings::ResumeOption;
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let alpha = alpha_unit().folder;
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 2 }\n")
+        );
+        let beta = wow_sync_core::paths::validate_folder_name("Beta").unwrap();
+        assert_eq!(
+            b.svc.command(Command::PauseSettings {
+                folder: beta.clone()
+            }),
+            Err(CommandError::UnknownFolder(beta)),
+            "only an installed folder can be paused"
+        );
+        assert_eq!(
+            b.svc.command(Command::PauseSettings {
+                folder: alpha.clone()
+            }),
+            Ok(CommandOutcome::Recorded)
+        );
+        assert_eq!(
+            b.svc.command(Command::PauseSettings {
+                folder: alpha.clone()
+            }),
+            Ok(CommandOutcome::NothingToDo)
+        );
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 3 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 2 }\n"),
+            "paused: the newer copy is not applied"
+        );
+        // Resume never publishes, so "Share mine" is refused here and the unit stays paused.
+        assert_eq!(
+            b.svc.command(Command::ResumeSettings {
+                folder: alpha.clone(),
+                choice: ResumeOption::ShareMine
+            }),
+            Err(CommandError::UseShareSettings)
+        );
+        assert_eq!(
+            b.svc.command(Command::ResumeSettings {
+                folder: alpha.clone(),
+                choice: ResumeOption::StayPaused
+            }),
+            Ok(CommandOutcome::NothingToDo)
+        );
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 2 }\n")
+        );
+        assert_eq!(
+            b.svc.command(Command::ResumeSettings {
+                folder: alpha.clone(),
+                choice: ResumeOption::UseShared
+            }),
+            Ok(CommandOutcome::Recorded)
+        );
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 3 }\n")
+        );
+        assert_eq!(
+            b.svc.settings_history(&alpha_unit()).len(),
+            2,
+            "resuming wrote no revision"
+        );
+        assert_eq!(
+            b.svc.command(Command::ResumeSettings {
+                folder: alpha,
+                choice: ResumeOption::Resume
+            }),
+            Ok(CommandOutcome::NothingToDo),
+            "a unit that is not paused has nothing to resume"
+        );
+    }
+
+    #[test]
+    fn use_shared_settings_replaces_a_local_difference_and_keeps_it_as_a_recovery_copy() {
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        synced(&mut b); // the next cycle records the applied revision as the basis
+        write_wtf(&b, "Alpha", "AlphaDB = { mine = true }\n");
+        synced(&mut b);
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { mine = true }\n"),
+            "a local difference is never replaced by itself"
+        );
+        let other = wow_sync_core::ids::SettingsUnit {
+            folder: wow_sync_core::paths::validate_folder_name("Beta").unwrap(),
+            identity: wow_sync_core::ids::Identity::account("ACC").unwrap(),
+        };
+        assert_eq!(
+            b.svc.command(Command::UseSharedSettings {
+                unit: other.clone()
+            }),
+            Err(CommandError::NoSharedSettings(other)),
+            "a unit with nothing shared has nothing to use"
+        );
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { mine = true }\n")
+        );
+        assert_eq!(
+            b.svc
+                .command(Command::UseSharedSettings { unit: alpha_unit() }),
+            Ok(CommandOutcome::Recorded)
+        );
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 2 }\n")
+        );
+        assert!(settings_recovery_holds(&b, "mine = true"));
+        write_wtf(&b, "Alpha", "AlphaDB = { again = true }\n");
+        synced(&mut b);
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { again = true }\n"),
+            "the request was spent by the first yield"
+        );
+    }
+
+    #[test]
+    fn competing_settings_choices_are_resolved_by_one_choice_that_names_every_head() {
+        use wow_sync_core::kinds::RevisionKind;
+        use wow_sync_core::settings::SettingsWriteError as W;
+        let lab = Lab::new();
+        let (mut a, mut b, g) = settings_pair(&lab, true, Some(1 << 20));
+        let unit = alpha_unit();
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        synced(&mut b);
+        // b shares its own copy while the master's next revision is not yet visible to it:
+        // b's record is held back until the master has published, so neither knew of the other.
+        let mine = stored_checkpoint(&b, &unit, b"AlphaDB = { mine = true }\n");
+        let out = b
+            .svc
+            .command(Command::ShareSettings {
+                unit: unit.clone(),
+                checkpoint: mine,
+            })
+            .unwrap();
+        let CommandOutcome::Written(push) = out else {
+            panic!("{out:?}")
+        };
+        let (bc, _) = pc_ids(&b);
+        let held = provider_file(&lab, &layout::authority_record(&g, &bc, &push));
+        let held_bytes = std::fs::read(&held).unwrap();
+        std::fs::remove_file(&held).unwrap();
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 3 }\n");
+        synced(&mut a);
+        synced(&mut a);
+        std::fs::write(&held, held_bytes).unwrap();
+        synced(&mut b);
+        let heads: Vec<_> = b
+            .svc
+            .settings_history(&unit)
+            .into_iter()
+            .filter(|e| e.is_head)
+            .collect();
+        assert_eq!(heads.len(), 2, "two intentional choices neither knew about");
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 2 }\n"),
+            "nothing is applied while the choice is open"
+        );
+        let hashes: Vec<Sha256> = heads.iter().map(|e| e.hash).collect();
+        let masters = heads
+            .iter()
+            .find(|e| e.kind == RevisionKind::Auto)
+            .expect("the master's revision")
+            .checkpoint;
+        let choose = |shown: &[Sha256], cp: Sha256, u: &wow_sync_core::ids::SettingsUnit| {
+            Command::ChooseSettings {
+                unit: u.clone(),
+                checkpoint: cp,
+                shown_heads: shown.to_vec(),
+            }
+        };
+        assert_eq!(
+            b.svc.command(choose(&hashes[..1], masters, &unit)),
+            Err(CommandError::Settings(W::Changed)),
+            "a head the owner was not shown"
+        );
+        let stranger = sha256(b"not a head state");
+        assert_eq!(
+            b.svc.command(choose(&hashes, stranger, &unit)),
+            Err(CommandError::Settings(W::NotAHead))
+        );
+        let beta = wow_sync_core::ids::SettingsUnit {
+            folder: wow_sync_core::paths::validate_folder_name("Beta").unwrap(),
+            identity: wow_sync_core::ids::Identity::account("ACC").unwrap(),
+        };
+        assert_eq!(
+            b.svc.command(choose(&hashes, masters, &beta)),
+            Err(CommandError::Settings(W::NotCompeting))
+        );
+        assert_eq!(
+            b.svc.settings_history(&unit).len(),
+            3,
+            "refusals wrote nothing"
+        );
+        assert!(matches!(
+            b.svc.command(choose(&hashes, masters, &unit)),
+            Ok(CommandOutcome::Written(_))
+        ));
+        synced(&mut b);
+        synced(&mut a);
+        synced(&mut b);
+        let history = b.svc.settings_history(&unit);
+        let head: Vec<_> = history.iter().filter(|e| e.is_head).collect();
+        assert_eq!(head.len(), 1);
+        assert_eq!(head[0].kind, RevisionKind::Choice);
+        assert_eq!(head[0].checkpoint, masters);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 3 }\n"),
+            "the chosen copy is applied"
+        );
+    }
+
+    #[test]
+    fn restore_settings_writes_a_restore_revision_and_the_unit_returns_to_that_copy() {
+        use wow_sync_core::kinds::RevisionKind;
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let unit = alpha_unit();
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        synced(&mut b);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 3 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 3 }\n")
+        );
+        let history = b.svc.settings_history(&unit);
+        assert_eq!(history.len(), 2);
+        let earlier = history[0].checkpoint;
+        let ghost = sha256(b"no such copy");
+        assert_eq!(
+            b.svc.command(Command::RestoreSettings {
+                unit: unit.clone(),
+                checkpoint: ghost
+            }),
+            Err(CommandError::UnknownCheckpoint(ghost))
+        );
+        assert_eq!(b.svc.settings_history(&unit).len(), 2);
+        assert!(matches!(
+            b.svc.command(Command::RestoreSettings {
+                unit: unit.clone(),
+                checkpoint: earlier
+            }),
+            Ok(CommandOutcome::Written(_))
+        ));
+        for _ in 0..2 {
+            synced(&mut b);
+            synced(&mut a);
+        }
+        let history = b.svc.settings_history(&unit);
+        let head: Vec<_> = history.iter().filter(|e| e.is_head).collect();
+        assert_eq!(head.len(), 1);
+        assert_eq!(head[0].kind, RevisionKind::Restore);
+        assert_eq!(head[0].checkpoint, earlier);
+        for pc in [&a, &b] {
+            assert_eq!(
+                read_wtf(pc, "Alpha").as_deref(),
+                Some("AlphaDB = { v = 2 }\n"),
+                "both computers returned to the restored copy"
+            );
+        }
+    }
+
+    #[test]
+    fn confirming_settings_here_needs_an_account_and_nothing_is_applied_before_it() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon_with("Alpha", "alpha-v1", SV_TOC);
+        b.addon_with("Alpha", "alpha-v1", SV_TOC);
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        synced(&mut a);
+        a.svc.set_settings_cap_for_tests(Some(1 << 20));
+        b.svc.set_settings_cap_for_tests(Some(1 << 20));
+        let master = ref_of(&a);
+        a.svc
+            .command(Command::SetSettingsPolicy {
+                master: Some(master),
+                exceptions: vec![],
+            })
+            .unwrap();
+        assert_eq!(
+            a.svc.command(Command::EnableSettings {
+                included_accounts: vec!["ACC".into()]
+            }),
+            Ok(CommandOutcome::Recorded)
+        );
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha"),
+            None,
+            "an unconfirmed computer applies nothing"
+        );
+        assert_eq!(
+            b.svc.command(Command::EnableSettings {
+                included_accounts: vec![]
+            }),
+            Err(CommandError::EmptySelection),
+            "confirming with no account included is not a confirmation"
+        );
+        synced(&mut b);
+        assert_eq!(read_wtf(&b, "Alpha"), None);
+        assert_eq!(
+            b.svc.command(Command::EnableSettings {
+                included_accounts: vec!["ACC".into()]
+            }),
+            Ok(CommandOutcome::Recorded)
+        );
+        synced(&mut b);
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 2 }\n")
+        );
+    }
+
+    #[test]
+    fn undoing_a_removal_restores_the_removed_units_settings_to_that_unit_only() {
+        use wow_sync_core::kinds::{RemovalSettings, RevisionKind};
+        use wow_sync_core::records::{Location, RootState, SettingsRoot};
+        use wow_sync_core::settings::SettingsWriteError as W;
+        let lab = Lab::new();
+        let (mut a, mut b, g) = settings_pair(&lab, true, Some(1 << 20));
+        let unit = alpha_unit();
+        a_removes_alpha(&mut a, &g);
+        let (ac, _) = pc_ids(&a);
+        let real = removal_hash(&lab, &g, &ac);
+        let kept = stored_checkpoint(&a, &unit, b"AlphaDB = { kept = true }\n");
+        // The removal record that carries the captured settings of Alpha's unit.
+        let p = provider_file(&lab, &layout::authority_record(&g, &ac, &real));
+        let Ok(AuthorityRecord::Removal(mut rm)) =
+            decode_authority(&std::fs::read(p).unwrap(), &real)
+        else {
+            panic!("a removal")
+        };
+        rm.issuer.issued_at_seq = 1000;
+        rm.settings = RemovalSettings::Checkpoints {
+            roots: vec![SettingsRoot {
+                unit: unit.clone(),
+                state: RootState::Captured {
+                    checkpoint: kept,
+                    location: Location::Local,
+                },
+            }],
+        };
+        let with_settings = put_authority(&lab, &g, &ac, &AuthorityRecord::Removal(rm));
+        for _ in 0..2 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        assert_eq!(status(&a, &g, &with_settings), Some(Status::Valid));
+        let beta = wow_sync_core::ids::SettingsUnit {
+            folder: wow_sync_core::paths::validate_folder_name("Beta").unwrap(),
+            identity: wow_sync_core::ids::Identity::account("ACC").unwrap(),
+        };
+        let ghost = sha256(b"no such removal");
+        let restore = |removal: Sha256, unit: &wow_sync_core::ids::SettingsUnit| {
+            Command::RestoreRemovedSettings {
+                removal,
+                unit: unit.clone(),
+            }
+        };
+        assert_eq!(
+            a.svc.command(restore(ghost, &unit)),
+            Err(CommandError::UnknownRemoval(ghost))
+        );
+        assert_eq!(
+            a.svc.command(restore(with_settings, &beta)),
+            Err(CommandError::Settings(W::NotRemovedUnit)),
+            "settings return to the same unit only"
+        );
+        assert_eq!(
+            a.svc.command(restore(real, &unit)),
+            Err(CommandError::Settings(W::NotRemovedUnit)),
+            "a removal that captured no settings restores none"
+        );
+        assert!(a.svc.settings_history(&unit).is_empty());
+        assert!(matches!(
+            a.svc.command(restore(with_settings, &unit)),
+            Ok(CommandOutcome::Written(_))
+        ));
+        let history = a.svc.settings_history(&unit);
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].kind, RevisionKind::Restore);
+        assert_eq!(history[0].checkpoint, kept);
+        assert!(
+            provider_file(&lab, &layout::settings_manifest(&kept)).is_file(),
+            "the restored copy is reachable by the other computers"
+        );
+        // Settings go back through their own command; the code restore is a separate command.
+        assert_eq!(a.svc.settings_history(&unit).len(), 1);
+    }
+
+    #[test]
+    fn a_policy_with_thousands_of_exceptions_is_written_in_parts_and_read_back_whole() {
+        use wow_sync_core::kinds::{PolicyRule, PolicyRuleKind};
+        let lab = Lab::new();
+        let (mut a, mut b, g) = settings_pair(&lab, true, Some(1 << 20));
+        let (ac, _) = pc_ids(&a);
+        let before = authority_files(&lab, &g, &ac);
+        let not_shared = |name: &str| PolicyRule {
+            folder: wow_sync_core::paths::validate_folder_name(name).unwrap(),
+            rule: PolicyRuleKind::NotShared,
+            computer_id: None,
+            enrollment_id: None,
+        };
+        // "Alpha" sorts after every "A0…" rule, so its rule is in the last part, not inline.
+        let mut rules: Vec<_> = (0..3000).map(|n| not_shared(&format!("A{n:05}"))).collect();
+        rules.push(not_shared("Alpha"));
+        let out = a
+            .svc
+            .command(Command::SetSettingsPolicy {
+                master: Some(ref_of(&a)),
+                exceptions: rules,
+            })
+            .unwrap();
+        let CommandOutcome::Written(policy) = out else {
+            panic!("{out:?}")
+        };
+        let after = authority_files(&lab, &g, &ac);
+        let parts: Vec<String> = after
+            .iter()
+            .filter(|f| !before.contains(f) && **f != format!("{policy}.json"))
+            .cloned()
+            .collect();
+        assert!(
+            parts.len() >= 2,
+            "the rules were split into parts: {parts:?}"
+        );
+        for f in after.iter().filter(|f| !before.contains(f)) {
+            let len = std::fs::metadata(provider_file(
+                &lab,
+                &layout::authority_record(
+                    &g,
+                    &ac,
+                    &Sha256::parse(f.trim_end_matches(".json")).unwrap(),
+                ),
+            ))
+            .unwrap()
+            .len();
+            assert!(len <= 64 * 1024, "{f} is {len} bytes");
+        }
+        synced(&mut a);
+
+        // A part that has not arrived yet leaves the policy pending: it acts on nothing.
+        let part_file = |f: &str| {
+            provider_file(
+                &lab,
+                &layout::authority_record(
+                    &g,
+                    &ac,
+                    &Sha256::parse(f.trim_end_matches(".json")).unwrap(),
+                ),
+            )
+        };
+        let missing = part_file(&parts[0]);
+        let missing_bytes = std::fs::read(&missing).unwrap();
+        std::fs::remove_file(&missing).unwrap();
+        synced(&mut b);
+        assert_ne!(status(&b, &g, &policy), Some(Status::Valid));
+
+        std::fs::write(&missing, missing_bytes).unwrap();
+        synced(&mut b);
+        assert_eq!(status(&b, &g, &policy), Some(Status::Valid));
+
+        // The rule that lives in a part is honoured: Alpha's settings are not shared.
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        synced(&mut b);
+        assert_eq!(read_wtf(&b, "Alpha"), None);
+    }
+
     fn two_option_item(
         key: &wow_sync_core::paths::FolderKey,
         write: AuthorityRecord,
