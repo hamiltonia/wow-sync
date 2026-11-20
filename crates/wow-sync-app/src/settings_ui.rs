@@ -74,6 +74,8 @@ pub struct SettingsData {
     pub exceptions: Vec<PolicyRule>,
     pub master: Option<EnrollmentRef>,
     pub accounts: Vec<String>,
+    /// Account folders found on this computer that settings sync could include.
+    pub available_accounts: Vec<String>,
     pub enabled: bool,
     /// Competing master choices exist; nothing is chosen for the owner.
     pub policy_conflict: bool,
@@ -356,12 +358,66 @@ fn without(rules: &[PolicyRule], folder: &FolderKey) -> Vec<PolicyRule> {
         .collect()
 }
 
+/// The settings master when it is still an active computer. A retired or unresolved master is not
+/// one: nothing is shared from it and no replacement is chosen for the owner.
+pub fn active_master(w: &World) -> Option<&EnrollmentRef> {
+    let m = w.features.settings.master.as_ref()?;
+    let active = w.features.this_enrollment.as_ref() == Some(m)
+        || w.features.enrollments.iter().any(|(_, e)| e == m);
+    active.then_some(m)
+}
+
+/// The sentence at the top of the Settings sync page.
+pub fn banner_text(w: &World) -> String {
+    let d = &w.features.settings;
+    if d.policy_conflict {
+        return "The settings master was changed on two computers. Nothing is chosen for you; choose a master to share settings again.".into();
+    }
+    let name = w
+        .features
+        .master
+        .clone()
+        .unwrap_or_else(|| "The settings master".into());
+    if d.master.is_some() && active_master(w).is_none() {
+        return format!(
+            "{name} was the settings master and is no longer an active computer, so settings have no active master and are not being shared. Nothing is chosen for you; choose a master to share settings again."
+        );
+    }
+    if d.master.is_some() {
+        if w.features
+            .settings
+            .units
+            .iter()
+            .any(|u| u.status == UnitStatus::SizeLimitPending)
+        {
+            return format!(
+                "{name} is the settings master, but settings sharing is off until a size limit is approved."
+            );
+        }
+        if !d.enabled {
+            return format!(
+                "{name} is the settings master, but settings sync is off on this computer."
+            );
+        }
+        return format!(
+            "{name} shares its add-on settings with the group. Settings are never merged."
+        );
+    }
+    if d.enabled {
+        "No settings master is chosen, so settings are not shared yet.".into()
+    } else {
+        "Settings sync is off. Add-on files are synced; your add-on settings stay as they are on each computer.".into()
+    }
+}
+
 /// Per add-on: don't share it, take it from another computer, or drop the exception.
 pub fn exception_controls(w: &World, folder: &FolderKey) -> Vec<Control> {
     let d = &w.features.settings;
-    let Some(master) = d.master.clone() else {
+    let Some(master) = active_master(w).cloned() else {
         let why = if d.policy_conflict {
             "The settings master was changed on two computers. Choose one master first."
+        } else if d.master.is_some() {
+            "The settings master is no longer an active computer. Choose a new master first."
         } else {
             "Choose a settings master first; exceptions are changes to what it shares."
         };
@@ -423,10 +479,21 @@ pub fn exception_controls(w: &World, folder: &FolderKey) -> Vec<Control> {
 }
 
 /// "Share settings for these accounts" before settings sync is on.
-// Waits for the list of accounts to choose from (not in the snapshot).
-#[allow(dead_code)]
+/// "Turn on settings sync" for the accounts the owner ticked. Only accounts the snapshot lists are
+/// offered, and nothing is chosen for the owner.
 pub fn enable_control(w: &World, chosen: &[String]) -> Control {
-    if chosen.is_empty() {
+    let listed: Vec<String> = chosen
+        .iter()
+        .filter(|a| w.features.settings.available_accounts.contains(a))
+        .cloned()
+        .collect();
+    if w.features.settings.available_accounts.is_empty() {
+        return off(
+            "Turn on settings sync",
+            "No WoW account folder was found on this computer to include.",
+        );
+    }
+    if listed.is_empty() {
         return off("Turn on settings sync", "Choose at least one account.");
     }
     control(
@@ -434,7 +501,7 @@ pub fn enable_control(w: &World, chosen: &[String]) -> Control {
         ActionKind::EnableSettings,
         "Turn on settings sync",
         GroupAction::EnableSettings {
-            included_accounts: chosen.to_vec(),
+            included_accounts: listed,
         },
     )
 }
@@ -632,7 +699,8 @@ mod tests {
         assert_eq!(cs[0].label, "Share my settings");
         assert_eq!(cs[0].action, Err(RETIRED_REASON.into()));
         assert_eq!(master_controls(&w)[0].action, Err(RETIRED_REASON.into()));
-        let w = world();
+        let mut w = world();
+        w.features.settings.available_accounts = vec!["ERIC".into()];
         assert!(enable_control(&w, &[]).action.is_err());
         assert_eq!(
             enable_control(&w, &["ERIC".into()]).action,
@@ -640,6 +708,28 @@ mod tests {
                 included_accounts: vec!["ERIC".into()]
             })
         );
+    }
+
+    #[test]
+    fn turning_on_offers_only_listed_accounts_from_the_snapshot() {
+        let w = snapshot_world_with(|s| {
+            s.settings.enabled = false;
+            s.settings.available_accounts = vec!["ACC".into(), "ZED".into()];
+        });
+        assert_eq!(w.features.settings.available_accounts, ["ACC", "ZED"]);
+        assert_eq!(
+            enable_control(&w, &["ZED".into(), "NOPE".into()]).action,
+            Ok(GroupAction::EnableSettings {
+                included_accounts: vec!["ZED".into()]
+            })
+        );
+        assert_eq!(
+            enable_control(&w, &["NOPE".into()]).action,
+            Err("Choose at least one account.".into())
+        );
+        let none = snapshot_world_with(|s| s.settings.available_accounts.clear());
+        let why = enable_control(&none, &["ACC".into()]).action.unwrap_err();
+        assert!(why.contains("No WoW account folder"));
     }
 
     #[test]
@@ -753,6 +843,52 @@ mod tests {
             master_controls(&w).iter().all(|c| c.action.is_ok()),
             "the owner may still choose one master"
         );
+    }
+
+    #[test]
+    fn a_retired_master_is_not_shown_as_sharing_and_nothing_replaces_it() {
+        use wow_sync_runtime::PeerStanding;
+        let w = snapshot_world();
+        assert_eq!(
+            banner_text(&w),
+            "Den PC shares its add-on settings with the group. Settings are never merged."
+        );
+        assert!(active_master(&w).is_some());
+        let w = snapshot_world_with(|s| {
+            for p in &mut s.peers {
+                if !p.is_this {
+                    p.standing = PeerStanding::Retired;
+                }
+            }
+        });
+        assert!(active_master(&w).is_none());
+        let t = banner_text(&w);
+        assert!(t.contains("no active master") && !t.contains("shares its add-on settings"));
+        let c = exception_controls(&w, &folder("Details"));
+        assert_eq!(c.len(), 1);
+        assert!(c[0]
+            .action
+            .as_ref()
+            .unwrap_err()
+            .contains("no longer an active computer"));
+        assert!(
+            master_controls(&w)
+                .iter()
+                .all(|c| !matches!(&c.action, Ok(GroupAction::SetSettingsPolicy { master: Some(m), .. }) if *m == den())),
+            "the retired master is never offered or elected"
+        );
+    }
+
+    #[test]
+    fn the_banner_does_not_claim_sharing_without_consent_or_a_size_limit() {
+        use wow_sync_runtime::SettingsUnitStatus as S;
+        let (w, _) = controls_for(|_| {}, S::Disabled, true);
+        assert_eq!(
+            banner_text(&w),
+            "Den PC is the settings master, but settings sharing is off until a size limit is approved."
+        );
+        let (w, _) = controls_for(|_| {}, S::Disabled, false);
+        assert!(banner_text(&w).contains("settings sync is off on this computer"));
     }
 
     fn runtime_row(

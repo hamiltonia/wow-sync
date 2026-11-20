@@ -191,7 +191,24 @@ no history, consent off, paused/blocked, or retired); every unit while the produ
 Turn on settings sync (no account list); Keep/Resume screens; Cancel is not the default focus in the
 retire panel; diagnostics journals, `process_memory_mib`, `os_version` empty and no save file picker.
 
-## 7. Verify
+## 6e. R4-check findings fixed (merge of main `5f9a125`)
+
+| Finding | Commit | A-38 mutation (caught, reverted, tree clean) |
+|---|---|---|
+| V-04 results visible on their own page (`notice.rs`) | `2aa5f36` | `for_page` ignoring the page |
+| V-02 Keep/Resume change decision + local recovery (`change_ui.rs`) | `001e668` | offering a rejected release for Keep |
+| V-03 retired master not shown as sharing (`settings_ui::banner_text/active_master`) | `b42f65a` | `active_master` always `Some` |
+| V-07 distinct "Keep this" names (`OptionRow::choose_name`) | `d499e13` | dropping holders from the name |
+| V-05 Turn on settings sync with `available_accounts` | `e0cc0cb` | not filtering to listed accounts |
+| V-10 nav entry no "Coming later" | `a0cea75` | restoring the suffix |
+| V-09 rollback confirmation names the installed version once | `0d20de9` | `version` repeated before the name |
+| V-08 Cancel default focus in retire panel | `e0ae641` | focusing Retire instead |
+
+Notes for R4-integrate / R4-check: Keep uses `ChoiceReason::Ambiguous` and an empty `allow_again`
+because the snapshot has no original reason or inherited exclusions (handover gap). A retired
+master shows "no active master"; no replacement is elected. Manual: open Computers > retire panel
+and confirm Cancel is focused; Settings sync page with sync off lists account toggles.
+
 
 Both run on the final tree (Windows 11 x64, native, worktree `D:\GitHub\wow-sync.worktrees\R4-app`,
 branch `run004/R4-app`, main not re-merged after `979b8de`):

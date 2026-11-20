@@ -5,8 +5,8 @@
 use crate::backend::{self, Cmd, SharedState, Target};
 use crate::consent::Consent;
 use crate::model::{
-    self, banners, headline, need_items, window_title, BannerAction, Detail, Filter, NeedTarget,
-    Page, NAV,
+    self, banners, headline, nav_name, need_items, window_title, BannerAction, Detail, Filter,
+    NeedTarget, Page, NAV,
 };
 use crate::theme::{Mode, Palette, ThemeChoice, Tone};
 use crate::ui::{icon, u, zoom};
@@ -106,6 +106,7 @@ pub enum Act {
     Setup(SetupAct),
     Reconfirm(ReconfAct),
     CopyVersion,
+    DismissNotice,
     /// A group command from a feature screen, sent to the sync thread as it is.
     Group(crate::features::GroupAction),
 }
@@ -224,7 +225,7 @@ pub struct Shell {
     pub visible: bool,
     pub tray: Option<TrayState>,
     pub last_title: String,
-    pub notice: Option<String>,
+    pub notice: crate::notice::Notices,
     pub copied: bool,
     pub region: usize,
     pub window_w: f32,
@@ -318,7 +319,7 @@ impl Shell {
             visible: true,
             tray: None,
             last_title: String::new(),
-            notice: None,
+            notice: crate::notice::Notices::default(),
             copied: false,
             region: 0,
             window_w: 1040.0,
@@ -417,7 +418,7 @@ impl Shell {
         self.sheet = None;
         self.expanded.clear();
         self.rov.clear();
-        self.notice = None;
+        self.notice.clear();
         self.reconf = ReconfState::default();
         self.setup = SetupState {
             step: 1,
@@ -466,7 +467,8 @@ impl Shell {
                 if r.seq != self.seen_group_result {
                     self.seen_group_result = r.seq;
                     self.diag.absorb(r.kind, &r.result);
-                    self.notice = Some(crate::features::result_text(r.kind, &r.result));
+                    let text = crate::features::result_text(r.kind, &r.result);
+                    self.notice.result(self.page, text);
                 }
             }
             (
@@ -631,7 +633,19 @@ impl Shell {
             return;
         }
         log(&format!("act {act:?}"));
-        self.notice = None;
+        let moves = matches!(
+            act,
+            Act::Nav(_)
+                | Act::Back
+                | Act::OpenAddon(_)
+                | Act::OpenComputer(_)
+                | Act::OpenDecision(_)
+                | Act::OpenNeedsHelp(_)
+                | Act::OpenReconfirm
+        );
+        if !moves {
+            self.notice.dismiss();
+        }
         match act {
             Act::None => {}
             Act::Nav(p) => self.nav(p),
@@ -650,11 +664,15 @@ impl Shell {
                 self.filter = Filter::NotUpToDate;
             }
             Act::TryAgainShared => {
-                self.notice = Some("Checking the shared folder…".into());
+                self.notice.show(self.page, "Checking the shared folder…");
                 self.send(Cmd::SyncNow);
             }
             Act::ToggleExpand(k) => {
-                if !self.expanded.remove(&k) {
+                let opened = !self.expanded.remove(&k);
+                if let Some(f) = crate::model::focus_on_open(&k, opened) {
+                    self.pending_focus = Some(f.into());
+                }
+                if opened {
                     self.expanded.insert(k);
                 }
             }
@@ -662,13 +680,14 @@ impl Shell {
                 if k == "closing-quits" {
                     self.closing_quits = !self.closing_quits;
                     self.save_settings();
-                    self.notice = Some("Saved".into());
+                    self.notice.show(self.page, "Saved");
                 } else if let Some(t) = crate::about_ui::toggled(self.w.features.toggles, &k) {
                     self.w.features.toggles = t;
                     self.send(Cmd::SaveToggles(t));
-                    self.notice = Some("Saved".into());
+                    self.notice.show(self.page, "Saved");
                 } else if !self.diag.toggle(&k) {
-                    self.notice = Some("This setting isn't available yet.".into());
+                    self.notice
+                        .show(self.page, "This setting isn't available yet.");
                 }
             }
             Act::Theme(t) => {
@@ -702,14 +721,19 @@ impl Shell {
             Act::ExplainCloseAgain => {
                 self.first_close_done = false;
                 self.save_settings();
-                self.notice = Some("The close explanation will show next time.".into());
+                self.notice
+                    .show(self.page, "The close explanation will show next time.");
             }
             Act::Setup(a) => self.setup_act(a),
             Act::Reconfirm(a) => self.reconf_act(a),
             Act::CopyVersion => self.copied = true,
+            Act::DismissNotice => self.notice.dismiss(),
             Act::Group(a) => match crate::features::gate(&self.w, a.kind()) {
-                Ok(()) => self.send(Cmd::Group(a)),
-                Err(why) => self.notice = Some(why),
+                Ok(()) => {
+                    self.notice.action_started(self.page);
+                    self.send(Cmd::Group(a))
+                }
+                Err(why) => self.notice.show(self.page, why),
             },
         }
         let _ = window;
@@ -934,7 +958,7 @@ impl Shell {
                     self.reconf = ReconfState::default();
                     self.detail = Detail::None;
                     self.detail_stack.clear();
-                    self.notice = Some("Confirmed. Syncing continues.".into());
+                    self.notice.show(self.page, "Confirmed. Syncing continues.");
                 }
             }
         }
@@ -1737,16 +1761,7 @@ impl Shell {
                 col = col.child(div().h(u(1.)).my(u(6.)).bg(rgb(pal.divider)));
             }
             let current = self.page == p;
-            let mut name = p.title().to_string();
-            if p == Page::Needs && needs > 0 {
-                name = format!("{name}, {needs} items");
-            }
-            if p == Page::SettingsSync {
-                name = format!("{name}, coming later");
-            }
-            if current {
-                name = format!("{name}, current page");
-            }
+            let name = nav_name(p, needs, current);
             let key = format!("nav:{}", p.title());
             let cur_idx = self.rov.get("nav").copied().unwrap_or(0);
             self.rov_keys
@@ -1804,14 +1819,6 @@ impl Shell {
                                     .text_color(rgb(pal.fg(Tone::Help)))
                                     .text_size(u(12.))
                                     .child(SharedString::from(needs.to_string())),
-                            )
-                        })
-                        .when(p == Page::SettingsSync, |d| {
-                            d.child(
-                                div()
-                                    .text_size(u(11.))
-                                    .text_color(rgb(pal.muted))
-                                    .child("Coming later"),
                             )
                         })
                 });
@@ -1907,6 +1914,31 @@ impl Shell {
         }
         for b in banners.drain(..) {
             col = col.child(b);
+        }
+        if let Some(n) = self.notice.for_page(self.page).map(str::to_string) {
+            let dismiss = self.btn(
+                "notice-dismiss",
+                "Dismiss",
+                Bk::Secondary,
+                Act::DismissNotice,
+                cx,
+            );
+            col = col.child(
+                div()
+                    .id("action-notice")
+                    .role(Role::Status)
+                    .aria_label(SharedString::from(n.clone()))
+                    .p(u(12.))
+                    .rounded(u(8.))
+                    .bg(rgb(pal.surface))
+                    .border_1()
+                    .border_color(rgb(pal.divider))
+                    .flex()
+                    .items_center()
+                    .gap(u(12.))
+                    .child(div().flex_1().min_w_0().child(SharedString::from(n)))
+                    .child(dismiss),
+            );
         }
         col = col.child(page);
         div()
