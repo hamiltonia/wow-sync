@@ -336,7 +336,7 @@ mod tests {
             Err(UpdateParseError::NotJson)
         );
         let mut big = json("v0.2.0", false, false);
-        big.extend(std::iter::repeat(b' ').take(MAX_RESPONSE_BYTES));
+        big.extend(std::iter::repeat_n(b' ', MAX_RESPONSE_BYTES));
         assert_eq!(parse_latest(&big), Err(UpdateParseError::TooLarge));
     }
 
