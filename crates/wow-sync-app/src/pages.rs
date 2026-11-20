@@ -1831,18 +1831,8 @@ impl Shell {
 
     fn app_settings(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let pal = self.pal();
-        let saved = self.notice.clone();
         let mut col = self.body_col().child(self.heading("App settings", 1));
-        if let Some(n) = &saved {
-            col = col.child(
-                div()
-                    .id("saved-notice")
-                    .role(Role::Status)
-                    .aria_label(SharedString::from(n.clone()))
-                    .text_color(rgb(pal.fg(Tone::Ok)))
-                    .child(SharedString::from(n.clone())),
-            );
-        }
+        let _ = pal;
         let signin = self.btn_off(
             "signin",
             "Start WoW Sync when I sign in",

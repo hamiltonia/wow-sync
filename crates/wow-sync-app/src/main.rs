@@ -19,6 +19,7 @@ mod consent;
 mod decisions_ui;
 mod features;
 mod model;
+mod notice;
 mod pages;
 mod platform;
 mod removed_ui;
