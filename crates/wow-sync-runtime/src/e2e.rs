@@ -3956,6 +3956,38 @@ mod tests {
     }
 
     #[test]
+    fn the_diagnostics_export_reports_the_environment_the_adapters_read() {
+        use wow_sync_core::diagnostics::ExportOptions;
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        a.addon("Alpha", "alpha-v1");
+        a.create();
+        synced(&mut a);
+        let Ok(CommandOutcome::Exported(e)) = a.svc.command(Command::ExportDiagnostics {
+            options: ExportOptions::default(),
+        }) else {
+            panic!("preview refused");
+        };
+        let line = |key: &str| {
+            e.text
+                .lines()
+                .find(|l| l.starts_with(key))
+                .unwrap_or_else(|| panic!("no {key} line in {}", e.text))
+                .to_string()
+        };
+        let mem = line("process_memory:");
+        match wow_sync_adapters::sysinfo::process_private_mib() {
+            Some(_) => assert!(mem.ends_with(" MiB") && !mem.contains("unknown"), "{mem}"),
+            None => assert_eq!(mem, "process_memory: unknown"),
+        }
+        let os = line("os:");
+        match wow_sync_adapters::sysinfo::os_version() {
+            Some((a, b, c)) => assert!(os.ends_with(&format!("{a}.{b}.{c}")), "{os}"),
+            None => assert!(os.ends_with("unknown"), "{os}"),
+        }
+    }
+
+    #[test]
     fn the_diagnostics_export_records_the_journals_left_on_disk() {
         use wow_sync_core::diagnostics::ExportOptions;
         let export = |pc: &mut Pc| {
