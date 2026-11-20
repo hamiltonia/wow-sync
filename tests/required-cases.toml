@@ -919,6 +919,14 @@ tests = [
     "e2e::tests::records_from_non_members_and_forged_copies_are_not_admitted",
     "e2e::tests::a_retired_computer_publishes_and_writes_nothing",
 ]
+
+[[case]]
+id = "R4-integrate:authority-index-publish-and-mirror"
+tier = "offline"
+tests = [
+    "e2e::tests::own_records_are_listed_in_the_published_authority_index",
+    "e2e::tests::a_peer_mirrors_valid_records_and_only_repairs_its_own_copy",
+]
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag

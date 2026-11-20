@@ -19,8 +19,13 @@ use wow_sync_core::decide::encode_authority;
 use wow_sync_core::decision::{DecideError, DecisionEffect, LocalResolution};
 use wow_sync_core::hash::sha256;
 use wow_sync_core::ids::{ComputerId, EnrollmentId, GroupId, Sha256};
+use wow_sync_core::kinds::{AuthorityIndexChunk, AuthorityRef, EnrollmentRef, MAX_INDEX_BYTES};
 use wow_sync_core::layout;
-use wow_sync_core::ledger::{decode_segment, encode_segments, Body, Ledger, Membership};
+use wow_sync_core::ledger::{
+    append_index_refs, decode_segment, derive, encode_segments, read_index_chain, Body, Entry,
+    IndexHead, Ledger, Membership, Status,
+};
+use wow_sync_core::records::{decode, AuthorityIndexHead};
 use wow_sync_core::retire::OwnStanding;
 
 const AUTHORITY_LIMIT: u64 = 16 * 1024 * 1024;
@@ -350,6 +355,27 @@ impl Plane {
         self.dirty = true;
     }
 
+    /// The verbatim bytes of a learned record, whether still unsaved or already stored locally.
+    pub(crate) fn bytes(&self, state: &LocalState, h: &Sha256) -> Option<Vec<u8>> {
+        let b = self
+            .fresh
+            .iter()
+            .find(|(f, _)| f == h)
+            .map(|(_, b)| b.clone())
+            .or_else(|| state.read(&object_name(h), LOCAL_LIMIT).ok().flatten())?;
+        (&sha256(&b) == h).then_some(b)
+    }
+
+    /// Marks records as listed in the own index from `seq` on, once that state is published.
+    pub(crate) fn mark_listed(&mut self, hashes: &[Sha256], seq: u64) {
+        for h in hashes {
+            self.ledger.mark_mirrored(h, seq);
+        }
+        if !hashes.is_empty() {
+            self.dirty = true;
+        }
+    }
+
     pub(crate) fn add_member(&mut self, c: &ComputerId, e: &EnrollmentId) {
         if !self.members.contains(c, e) {
             self.members.add(c, e);
@@ -391,6 +417,144 @@ pub(crate) fn write_own_record(
     authority_store::put_record(provider, &rel, &bytes, AUTHORITY_LIMIT, me.as_str())?;
     plane.learn_bytes(h, Some(me), &bytes);
     Ok(h)
+}
+
+/// What the next own state carries for the authority index, and what to mark once it is published.
+#[derive(Debug, Default)]
+pub(crate) struct OwnIndex {
+    pub head: Option<AuthorityIndexHead>,
+    /// Records this plan lists for the first time.
+    pub newly: Vec<Sha256>,
+    /// Records the published chain already lists but the ledger had not marked (a lost mark).
+    pub adopt: Vec<Sha256>,
+    pub note: Option<String>,
+}
+
+/// Mirrors every newly valid record into the own `authority\` and lists it in the own index
+/// (contracts.md §1.6, §1.12 step 4 and repair). Only the own directory is ever written: a good
+/// own copy is left alone, a missing one is written and a damaged one is repaired
+/// (`put_record`). A failed repair keeps the record listed and says so. Index chunks are
+/// immutable and written before the state that names them.
+pub(crate) fn plan_own_index(
+    plane: &Plane,
+    state: &LocalState,
+    provider: &ProviderRoot,
+    group: &GroupId,
+    own: &EnrollmentRef,
+    published: Option<AuthorityIndexHead>,
+) -> OwnIndex {
+    let mut out = OwnIndex {
+        head: published,
+        ..OwnIndex::default()
+    };
+    let derived = derive(&plane.ledger, group, &plane.members);
+    let mut candidates: Vec<&Entry> = plane
+        .ledger
+        .entries()
+        .filter(|e| e.mirrored_seq.is_none() && derived.status_of(&e.hash) == Some(&Status::Valid))
+        .collect();
+    if candidates.is_empty() {
+        return out;
+    }
+    let chain_head = match published {
+        None => None,
+        Some(h) => {
+            let fetch = |c: &Sha256| {
+                provider
+                    .read(
+                        &layout::authority_index_chunk(group, &own.computer_id, c),
+                        MAX_INDEX_BYTES as u64,
+                    )
+                    .ok()
+            };
+            let read = read_index_chain(
+                &IndexHead {
+                    head: h.head,
+                    total: h.total,
+                },
+                group,
+                &own.enrollment_id,
+                &Default::default(),
+                &fetch,
+            );
+            if read.error.is_some() {
+                out.note = Some("the own authority index could not be read; not extended".into());
+                return out;
+            }
+            let listed: BTreeSet<Sha256> = read.refs.iter().map(|r| r.hash).collect();
+            out.adopt = candidates
+                .iter()
+                .map(|e| e.hash)
+                .filter(|h| listed.contains(h))
+                .collect();
+            candidates.retain(|e| !listed.contains(&e.hash));
+            let bytes = fetch(&h.head);
+            bytes
+                .and_then(|b| decode::<AuthorityIndexChunk>(&b, MAX_INDEX_BYTES).ok())
+                .map(|c| (h.head, c))
+        }
+    };
+    if published.is_some() && chain_head.is_none() {
+        out.note = Some("the own authority index could not be read; not extended".into());
+        return out;
+    }
+    let mut refs = Vec::new();
+    for e in candidates {
+        let Some(bytes) = plane.bytes(state, &e.hash) else {
+            continue;
+        };
+        let rel = layout::authority_record(group, &own.computer_id, &e.hash);
+        if authority_store::put_record(
+            provider,
+            &rel,
+            &bytes,
+            AUTHORITY_LIMIT,
+            own.computer_id.as_str(),
+        )
+        .is_err()
+        {
+            out.note = Some("A damaged copy could not be repaired".into());
+        }
+        refs.push(AuthorityRef {
+            hash: e.hash,
+            kind: e.kind,
+            folders: e.folders.clone(),
+        });
+    }
+    if refs.is_empty() {
+        return out;
+    }
+    refs.sort_by_key(|r| r.hash);
+    out.newly = refs.iter().map(|r| r.hash).collect();
+    let total = published.map_or(0, |h| h.total);
+    let (files, head) = append_index_refs(
+        group,
+        &own.enrollment_id,
+        chain_head.as_ref().map(|(h, c)| (h, c)),
+        total,
+        refs,
+    );
+    for (h, bytes) in files {
+        let rel = layout::authority_index_chunk(group, &own.computer_id, &h);
+        if authority_store::put_record(
+            provider,
+            &rel,
+            &bytes,
+            MAX_INDEX_BYTES as u64,
+            own.computer_id.as_str(),
+        )
+        .is_err()
+        {
+            out.newly.clear();
+            out.note = Some("the authority index could not be written; will retry".into());
+            return out;
+        }
+    }
+    out.head = Some(AuthorityIndexHead {
+        head: head.head,
+        total: head.total,
+    });
+    out
 }
 
 /// Reads every member's `authority\` listing (own and mirrors, retired members and members whose

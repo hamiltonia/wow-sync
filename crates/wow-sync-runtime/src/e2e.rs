@@ -15,8 +15,9 @@ mod tests {
     use wow_sync_core::ids::{ComputerId, EnrollmentId, GroupId, Sha256};
     use wow_sync_core::kinds::{EnrollmentRef, Issuer, Retirement};
     use wow_sync_core::layout;
-    use wow_sync_core::ledger::{derive, InvalidReason, Status};
+    use wow_sync_core::ledger::{derive, read_index_chain, IndexHead, InvalidReason, Status};
     use wow_sync_core::plan::Activity;
+    use wow_sync_core::records::{decode, CodeState};
 
     struct Pc {
         install: SyntheticInstall,
@@ -1312,6 +1313,122 @@ mod tests {
             None,
             "a bad copy teaches nothing"
         );
+    }
+
+    fn latest_state(lab: &Lab, g: &GroupId, pc: &Pc) -> CodeState {
+        let c = computer_id(pc);
+        let dir = lab
+            .shared
+            .join("WoWSync")
+            .join(format!("groups/{g}/members/{c}/state"));
+        let newest = std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .filter_map(|e| {
+                let n = e.file_name().to_string_lossy().into_owned();
+                layout::parse_state_name(&n).map(|(_, seq)| (seq, e.path()))
+            })
+            .max()
+            .expect("a published state");
+        decode::<CodeState>(&std::fs::read(newest.1).unwrap(), 8 * 1024 * 1024).unwrap()
+    }
+
+    fn index_refs(lab: &Lab, g: &GroupId, pc: &Pc, st: &CodeState) -> Vec<Sha256> {
+        let (c, e) = pc_ids(pc);
+        let head = st.authority_index.expect("an authority index");
+        let fetch = |h: &Sha256| {
+            std::fs::read(provider_file(lab, &layout::authority_index_chunk(g, &c, h))).ok()
+        };
+        let read = read_index_chain(
+            &IndexHead {
+                head: head.head,
+                total: head.total,
+            },
+            g,
+            &e,
+            &Default::default(),
+            &fetch,
+        );
+        assert_eq!(read.error, None);
+        read.refs.iter().map(|r| r.hash).collect()
+    }
+
+    #[test]
+    fn own_records_are_listed_in_the_published_authority_index() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let g = a.create();
+        synced(&mut a);
+        assert!(latest_state(&lab, &g, &a).authority_index.is_none());
+        a_removes_alpha(&mut a, &g);
+        let (ac, _) = pc_ids(&a);
+        let st = latest_state(&lab, &g, &a);
+        let mut listed = index_refs(&lab, &g, &a, &st);
+        listed.sort();
+        let mut on_disk: Vec<Sha256> = authority_files(&lab, &g, &ac)
+            .iter()
+            .map(|f| Sha256::parse(f.trim_end_matches(".json")).unwrap())
+            .collect();
+        on_disk.sort();
+        assert_eq!(listed, on_disk);
+        assert_eq!(st.authority_index.unwrap().total, 2);
+        // Listed once: a further cycle neither republishes nor grows the chain.
+        let r = synced(&mut a);
+        assert!(r.published.is_none(), "{r:?}");
+        a.restart();
+        let r = synced(&mut a);
+        assert!(r.published.is_none(), "{r:?}");
+        assert_eq!(latest_state(&lab, &g, &a).authority_index.unwrap().total, 2);
+    }
+
+    #[test]
+    fn a_peer_mirrors_valid_records_and_only_repairs_its_own_copy() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        let g = a.create();
+        a_removes_alpha(&mut a, &g);
+        let (ac, _) = pc_ids(&a);
+        b.join(&g);
+        let bc = ComputerId::parse(&computer_id(&b)).unwrap();
+        let removal = removal_hash(&lab, &g, &ac);
+        let ack = authority_files(&lab, &g, &ac)
+            .iter()
+            .map(|f| Sha256::parse(f.trim_end_matches(".json")).unwrap())
+            .find(|h| *h != removal)
+            .unwrap();
+        let good = std::fs::read(provider_file(
+            &lab,
+            &layout::authority_record(&g, &ac, &removal),
+        ))
+        .unwrap();
+        // B's own copy of the removal is damaged before it first lists it; A's copy of the ack
+        // is damaged too.
+        let b_copy = provider_file(&lab, &layout::authority_record(&g, &bc, &removal));
+        std::fs::create_dir_all(b_copy.parent().unwrap()).unwrap();
+        std::fs::write(&b_copy, b"damaged").unwrap();
+        let a_ack = provider_file(&lab, &layout::authority_record(&g, &ac, &ack));
+        std::fs::write(&a_ack, b"damaged too").unwrap();
+        synced(&mut b);
+        assert_eq!(std::fs::read(&b_copy).unwrap(), good, "own copy repaired");
+        assert_eq!(
+            std::fs::read(&a_ack).unwrap(),
+            b"damaged too",
+            "a peer's directory is never written"
+        );
+        assert!(
+            !authority_files(&lab, &g, &bc).contains(&format!("{ack}.json")),
+            "a record with no good copy is read past, not mirrored"
+        );
+        assert_eq!(status(&b, &g, &removal), Some(Status::Valid));
+        let st = latest_state(&lab, &g, &b);
+        assert_eq!(index_refs(&lab, &g, &b, &st), vec![removal]);
+        // The issuer's directory becoming unusable does not lose the record (Q-51).
+        std::fs::remove_dir_all(provider_file(&lab, &layout::authority_dir(&g, &ac))).unwrap();
+        let mut c = lab.pc("c");
+        c.join(&g);
+        synced(&mut c);
+        assert_eq!(status(&c, &g, &removal), Some(Status::Valid));
     }
 
     #[test]

@@ -4,7 +4,7 @@
 
 use crate::activity::{ActivitySource, WinprocActivity};
 use crate::decisions::write_own_record;
-use crate::decisions::{learn_from_directories, Plane};
+use crate::decisions::{learn_from_directories, plan_own_index, Plane};
 use crate::detail::{
     build_package_rows, folder_titles, member_rows, render_with_names, DetailInput, StatusDetail,
 };
@@ -1352,6 +1352,8 @@ impl SliceService {
                 Self::publish_step(
                     &self.cfg,
                     &self.state,
+                    &mut self.plane,
+                    &provider,
                     &mut last_publish,
                     &w,
                     store,
@@ -1502,6 +1504,8 @@ impl SliceService {
     fn publish_step<E: wow_sync_core::exec::PublishEffects>(
         cfg: &ServiceConfig,
         state: &LocalState,
+        plane: &mut Plane,
+        provider: &ProviderRoot,
         last_publish: &mut Option<i64>,
         w: &World,
         store: Option<PendingReport>,
@@ -1529,7 +1533,16 @@ impl SliceService {
             .iter()
             .map(|s| (*s).to_string())
             .collect();
-        let index_head: Option<wow_sync_core::records::AuthorityIndexHead> = None;
+        let published_head = w.own_latest.as_ref().and_then(|s| s.authority_index);
+        let own_index = plan_own_index(plane, state, provider, group_id, &w.own, published_head);
+        if let Some(n) = &own_index.note {
+            report.publish_note = Some(n.clone());
+        }
+        let latest_seq = w.own_latest.as_ref().map_or(0, |s| s.seq);
+        if !own_index.adopt.is_empty() {
+            plane.mark_listed(&own_index.adopt, latest_seq);
+        }
+        let index_head = own_index.head;
         if !publish_needed(
             w.own_latest.as_ref(),
             &w.inventory,
@@ -1591,6 +1604,8 @@ impl SliceService {
         match run_publish(&plan, &mut ctx, fx) {
             PublishOutcome::Published { uploaded, .. } => {
                 *last_publish = Some(now_unix_ms());
+                plane.mark_listed(&own_index.newly, seq);
+                let _ = plane.save(state);
                 report.published = Some(format!("published seq {seq} ({uploaded} new objects)"));
                 if published_report {
                     // Published once. If this write is lost, `outstanding` drops it while this
