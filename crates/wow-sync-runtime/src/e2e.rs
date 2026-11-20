@@ -1283,6 +1283,77 @@ mod tests {
     }
 
     #[test]
+    fn a_removal_whose_record_could_not_be_written_is_replayed_on_the_next_cycle() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let g = a.create();
+        a.addon("Alpha", "alpha-v1");
+        synced(&mut a);
+        let (ac, _) = pc_ids(&a);
+        // The write of the record fails (a file where its folder belongs) after the
+        // observation was consumed: the window of a crash between the two.
+        let dir = provider_file(&lab, &layout::authority_dir(&g, &ac));
+        let _ = std::fs::remove_dir(&dir);
+        std::fs::write(&dir, b"in the way").unwrap();
+        std::fs::remove_dir_all(a.install.addons.join("Alpha")).unwrap();
+        let st = LocalState::open_at(&a.cfg.state_dir).unwrap();
+        let store = RemovalStore::new(&st, g.clone());
+        let (base, mut obs) = store.load();
+        let key = base.packages.keys().next().expect("a baseline").clone();
+        obs.gone.insert(key, (1, 1));
+        store.save(&base, &obs).unwrap();
+        let r = synced(&mut a);
+        assert!(
+            r.apply_note
+                .as_deref()
+                .is_some_and(|n| n.contains("removal record not written")),
+            "{r:?}"
+        );
+        assert!(dir.is_file(), "nothing was written");
+        a.restart();
+        std::fs::remove_file(&dir).unwrap();
+        synced(&mut a);
+        let files = authority_files(&lab, &g, &ac);
+        assert_eq!(files.len(), 2, "the removal and its ack: {files:?}");
+        let h = removal_hash(&lab, &g, &ac);
+        assert_eq!(status(&a, &g, &h), Some(Status::Valid));
+        synced(&mut a);
+        assert_eq!(
+            authority_files(&lab, &g, &ac).len(),
+            2,
+            "replayed once, not again"
+        );
+    }
+
+    #[test]
+    fn a_pending_removal_is_dropped_when_the_folder_is_installed_again() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let g = a.create();
+        a.addon("Alpha", "alpha-v1");
+        synced(&mut a);
+        let (ac, _) = pc_ids(&a);
+        let dir = provider_file(&lab, &layout::authority_dir(&g, &ac));
+        let _ = std::fs::remove_dir(&dir);
+        std::fs::write(&dir, b"in the way").unwrap();
+        std::fs::remove_dir_all(a.install.addons.join("Alpha")).unwrap();
+        let st = LocalState::open_at(&a.cfg.state_dir).unwrap();
+        let store = RemovalStore::new(&st, g.clone());
+        let (base, mut obs) = store.load();
+        let key = base.packages.keys().next().expect("a baseline").clone();
+        obs.gone.insert(key, (1, 1));
+        store.save(&base, &obs).unwrap();
+        synced(&mut a);
+        std::fs::remove_file(&dir).unwrap();
+        a.addon("Alpha", "alpha-v1");
+        synced(&mut a);
+        assert!(
+            authority_files(&lab, &g, &ac).is_empty(),
+            "an addon that is back is not removed from the group"
+        );
+    }
+
+    #[test]
     fn records_from_non_members_and_forged_copies_are_not_admitted() {
         let lab = Lab::new();
         let mut a = lab.pc("a");

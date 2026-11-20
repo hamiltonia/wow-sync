@@ -116,12 +116,92 @@ impl<'a> RemovalStore<'a> {
     }
 
     /// One observation pass; the new baseline and observation are persisted before the result is
-    /// returned, so a crash cannot lose a first sighting.
+    /// returned, so a crash cannot lose a first sighting. A removal this pass matured is also
+    /// kept as pending *before* the observation is consumed and returned again by every later
+    /// pass until `clear_pending`, so a crash (or a failed write) before its record is written
+    /// does not lose it. A pending removal whose folder is installed again is dropped.
     pub fn observe(&self, input: &ObserveInput) -> Result<Observed, FsError> {
         let (base, obs) = self.load();
-        let out = observe(&base, &obs, input);
+        let mut out = observe(&base, &obs, input);
+        let before = self.load_pending();
+        let mut pending: Vec<PendingRemoval> = before
+            .iter()
+            .filter(|p| {
+                p.folders
+                    .iter()
+                    .all(|f| input.inventory.get(&f.key).is_none())
+            })
+            .cloned()
+            .collect();
+        for r in &out.removed {
+            if !pending.iter().any(|p| p.package == r.package) {
+                pending.push(PendingRemoval::from(r));
+            }
+        }
+        if pending != before {
+            self.save_pending(&pending)?;
+        }
         self.save(&out.baseline, &out.observation)?;
+        out.removed = pending.into_iter().map(ObservedRemoval::from).collect();
         Ok(out)
+    }
+
+    fn pending_name(&self) -> String {
+        format!("removal-pending-{}.json", self.group)
+    }
+
+    fn load_pending(&self) -> Vec<PendingRemoval> {
+        self.state
+            .read(&self.pending_name(), LIMIT)
+            .ok()
+            .flatten()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default()
+    }
+
+    fn save_pending(&self, p: &[PendingRemoval]) -> Result<(), FsError> {
+        if p.is_empty() {
+            return self.state.remove(&self.pending_name());
+        }
+        self.state.write_atomic(
+            &self.pending_name(),
+            &serde_json::to_vec(p).expect("plain data serializes"),
+        )
+    }
+
+    /// The removal record for `package` is written; it is no longer pending.
+    pub fn clear_pending(&self, package: &str) {
+        let mut p = self.load_pending();
+        p.retain(|r| r.package != package);
+        let _ = self.save_pending(&p);
+    }
+}
+
+/// An observed removal kept across a restart until its record is written.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct PendingRemoval {
+    package: String,
+    folders: Vec<FolderState>,
+    evidence: RemovalEvidence,
+}
+
+impl From<&ObservedRemoval> for PendingRemoval {
+    fn from(r: &ObservedRemoval) -> Self {
+        Self {
+            package: r.package.clone(),
+            folders: r.folders.clone(),
+            evidence: r.evidence,
+        }
+    }
+}
+
+impl From<PendingRemoval> for ObservedRemoval {
+    fn from(r: PendingRemoval) -> Self {
+        Self {
+            package: r.package,
+            folders: r.folders,
+            evidence: r.evidence,
+        }
     }
 }
 

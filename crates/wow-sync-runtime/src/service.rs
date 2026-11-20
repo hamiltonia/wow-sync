@@ -2089,6 +2089,7 @@ impl SliceService {
                     &AuthorityRecord::Removal(rec),
                 ) {
                     Ok(_) => {
+                        RemovalStore::new(state, gid.clone()).clear_pending(&r.package);
                         next_seq += 1;
                         written = true;
                     }
