@@ -715,6 +715,55 @@ tests = [
 # <<< section: R4-core-settings
 
 # >>> section: R4-core-ops
+[[case]]
+id = "R4-core-ops:code-choice"
+tier = "offline"
+tests = [
+    "choice_tests::keep_pins_the_copy_and_excludes_every_shown_copy_it_is_not",
+    "choice_tests::writer_never_writes_a_record_that_fails_v_choice",
+    "choice_tests::resume_ends_the_pin_but_keeps_inherited_exclusions",
+    "choice_tests::allow_again_releases_only_the_named_hash",
+    "choice_tests::unconsidered_newer_copy_raises_a_decision_and_never_replaces_the_keep",
+    "choice_tests::partial_choice_over_choice_is_decided_per_folder",
+    "choice_tests::carried_exclusion_keeps_its_own_scope_when_the_package_regroups",
+]
+
+[[case]]
+id = "R4-core-ops:decide"
+tier = "offline"
+tests = [
+    "decide_tests::new_version_item_offers_keep_take_or_follow_and_each_writes_one_choice",
+    "decide_tests::a_changed_item_refuses_and_writes_nothing",
+    "decide_tests::unknown_options_and_items_without_options_never_write",
+    "decide_tests::a_retired_computer_cannot_publish_a_decision_but_can_decide_locally",
+    "decide_tests::encode_authority_is_the_record_wire_form",
+]
+
+[[case]]
+id = "R4-core-ops:retirement"
+tier = "offline"
+tests = [
+    "retire_tests::retiring_another_computer_cuts_its_later_records_off",
+    "retire_tests::retiring_the_settings_master_never_picks_a_replacement",
+    "retire_tests::mutual_unknowing_retirement_retires_both_in_every_read_order",
+    "retire_tests::re_enrolled_computer_is_a_new_member_and_the_old_enrollment_stays_retired",
+    "retire_tests::a_retired_computer_plans_no_retirement_and_pauses_publishing",
+    "retire_tests::self_retirement_cuts_off_at_the_last_written_sequence",
+    "retire_tests::two_effective_retirements_use_the_minimum_cutoff_in_either_order",
+    "retire_tests::held_self_is_neither_active_nor_retired_and_publishes_nothing",
+]
+
+[[case]]
+id = "R4-core-ops:runtime-routing"
+tier = "offline"
+tests = [
+    "decisions::tests::a_retired_computer_refuses_group_writes_but_not_local_choices",
+    "decisions::tests::held_paused_or_unwritable_keeps_the_record_and_an_active_one_writes_it",
+    "decisions::tests::held_record_is_written_with_reserved_bytes_when_the_retirement_turns_void",
+    "decisions::tests::held_record_is_discarded_and_never_written_when_the_retirement_turns_effective",
+    "decisions::tests::a_pause_keeps_the_queue_and_a_cancel_removes_one_record",
+    "decisions::tests::a_record_that_does_not_match_its_name_is_never_written",
+]
 # <<< section: R4-core-ops
 
 # >>> section: R4-notify-diag
