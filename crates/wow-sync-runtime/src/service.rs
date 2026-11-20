@@ -2037,12 +2037,17 @@ impl SliceService {
                     .map(|n| (p.enrollment_id.clone(), n.clone()))
             })
             .collect();
-        let settings = crate::settings_cycle::settings_snapshot(
+        let mut settings = crate::settings_cycle::settings_snapshot(
             &crate::settings_cycle::load_local(&self.state, &w.group.group_id),
             &self.plane.ledger,
             &derived,
             &enrollment_names,
         );
+        settings.available_accounts = if w.standing == OwnStanding::Active {
+            crate::settings_cycle::available_accounts(&self.variant_dir())
+        } else {
+            Vec::new()
+        };
         let retirements = crate::detail::retirement_rows(
             &self.plane.ledger,
             &derived,
