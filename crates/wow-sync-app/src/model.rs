@@ -1240,9 +1240,21 @@ pub fn nav_name(p: Page, needs: usize, current: bool) -> String {
     name
 }
 
+/// Where focus goes when a confirmation panel opens: the safe choice, never the one that acts.
+pub fn focus_on_open(key: &str, opened: bool) -> Option<&'static str> {
+    (opened && key == "retire-open").then_some("retire-cancel")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opening_the_retire_panel_focuses_cancel_and_nothing_else_moves_focus() {
+        assert_eq!(focus_on_open("retire-open", true), Some("retire-cancel"));
+        assert_eq!(focus_on_open("retire-open", false), None);
+        assert_eq!(focus_on_open("retire-ack", true), None);
+    }
 
     #[test]
     fn settings_sync_is_a_normal_entry_and_not_labelled_coming_later() {

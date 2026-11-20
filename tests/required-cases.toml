@@ -1323,6 +1323,7 @@ id = "R4-app:minor-fixes"
 tier = "offline"
 tests = [
     "model::tests::settings_sync_is_a_normal_entry_and_not_labelled_coming_later",
+    "model::tests::opening_the_retire_panel_focuses_cancel_and_nothing_else_moves_focus",
     "rollback_ui::tests::the_confirmation_never_repeats_a_summary_sentence_as_the_version",
 ]
 

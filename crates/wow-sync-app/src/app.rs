@@ -668,7 +668,11 @@ impl Shell {
                 self.send(Cmd::SyncNow);
             }
             Act::ToggleExpand(k) => {
-                if !self.expanded.remove(&k) {
+                let opened = !self.expanded.remove(&k);
+                if let Some(f) = crate::model::focus_on_open(&k, opened) {
+                    self.pending_focus = Some(f.into());
+                }
+                if opened {
                     self.expanded.insert(k);
                 }
             }
