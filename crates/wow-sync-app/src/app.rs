@@ -190,6 +190,7 @@ pub struct Shell {
     pub loaded: bool,
     pub message: String,
     seen_group_result: u64,
+    pub diag: crate::about_ui::DiagState,
     pub preview_lines: Vec<String>,
     pub app_version: String,
     pub closing_quits: bool,
@@ -284,6 +285,7 @@ impl Shell {
             loaded: false,
             message: String::new(),
             seen_group_result: 0,
+            diag: Default::default(),
             preview_lines: Vec::new(),
             app_version,
             closing_quits: false,
@@ -450,9 +452,11 @@ impl Shell {
             w.features.caps = crate::features::Capabilities::runtime();
             w.features.decisions = g.decisions.clone();
             crate::features::apply_snapshot(&mut w.features, &g.snapshot);
+            w.features.toggles = g.toggles;
             if let Some(r) = &g.group_result {
                 if r.seq != self.seen_group_result {
                     self.seen_group_result = r.seq;
+                    self.diag.absorb(r.kind, &r.result);
                     self.notice = Some(crate::features::result_text(r.kind, &r.result));
                 }
             }
@@ -650,7 +654,11 @@ impl Shell {
                     self.closing_quits = !self.closing_quits;
                     self.save_settings();
                     self.notice = Some("Saved".into());
-                } else {
+                } else if let Some(t) = crate::about_ui::toggled(self.w.features.toggles, &k) {
+                    self.w.features.toggles = t;
+                    self.send(Cmd::SaveToggles(t));
+                    self.notice = Some("Saved".into());
+                } else if !self.diag.toggle(&k) {
                     self.notice = Some("This setting isn't available yet.".into());
                 }
             }

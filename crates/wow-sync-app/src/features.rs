@@ -7,13 +7,17 @@
 //! notification choices) are shown disabled with an honest reason.
 
 use crate::world::World;
+use std::path::PathBuf;
 use wow_sync_core::decision::{DecisionId, DecisionItem, DecisionScope, EvidenceToken, OptionId};
+use wow_sync_core::diagnostics::{ExportOptions, REFUSED_TEXT, SHARED_FOLDER_WARNING};
 use wow_sync_core::ids::{SettingsUnit, Sha256};
 use wow_sync_core::kinds::{ChoiceReason, EnrollmentRef, PolicyRule};
 use wow_sync_core::paths::FolderKey;
 use wow_sync_core::settings::ResumeOption;
 use wow_sync_core::status::{AllHoldCause, HoldScope};
-use wow_sync_runtime::{Command, CommandError, CommandOutcome, RollbackRefusal};
+use wow_sync_runtime::{
+    Command, CommandError, CommandOutcome, ExportError, RollbackRefusal, SaveError,
+};
 
 /// Every action a feature screen can ask for.
 // Some variants wait for items 7-8 or have no screen yet (Keep, Resume, NotWired).
@@ -39,18 +43,10 @@ pub enum ActionKind {
     RestoreSettings,
     CheckUpdates,
     ExportDiagnostics,
-    SaveNoticePrefs,
+    SaveDiagnostics,
 }
 
 impl ActionKind {
-    /// Whether the runtime has a command for it on the current base (evidence control map).
-    pub fn has_runtime_command(self) -> bool {
-        !matches!(
-            self,
-            ActionKind::CheckUpdates | ActionKind::ExportDiagnostics | ActionKind::SaveNoticePrefs
-        )
-    }
-
     /// Writes a group record, so a retired computer cannot do it (ops.md §2.4).
     pub fn publishes(self) -> bool {
         matches!(
@@ -108,6 +104,9 @@ impl Capabilities {
             UseSharedSettings,
             ChooseSettings,
             RestoreSettings,
+            CheckUpdates,
+            ExportDiagnostics,
+            SaveDiagnostics,
         ]
         .into_iter()
         .fold(Self::default(), Self::with)
@@ -181,6 +180,15 @@ pub enum GroupAction {
         unit: SettingsUnit,
         checkpoint: Sha256,
     },
+    CheckUpdates,
+    /// Builds the preview text; nothing is written.
+    ExportDiagnostics {
+        options: ExportOptions,
+    },
+    SaveDiagnostics {
+        options: ExportOptions,
+        dest: PathBuf,
+    },
 }
 
 impl GroupAction {
@@ -203,6 +211,9 @@ impl GroupAction {
             GroupAction::UseSharedSettings { .. } => ActionKind::UseSharedSettings,
             GroupAction::ChooseSettings { .. } => ActionKind::ChooseSettings,
             GroupAction::RestoreSettings { .. } => ActionKind::RestoreSettings,
+            GroupAction::CheckUpdates => ActionKind::CheckUpdates,
+            GroupAction::ExportDiagnostics { .. } => ActionKind::ExportDiagnostics,
+            GroupAction::SaveDiagnostics { .. } => ActionKind::SaveDiagnostics,
         }
     }
 
@@ -264,6 +275,11 @@ impl GroupAction {
             GroupAction::RestoreSettings { unit, checkpoint } => {
                 Command::RestoreSettings { unit, checkpoint }
             }
+            GroupAction::CheckUpdates => Command::CheckUpdates,
+            GroupAction::ExportDiagnostics { options } => Command::ExportDiagnostics { options },
+            GroupAction::SaveDiagnostics { options, dest } => {
+                Command::SaveDiagnostics { options, dest }
+            }
         }
     }
 }
@@ -288,6 +304,15 @@ pub enum ActionResult {
     NothingToDo,
     /// This build cannot send the action (no runtime command or not wired).
     NotWired,
+    /// An update check was started or answered from the last result.
+    UpdateStarted,
+    /// The diagnostics text, with the "Replaced: …" line; saved or only previewed by kind.
+    Exported {
+        text: String,
+        summary: String,
+    },
+    /// The export or save was refused; the text says why in plain words.
+    ExportRefused(String),
     Failed(String),
 }
 
@@ -297,14 +322,15 @@ impl ActionResult {
             Ok(CommandOutcome::Written(_) | CommandOutcome::ReEnrolled) => Self::Written,
             Ok(CommandOutcome::Kept) => Self::Kept,
             Ok(CommandOutcome::Local(_) | CommandOutcome::Recorded) => Self::Local,
-            // About and diagnostics show their own results (the update state, the export text).
-            Ok(CommandOutcome::UpdateCheck(_) | CommandOutcome::Exported(_)) => Self::Local,
+            Ok(CommandOutcome::UpdateCheck(_)) => Self::UpdateStarted,
+            Ok(CommandOutcome::Exported(e)) => Self::Exported {
+                summary: e.replaced.summary(),
+                text: e.text,
+            },
             Err(CommandError::UpdatesUnavailable) => {
                 Self::Failed("update checking is not available in this build".into())
             }
-            Err(CommandError::Export(_)) => {
-                Self::Failed("the diagnostics could not be exported".into())
-            }
+            Err(CommandError::Export(e)) => Self::ExportRefused(export_refusal(&e)),
             Ok(CommandOutcome::NothingToDo) => Self::NothingToDo,
             Err(CommandError::Decide(wow_sync_core::decision::DecideError::Changed)) => {
                 Self::Changed
@@ -357,9 +383,31 @@ impl ActionResult {
     }
 }
 
+/// The sentence for a refused export or save (diagnostics.md; nothing is ever saved on refusal).
+pub fn export_refusal(e: &ExportError) -> String {
+    match e {
+        ExportError::Refused(_) => REFUSED_TEXT.into(),
+        ExportError::Save(SaveError::ForbiddenLocation) => {
+            format!("That place is not allowed. {SHARED_FOLDER_WARNING} Nothing was saved.")
+        }
+        ExportError::Save(SaveError::BadDestination) => {
+            "That place can't be saved to. Choose an existing folder. Nothing was saved.".into()
+        }
+        ExportError::Save(SaveError::Io(_)) => {
+            "The file could not be written. Nothing was saved.".into()
+        }
+    }
+}
+
 /// The sentence shown after an action (decision flows: ops.md §1.3, rollback.md §1).
 pub fn result_text(kind: ActionKind, r: &ActionResult) -> String {
     match r {
+        ActionResult::UpdateStarted => "Checking for updates…".into(),
+        ActionResult::Exported { summary, .. } => match kind {
+            ActionKind::SaveDiagnostics => format!("Saved. {summary}."),
+            _ => format!("Preview ready. {summary}."),
+        },
+        ActionResult::ExportRefused(t) => t.clone(),
         ActionResult::Written => match kind {
             ActionKind::Retire => "Retired. It is shared with the group.".into(),
             ActionKind::ReEnroll => "This computer joined the group again.".into(),
@@ -390,7 +438,6 @@ pub fn result_text(kind: ActionKind, r: &ActionResult) -> String {
 pub const RETIRED_REASON: &str =
     "This computer was retired. Join the group again to make choices for it.";
 pub const NOT_WIRED: &str = "This version of WoW Sync can't send that to the sync service yet.";
-pub const NEEDS_UPDATE: &str = "This needs a newer WoW Sync. It is not built into this version.";
 
 /// Whether this computer is still a member that may publish (ops.md §2.4).
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -433,6 +480,10 @@ pub struct FeatureData {
     pub master: Option<String>,
     /// A guided reconfirmation is pending and nothing worse applies (ops.md §1.7).
     pub review_needed: bool,
+    /// The last update check result, if any.
+    pub update: Option<wow_sync_core::update::UpdateResult>,
+    /// The About toggles (update check, notifications).
+    pub toggles: wow_sync_runtime::AppToggles,
     /// Settings units, policy and accounts. Not in the snapshot yet (handover).
     pub settings: crate::settings_ui::SettingsData,
 }
@@ -452,6 +503,8 @@ impl Default for FeatureData {
             older_peer: None,
             master: None,
             review_needed: false,
+            update: None,
+            toggles: Default::default(),
             settings: Default::default(),
         }
     }
@@ -464,6 +517,7 @@ impl Default for FeatureData {
 pub fn apply_snapshot(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot) {
     f.hold = s.hold.clone();
     f.review_needed = s.review_needed;
+    f.update = s.update.clone();
     f.removed = s.removed.clone();
     f.standing = match (&s.this_retirement, &s.hold) {
         (Some(_), _) => Standing::Retired {
@@ -511,13 +565,10 @@ pub fn apply_snapshot(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot)
 pub type Gate = Result<(), String>;
 
 /// Whether `kind` can be used now. Order: standing (a retired computer never publishes), then
-/// whether the runtime has the command, then whether this build is wired to it.
+/// whether this build is wired to the runtime command.
 pub fn gate(w: &World, kind: ActionKind) -> Gate {
     if kind.publishes() && matches!(w.features.standing, Standing::Retired { .. }) {
         return Err(RETIRED_REASON.into());
-    }
-    if !kind.has_runtime_command() {
-        return Err(NEEDS_UPDATE.into());
     }
     if !w.features.caps.has(kind) {
         return Err(NOT_WIRED.into());
@@ -594,7 +645,7 @@ mod tests {
         let e = gate(&w, ActionKind::Decide).unwrap_err();
         assert_eq!(e, NOT_WIRED);
         let e = gate(&w, ActionKind::CheckUpdates).unwrap_err();
-        assert_eq!(e, NEEDS_UPDATE);
+        assert_eq!(e, NOT_WIRED);
     }
 
     #[test]
@@ -700,7 +751,7 @@ mod tests {
         );
         assert_eq!(a.kind(), ActionKind::Rollback);
         assert!(Capabilities::runtime().has(ActionKind::Rollback));
-        assert!(!Capabilities::runtime().has(ActionKind::CheckUpdates));
+        assert!(Capabilities::runtime().has(ActionKind::CheckUpdates));
     }
 
     fn retirement(name: &str, by: &str, is_this: bool) -> wow_sync_runtime::RetirementRow {

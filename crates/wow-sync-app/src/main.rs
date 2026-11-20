@@ -9,6 +9,7 @@
 //! Logging goes to $WOWSYNC_LOG.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod about_ui;
 mod app;
 mod assets;
 mod backend;

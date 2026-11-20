@@ -1227,6 +1227,15 @@ tests = [
   "removed_ui::tests::nobody_awaited_means_no_waiting_line_and_empty_means_the_empty_text",
 ]
 
+[[case]]
+id = "R4-app:about-diagnostics"
+tier = "offline"
+tests = [
+  "about_ui::tests::update_states_use_core_text_and_an_empty_state",
+  "about_ui::tests::a_toggle_flips_only_its_own_flag_and_unknown_keys_do_nothing",
+  "about_ui::tests::changing_an_option_drops_the_preview_and_a_refusal_is_shown_not_saved",
+]
+
 # <<< section: R4-app
 
 # >>> section: R4-mac-kit

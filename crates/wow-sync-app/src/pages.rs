@@ -1931,11 +1931,31 @@ impl Shell {
                     themes.into_any_element(),
                 ],
         ));
+        let tg = self.w.features.toggles;
+        let n1 = self.toggle(
+            "notify-summaries",
+            "Tell me when changes were applied",
+            tg.notify_summaries,
+            true,
+            Act::Toggle("notify-summaries".into()),
+            cx,
+        );
+        let n2 = self.toggle(
+            "notify-needs-me",
+            "Tell me when something needs me",
+            tg.notify_needs_me,
+            true,
+            Act::Toggle("notify-needs-me".into()),
+            cx,
+        );
         col = col.child(self.panel(
             "Notifications",
-            vec![self
-                .muted("Operating-system notifications are not available yet. Problems always show here and in the tray icon.")
-                .into_any_element()],
+            vec![
+                self.muted("Problems always show here and in the tray icon, whatever you choose.")
+                    .into_any_element(),
+                n1.into_any_element(),
+                n2.into_any_element(),
+            ],
         ));
         let cq = self.closing_quits;
         let cqt = self.toggle(
@@ -1965,25 +1985,32 @@ impl Shell {
         ));
         let o1 = self.btn_off("open-shared", "Open shared folder", "not available yet", cx);
         let o2 = self.btn_off("open-data", "Open data folder", "not available yet", cx);
-        let o3 = self.btn_off("export-diag", "Export diagnostics…", "coming later", cx);
+        let o3 = self.btn(
+            "export-diag",
+            "Export diagnostics…",
+            Bk::Secondary,
+            Act::ToggleExpand("diag-open".into()),
+            cx,
+        );
         let shared = if self.w.shared_label.is_empty() {
             "Shared folder: not set up yet.".to_string()
         } else {
             format!("Shared folder: {}", self.w.shared_label)
         };
-        col = col.child(self.panel(
-            "Data",
-            vec![
-                    self.muted(shared).into_any_element(),
-                    div()
-                        .flex()
-                        .gap(u(10.))
-                        .child(o1)
-                        .child(o2)
-                        .child(o3)
-                        .into_any_element(),
-                ],
-        ));
+        let mut data = vec![
+            self.muted(shared).into_any_element(),
+            div()
+                .flex()
+                .gap(u(10.))
+                .child(o1)
+                .child(o2)
+                .child(o3)
+                .into_any_element(),
+        ];
+        if self.expanded.contains("diag-open") {
+            data.extend(self.diag_sheet(cx));
+        }
+        col = col.child(self.panel("Data", data));
         let q = self.btn("quit", "Quit WoW Sync", Bk::Secondary, Act::Quit, cx);
         col.child(self.panel("Quit", vec![q.into_any_element()]))
             .into_any_element()
@@ -1991,13 +2018,120 @@ impl Shell {
 
     // ------------------------------------------------------------------- About
 
+    /// The export sheet: options, what is never included, the exact preview, then Save.
+    fn diag_sheet(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        use crate::features::{gate, ActionKind, GroupAction};
+        let pal = self.pal();
+        let opts = self.diag.options;
+        let mut v: Vec<AnyElement> = Vec::new();
+        for w in crate::about_ui::warnings() {
+            v.push(self.muted(w).into_any_element());
+        }
+        v.push(
+            self.toggle(
+                "diag-names",
+                "Include add-on folder names",
+                opts.include_folder_names,
+                false,
+                Act::Toggle("diag-names".into()),
+                cx,
+            )
+            .into_any_element(),
+        );
+        v.push(
+            self.toggle(
+                "diag-fingerprints",
+                "Include file fingerprints",
+                opts.include_fingerprints,
+                false,
+                Act::Toggle("diag-fingerprints".into()),
+                cx,
+            )
+            .into_any_element(),
+        );
+        let preview = match gate(&self.w, ActionKind::ExportDiagnostics) {
+            Ok(()) => self.btn(
+                "diag-preview",
+                "Preview",
+                Bk::Secondary,
+                Act::Group(GroupAction::ExportDiagnostics { options: opts }),
+                cx,
+            ),
+            Err(why) => self.btn_off("diag-preview", "Preview", &why, cx),
+        };
+        v.push(preview.into_any_element());
+        if let Some(p) = self.diag.preview.clone() {
+            v.push(self.muted(p.summary.clone()).into_any_element());
+            v.push(
+                div()
+                    .id("diag-text")
+                    .max_h(u(200.))
+                    .overflow_y_scroll()
+                    .p(u(8.))
+                    .rounded(u(6.))
+                    .bg(rgb(pal.surface))
+                    .text_size(u(12.))
+                    .child(SharedString::from(p.text))
+                    .into_any_element(),
+            );
+            let dest = crate::about_ui::default_dest();
+            v.push(
+                self.muted(format!("It will be saved as {}", dest.display()))
+                    .into_any_element(),
+            );
+            let save = match gate(&self.w, ActionKind::SaveDiagnostics) {
+                Ok(()) => self.btn(
+                    "diag-save",
+                    "Save",
+                    Bk::Primary,
+                    Act::Group(GroupAction::SaveDiagnostics {
+                        options: opts,
+                        dest,
+                    }),
+                    cx,
+                ),
+                Err(why) => self.btn_off("diag-save", "Save", &why, cx),
+            };
+            v.push(save.into_any_element());
+        } else {
+            v.push(
+                self.muted("Preview first. Only what you see is saved.")
+                    .into_any_element(),
+            );
+        }
+        if let Some(m) = self.diag.message.clone() {
+            v.push(self.muted(m).into_any_element());
+        }
+        v
+    }
+
     fn about(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let pal = self.pal();
         let u_info = self.w.update.clone();
-        let check = self.btn_off("check-update", "Check for updates", "not available yet", cx);
+        let check = match crate::features::gate(&self.w, crate::features::ActionKind::CheckUpdates)
+        {
+            Ok(()) => self.btn(
+                "check-update",
+                "Check for updates",
+                Bk::Secondary,
+                Act::Group(crate::features::GroupAction::CheckUpdates),
+                cx,
+            ),
+            Err(why) => self.btn_off("check-update", "Check for updates", &why, cx),
+        };
+        let auto = self.toggle(
+            "update-check",
+            "Check for updates automatically",
+            self.w.features.toggles.update_check,
+            true,
+            Act::Toggle("update-check".into()),
+            cx,
+        );
         let up: Vec<AnyElement> = vec![
-            self.muted("Checking for updates is not available yet.").into_any_element(),
+            self.muted(crate::about_ui::update_text(self.w.features.update.as_ref()))
+                .into_any_element(),
             check.into_any_element(),
+            auto.into_any_element(),
             self.muted("WoW Sync never replaces itself. To update, download the new version and install it; your sync data and recovery copies are kept.").into_any_element(),
         ];
         let copy = self.btn(

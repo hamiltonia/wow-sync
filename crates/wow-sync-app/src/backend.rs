@@ -33,6 +33,8 @@ pub enum Cmd {
     Enroll(Target, EnrollRequest),
     Reconfirm(ReconfirmRequest),
     SaveSettings(AppSettings),
+    /// The About toggles; stored in their own file by the service.
+    SaveToggles(wow_sync_runtime::AppToggles),
     /// A group command from a feature screen; its result is published for the screen to show.
     Group(GroupAction),
 }
@@ -61,6 +63,7 @@ pub struct Shared {
     pub pause_damaged: bool,
     pub activity: Vec<ActivityEntry>,
     pub settings: AppSettings,
+    pub toggles: wow_sync_runtime::AppToggles,
     pub busy: bool,
     pub last_check_ms: Option<i64>,
     /// When the scheduler will next run a check on its own; `None` while none is scheduled
@@ -179,8 +182,10 @@ fn refresh(svc: &mut SliceService, shared: &SharedState, wake: &Sender<()>, chec
     let st = svc.status();
     let decisions = svc.offered_decisions().to_vec();
     let (pause, act, settings) = (svc.pause_state(), svc.activity_log(300), svc.app_settings());
+    let toggles = svc.toggles();
     publish(shared, wake, |g| {
         g.started = true;
+        g.toggles = toggles;
         g.snapshot = st;
         g.decisions = decisions;
         g.paused_since = match pause {
@@ -295,6 +300,13 @@ fn run(
                 if let Some(s) = svc.as_ref() {
                     let _ = s.save_app_settings(&st);
                     publish(&shared, &wake, |g| g.settings = st);
+                }
+                continue;
+            }
+            Some(Cmd::SaveToggles(t)) => {
+                if let Some(s) = svc.as_ref() {
+                    let _ = s.save_toggles(&t);
+                    publish(&shared, &wake, |g| g.toggles = t);
                 }
                 continue;
             }
