@@ -123,6 +123,44 @@ No GUI window was driven by the worker. On Windows, with a demo group:
   both flags per paused folder.
 - The Settings page lists add-ons from `w.addons`; exceptions need `FolderKey`-valid add-on keys.
 
+## 6b. Later commits (after snapshot merge `fba5b63`)
+
+| Item | SHA | Notes |
+|---|---|---|
+| Merge main (snapshot) | `e2f3208` | |
+| Connect snapshot | `8f74af9` | Computers, history, Settings fed from real snapshot. |
+| Item 2 headline/tray | `9b0abb1` | `review_needed`, retired-self, Removing/Waiting. |
+| Item 7 removed | `fc82979`, fix `0754875` | Restore disabled (`RESTORE_UNAVAILABLE`). |
+| Item 8 About/diagnostics | `a702bcc` | updates, toggles, export/save. |
+| B macOS behaviour | `18785ca` | `platform.rs`, socket single-instance, hide/show, paths, offset. |
+| A attach_os_services | `e9f4765`, fix `ab0579e` | `open_service` calls attach at startup and Enroll. |
+
+A-38 controls (all caught by tests; reverted; tree clean):
+
+| Case | Mutation | Result |
+|---|---|---|
+| snapshot-connect | `.filter(\|r\| !r.is_this)` removed | caught |
+| headline | dropped `!core_blocks_pause` guard | caught |
+| removed | `\|\| true` on awaiting line | caught |
+| about-diagnostics | preview not cleared on option toggle | caught |
+| attach-os-services | `os_services && false` | caught |
+
+macOS items (second launch raise, hide/show, host name, state dir, `date +%z` offset): code
+cfg-gated and NOT compiled/run on Windows; only pure helpers (`mac_state_dir`, `parse_utc_offset`,
+`show_socket_path`, visibility request) are tested (case `macos-platform-logic`). Rest NOT RUN.
+
+Manual steps for R4-check on macOS: launch twice (second raises first); close window (hides to
+menu bar; tray Show restores); confirm computer name, `~/Library/Application Support/WoW Sync`,
+and local time. On Windows: inline retire panel Cancel is not default-focused (known gap);
+confirm notifications fire after startup (os services attached unless developer mode).
+
+Remaining snapshot gaps (handover to R4-integrate): active-peer enrollments (Retire/master
+disabled); settings units/master/accounts/paused flags; `rejections` hashes and `older_peer`;
+retirement/held dates; removal hash in `RemovedRow` (Restore disabled); resume-sheet
+`here_changed`/`shared_newer`; DataAtRisk notice producer; diagnostics journals,
+`process_memory_mib`, `os_version`; Keep/Resume screens; diagnostics save uses a default path (no
+file picker). `settings_ui.rs`, `rollback_ui.rs` keep `allow(dead_code)`.
+
 ## 7. Verify
 
 Both run on the final tree (Windows 11 x64, native, worktree `D:\GitHub\wow-sync.worktrees\R4-app`,
