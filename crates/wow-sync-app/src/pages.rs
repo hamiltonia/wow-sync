@@ -827,7 +827,7 @@ impl Shell {
         col = col.child(self.muted(crate::removed_ui::intro(removed.len())));
         for (i, r) in removed.into_iter().enumerate() {
             let mut body: Vec<AnyElement> = vec![
-                self.muted(&format!("{} ({})", r.title, r.folders))
+                self.muted(format!("{} ({})", r.title, r.folders))
                     .into_any_element(),
                 self.muted(&r.provenance).into_any_element(),
             ];
