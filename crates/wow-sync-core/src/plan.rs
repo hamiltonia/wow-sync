@@ -9,6 +9,7 @@ use crate::package::ClientInfo;
 use crate::paths::{FolderKey, RelPath};
 use crate::records::{
     encode, ApplyReport, CodeState, FolderTreeRecord, OpKind, PendingRecord, SettingsFileOp,
+    SettingsRoot,
 };
 use crate::target::{GroupTarget, PackageTarget};
 use crate::variant::ConfirmedVariant;
@@ -250,6 +251,8 @@ pub struct PackageApply {
     pub removals: Vec<Sha256>,
     pub settings_ops: Vec<SettingsFileOp>,
     pub pending_records: Vec<PendingRecord>,
+    /// Every settings unit this operation applies to, captured or missing (contracts.md §2.3).
+    pub settings_roots: Vec<SettingsRoot>,
 }
 
 impl PackageApply {
@@ -272,6 +275,7 @@ impl PackageApply {
             removals: Vec::new(),
             settings_ops: Vec::new(),
             pending_records: Vec::new(),
+            settings_roots: Vec::new(),
         }
     }
 }
