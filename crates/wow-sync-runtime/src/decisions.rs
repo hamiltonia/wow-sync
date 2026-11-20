@@ -6,8 +6,10 @@
 //! in step 3.
 #![allow(dead_code)]
 
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use wow_sync_adapters::authority_store;
+use wow_sync_adapters::localstate::LocalState;
 use wow_sync_adapters::provider::ProviderRoot;
 use wow_sync_adapters::{FsError, FsErrorKind};
 use wow_sync_core::authority::AuthorityRecord;
@@ -20,7 +22,8 @@ use wow_sync_core::retire::OwnStanding;
 
 const AUTHORITY_LIMIT: u64 = 16 * 1024 * 1024;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub(crate) enum KeepWhy {
     /// This computer's own retirement is unresolved: nothing is published yet.
     Held,
@@ -102,6 +105,14 @@ impl KeptQueue {
         self.items.len()
     }
 
+    pub fn items(&self) -> &[KeptRecord] {
+        &self.items
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
     /// The owner cancels a kept decision before it is written.
     pub fn cancel(&mut self, hash: &Sha256) -> bool {
         let n = self.items.len();
@@ -124,6 +135,71 @@ impl KeptQueue {
                 discarded: vec![],
             },
         }
+    }
+}
+
+const KEPT_LIMIT: u64 = 8 * 1024 * 1024;
+
+#[derive(Serialize, Deserialize)]
+struct KeptWire {
+    hash: Sha256,
+    /// The record's exact canonical JSON text.
+    record: String,
+    reserved_seq: u64,
+    why: KeepWhy,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+struct KeptFile {
+    items: Vec<KeptWire>,
+}
+
+fn kept_name(group: &GroupId) -> String {
+    format!("kept-records-{group}.json")
+}
+
+impl KeptQueue {
+    /// A missing or damaged file is an empty queue. An item whose bytes do not hash to its name
+    /// is dropped, so a damaged queue can never write a record under a name it does not match.
+    pub fn load(state: &LocalState, group: &GroupId) -> Self {
+        let file: KeptFile = state
+            .read(&kept_name(group), KEPT_LIMIT)
+            .ok()
+            .flatten()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
+        let mut q = Self::default();
+        for w in file.items {
+            let bytes = w.record.into_bytes();
+            if sha256(&bytes) == w.hash {
+                q.push(KeptRecord {
+                    hash: w.hash,
+                    bytes,
+                    reserved_seq: w.reserved_seq,
+                    why: w.why,
+                });
+            }
+        }
+        q
+    }
+
+    pub fn save(&self, state: &LocalState, group: &GroupId) -> Result<(), FsError> {
+        let file = KeptFile {
+            items: self
+                .items
+                .iter()
+                .filter_map(|k| {
+                    Some(KeptWire {
+                        hash: k.hash,
+                        record: String::from_utf8(k.bytes.clone()).ok()?,
+                        reserved_seq: k.reserved_seq,
+                        why: k.why,
+                    })
+                })
+                .collect(),
+        };
+        let bytes = serde_json::to_vec(&file).expect("plain data serializes");
+        state.write_atomic(&kept_name(group), &bytes)
     }
 }
 
@@ -291,6 +367,31 @@ mod tests {
         assert!(q.cancel(&a.hash));
         assert!(!q.cancel(&a.hash));
         assert_eq!(q.settle(OwnStanding::Active, false, true).to_write, vec![b]);
+    }
+
+    #[test]
+    fn a_kept_queue_survives_a_restart_and_a_tampered_item_is_dropped() {
+        let t = TempDir::new();
+        let state = LocalState::open_at(t.path()).unwrap();
+        let g = GroupId::parse(&hex('9')).unwrap();
+        let a = KeptRecord::reserve(&rec(5), 7, KeepWhy::Held);
+        let b = KeptRecord::reserve(&rec(6), 8, KeepWhy::Paused);
+        let mut q = KeptQueue::default();
+        q.push(a.clone());
+        q.push(b.clone());
+        q.save(&state, &g).unwrap();
+        let back = KeptQueue::load(&state, &g);
+        assert_eq!(back.items(), &[a.clone(), b.clone()]);
+        let other = GroupId::parse(&hex('8')).unwrap();
+        assert!(KeptQueue::load(&state, &other).is_empty());
+        let name = kept_name(&g);
+        let text = String::from_utf8(state.read(&name, KEPT_LIMIT).unwrap().unwrap()).unwrap();
+        let tampered = text.replacen("cutoff_seq\\\": 5,", "cutoff_seq\\\": 50,", 1);
+        assert_ne!(tampered, text, "the fixture must actually change a byte");
+        state.write_atomic(&name, tampered.as_bytes()).unwrap();
+        assert_eq!(KeptQueue::load(&state, &g).items(), &[b]);
+        state.write_atomic(&name, b"{ not json").unwrap();
+        assert!(KeptQueue::load(&state, &g).is_empty());
     }
 
     #[test]
