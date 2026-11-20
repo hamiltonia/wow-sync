@@ -1175,6 +1175,198 @@ mod tests {
         }
     }
 
+    fn eref_hash(pairs: &[(&str, &[u8])]) -> (Vec<crate::kinds::TreeEntry>, Sha256) {
+        let entries: Vec<crate::kinds::TreeEntry> = pairs
+            .iter()
+            .map(|(k, t)| crate::kinds::TreeEntry {
+                key: FolderKey::lossy(k),
+                tree: sha256(t),
+            })
+            .collect();
+        let v: Vec<(FolderKey, Sha256)> = entries.iter().map(|e| (e.key.clone(), e.tree)).collect();
+        (entries, crate::hash::package_hash(&v))
+    }
+
+    #[test]
+    fn golden_bytes_of_every_remaining_kind_part_and_index_chunk() {
+        // T-C01-golden-bytes: readd, code-choice, rejection, lift, policy, revision, part, index
+        use crate::kinds::*;
+        let suite = || vec![FolderKey::lossy("suite")];
+        let mut all: Vec<(&str, Vec<u8>, AuthorityKind)> = Vec::new();
+
+        all.push((
+            "readd-1.json",
+            encode(&readd_with(Known {
+                seen: vec![Seen {
+                    enrollment_id: enrollment(2),
+                    seq: 3,
+                }],
+                extra: vec![sha256(b"mirrored")],
+                parts: vec![],
+            })),
+            AuthorityKind::Readd,
+        ));
+
+        let (tree_a, hash_a) = eref_hash(&[("suite", b"a")]);
+        let (tree_b, hash_b) = eref_hash(&[("suite", b"b")]);
+        let choice = CodeChoice {
+            group_id: group_id(),
+            issuer: issuer(1, 6),
+            reason: ChoiceReason::Ambiguous,
+            action: ChoiceAction::Keep,
+            folders: suite(),
+            keep: Some(KeepEntry {
+                package_hash: hash_a,
+                folders: vec![ManifestFolder {
+                    key: FolderKey::lossy("suite"),
+                    name: "Suite".into(),
+                    tree: sha256(b"a"),
+                }],
+            }),
+            considered: {
+                let mut v = vec![
+                    Considered {
+                        package_hash: hash_a,
+                        folders: tree_a.clone(),
+                        holders: vec![enrollment(1)],
+                    },
+                    Considered {
+                        package_hash: hash_b,
+                        folders: tree_b.clone(),
+                        holders: vec![enrollment(2)],
+                    },
+                ];
+                v.sort();
+                v
+            },
+            exclude: vec![],
+            allow_again: None,
+            known: Default::default(),
+            considered_parts: vec![],
+            exclude_parts: vec![],
+            allow_again_parts: vec![],
+            written_unix_ms: 9,
+        };
+        all.push((
+            "code-choice-1.json",
+            encode(&choice),
+            AuthorityKind::CodeChoice,
+        ));
+
+        let rejection = Rejection {
+            group_id: group_id(),
+            issuer: issuer(1, 7),
+            folders: suite(),
+            rejected: RejectedEntry {
+                package_hash: hash_b,
+                version_label: "2.0".into(),
+                folders: tree_b.clone(),
+            },
+            recovered: RecoveredEntry {
+                package_hash: hash_a,
+                folders: tree_a.clone(),
+            },
+            considered: {
+                let mut v = vec![
+                    Considered {
+                        package_hash: hash_a,
+                        folders: tree_a,
+                        holders: vec![enrollment(1)],
+                    },
+                    Considered {
+                        package_hash: hash_b,
+                        folders: tree_b,
+                        holders: vec![enrollment(2)],
+                    },
+                ];
+                v.sort();
+                v
+            },
+            settings: RejectionSettings::NotApplicable,
+            known: Default::default(),
+            considered_parts: vec![],
+            written_unix_ms: 9,
+        };
+        let rej_bytes = encode(&rejection);
+        let rej_hash = sha256(&rej_bytes);
+        all.push(("rejection-1.json", rej_bytes, AuthorityKind::Rejection));
+
+        let lift = Lift {
+            group_id: group_id(),
+            issuer: issuer(1, 8),
+            folders: suite(),
+            lifts: vec![rej_hash],
+            known: Default::default(),
+            written_unix_ms: 9,
+        };
+        all.push(("rejection-lift-1.json", encode(&lift), AuthorityKind::Lift));
+
+        let policy = policy_with(vec![rule(1), rule(2)], vec![]);
+        let pol_bytes = encode(&policy);
+        let pol_hash = sha256(&pol_bytes);
+        all.push((
+            "settings-policy-1.json",
+            pol_bytes,
+            AuthorityKind::SettingsPolicy,
+        ));
+
+        let revision = SettingsRevision {
+            group_id: group_id(),
+            issuer: issuer(1, 9),
+            unit: crate::ids::SettingsUnit {
+                folder: FolderKey::lossy("suite"),
+                identity: crate::ids::Identity::account("ACC").unwrap(),
+            },
+            kind: RevisionKind::Push,
+            checkpoint: sha256(b"checkpoint"),
+            parents: vec![],
+            parents_parts: vec![],
+            policy: vec![pol_hash],
+            code_package_hash: None,
+            known: Default::default(),
+            written_unix_ms: 9,
+        };
+        all.push((
+            "settings-revision-1.json",
+            encode(&revision),
+            AuthorityKind::SettingsRevision,
+        ));
+
+        let part = Part {
+            group_id: group_id(),
+            of: PartOf::Known,
+            items: vec![PartItem::Seen(Seen {
+                enrollment_id: enrollment(2),
+                seq: 4,
+            })],
+            more: vec![],
+        };
+        all.push(("authority-part-1.json", encode(&part), AuthorityKind::Part));
+
+        for (name, bytes, kind) in &all {
+            golden(name, bytes);
+            let h = sha256(bytes);
+            let r = decode_authority(bytes, &h).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            assert_eq!(r.kind(), *kind, "{name}");
+            let mut l = Ledger::new();
+            l.learn(h, *kind, vec![], None, Some(bytes));
+            assert!(matches!(l.body(&h), Some(Body::Record(_))), "{name}");
+        }
+
+        let chunk = AuthorityIndexChunk {
+            group_id: group_id(),
+            enrollment_id: enrollment(2),
+            prev: None,
+            refs: refs(0..2),
+        };
+        let bytes = encode(&chunk);
+        golden("authority-index-1.json", &bytes);
+        assert_eq!(
+            decode::<AuthorityIndexChunk>(&bytes, MAX_INDEX_BYTES).unwrap(),
+            chunk
+        );
+    }
+
     #[test]
     fn readd_with_unreadable_issuer_indexes_lists_every_record_in_extra_parts() {
         // T-R4D4-mirror-only-readd

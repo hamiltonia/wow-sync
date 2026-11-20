@@ -1,0 +1,29 @@
+{
+  "schema": "wowsync.settings-revision/1",
+  "group_id": "11111111111111111111111111111111",
+  "issuer": {
+    "computer_id": "01010101010101010101010101010101",
+    "enrollment_id": "01010101010101010101010101010101",
+    "issued_at_seq": 9
+  },
+  "unit": {
+    "folder": "suite",
+    "identity": {
+      "account": "ACC"
+    }
+  },
+  "kind": "push",
+  "checkpoint": "47320987f9a49d5b00119b960f247a956773f57543982b8bfcb6da5bb3afd9ef",
+  "parents": [],
+  "parents_parts": [],
+  "policy": [
+    "7e78166656e2a405db9a67cd5e4d7dbdd03aade9139afa95e5cd4b22e140c8d1"
+  ],
+  "code_package_hash": null,
+  "known": {
+    "seen": [],
+    "extra": [],
+    "parts": []
+  },
+  "written_unix_ms": 9
+}
