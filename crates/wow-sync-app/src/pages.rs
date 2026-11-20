@@ -821,7 +821,31 @@ impl Shell {
         if n == 0 {
             col = col.child(self.muted("No add-ons match this filter."));
         }
-        col.child(list).into_any_element()
+        col = col.child(list);
+        let removed = crate::removed_ui::lines(&self.w.features.removed);
+        col = col.child(self.heading("Removed", 2));
+        col = col.child(self.muted(crate::removed_ui::intro(removed.len())));
+        for (i, r) in removed.into_iter().enumerate() {
+            let mut body: Vec<AnyElement> = vec![
+                self.muted(&format!("{} ({})", r.title, r.folders))
+                    .into_any_element(),
+                self.muted(&r.provenance).into_any_element(),
+            ];
+            if let Some(a) = &r.awaiting {
+                body.push(self.muted(a).into_any_element());
+            }
+            body.push(
+                self.btn_off(
+                    &format!("removed-restore-{i}"),
+                    "Restore",
+                    crate::removed_ui::RESTORE_UNAVAILABLE,
+                    cx,
+                )
+                .into_any_element(),
+            );
+            col = col.child(self.panel(&r.title, body));
+        }
+        col.into_any_element()
     }
 
     fn addon_detail(&mut self, key: &str, cx: &mut Context<Self>) -> AnyElement {

@@ -425,6 +425,8 @@ pub struct FeatureData {
     pub allow_again: Vec<crate::computers_ui::AllowAgainRow>,
     /// Held releases per add-on for the history list. Pending snapshot field (R4-integrate).
     pub history: Vec<crate::rollback_ui::ReleaseRow>,
+    /// Removals the group has recorded, for the Removed section.
+    pub removed: Vec<wow_sync_runtime::RemovedRow>,
     /// Name of a live member whose WoW Sync can't block versions (Q-84), which blocks go-back.
     pub older_peer: Option<String>,
     /// Name of the settings master, when one is chosen.
@@ -446,6 +448,7 @@ impl Default for FeatureData {
             retired: Vec::new(),
             allow_again: Vec::new(),
             history: Vec::new(),
+            removed: Vec::new(),
             older_peer: None,
             master: None,
             review_needed: false,
@@ -461,6 +464,7 @@ impl Default for FeatureData {
 pub fn apply_snapshot(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot) {
     f.hold = s.hold.clone();
     f.review_needed = s.review_needed;
+    f.removed = s.removed.clone();
     f.standing = match (&s.this_retirement, &s.hold) {
         (Some(_), _) => Standing::Retired {
             on: String::new(),

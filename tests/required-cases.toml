@@ -1219,6 +1219,14 @@ id = "R4-app:headline"
 tier = "offline"
 tests = ["model::tests::review_needed_retired_held_and_removing_have_their_own_headlines"]
 
+[[case]]
+id = "R4-app:removed"
+tier = "offline"
+tests = [
+  "removed_ui::tests::lines_name_the_remover_and_who_is_still_awaited",
+  "removed_ui::tests::nobody_awaited_means_no_waiting_line_and_empty_means_the_empty_text",
+]
+
 # <<< section: R4-app
 
 # >>> section: R4-mac-kit

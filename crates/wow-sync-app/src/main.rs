@@ -19,6 +19,7 @@ mod decisions_ui;
 mod features;
 mod model;
 mod pages;
+mod removed_ui;
 mod rollback_ui;
 mod settings_ui;
 mod setup;
