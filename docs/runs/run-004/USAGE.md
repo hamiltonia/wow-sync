@@ -21,7 +21,7 @@ Baseline: the cumulative orchestrator-session total at run-004 start is
 | 11 | R4-notify-diag | implementation / claude-sonnet-5.5 | `d94edf6a` | 357.2 | Merged `4dd9d7b` (`fe9a626`); macOS fix merged `cfa718b` (`2a6024c`), CI green on all platforms at `979b8de`. T-27-11 Windows toast accepted (name not seen on screen), T-28-13 one live GET returned 404 (no release), macOS rows to R4-mac-kit, T-33-10 to R4-app. macOS CI failed on a Windows-only test helper (`update_http.rs:148`); follow-up sent |
 | 12 | R4-app | implementation / claude-sonnet-5.5 | `9215a078` | 842.7 | Packet `45a1c3e`. Merged `c62dc6c`: control map, decisions, retire/allow again, rollback, settings, snapshot connect, headline/tray, removed section, About/diagnostics, `attach_os_services` call (fixes OS services never attaching), macOS app behaviour (NOT RUN). macOS CI failed on a symlinked temp dir in a test; fix `fbd4237` merged `023ebbd`, CI green on all jobs. Snapshot wiring merged `511c704` (peers/retire, settings master/exceptions/resume, removed restore, AllowAgain/older_peer, settings Share/Choose/Restore). Remaining gaps: no Keep/Resume screen, no account list to turn on settings, settings off until Q-77, diagnostics save has no picker |
 | 13 | R4-mac-kit | implementation / claude-sonnet-5.5 | `04f2b6e1` | 151.1 | Merged `846dc43` (scripts, `MAC-OWNER.md`) and the bundle follow-up (`bcda6d8`, `d552364`). All macOS rows NOT RUN until the owner runs the kit. Gaps routed to R4-app and R4-integrate |
-| 14 | R4-check | verification / gpt-6.1-sol | `b53da531` | — | Running (worktree from `511c704`) |
+| 14 | R4-check | verification / gpt-6.1-sol | `b53da531` | 377.7 | Evidence merged `f4accbe` (`83e5946`). Tiers/controls PASS; Windows GUI FAIL; GUI recovery FAIL; memory PASS (37.26 MiB, 2.28 s); CI BLOCKED (no network in packet); records FAIL (V-11, fixed by orchestrator). 12 findings V-01..V-12; fixes routed to R4-integrate (V-01, V-05 data, V-06) and R4-app (V-02..V-05, V-07..V-10) |
 
 Follow-up R4-core-settings (worker 8, same agent): a #[cfg(windows)] junction test was listed in an offline case, so main CI `c0d6a93` failed on macOS. Fixed in `577a8ca` (moved to native case `R4-core-settings:adapters-native`), merged `cb9931e`.
 
@@ -52,5 +52,6 @@ Stopped at the owner barrier: R4D-28 needs an owner-authorized bounded amendment
 | C3 snapshot + notify wiring merged; R4-app pass 4, R4-mac-kit launched | 29,610.5 | 12,197.5 |
 | R4-app + mac-kit merged; CI green; integrate pass 12 running | 30,518.4 | 13,105.4 |
 | R4-app wiring merged; R4-check launched | 31,072.1 | 13,659.1 |
+| R4-check evidence merged; fix round sent | 31,559.2 | 14,146.2 |
 
-Design review passed. Phase C remains blocked only on the PENDING OWNER product questions.
+Design review passed. The owner accepted the defaults (D-25), so phase C started; C1, C2 and C3 are merged (rows 6–10), and phase D/E work is recorded above. Owner barriers still open: Q-77 (settings size cap) and the macOS runs in `MAC-OWNER.md`.

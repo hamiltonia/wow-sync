@@ -2866,6 +2866,50 @@ mod tests {
     }
 
     #[test]
+    fn the_snapshot_lists_the_account_folders_consent_can_include() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        // Negative: no WTF folder at all gives an empty list.
+        assert!(a.svc.status().settings.available_accounts.is_empty());
+
+        let account = |pc: &Pc, name: &str| pc.install.variant_dir.join("WTF/Account").join(name);
+        std::fs::create_dir_all(account(&a, "ZED")).unwrap();
+        std::fs::create_dir_all(account(&a, "ACC")).unwrap();
+        std::fs::write(account(&a, "stray.txt"), b"not an account").unwrap();
+        let st = a.svc.status().settings;
+        assert_eq!(st.available_accounts, vec!["ACC", "ZED"]);
+        assert!(!st.enabled);
+        // The listed names are exactly what consent takes.
+        a.svc
+            .command(Command::EnableSettings {
+                included_accounts: st.available_accounts[..1].to_vec(),
+            })
+            .unwrap();
+        let st = a.svc.status().settings;
+        assert!(st.enabled);
+        assert_eq!(st.accounts, vec!["ACC"]);
+        assert_eq!(st.available_accounts, vec!["ACC", "ZED"]);
+
+        // Negative: another computer's accounts are not listed here, and a retired one has none.
+        assert!(b.svc.status().settings.available_accounts.is_empty());
+        std::fs::create_dir_all(account(&b, "BEE")).unwrap();
+        a.svc
+            .command(Command::Retire {
+                subject: ref_of(&b),
+            })
+            .unwrap();
+        synced(&mut a);
+        synced(&mut b);
+        assert!(b.svc.status().settings.available_accounts.is_empty());
+    }
+
+    #[test]
     fn the_snapshot_units_offer_no_actionable_heads_when_disabled_or_retired() {
         use crate::settings_cycle::SettingsUnitStatus as S;
         let lab = Lab::new();
@@ -3909,6 +3953,37 @@ mod tests {
             .filter(|n| n.body.contains("9.9.9"))
             .count();
         assert_eq!(again, 1, "the same release is not announced twice");
+    }
+
+    #[test]
+    fn the_diagnostics_export_records_the_journals_left_on_disk() {
+        use wow_sync_core::diagnostics::ExportOptions;
+        let export = |pc: &mut Pc| {
+            let Ok(CommandOutcome::Exported(e)) = pc.svc.command(Command::ExportDiagnostics {
+                options: ExportOptions::default(),
+            }) else {
+                panic!("preview refused");
+            };
+            e.text
+        };
+        let mut f = two_package_fixture();
+        let clean = export(&mut f.b);
+        assert!(!clean.contains("journal:"), "{clean}");
+        f.b.svc.inject_crash_after(Some(3));
+        assert!(synced(&mut f.b).crashed);
+        assert!(f.b.journals() > 0);
+        let text = export(&mut f.b);
+        assert_eq!(
+            text.matches("journal: pending").count(),
+            f.b.journals(),
+            "{text}"
+        );
+        f.b.restart();
+        for _ in 0..3 {
+            synced(&mut f.b);
+        }
+        assert_eq!(f.b.journals(), 0);
+        assert!(!export(&mut f.b).contains("journal:"));
     }
 
     #[test]

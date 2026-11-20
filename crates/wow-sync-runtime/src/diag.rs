@@ -274,7 +274,7 @@ pub fn input_from(
         addons,
         hold_scope,
         plan_blocks,
-        journals: Vec::new(),
+        journals: snap.journal_states.clone(),
         activity: activity
             .iter()
             .filter_map(|a| {

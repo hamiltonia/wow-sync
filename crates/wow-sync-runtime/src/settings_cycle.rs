@@ -315,6 +315,28 @@ pub struct SettingsSnapshot {
     /// Several competing policies exist: nothing is chosen for the owner.
     pub policy_conflict: bool,
     pub paused: Vec<PausedFolder>,
+    /// `WTF\Account` folders this computer has that consent could include (V-05). Link or
+    /// reparse-point entries are not offered; nothing under them is read.
+    pub available_accounts: Vec<String>,
+}
+
+/// The account folder names under `<variant>\WTF\Account`, sorted. A missing `WTF` or `Account`
+/// folder, or an unreadable one, gives an empty list.
+pub fn available_accounts(variant_dir: &std::path::Path) -> Vec<String> {
+    use wow_sync_adapters::fs_safe::{ReparseKind, WtfScope};
+    let Ok(Some(scope)) = WtfScope::open(variant_dir, false) else {
+        return Vec::new();
+    };
+    let Ok(entries) = scope.root().list("Account") else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
+        .into_iter()
+        .filter(|e| e.is_dir && e.reparse == ReparseKind::None)
+        .map(|e| e.name)
+        .collect();
+    names.sort();
+    names
 }
 
 pub fn settings_snapshot(
@@ -358,6 +380,7 @@ pub fn settings_snapshot(
         exceptions,
         policy_conflict,
         paused,
+        available_accounts: Vec::new(),
     }
 }
 
