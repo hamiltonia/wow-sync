@@ -6,6 +6,20 @@ use std::fmt;
 /// Display application id registered for toasts (see `winproc::register_app_user_model_id`).
 pub const APP_ID: &str = "WoWSync.App";
 pub const APP_NAME: &str = "WoW Sync";
+/// Bundle identifier macOS needs for notifications to read "WoW Sync": the packaged app's
+/// `CFBundleIdentifier` (with `CFBundleName`/`CFBundleDisplayName` = "WoW Sync") must be exactly
+/// this, and the app must be installed so macOS can find it.
+pub const MACOS_BUNDLE_ID: &str = "com.wowsync.app";
+
+/// The macOS sender identity for an app id: the product id maps to [`MACOS_BUNDLE_ID`]; any
+/// other id (a scoped test identity) is already a bundle identifier and is used as given.
+pub fn macos_bundle_identifier(app_id: &str) -> String {
+    if app_id == "never" {
+        MACOS_BUNDLE_ID.to_string()
+    } else {
+        app_id.to_string()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedNotice {
@@ -61,7 +75,14 @@ impl Notifier for OsNotifier {
         n.summary(&notice.title).body(&notice.body);
         #[cfg(windows)]
         n.app_id(&self.app_id);
-        #[cfg(not(windows))]
+        #[cfg(target_os = "macos")]
+        {
+            // The sender is chosen once per process; a repeat call reports "already set", which
+            // is not a delivery failure. If the bundle is not installed macOS falls back to its
+            // default sender and the name check (Q-63) is the owner's to judge.
+            let _ = notify_rust::set_application(&macos_bundle_identifier(&self.app_id));
+        }
+        #[cfg(not(any(windows, target_os = "macos")))]
         let _ = &self.app_id;
         if notice.urgent {
             n.timeout(notify_rust::Timeout::Never);
@@ -125,7 +146,12 @@ mod tests {
     #[test]
     #[ignore = "manual: shows a real OS notification"]
     fn manual_toast_shows_the_app_name() {
+        // Windows needs a registered scoped identity; macOS uses the installed app's bundle id.
+        #[cfg(windows)]
         let id = "WoWSync.ManualToastTest";
+        #[cfg(not(windows))]
+        let id = APP_ID;
+        #[cfg(windows)]
         crate::winproc::register_app_user_model_id(id, "WoW Sync", None).unwrap();
         let n = OsNotifier::with_app_id(id);
         let r = n.deliver(&RenderedNotice {
@@ -134,8 +160,19 @@ mod tests {
             urgent: false,
         });
         std::thread::sleep(std::time::Duration::from_secs(3));
+        #[cfg(windows)]
         crate::winproc::unregister_app_user_model_id(id).unwrap();
         r.unwrap();
+    }
+
+    #[test]
+    fn the_product_id_maps_to_the_bundle_id_and_a_scoped_id_is_kept() {
+        assert_eq!(macos_bundle_identifier(APP_ID), "com.wowsync.app");
+        assert_eq!(
+            macos_bundle_identifier("com.example.scoped"),
+            "com.example.scoped"
+        );
+        assert_ne!(macos_bundle_identifier("WoWSync.Other"), MACOS_BUNDLE_ID);
     }
 
     #[test]

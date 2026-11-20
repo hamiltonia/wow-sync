@@ -1075,6 +1075,13 @@ tests = [
     "e2e::tests::diagnostics_preview_and_save_match_and_never_land_in_the_shared_or_install_folders",
     "control::tests::toggles_default_on_persist_apart_from_the_window_settings",
 ]
+
+[[case]]
+id = "R4-integrate:macos-notification-identity"
+tier = "offline"
+tests = [
+    "notify::tests::the_product_id_maps_to_the_bundle_id_and_a_scoped_id_is_kept",
+]
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag
