@@ -324,6 +324,27 @@ separate fields/types carry the data instead.
   item 4 (diagnostics `os_version`, `process_memory_mib`, journals, DataAtRisk producer) not done
   this pass.
 
+## Pass 14: R4-check findings
+
+### V-01 design-gap finding (no code change)
+
+Reproduced in a service e2e probe (removed afterwards, tree unchanged): B holds a live keep of its
+own v1, then installs v2 by hand. In the first cycle `decision_items` does raise
+`NewVersionAfterDecision` (offer present), but the same cycle applies the keep's level-6
+constraint and puts v1 back (recovery point taken). v2 was never published, so on the next cycle
+no copy of v2 exists in any observation and the offer disappears; nothing is shown.
+
+Design text: contracts.md §5.3 ("Live keep ... install exactly the kept tree"; Q-49: "The keep
+stays: the kept copy remains the target until the user chooses. Nothing is installed
+automatically") and ops.md §1.5 ("the kept version stays installed until the user chooses
+explicitly"). So reverting to the kept copy is as designed, and the design does not say to adopt
+v2. The gap is that an unpublished local copy that a keep overwrites is only a recovery point, so
+the `NewVersionAfterDecision` item for it is lost after one cycle. Owner decision needed: either
+(a) a keep must not overwrite an unpublished newer local install (it should be offered first and
+the apply held, a change to contracts §4.4/apply), or (b) the offer must persist until answered
+(a recorded observation of the displaced copy). Not changed here: both need core
+target/decide/apply changes outside this packet's files.
+
 ## Verification
 
 Final tree: `cargo xtask verify --tier offline` PASS; `cargo xtask verify --tier native` PASS
