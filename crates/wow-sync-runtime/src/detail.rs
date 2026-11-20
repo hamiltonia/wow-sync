@@ -360,6 +360,130 @@ pub fn member_rows(
     out
 }
 
+/// One package the group has removed and that is still removed (the "Removed" section).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemovedRow {
+    pub title: String,
+    pub folders: Vec<String>,
+    /// Who removed it and how it was noticed, by the name its owner chose.
+    pub provenance: String,
+    /// Computers that have not yet acknowledged the removal.
+    pub awaiting: Vec<String>,
+}
+
+fn how(e: wow_sync_core::kinds::RemovalEvidence) -> &'static str {
+    use wow_sync_core::kinds::RemovalEvidence as E;
+    match e {
+        E::UserAction => "removed it",
+        E::UserConfirmed => "confirmed it was removed",
+        E::Observed => "noticed it was missing",
+        E::FolderDrop => "noticed an upgrade dropped it",
+        E::Rollback => "rolled it back",
+    }
+}
+
+/// Live removals as rows, with provenance by computer name (UG-22). Nothing is decided here.
+#[allow(dead_code)]
+pub fn removed_rows(
+    ledger: &wow_sync_core::ledger::Ledger,
+    derived: &wow_sync_core::ledger::Derived,
+    names: &BTreeMap<ComputerId, String>,
+    this: &ComputerId,
+) -> Vec<RemovedRow> {
+    use wow_sync_core::authority::AuthorityRecord;
+    let name = |c: &ComputerId| -> String {
+        if c == this {
+            "this computer".to_string()
+        } else {
+            names
+                .get(c)
+                .cloned()
+                .unwrap_or_else(|| "another computer".into())
+        }
+    };
+    let mut out = Vec::new();
+    for unit in wow_sync_core::removal::removal_units(ledger, derived) {
+        for h in &unit.removals {
+            let Some(AuthorityRecord::Removal(r)) = ledger.record(h) else {
+                continue;
+            };
+            let awaiting = r
+                .audience
+                .iter()
+                .filter(|e| {
+                    r.folders
+                        .iter()
+                        .any(|m| wow_sync_core::removal::owes(ledger, derived, e, h, &m.key))
+                })
+                .map(|e| name(&e.computer_id))
+                .collect();
+            out.push(RemovedRow {
+                title: strip_colour_codes(&r.title),
+                folders: r.folders.iter().map(|m| m.name.clone()).collect(),
+                provenance: format!("{} {}", name(&r.issuer.computer_id), how(r.evidence)),
+                awaiting,
+            });
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod removed_tests {
+    use super::*;
+    use crate::removal_cycle::fixtures::{addon, computer, enrollment, group_id, inventory};
+    use wow_sync_core::hash::sha256;
+    use wow_sync_core::kinds::{AuthorityKind, EnrollmentRef, RemovalEvidence};
+    use wow_sync_core::ledger::{derive, Ledger, Membership};
+    use wow_sync_core::records::encode;
+    use wow_sync_core::removal::removal_record;
+
+    fn eref(n: u8) -> EnrollmentRef {
+        EnrollmentRef {
+            computer_id: computer(n),
+            enrollment_id: enrollment(n),
+        }
+    }
+
+    #[test]
+    fn removed_rows_name_who_removed_it_and_who_has_not_acknowledged() {
+        let mut members = Membership::default();
+        for n in [1, 2] {
+            members.add(&computer(n), &enrollment(n));
+        }
+        let o = wow_sync_core::removal::ObservedRemoval {
+            package: "|cff00ff00Alpha|r".into(),
+            folders: inventory(vec![addon("Alpha", Some("1"), "a")]).folders,
+            evidence: RemovalEvidence::Observed,
+        };
+        let r = removal_record(&group_id(), &eref(2), vec![eref(1), eref(2)], &o, 5, 1);
+        let bytes = encode(&r);
+        let mut ledger = Ledger::new();
+        ledger.learn(
+            sha256(&bytes),
+            AuthorityKind::Removal,
+            vec![r.folders[0].key.clone()],
+            Some(&computer(2)),
+            Some(&bytes),
+        );
+        let d = derive(&ledger, &group_id(), &members);
+        let names = BTreeMap::from([(computer(2), "Desk".to_string())]);
+        let rows = removed_rows(&ledger, &d, &names, &computer(1));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].title, "Alpha");
+        assert_eq!(rows[0].provenance, "Desk noticed it was missing");
+        assert_eq!(rows[0].folders, vec!["Alpha".to_string()]);
+        assert_eq!(
+            rows[0].awaiting,
+            vec!["this computer".to_string(), "Desk".to_string()]
+        );
+        // From the other computer's view the names swap; an unknown computer is not an ID.
+        let rows = removed_rows(&ledger, &d, &BTreeMap::new(), &computer(2));
+        assert_eq!(rows[0].provenance, "this computer noticed it was missing");
+        assert!(rows[0].awaiting.contains(&"another computer".to_string()));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

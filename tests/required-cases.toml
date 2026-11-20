@@ -709,6 +709,61 @@ tests = [
 # <<< section: R4-core-contracts
 
 # >>> section: R4-core-removal
+[[case]]
+id = "R4-core-removal:merge"
+tier = "offline"
+tests = [
+    "removal_tests::a_removal_alone_is_live_and_a_covering_readd_lifts_it",
+    "removal_tests::removal_wins_over_a_concurrent_or_later_removal_relative_to_the_readd",
+    "removal_tests::conflicting_removals_merge_into_one_unit_and_both_stay_live",
+    "removal_tests::invalid_and_foreign_removals_never_count",
+    "removal_tests::restore_readd_covers_exactly_what_was_seen_and_a_later_removal_still_wins",
+]
+
+[[case]]
+id = "R4-core-removal:stale-and-owed"
+tier = "offline"
+tests = [
+    "removal_tests::an_offline_peer_that_still_owes_cannot_resurrect_a_removed_package",
+    "removal_tests::states_written_before_discharge_are_not_candidates",
+    "removal_tests::a_readd_discharges_the_owing_enrollment_too",
+    "removal_tests::reinstall_is_held_only_after_this_computer_acknowledged",
+    "removal_tests::an_unreadable_removal_holds_installs_until_dismissed",
+]
+
+[[case]]
+id = "R4-core-removal:ack-and-plan"
+tier = "offline"
+tests = [
+    "removal_tests::due_items_include_the_origin_and_split_by_cleanup_class",
+    "removal_tests::more_than_256_absent_items_split_into_batches",
+    "removal_tests::a_remove_op_carries_the_fixed_ack_and_skips_held_or_unreadable_folders",
+    "removal_tests::a_remove_op_with_owned_settings_waits_for_cleanup_and_carries_no_ack",
+    "removal_tests::the_hooks_plan_through_behaviour_state",
+    "removal_tests::dependents_are_warned_about_and_stay",
+    "removal_cycle::tests::game_running_blocks_remove_ops_but_not_absent_acks_and_waiting_items_get_none",
+]
+
+[[case]]
+id = "R4-core-removal:observation"
+tier = "offline"
+tests = [
+    "removal_tests::a_disappearance_needs_two_stable_scans_thirty_seconds_apart",
+    "removal_tests::reappearance_an_unstable_scan_or_a_journal_resets_the_observation",
+    "removal_tests::a_changed_directory_or_variant_discards_the_baseline",
+    "removal_tests::a_lookalike_or_new_unusable_entry_makes_the_removal_unclear",
+    "removal_tests::a_dropped_folder_of_an_upgraded_package_is_a_folder_drop",
+    "removal_tests::an_observed_removal_becomes_a_record_that_validates",
+    "removal_cycle::tests::persisted_observation_keeps_the_first_sighting_across_a_restart",
+]
+
+[[case]]
+id = "R4-core-removal:commands-and-rows"
+tier = "offline"
+tests = [
+    "removal_cycle::tests::commands_write_the_documented_records_and_keep_or_dismiss_locally",
+    "detail::removed_tests::removed_rows_name_who_removed_it_and_who_has_not_acknowledged",
+]
 # <<< section: R4-core-removal
 
 # >>> section: R4-core-settings
