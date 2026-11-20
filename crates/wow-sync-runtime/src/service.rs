@@ -415,6 +415,9 @@ impl SliceService {
         }
         let gid = w.group.group_id.clone();
         if let Command::EnableSettings { included_accounts } = &cmd {
+            if included_accounts.is_empty() {
+                return Err(CommandError::EmptySelection);
+            }
             let mut l = crate::settings_cycle::load_local(&self.state, &gid);
             l.consent = true;
             l.included_accounts = included_accounts.clone();
@@ -652,6 +655,64 @@ impl SliceService {
                     .map_err(CommandError::Settings)?;
                     DecisionEffect::Write(Box::new(AuthorityRecord::SettingsRevision(rec)))
                 }
+                Command::ChooseSettings {
+                    unit,
+                    checkpoint,
+                    shown_heads,
+                } => {
+                    let rec = wow_sync_core::settings::build_choice(
+                        &self.plane.ledger,
+                        &derived,
+                        &gid,
+                        issuer,
+                        unit.clone(),
+                        checkpoint,
+                        &shown_heads,
+                        now,
+                    )
+                    .map_err(CommandError::Settings)?;
+                    let _ = self.share_checkpoint(
+                        &provider,
+                        w.own.computer_id.as_str(),
+                        &checkpoint,
+                        &unit,
+                    );
+                    DecisionEffect::Write(Box::new(AuthorityRecord::SettingsRevision(rec)))
+                }
+                Command::RestoreSettings { unit, checkpoint } => {
+                    let rec = self.restore_revision(
+                        &provider,
+                        w.own.computer_id.as_str(),
+                        &derived,
+                        &gid,
+                        issuer,
+                        unit,
+                        checkpoint,
+                        now,
+                    )?;
+                    DecisionEffect::Write(Box::new(AuthorityRecord::SettingsRevision(rec)))
+                }
+                Command::RestoreRemovedSettings { removal, unit } => {
+                    let valid = derived.status.get(&removal) == Some(&LedgerStatus::Valid);
+                    let Some(AuthorityRecord::Removal(rm)) =
+                        self.plane.ledger.record(&removal).filter(|_| valid)
+                    else {
+                        return Err(CommandError::UnknownRemoval(removal));
+                    };
+                    let checkpoint = wow_sync_core::settings::removed_unit_checkpoint(rm, &unit)
+                        .map_err(CommandError::Settings)?;
+                    let rec = self.restore_revision(
+                        &provider,
+                        w.own.computer_id.as_str(),
+                        &derived,
+                        &gid,
+                        issuer,
+                        unit,
+                        checkpoint,
+                        now,
+                    )?;
+                    DecisionEffect::Write(Box::new(AuthorityRecord::SettingsRevision(rec)))
+                }
                 Command::Keep { scope, copy, why } => {
                     let valid = wow_sync_core::choice::valid_hashes(&derived);
                     let view = wow_sync_core::choice::ChoiceView::new(&self.plane.ledger, &valid);
@@ -744,6 +805,66 @@ impl SliceService {
                 Ok(CommandOutcome::Kept)
             }
         }
+    }
+
+    /// Makes `checkpoint` reachable by peers: uploaded from this computer's store, or already in
+    /// the shared folder. A checkpoint known nowhere is refused.
+    fn share_checkpoint(
+        &self,
+        provider: &ProviderRoot,
+        me: &str,
+        checkpoint: &wow_sync_core::ids::Sha256,
+        unit: &wow_sync_core::ids::SettingsUnit,
+    ) -> Result<(), CommandError> {
+        let store =
+            wow_sync_adapters::settings_store::SettingsStore::open(&self.variant_dir()).ok();
+        let local = store
+            .as_ref()
+            .and_then(|s| s.get_manifest(&checkpoint.0).ok().flatten())
+            .is_some();
+        if local {
+            let store = store.as_ref().expect("store");
+            return crate::settings_cycle::upload_checkpoint(provider, store, checkpoint, me)
+                .map_err(CommandError::Service);
+        }
+        if crate::settings_cycle::manifest_blob(provider, checkpoint, unit).is_some() {
+            return Ok(());
+        }
+        Err(CommandError::UnknownCheckpoint(*checkpoint))
+    }
+
+    /// The `restore` revision of `unit` to `checkpoint`, parented on this computer's basis.
+    #[allow(clippy::too_many_arguments)]
+    fn restore_revision(
+        &self,
+        provider: &ProviderRoot,
+        me: &str,
+        derived: &wow_sync_core::ledger::Derived,
+        gid: &GroupId,
+        issuer: Issuer,
+        unit: wow_sync_core::ids::SettingsUnit,
+        checkpoint: wow_sync_core::ids::Sha256,
+        now: u64,
+    ) -> Result<wow_sync_core::kinds::SettingsRevision, CommandError> {
+        let basis = crate::settings_cycle::load_local(&self.state, gid)
+            .units
+            .into_iter()
+            .find(|u| u.unit == unit)
+            .map(|u| u.basis)
+            .unwrap_or_default();
+        let rec = wow_sync_core::settings::build_restore(
+            &self.plane.ledger,
+            derived,
+            gid,
+            issuer,
+            unit.clone(),
+            checkpoint,
+            &basis,
+            now,
+        )
+        .map_err(CommandError::Settings)?;
+        self.share_checkpoint(provider, me, &checkpoint, &unit)?;
+        Ok(rec)
     }
 
     /// Explicit re-enrollment of a retired (or held) computer: a new enrollment id for the same

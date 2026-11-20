@@ -322,6 +322,28 @@ pub enum Command {
     UseSharedSettings {
         unit: wow_sync_core::ids::SettingsUnit,
     },
+    /// "Use <computer>'s settings": resolve competing settings choices (settings.md §4.4). The
+    /// `choice` revision names every head; `shown_heads` are the heads the owner saw, and a unit
+    /// whose heads changed since is refused (`Changed`) and shown again. Refused when the unit is
+    /// not competing or `checkpoint` is not one of its head states.
+    ChooseSettings {
+        unit: wow_sync_core::ids::SettingsUnit,
+        checkpoint: wow_sync_core::ids::Sha256,
+        shown_heads: Vec<wow_sync_core::ids::Sha256>,
+    },
+    /// "Restore" an earlier settings copy of `unit` from its history (settings.md §3.3). The
+    /// checkpoint must be known here or already shared.
+    RestoreSettings {
+        unit: wow_sync_core::ids::SettingsUnit,
+        checkpoint: wow_sync_core::ids::Sha256,
+    },
+    /// "Undo removal" for the settings of one unit of a removed addon: restores the checkpoint the
+    /// valid `removal` captured for `unit`, to that same unit only (settings.md §8). The code is
+    /// restored by `RestoreRemoved`.
+    RestoreRemovedSettings {
+        removal: wow_sync_core::ids::Sha256,
+        unit: wow_sync_core::ids::SettingsUnit,
+    },
     /// "Go back to this release": install the held release `recovered` (its package hash) of
     /// `package` and reject what is installed now for the group. The request is checked against
     /// the live state now and queued; the operation runs when the game is closed and writes the

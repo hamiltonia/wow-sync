@@ -206,7 +206,7 @@ impl<'a> EpochStore<'a> {
 }
 
 /// What a peer's captured checkpoint of one settings file is made of (single-file units).
-fn manifest_blob(
+pub(crate) fn manifest_blob(
     provider: &ProviderRoot,
     checkpoint: &CheckpointRef,
     unit: &SettingsUnit,
@@ -229,7 +229,7 @@ fn manifest_blob(
 }
 
 /// Copies the checkpoint (blob first, then manifest) to the shared folder, write-if-absent.
-fn upload_checkpoint(
+pub(crate) fn upload_checkpoint(
     provider: &ProviderRoot,
     store: &SettingsStore,
     checkpoint: &CheckpointRef,

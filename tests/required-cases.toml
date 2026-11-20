@@ -1029,6 +1029,16 @@ tests = [
     "e2e::tests::pausing_settings_holds_a_units_updates_until_resume_and_resume_never_publishes",
     "e2e::tests::use_shared_settings_replaces_a_local_difference_and_keeps_it_as_a_recovery_copy",
 ]
+
+[[case]]
+id = "R4-integrate:settings-choose-restore-confirm"
+tier = "offline"
+tests = [
+    "e2e::tests::competing_settings_choices_are_resolved_by_one_choice_that_names_every_head",
+    "e2e::tests::restore_settings_writes_a_restore_revision_and_the_unit_returns_to_that_copy",
+    "e2e::tests::confirming_settings_here_needs_an_account_and_nothing_is_applied_before_it",
+    "e2e::tests::undoing_a_removal_restores_the_removed_units_settings_to_that_unit_only",
+]
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag

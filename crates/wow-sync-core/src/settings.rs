@@ -1039,6 +1039,14 @@ pub enum SettingsWriteError {
     HistoryIncomplete,
     /// An automatic revision needs the issuer to be the unit's authority.
     NotAuthority,
+    /// The unit does not have competing head states, so there is nothing to choose between.
+    NotCompeting,
+    /// The heads changed since the owner was shown them: show the choice again.
+    Changed,
+    /// The chosen checkpoint is not one of the competing head states.
+    NotAHead,
+    /// The removal did not capture this unit's settings, so there is nothing to restore to it.
+    NotRemovedUnit,
 }
 
 /// The causal summary of the settings policies this ledger has learned.
@@ -1160,6 +1168,123 @@ pub fn build_auto(
         known: settings_known(l, group),
         written_unix_ms: now_unix_ms,
     })
+}
+
+/// The explicit resolution of competing head states (settings.md §4.4): a `choice` revision of
+/// `checkpoint` whose parents are every head of every head state. Refused when the unit is not
+/// competing, when `shown_heads` is not exactly the heads now (a head arrived meanwhile), or
+/// when `checkpoint` is not one of the competing states.
+#[allow(clippy::too_many_arguments)]
+pub fn build_choice(
+    l: &Ledger,
+    d: &Derived,
+    group: &crate::ids::GroupId,
+    issuer: crate::kinds::Issuer,
+    unit: SettingsUnit,
+    checkpoint: CheckpointRef,
+    shown_heads: &[Sha256],
+    now_unix_ms: u64,
+) -> Result<crate::kinds::SettingsRevision, SettingsWriteError> {
+    let heads = policy_heads(l, d);
+    if heads.is_empty() {
+        return Err(SettingsWriteError::NoPolicy);
+    }
+    let g = graph_from_ledger(l, d, &unit);
+    if g.pending {
+        return Err(SettingsWriteError::HistoryIncomplete);
+    }
+    if g.head_states.len() < 2 {
+        return Err(SettingsWriteError::NotCompeting);
+    }
+    let mut shown = shown_heads.to_vec();
+    shown.sort();
+    shown.dedup();
+    let mut now_heads = choice_parents(&g);
+    now_heads.sort();
+    if shown != now_heads {
+        return Err(SettingsWriteError::Changed);
+    }
+    if !g.head_states.contains_key(&checkpoint) {
+        return Err(SettingsWriteError::NotAHead);
+    }
+    Ok(crate::kinds::SettingsRevision {
+        group_id: group.clone(),
+        issuer,
+        unit,
+        kind: RevisionKind::Choice,
+        checkpoint,
+        parents: now_heads,
+        parents_parts: Vec::new(),
+        policy: witness_set(&heads),
+        code_package_hash: None,
+        known: settings_known(l, group),
+        written_unix_ms: now_unix_ms,
+    })
+}
+
+/// "Restore" an earlier copy of `unit` (settings.md §3.3): a `restore` revision of `checkpoint`
+/// whose parents are the issuer's `basis`, limited to nodes that exist. Explicit, so it needs no
+/// authority witness beyond the policy heads it was written under.
+#[allow(clippy::too_many_arguments)]
+pub fn build_restore(
+    l: &Ledger,
+    d: &Derived,
+    group: &crate::ids::GroupId,
+    issuer: crate::kinds::Issuer,
+    unit: SettingsUnit,
+    checkpoint: CheckpointRef,
+    basis: &[Sha256],
+    now_unix_ms: u64,
+) -> Result<crate::kinds::SettingsRevision, SettingsWriteError> {
+    let heads = policy_heads(l, d);
+    if heads.is_empty() {
+        return Err(SettingsWriteError::NoPolicy);
+    }
+    if authority_for(&heads, &unit.folder) == Authority::NotShared {
+        return Err(SettingsWriteError::NotShared);
+    }
+    let g = graph_from_ledger(l, d, &unit);
+    if g.pending {
+        return Err(SettingsWriteError::HistoryIncomplete);
+    }
+    let mut parents: Vec<Sha256> = basis
+        .iter()
+        .filter(|b| g.nodes.contains_key(b))
+        .copied()
+        .collect();
+    parents.sort();
+    parents.dedup();
+    Ok(crate::kinds::SettingsRevision {
+        group_id: group.clone(),
+        issuer,
+        unit,
+        kind: RevisionKind::Restore,
+        checkpoint,
+        parents,
+        parents_parts: Vec::new(),
+        policy: witness_set(&heads),
+        code_package_hash: None,
+        known: settings_known(l, group),
+        written_unix_ms: now_unix_ms,
+    })
+}
+
+/// The checkpoint a removal captured for `unit`: settings return only to the same unit, and only
+/// when the removal holds a captured state of it (settings.md §8).
+pub fn removed_unit_checkpoint(
+    removal: &crate::kinds::Removal,
+    unit: &SettingsUnit,
+) -> Result<CheckpointRef, SettingsWriteError> {
+    match &removal.settings {
+        crate::kinds::RemovalSettings::Checkpoints { roots } => roots
+            .iter()
+            .find_map(|r| match (&r.unit == unit, &r.state) {
+                (true, RootState::Captured { checkpoint, .. }) => Some(*checkpoint),
+                _ => None,
+            })
+            .ok_or(SettingsWriteError::NotRemovedUnit),
+        crate::kinds::RemovalSettings::None => Err(SettingsWriteError::NotRemovedUnit),
+    }
 }
 
 /// An explicit "Share my settings" revision for `unit` (settings.md §4.1): any computer may
