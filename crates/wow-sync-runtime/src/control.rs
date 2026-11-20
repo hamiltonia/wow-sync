@@ -250,6 +250,50 @@ pub fn split_journals(
     (known, unknown)
 }
 
+/// Group commands the GUI sends to the service (contracts.md §9.1). Each is routed through the
+/// owner's standing: a retired computer is refused, a held or paused one keeps the record.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Command {
+    /// An answer to an offered decision. `shown` is the evidence token the owner saw; a changed
+    /// item is refused with `DecideError::Changed` and nothing is written.
+    Decide {
+        item: wow_sync_core::decision::DecisionId,
+        option: wow_sync_core::decision::OptionId,
+        shown: wow_sync_core::decision::EvidenceToken,
+    },
+    /// Retire an enrolled computer (this one or another).
+    Retire {
+        subject: wow_sync_core::kinds::EnrollmentRef,
+    },
+    /// "Allow again": lift exactly these active rejections.
+    AllowAgain {
+        rejections: Vec<wow_sync_core::ids::Sha256>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandOutcome {
+    /// A group record was written (its hash).
+    Written(wow_sync_core::ids::Sha256),
+    /// Valid and reserved: it is written when publishing resumes (held, paused).
+    Kept,
+    /// Only this computer changed.
+    Local(wow_sync_core::decision::LocalResolution),
+    /// The command had no effect to make (for example the subject is already retired).
+    NothingToDo,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandError {
+    Decide(wow_sync_core::decision::DecideError),
+    /// This computer is retired or held and cannot publish.
+    NotAllowed,
+    /// A named rejection is not active (never existed, or already allowed again).
+    UnknownRejection(wow_sync_core::ids::Sha256),
+    EmptySelection,
+    Service(String),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

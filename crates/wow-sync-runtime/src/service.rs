@@ -3,8 +3,12 @@
 //! through the adapters, calls core, and runs the resulting plans through the effects.
 
 use crate::activity::{ActivitySource, WinprocActivity};
+use crate::control::{Command, CommandError, CommandOutcome};
 use crate::decisions::write_own_record;
-use crate::decisions::{learn_from_directories, plan_own_index, Constraints, Plane};
+use crate::decisions::{
+    learn_from_directories, plan_own_index, route, write_record, Constraints, KeptQueue,
+    KeptRecord, Plane, RouteCx, Routed,
+};
 use crate::detail::{
     build_package_rows, folder_titles, member_rows, render_with_names, DetailInput, StatusDetail,
 };
@@ -30,15 +34,19 @@ use wow_sync_core::admit::{
     StateFileObs,
 };
 use wow_sync_core::authority::{AuthorityRecord, Retired};
+use wow_sync_core::decide::{DecideBehaviour, Standing};
 use wow_sync_core::decision::CycleCx;
+use wow_sync_core::decision::{DecideOutcome, DecisionEffect, FreshEvidence};
 use wow_sync_core::exec::{
     apply_report, recover_interrupted, run_apply, run_publish, ApplyEffects, PublishOutcome,
 };
 use wow_sync_core::explain;
 use wow_sync_core::hooks::RemovalHooks;
+use wow_sync_core::hooks::{DecisionHooks, RetireHooks};
 use wow_sync_core::ids::{ComputerId, EnrollmentId, GroupId, OpId, Sha256};
 use wow_sync_core::inventory::{build_inventory, FolderScan, Inventory, ScanStatus, ScannedFile};
 use wow_sync_core::kinds::EnrollmentRef;
+use wow_sync_core::kinds::Issuer;
 use wow_sync_core::layout;
 use wow_sync_core::ledger::derive;
 use wow_sync_core::package::ClientInfo;
@@ -53,9 +61,12 @@ use wow_sync_core::records::{
     CodeState, GroupRecord, LocalComputer, LocalEnrollment, MemberRecord, PendingReport,
     RecordError, RecoveryPoint, RootFormat,
 };
+use wow_sync_core::reject::{build_lift, LiftError, RejectBehaviour};
+use wow_sync_core::removal::known_summary;
 use wow_sync_core::removal::{removal_record, ObserveInput, RemovalBehaviour};
 use wow_sync_core::report::{outstanding, record_pending, store_needs_reconcile};
 use wow_sync_core::retire::OwnStanding;
+use wow_sync_core::retire::RetireBehaviour;
 use wow_sync_core::status::{
     applied_here, derive_status, game_halted, headline_sentence, journal_status, remember_applied,
     render_block, render_headline, render_member, render_result, Headline, StatusInput, StatusView,
@@ -281,6 +292,11 @@ pub struct SliceService {
     last_blocks: Vec<PlanBlock>,
     provider_error: Option<String>,
     plane: Plane,
+    /// The decisions currently offered to the owner and what answering each one does.
+    offered: (
+        Vec<wow_sync_core::decision::DecisionItem>,
+        wow_sync_core::decide::Plans,
+    ),
 }
 
 fn file_obs(r: FileRead) -> FileObs {
@@ -328,7 +344,167 @@ impl SliceService {
             last_blocks: Vec::new(),
             provider_error: None,
             plane,
+            offered: Default::default(),
         })
+    }
+
+    /// Replaces the offered decisions. The set is what `Command::Decide` is judged against, so
+    /// an item whose evidence changed since the owner saw it is refused as changed.
+    pub fn offer_decisions(
+        &mut self,
+        items: Vec<wow_sync_core::decision::DecisionItem>,
+        plans: wow_sync_core::decide::Plans,
+    ) {
+        self.offered = (items, plans);
+    }
+
+    /// Runs one group command (contracts.md §9.1) against the current observed state.
+    pub fn command(&mut self, cmd: Command) -> Result<CommandOutcome, CommandError> {
+        let w = self
+            .observe_world(false)
+            .map_err(|e| CommandError::Service(e.to_string()))?;
+        let provider = self
+            .open_provider()
+            .map_err(|e| CommandError::Service(e.to_string()))?;
+        if w.standing == OwnStanding::Retired {
+            return Err(CommandError::NotAllowed);
+        }
+        let gid = w.group.group_id.clone();
+        let now = now_unix_ms() as u64;
+        let seq = w.enrollment.next_seq;
+        let derived = derive(&self.plane.ledger, &gid, &self.plane.members);
+        let held = BTreeSet::new();
+        let effect = {
+            let cx = CycleCx {
+                group_id: &gid,
+                own: &w.own,
+                ledger: &self.plane.ledger,
+                derived: &derived,
+                members: &self.plane.members,
+                now_unix_ms: now,
+                held: &held,
+                roots: &[],
+            };
+            let issuer = Issuer {
+                computer_id: w.own.computer_id.clone(),
+                enrollment_id: w.own.enrollment_id.clone(),
+                issued_at_seq: seq,
+            };
+            match cmd {
+                Command::Decide {
+                    item,
+                    option,
+                    shown,
+                } => {
+                    let behaviour = DecideBehaviour::new(self.offered.1.clone(), Standing::Active);
+                    let fresh = FreshEvidence {
+                        items: self.offered.0.clone(),
+                    };
+                    match behaviour.decide(&item, &option, &shown, &fresh) {
+                        DecideOutcome::Effect(e) => e,
+                        DecideOutcome::Refused(why) => return Err(CommandError::Decide(why)),
+                    }
+                }
+                Command::Retire { subject } => {
+                    let mut admitted_seq = BTreeMap::new();
+                    for e in cx.ledger.entries() {
+                        if let Some(i) = &e.issuer {
+                            let s = admitted_seq.entry(i.enrollment_id.clone()).or_insert(0);
+                            *s = (*s).max(i.issued_at_seq);
+                        }
+                    }
+                    let plan = RetireBehaviour {
+                        own_next_seq: seq,
+                        admitted_seq,
+                        master: None,
+                    }
+                    .plan_retirement(&cx, &subject);
+                    match plan.retirement {
+                        Some(r) => DecisionEffect::Write(Box::new(AuthorityRecord::Retirement(r))),
+                        None if w.standing != OwnStanding::Active => {
+                            return Err(CommandError::NotAllowed)
+                        }
+                        None => return Ok(CommandOutcome::NothingToDo),
+                    }
+                }
+                Command::AllowAgain { rejections } => {
+                    let lift = build_lift(
+                        &RejectBehaviour::new(&derived),
+                        &self.plane.ledger,
+                        &gid,
+                        issuer,
+                        &rejections,
+                        known_summary(&self.plane.ledger, &gid),
+                        now,
+                    )
+                    .map_err(|e| match e {
+                        LiftError::NotActive(h) => CommandError::UnknownRejection(h),
+                        LiftError::Empty => CommandError::EmptySelection,
+                    })?;
+                    DecisionEffect::Write(Box::new(AuthorityRecord::Lift(lift)))
+                }
+            }
+        };
+        let routed = route(
+            effect,
+            &RouteCx {
+                standing: w.standing,
+                paused: self.pause_state().holds_sync(),
+                folder_writable: true,
+            },
+        );
+        match routed {
+            Routed::Refused(why) => Err(CommandError::Decide(why)),
+            Routed::Local(l) => Ok(CommandOutcome::Local(l)),
+            Routed::WriteNow(rec) => {
+                let h =
+                    write_own_record(&mut self.plane, &provider, &gid, &w.own.computer_id, &rec)
+                        .map_err(|e| CommandError::Service(e.to_string()))?;
+                self.plane
+                    .save(&self.state)
+                    .map_err(|e| CommandError::Service(e.to_string()))?;
+                self.reserve_seq(&w, seq)?;
+                Ok(CommandOutcome::Written(h))
+            }
+            Routed::Keep(rec, why) => {
+                let mut q = KeptQueue::load(&self.state, &gid);
+                q.push(KeptRecord::reserve(&rec, seq, why));
+                q.save(&self.state, &gid)
+                    .map_err(|e| CommandError::Service(e.to_string()))?;
+                self.reserve_seq(&w, seq)?;
+                Ok(CommandOutcome::Kept)
+            }
+        }
+    }
+
+    /// The sequence number a record used is never handed out again.
+    fn reserve_seq(&self, w: &World, used: u64) -> Result<(), CommandError> {
+        let mut le = w.enrollment.clone();
+        le.next_seq = used + 1;
+        self.state
+            .write_atomic("enrollment.json", &encode(&le))
+            .map_err(|e| CommandError::Service(e.to_string()))
+    }
+
+    /// Writes the records kept while publishing was blocked, once nothing blocks them; a
+    /// retired computer discards them (ops.md §1, Q-60).
+    fn settle_kept(&mut self, w: &World, provider: &ProviderRoot) {
+        let gid = &w.group.group_id;
+        let mut q = KeptQueue::load(&self.state, gid);
+        if q.is_empty() {
+            return;
+        }
+        let settled = q.settle(w.standing, self.pause_state().holds_sync(), true);
+        for r in settled.to_write {
+            match write_record(provider, gid, &w.own.computer_id, &r) {
+                Ok(_) => self
+                    .plane
+                    .learn_bytes(r.hash, Some(&w.own.computer_id), &r.bytes),
+                Err(_) => q.push(r),
+            }
+        }
+        let _ = self.plane.save(&self.state);
+        let _ = q.save(&self.state, gid);
     }
 
     /// Simulate a process crash after this many mutating effects in the next cycle.
@@ -1223,6 +1399,7 @@ impl SliceService {
         let mut new_report = None;
         let mut journals_remaining = false;
         self.last_blocks.clear();
+        self.settle_kept(&w, &provider);
 
         // Drop results the newest own state already carries (a crash after publishing but
         // before the store was cleared). A failure here is retried: `publish_step` refuses to

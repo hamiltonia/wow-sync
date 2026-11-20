@@ -1,8 +1,46 @@
-# R4-integrate evidence (stages A and B done; C and D DEFERRED)
+# R4-integrate evidence (stages A and B done; C partial; settings wiring and D DEFERRED)
 
 Branch `run004/R4-integrate`. Status: **partial**. Stage A, the code-state `authority_index`,
-and stage B (authority plane, compose with constraints, removal through the cycle) are built
-and tested. Stages C and D are DEFERRED below; nothing here claims they work.
+stage B (authority plane, compose with constraints, removal through the cycle) and a subset of
+stage C (`Decide`, `Retire`, `AllowAgain` commands, kept-record settling) are built and tested.
+The rest of stage C, C0 (settings `PackageApply`) and stage D are DEFERRED below; nothing here
+claims they work.
+
+The orchestrator accepted two stage-B edits as within the approved intent: the core
+`decision.rs` match-arm change and the `e2e.rs` service tests.
+
+## Stage C (partial): control commands
+
+`control.rs` declares `Command`, `CommandOutcome`, `CommandError`; `SliceService::command` runs
+them against the freshly observed world and routes the effect through `decisions::route`
+(retired → refused, held/paused → kept in the persisted `KeptQueue`, otherwise written).
+`SliceService::offer_decisions` sets the items an answer is judged against. `sync_once` settles
+the kept queue first (`settle_kept`): it is written once nothing blocks it, and discarded when
+the computer is retired. The used sequence number is persisted before it can be handed out again.
+
+| Command | Parameters | Result | Meaning for the UI |
+|---|---|---|---|
+| `Decide` | `item: DecisionId`, `option: OptionId`, `shown: EvidenceToken` | `Written(hash)`, `Kept`, `Local(LocalResolution)`; errors `Decide(Changed \| UnknownOption \| NotAllowed \| UnknownItem)` | `Changed`: "this changed since you looked", reload the item. `Kept`: "saved, applies when syncing resumes" |
+| `Retire` | `subject: EnrollmentRef` | `Written(hash)`, `NothingToDo` (not a member or already retired); error `NotAllowed` (this computer is retired or held) | Retirement is group-wide; the subject can publish nothing new |
+| `AllowAgain` | `rejections: Vec<Sha256>` | `Written(hash)`; errors `UnknownRejection(h)` (never existed or already lifted), `EmptySelection` | The rejected release may be installed again |
+
+Tests: `e2e::tests::decide_command_is_checked_for_freshness_and_kept_while_paused` (local
+answer, stale → `Changed`, unknown option, paused → `Kept`, written after resume),
+`retire_command_writes_a_retirement_and_a_retired_computer_is_refused`,
+`allow_again_lifts_only_an_active_rejection`.
+
+A-38 controls for C (edit-tool mutation, named test failed, reverted, `git diff --exit-code`
+clean):
+
+| Control | Mutation | Failing test |
+|---|---|---|
+| Decide freshness check bypassed | core `decide.rs`: `if current.evidence != *shown` → `if false && ...` | `decide_command_is_checked_for_freshness_and_kept_while_paused` (got `Written`, wanted `Changed`) |
+| Paused decision written at once | `decisions.rs` `route`: `Active if cx.paused` → `Active if false && ...` | same test (got `Written`, wanted `Kept`) |
+| Rejection that is not active accepted | core `reject.rs` `build_lift`: `return Err(NotActive)` → `continue` | `allow_again_lifts_only_an_active_rejection` |
+
+Two controls the orchestrator named do not exist: there is no rollback command (needs live
+R1/R0 inputs, stage D) and no settings push command (settings step not built), so "unrouted
+rollback" and "non-master push without explicit intent" are NOT RUN.
 
 ## Done
 
@@ -67,7 +105,8 @@ stage A ledger-rule mutation.
 | `detail.rs`, proto `scenario.rs` | no edit needed |
 | proto and app `model.rs` `decision_title`/`decision_reason` | arms for `ChoicesDiffer` and `RollbackTargetsDiffer` (NeedsDecision with `candidates: []`; the detail view renders an empty candidate list) |
 
-No new UI was added. There are still no control commands for the app to drive (stage C).
+No new UI was added. The app can drive `Decide`, `Retire` and `AllowAgain` through
+`SliceService::command`; the other commands do not exist yet.
 
 ## Open items
 
@@ -86,12 +125,19 @@ No new UI was added. There are still no control commands for the app to drive (s
 
 ## DEFERRED (not built; each needs the named change)
 
-- **Settings `PackageApply`s** (`service.rs`): `plan_settings` is not called;
-  `CycleCx.roots` is `&[]`. Needs the settings roots from the live scan and the settings
-  epoch/revision ledger view, then append after `plan_apply` handling `NothingToDo`.
-- **§9.1 control surface** (`control.rs`, stage C): every command/query variant routed to
-  `decisions`, `removal_cycle`, `settings_cycle`, `rollback_flow` (incl. `SettingsHistory`,
-  rollback, allow-again).
+- **Settings `PackageApply`s (C0)** (`service.rs`, `settings_cycle.rs`): `plan_settings` is not
+  called; `CycleCx.roots` is `&[]`. Needs: `DeclaringFolder`s computed from the scans before
+  `build_inventory`, a private test-only settings cap (production stays `None`, Q-77), the
+  policy/revision builders, the per-unit step (capture, `target_case`, publish `Auto`, plan the
+  apply) and `SetPolicy`/`ConfirmSettingsHere`. Not started; real-data settings sync stays off.
+- **Rest of the §9.1 surface** (`control.rs`): not built, so no variant is declared for them:
+  keep and resume (typed scope), explicit re-enrollment, `Rollback` (needs live R1/R0, stage D),
+  settings master/exception/push/pause/resume/choose/restore/confirm/use-shared,
+  `SettingsHistory`, removal recovery/restore commands (functions exist in `removal_cycle.rs`
+  but are not routed). `ExportDiagnostics`, `CheckUpdates`, `AppSettings` remain as before.
+- **Decision item producer:** nothing in the cycle builds `DecisionItem`s from live state;
+  `offer_decisions` is the hook the producer (compose's `NeedsDecision`, `new_version_item`)
+  must call.
 - **Rollback inputs from live scans, cross-packet items, `TooLarge` split persistence**
   (probably `kinds.rs`), the stage D A-38 controls.
 

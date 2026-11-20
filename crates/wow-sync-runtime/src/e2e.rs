@@ -3,6 +3,7 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::control::{Command, CommandError, CommandOutcome};
     use crate::removal_cycle::RemovalStore;
     use crate::*;
     use std::path::{Path, PathBuf};
@@ -1705,5 +1706,237 @@ mod tests {
                 "the rejected release is not installed: {r:?}"
             );
         }
+    }
+
+    // ------------------------------------------------ control commands (R4-integrate C1)
+
+    fn ref_of(pc: &Pc) -> EnrollmentRef {
+        let (c, e) = pc_ids(pc);
+        EnrollmentRef {
+            computer_id: c,
+            enrollment_id: e,
+        }
+    }
+
+    #[test]
+    fn retire_command_writes_a_retirement_and_a_retired_computer_is_refused() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        synced(&mut a);
+        let (ac, _) = pc_ids(&a);
+        let out = a
+            .svc
+            .command(Command::Retire {
+                subject: ref_of(&b),
+            })
+            .unwrap();
+        let CommandOutcome::Written(h) = out else {
+            panic!("{out:?}")
+        };
+        synced(&mut a);
+        assert_eq!(status(&a, &g, &h), Some(Status::Valid));
+        assert_eq!(authority_files(&lab, &g, &ac).len(), 1);
+        let r = synced(&mut b);
+        assert!(r.published.is_none(), "{r:?}");
+        assert_eq!(
+            b.svc.command(Command::Retire {
+                subject: ref_of(&a)
+            }),
+            Err(CommandError::NotAllowed)
+        );
+        let (bc, _) = pc_ids(&b);
+        assert!(authority_files(&lab, &g, &bc).is_empty());
+    }
+
+    fn two_option_item(
+        key: &wow_sync_core::paths::FolderKey,
+        write: AuthorityRecord,
+        basis: &[u8],
+    ) -> (
+        wow_sync_core::decision::DecisionItem,
+        wow_sync_core::decide::Plans,
+    ) {
+        use wow_sync_core::decide::{build_item, PlannedOption};
+        use wow_sync_core::decision::*;
+        let opt = |id: u32, label| DecisionOption {
+            id: OptionId(id),
+            label,
+            holders: vec![],
+            consequence: Consequence::default(),
+            warning: None,
+        };
+        build_item(
+            DecisionScope::Folders(vec![key.clone()]),
+            DecisionKind::ChoicesDiffer,
+            DecisionReach::Group,
+            vec![
+                PlannedOption {
+                    option: opt(0, OptionLabel::KeepOnThisComputer),
+                    effect: DecisionEffect::Local(LocalResolution::Dismiss(sha256(b"x"))),
+                },
+                PlannedOption {
+                    option: opt(1, OptionLabel::RemoveEverywhere),
+                    effect: DecisionEffect::Write(Box::new(write)),
+                },
+            ],
+            &[sha256(basis)],
+        )
+    }
+
+    #[test]
+    fn decide_command_is_checked_for_freshness_and_kept_while_paused() {
+        use wow_sync_core::decision::{DecideError, DecisionId, LocalResolution, OptionId};
+        let lab = Lab::new();
+        let (mut a, b, _c, g) = alpha_v2_published(&lab);
+        let (ac, _) = pc_ids(&a);
+        let key = alpha_folder(&lab, &g, &a).key;
+        let write = AuthorityRecord::Retirement(Retirement {
+            group_id: g.clone(),
+            issuer: issuer_of(&a),
+            retired: ref_of(&b),
+            cutoff_seq: 0,
+            was_settings_master: false,
+            retirements_known: vec![],
+            written_unix_ms: 1,
+        });
+        let (item, plans) = two_option_item(&key, write.clone(), b"basis-1");
+        let id = DecisionId(item.scope.clone());
+        a.svc.offer_decisions(vec![item.clone()], plans);
+        let out = a
+            .svc
+            .command(Command::Decide {
+                item: id.clone(),
+                option: OptionId(0),
+                shown: item.evidence,
+            })
+            .unwrap();
+        assert_eq!(
+            out,
+            CommandOutcome::Local(LocalResolution::Dismiss(sha256(b"x")))
+        );
+        // The evidence changed after the owner looked: nothing is written.
+        let (newer, plans) = two_option_item(&key, write, b"basis-2");
+        assert_ne!(newer.evidence, item.evidence);
+        a.svc.offer_decisions(vec![newer.clone()], plans);
+        let stale = Command::Decide {
+            item: id.clone(),
+            option: OptionId(1),
+            shown: item.evidence,
+        };
+        assert_eq!(
+            a.svc.command(stale),
+            Err(CommandError::Decide(DecideError::Changed))
+        );
+        assert_eq!(
+            a.svc.command(Command::Decide {
+                item: id.clone(),
+                option: OptionId(9),
+                shown: newer.evidence,
+            }),
+            Err(CommandError::Decide(DecideError::UnknownOption))
+        );
+        assert!(authority_files(&lab, &g, &ac).is_empty());
+        // Paused: the answer is kept, then written once syncing resumes.
+        a.svc.set_paused(true).unwrap();
+        let fresh = Command::Decide {
+            item: id,
+            option: OptionId(1),
+            shown: newer.evidence,
+        };
+        assert_eq!(a.svc.command(fresh), Ok(CommandOutcome::Kept));
+        assert!(authority_files(&lab, &g, &ac).is_empty());
+        a.svc.set_paused(false).unwrap();
+        synced(&mut a);
+        let files = authority_files(&lab, &g, &ac);
+        assert_eq!(files.len(), 1, "{files:?}");
+    }
+
+    #[test]
+    fn allow_again_lifts_only_an_active_rejection() {
+        use wow_sync_core::hash::package_hash;
+        use wow_sync_core::kinds::{
+            Considered, RecoveredEntry, RejectedEntry, Rejection, RejectionSettings, TreeEntry,
+        };
+        let lab = Lab::new();
+        let (mut a, b, _c, g) = alpha_v2_published(&lab);
+        let (ac, _) = pc_ids(&a);
+        let bad = alpha_folder(&lab, &g, &b);
+        let good = alpha_folder(&lab, &g, &a);
+        let entry = |f: &wow_sync_core::inventory::FolderState| TreeEntry {
+            key: f.key.clone(),
+            tree: f.tree.unwrap(),
+        };
+        let hash = |f: &wow_sync_core::inventory::FolderState| {
+            package_hash(&[(f.key.clone(), f.tree.unwrap())])
+        };
+        let mut considered = vec![
+            Considered {
+                package_hash: hash(&bad),
+                folders: vec![entry(&bad)],
+                holders: vec![pc_ids(&b).1],
+            },
+            Considered {
+                package_hash: hash(&good),
+                folders: vec![entry(&good)],
+                holders: vec![pc_ids(&a).1],
+            },
+        ];
+        considered.sort();
+        let rej = Rejection {
+            group_id: g.clone(),
+            issuer: issuer_of(&a),
+            folders: vec![bad.key.clone()],
+            rejected: RejectedEntry {
+                package_hash: hash(&bad),
+                version_label: "3.0".into(),
+                folders: vec![entry(&bad)],
+            },
+            recovered: RecoveredEntry {
+                package_hash: hash(&good),
+                folders: vec![entry(&good)],
+            },
+            considered,
+            settings: RejectionSettings::NotApplicable,
+            known: Default::default(),
+            considered_parts: vec![],
+            written_unix_ms: 5,
+        };
+        let rh = put_authority(&lab, &g, &ac, &AuthorityRecord::Rejection(rej));
+        synced(&mut a);
+        let unknown = sha256(b"no such rejection");
+        assert_eq!(
+            a.svc.command(Command::AllowAgain {
+                rejections: vec![unknown]
+            }),
+            Err(CommandError::UnknownRejection(unknown))
+        );
+        assert_eq!(
+            a.svc.command(Command::AllowAgain { rejections: vec![] }),
+            Err(CommandError::EmptySelection)
+        );
+        let out = a
+            .svc
+            .command(Command::AllowAgain {
+                rejections: vec![rh],
+            })
+            .unwrap();
+        let CommandOutcome::Written(lift) = out else {
+            panic!("{out:?}")
+        };
+        synced(&mut a);
+        assert_eq!(status(&a, &g, &lift), Some(Status::Valid));
+        // The rejection is no longer active, so it cannot be lifted twice.
+        assert_eq!(
+            a.svc.command(Command::AllowAgain {
+                rejections: vec![rh]
+            }),
+            Err(CommandError::UnknownRejection(rh))
+        );
     }
 }
