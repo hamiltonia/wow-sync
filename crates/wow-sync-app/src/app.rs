@@ -449,6 +449,7 @@ impl Shell {
                 .unwrap_or_default();
             w.features.caps = crate::features::Capabilities::runtime();
             w.features.decisions = g.decisions.clone();
+            crate::features::apply_snapshot(&mut w.features, &g.snapshot);
             if let Some(r) = &g.group_result {
                 if r.seq != self.seen_group_result {
                     self.seen_group_result = r.seq;

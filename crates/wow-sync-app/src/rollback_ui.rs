@@ -21,7 +21,8 @@ pub struct ReleaseRow {
     pub current: bool,
     /// Active rejections of this release; non-empty means it is blocked for the group.
     pub rejections: Vec<Sha256>,
-    pub held_since: String,
+    /// Names of the computers that hold this copy.
+    pub held_by: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -170,7 +171,7 @@ mod tests {
             } else {
                 vec![]
             },
-            held_since: "3 Mar".into(),
+            held_by: "Den PC".into(),
         }
     }
 

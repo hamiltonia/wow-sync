@@ -97,13 +97,25 @@ pub fn retire_action(w: &World, peer: usize, acknowledged: bool) -> Result<Group
     Ok(GroupAction::Retire { subject })
 }
 
+/// "Retired on D by X", or "Retired by X" when the date is not known.
+fn retired_by(on: &str, by: &str) -> String {
+    if on.is_empty() {
+        format!("Retired by {by}")
+    } else {
+        format!("Retired on {on} by {by}")
+    }
+}
+
 /// The sentence on the Computers page and Overview for a retired or held self.
 pub fn standing_headline(s: &Standing) -> Option<(String, String)> {
     match s {
         Standing::Active => None,
         Standing::Retired { on, by } => Some((
             "This computer was retired".into(),
-            format!("Retired on {on} by {by}. Your add-ons and settings here are kept. Join the group again to sync."),
+            format!(
+                "{}. Your add-ons and settings here are kept. Join the group again to sync.",
+                retired_by(on, by)
+            ),
         )),
         Standing::Held => Some((
             "Waiting for group history".into(),
@@ -145,7 +157,7 @@ pub fn allow_again(w: &World, row: &AllowAgainRow) -> Result<GroupAction, String
 
 /// Retired computers keep history but have no status dot.
 pub fn retired_line(c: &crate::features::RetiredComputer) -> String {
-    format!("Retired on {} by {}. History kept.", c.on, c.by)
+    format!("{}. History kept.", retired_by(&c.on, &c.by))
 }
 
 #[cfg(test)]

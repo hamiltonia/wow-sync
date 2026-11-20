@@ -896,7 +896,10 @@ impl Shell {
             .cloned()
             .collect();
         for (j, r) in rows.into_iter().enumerate() {
-            let mut line = format!("Version {}, held since {}", r.version, r.held_since);
+            let mut line = format!("Version {}", r.version);
+            if !r.held_by.is_empty() {
+                line.push_str(&format!(", held by {}", r.held_by));
+            }
             if r.current {
                 line.push_str(" (installed now)");
             }

@@ -5,8 +5,6 @@
 //! back as a [`GroupAction`]; `backend` is the one place that sends it to the sync service as a
 //! runtime `Command`. Controls whose runtime command does not exist yet (updates, diagnostics,
 //! notification choices) are shown disabled with an honest reason.
-//! Some fields are filled only once the snapshot fields of R4-integrate merge, hence the allow.
-#![allow(dead_code)]
 
 use crate::world::World;
 use wow_sync_core::decision::{DecisionId, DecisionItem, DecisionScope, EvidenceToken, OptionId};
@@ -18,6 +16,8 @@ use wow_sync_core::status::{AllHoldCause, HoldScope};
 use wow_sync_runtime::{Command, CommandError, CommandOutcome, RollbackRefusal};
 
 /// Every action a feature screen can ask for.
+// Some variants wait for items 7-8 or have no screen yet (Keep, Resume, NotWired).
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ActionKind {
     Decide,
@@ -115,6 +115,7 @@ impl Capabilities {
 }
 
 /// A request the GUI hands to the sync thread; one-to-one with the runtime's `Command`.
+#[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GroupAction {
     Decide {
@@ -268,6 +269,7 @@ impl GroupAction {
 }
 
 /// What came back from the sync thread, in the app's own terms.
+#[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ActionResult {
     /// A group record was written.
@@ -295,6 +297,14 @@ impl ActionResult {
             Ok(CommandOutcome::Written(_) | CommandOutcome::ReEnrolled) => Self::Written,
             Ok(CommandOutcome::Kept) => Self::Kept,
             Ok(CommandOutcome::Local(_) | CommandOutcome::Recorded) => Self::Local,
+            // About and diagnostics show their own results (the update state, the export text).
+            Ok(CommandOutcome::UpdateCheck(_) | CommandOutcome::Exported(_)) => Self::Local,
+            Err(CommandError::UpdatesUnavailable) => {
+                Self::Failed("update checking is not available in this build".into())
+            }
+            Err(CommandError::Export(_)) => {
+                Self::Failed("the diagnostics could not be exported".into())
+            }
             Ok(CommandOutcome::NothingToDo) => Self::NothingToDo,
             Err(CommandError::Decide(wow_sync_core::decision::DecideError::Changed)) => {
                 Self::Changed
@@ -439,6 +449,54 @@ impl Default for FeatureData {
             settings: Default::default(),
         }
     }
+}
+
+/// Fill what the status snapshot carries: standing, hold, retired computers and held releases.
+/// Not in the snapshot yet (handover): enrollments of active peers, settings units, the master,
+/// rejected releases to allow again and an older-peer flag; those stay empty and their controls
+/// say why they are unavailable.
+pub fn apply_snapshot(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot) {
+    f.hold = s.hold.clone();
+    f.standing = match (&s.this_retirement, &s.hold) {
+        (Some(_), _) => Standing::Retired {
+            on: String::new(),
+            by: s
+                .retirements
+                .iter()
+                .find(|r| r.is_this)
+                .map(|r| r.retired_by.clone())
+                .unwrap_or_else(|| "another computer".into()),
+        },
+        (None, HoldScope::AllApplies(AllHoldCause::RetirementUnresolved)) => Standing::Held,
+        _ => Standing::Active,
+    };
+    f.retired = s
+        .retirements
+        .iter()
+        .filter(|r| !r.is_this)
+        .map(|r| RetiredComputer {
+            name: r.name.clone(),
+            on: String::new(),
+            by: r.retired_by.clone(),
+        })
+        .collect();
+    f.history = s
+        .held_releases
+        .iter()
+        .map(|h| crate::rollback_ui::ReleaseRow {
+            package: h.package.clone(),
+            title: h.title.clone(),
+            version: if h.label.is_empty() {
+                "from earlier".into()
+            } else {
+                h.label.clone()
+            },
+            package_hash: h.release,
+            current: false,
+            rejections: Vec::new(),
+            held_by: h.holders.join(", "),
+        })
+        .collect();
 }
 
 /// A disabled control carries its reason; an enabled one is `Ok`.
@@ -635,6 +693,72 @@ mod tests {
         assert_eq!(a.kind(), ActionKind::Rollback);
         assert!(Capabilities::runtime().has(ActionKind::Rollback));
         assert!(!Capabilities::runtime().has(ActionKind::CheckUpdates));
+    }
+
+    fn retirement(name: &str, by: &str, is_this: bool) -> wow_sync_runtime::RetirementRow {
+        use wow_sync_core::ids::{ComputerId, EnrollmentId};
+        wow_sync_runtime::RetirementRow {
+            computer: ComputerId::parse("22222222222222222222222222222222").unwrap(),
+            enrollment: EnrollmentId::parse("33333333333333333333333333333333").unwrap(),
+            name: name.into(),
+            retired_by: by.into(),
+            retired_by_id: ComputerId::parse("11111111111111111111111111111111").unwrap(),
+            cutoff_seq: 4,
+            is_this,
+        }
+    }
+
+    #[test]
+    fn the_snapshot_fills_standing_retired_rows_and_held_releases() {
+        use wow_sync_core::ids::{ComputerId, EnrollmentId};
+        let mut s = wow_sync_runtime::StatusSnapshot::default();
+        let mut f = FeatureData::default();
+        apply_snapshot(&mut f, &s);
+        assert_eq!(f.standing, Standing::Active);
+        assert!(f.retired.is_empty() && f.history.is_empty());
+
+        s.this_retirement = Some(wow_sync_core::status::RetiredInfo {
+            enrollment: EnrollmentId::parse("33333333333333333333333333333333").unwrap(),
+            retired_by: ComputerId::parse("11111111111111111111111111111111").unwrap(),
+            cutoff_seq: 4,
+        });
+        s.retirements = vec![
+            retirement("this computer", "Den PC", true),
+            retirement("Laptop", "Den PC", false),
+        ];
+        s.held_releases = vec![wow_sync_runtime::HeldRelease {
+            package: validate_folder_name("Details").unwrap(),
+            title: "Details".into(),
+            release: Sha256([7; 32]),
+            label: "2.0".into(),
+            holders: vec!["Den PC".into(), "Laptop".into()],
+        }];
+        apply_snapshot(&mut f, &s);
+        assert_eq!(
+            f.standing,
+            Standing::Retired {
+                on: String::new(),
+                by: "Den PC".into()
+            }
+        );
+        assert_eq!(
+            f.retired.len(),
+            1,
+            "this computer is not in the Retired group"
+        );
+        assert_eq!(f.retired[0].name, "Laptop");
+        assert_eq!(f.history[0].version, "2.0");
+        assert_eq!(f.history[0].held_by, "Den PC, Laptop");
+        assert_eq!(f.history[0].package_hash, Sha256([7; 32]));
+
+        s.this_retirement = None;
+        s.hold = HoldScope::AllApplies(AllHoldCause::RetirementUnresolved);
+        apply_snapshot(&mut f, &s);
+        assert_eq!(
+            f.standing,
+            Standing::Held,
+            "unresolved is not shown as retired"
+        );
     }
 
     #[test]
