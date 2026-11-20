@@ -571,8 +571,28 @@ pub fn apply_snapshot(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot)
             },
             package_hash: h.release,
             current: false,
-            rejections: Vec::new(),
+            rejections: s
+                .rejected_releases
+                .iter()
+                .filter(|r| r.release == h.release)
+                .flat_map(|r| r.rejections.iter().copied())
+                .collect(),
             held_by: h.holders.join(", "),
+        })
+        .collect();
+    f.older_peer = s.older_peer.clone();
+    f.allow_again = s
+        .rejected_releases
+        .iter()
+        .map(|r| crate::computers_ui::AllowAgainRow {
+            title: r.folders.join(", "),
+            version: if r.label.is_empty() {
+                "from earlier".into()
+            } else {
+                r.label.clone()
+            },
+            rejections: r.rejections.clone(),
+            on: crate::world::day_text(r.rejected_at_ms),
         })
         .collect();
 }
@@ -941,6 +961,57 @@ mod tests {
             wow_sync_core::ids::EnrollmentId::parse("44444444444444444444444444444444").unwrap();
         apply_snapshot(&mut f, &s);
         assert_eq!(f.retired[0].on, "12 January");
+    }
+
+    #[test]
+    fn rejected_releases_become_allow_again_rows_and_mark_the_held_release_blocked() {
+        let mut s = wow_sync_runtime::StatusSnapshot::default();
+        s.held_releases = vec![wow_sync_runtime::HeldRelease {
+            package: validate_folder_name("Details").unwrap(),
+            title: "Details".into(),
+            release: Sha256([7; 32]),
+            label: "2.0".into(),
+            holders: vec!["Den PC".into()],
+        }];
+        s.rejected_releases = vec![
+            wow_sync_runtime::RejectedRelease {
+                folders: vec!["Details".into(), "Details_Options".into()],
+                label: "2.0".into(),
+                release: Sha256([7; 32]),
+                rejections: vec![Sha256([1; 32]), Sha256([2; 32])],
+                rejected_at_ms: 1_768_219_200_000,
+            },
+            wow_sync_runtime::RejectedRelease {
+                folders: vec!["Bagnon".into()],
+                label: String::new(),
+                release: Sha256([8; 32]),
+                rejections: vec![Sha256([3; 32])],
+                rejected_at_ms: 1_768_219_200_000,
+            },
+        ];
+        s.older_peer = Some("Laptop".into());
+        let mut f = FeatureData::default();
+        apply_snapshot(&mut f, &s);
+        assert_eq!(f.allow_again.len(), 2);
+        assert_eq!(f.allow_again[0].title, "Details, Details_Options");
+        assert_eq!(
+            f.allow_again[0].rejections,
+            vec![Sha256([1; 32]), Sha256([2; 32])],
+            "every record that rejects it, and only those"
+        );
+        assert_eq!(f.allow_again[0].on, "12 January");
+        assert_eq!(f.allow_again[1].version, "from earlier");
+        assert_eq!(
+            f.history[0].rejections,
+            vec![Sha256([1; 32]), Sha256([2; 32])],
+            "the held release is blocked by its own rejections, not another's"
+        );
+        assert_eq!(f.older_peer.as_deref(), Some("Laptop"));
+        s.rejected_releases.clear();
+        s.older_peer = None;
+        apply_snapshot(&mut f, &s);
+        assert!(f.allow_again.is_empty() && f.history[0].rejections.is_empty());
+        assert_eq!(f.older_peer, None);
     }
 
     #[test]

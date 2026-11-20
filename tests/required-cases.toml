@@ -1249,6 +1249,7 @@ tier = "offline"
 tests = [
     "features::tests::the_snapshot_fills_standing_retired_rows_and_held_releases",
     "features::tests::only_active_other_computers_can_be_retired_and_the_retirement_date_is_shown",
+    "features::tests::rejected_releases_become_allow_again_rows_and_mark_the_held_release_blocked",
 ]
 
 [[case]]

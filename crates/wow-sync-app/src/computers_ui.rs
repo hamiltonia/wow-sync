@@ -139,10 +139,16 @@ pub struct AllowAgainRow {
     pub title: String,
     pub version: String,
     pub rejections: Vec<Sha256>,
+    /// The day the group rejected it; empty when not known.
+    pub on: String,
 }
 
 pub fn allow_again_label(r: &AllowAgainRow) -> String {
-    format!("{} {} is blocked", r.title, r.version)
+    if r.on.is_empty() {
+        format!("{} {} is blocked", r.title, r.version)
+    } else {
+        format!("{} {} is blocked since {}", r.title, r.version, r.on)
+    }
 }
 
 pub fn allow_again(w: &World, row: &AllowAgainRow) -> Result<GroupAction, String> {
@@ -285,8 +291,16 @@ mod tests {
             title: "Bagnon".into(),
             version: "2.1".into(),
             rejections: vec![Sha256([1; 32]), Sha256([2; 32])],
+            on: String::new(),
         };
         assert_eq!(allow_again_label(&row), "Bagnon 2.1 is blocked");
+        assert_eq!(
+            allow_again_label(&AllowAgainRow {
+                on: "12 January".into(),
+                ..row.clone()
+            }),
+            "Bagnon 2.1 is blocked since 12 January"
+        );
         assert_eq!(
             allow_again(&w, &row).unwrap(),
             GroupAction::AllowAgain {
