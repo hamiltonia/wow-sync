@@ -981,6 +981,13 @@ tier = "offline"
 tests = [
     "e2e::tests::a_retired_computer_cannot_publish_until_it_re_enrolls",
 ]
+
+[[case]]
+id = "R4-integrate:removal-restore-command"
+tier = "offline"
+tests = [
+    "e2e::tests::restoring_a_removed_addon_brings_it_back_and_it_is_not_removed_again",
+]
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag

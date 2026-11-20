@@ -49,7 +49,7 @@ use wow_sync_core::inventory::{build_inventory, FolderScan, Inventory, ScanStatu
 use wow_sync_core::kinds::EnrollmentRef;
 use wow_sync_core::kinds::Issuer;
 use wow_sync_core::layout;
-use wow_sync_core::ledger::derive;
+use wow_sync_core::ledger::{derive, Status as LedgerStatus};
 use wow_sync_core::package::ClientInfo;
 use wow_sync_core::paths::FolderKey;
 use wow_sync_core::plan::{
@@ -458,6 +458,23 @@ impl SliceService {
                         LiftError::Empty => CommandError::EmptySelection,
                     })?;
                     DecisionEffect::Write(Box::new(AuthorityRecord::Lift(lift)))
+                }
+                Command::RestoreRemoved { removal } => {
+                    let valid = derived.status.get(&removal) == Some(&LedgerStatus::Valid);
+                    let Some(AuthorityRecord::Removal(rm)) =
+                        self.plane.ledger.record(&removal).filter(|_| valid)
+                    else {
+                        return Err(CommandError::UnknownRemoval(removal));
+                    };
+                    let readd = crate::removal_cycle::restore(
+                        &self.plane.ledger,
+                        &gid,
+                        &w.own,
+                        rm,
+                        seq,
+                        now,
+                    );
+                    DecisionEffect::Write(Box::new(AuthorityRecord::Readd(readd)))
                 }
                 // Dispatched before observation, above.
                 Command::ReEnroll => return Err(CommandError::NotAllowed),
@@ -1229,6 +1246,14 @@ impl SliceService {
             };
             trees.insert(h, avail);
         }
+        if inventory.listing_stable {
+            let hooks =
+                RemovalBehaviour::new(&self.plane.ledger, &group.group_id, &self.plane.members);
+            let _ = RemovalStore::new(&self.state, group.group_id.clone())
+                .forget_group_removed(&inventory, |k| {
+                    !hooks.merged_removals(&self.plane.ledger, k).live.is_empty()
+                });
+        }
         let held = {
             let identity = format!("{}|{}", enrollment.install_root, enrollment.variant_folder);
             let journaled = self.journaled();
@@ -1680,6 +1705,15 @@ impl SliceService {
                             });
                         }
                         remember_applied(&mut self.applied_here, &plan, &outcome);
+                        let removed_here: BTreeSet<FolderKey> = plan
+                            .packages
+                            .iter()
+                            .flat_map(|p| p.removes.iter().map(|r| r.key.clone()))
+                            .collect();
+                        if !removed_here.is_empty() && !fx.crashed() {
+                            let _ = RemovalStore::new(&self.state, group_id.clone())
+                                .forget_keys(&removed_here);
+                        }
                         if let Some(b) = &outcome.stopped {
                             report.apply_note = Some(render_block(b));
                             self.last_blocks.push(b.clone());

@@ -269,6 +269,9 @@ pub enum Command {
     AllowAgain {
         rejections: Vec<wow_sync_core::ids::Sha256>,
     },
+    /// Restore a removed addon for the whole group (explicit only, Q-55): `removal` is the hash of
+    /// a valid removal record. The re-add covers it, so no later cycle removes the addon again.
+    RestoreRemoved { removal: wow_sync_core::ids::Sha256 },
     /// "Join again…": explicit re-enrollment of this computer after it was retired.
     ReEnroll,
     /// Keep one release of the folders in `scope` (typed folder keys, UQ-2). `copy` is the package
@@ -315,6 +318,8 @@ pub enum CommandError {
     Write(wow_sync_core::choice::WriteError),
     /// No release with this package hash is currently held for the scope.
     UnknownCopy(wow_sync_core::ids::Sha256),
+    /// No valid removal record has this hash.
+    UnknownRemoval(wow_sync_core::ids::Sha256),
     Service(String),
 }
 

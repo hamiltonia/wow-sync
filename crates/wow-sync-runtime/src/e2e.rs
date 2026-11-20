@@ -1824,6 +1824,70 @@ mod tests {
         );
     }
 
+    #[test]
+    fn restoring_a_removed_addon_brings_it_back_and_it_is_not_removed_again() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        let mut c = lab.pc("c");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        c.join(&g);
+        synced(&mut c);
+        synced(&mut b);
+        a_removes_alpha(&mut a, &g);
+        let (ac, _) = pc_ids(&a);
+        let removal = removal_hash(&lab, &g, &ac);
+        synced(&mut b);
+        assert_eq!(b.read("Alpha/main.lua"), None, "the removal applied first");
+
+        let ghost = sha256(b"no such removal");
+        assert_eq!(
+            b.svc.command(Command::RestoreRemoved { removal: ghost }),
+            Err(CommandError::UnknownRemoval(ghost))
+        );
+        let (bc, _) = pc_ids(&b);
+        assert!(authority_files(&lab, &g, &bc).iter().all(|f| !f.is_empty()));
+        let before = authority_files(&lab, &g, &bc).len();
+        let out = b.svc.command(Command::RestoreRemoved { removal }).unwrap();
+        let CommandOutcome::Written(readd) = out else {
+            panic!("{out:?}")
+        };
+        assert_eq!(authority_files(&lab, &g, &bc).len(), before + 1);
+        for _ in 0..3 {
+            synced(&mut b);
+            synced(&mut c);
+            synced(&mut a);
+        }
+        assert_eq!(status(&b, &g, &readd), Some(Status::Valid));
+        let rc = synced(&mut c);
+        assert!(!rc.crashed);
+        for pc in [&b, &a, &c] {
+            assert_eq!(
+                pc.read("Alpha/main.lua").as_deref(),
+                Some("alpha-v1"),
+                "the code returned and stays"
+            );
+        }
+        let removals = |pc: &Pc| {
+            let p = pc.svc.plane();
+            p.ledger
+                .entries()
+                .filter(|e| e.kind == wow_sync_core::kinds::AuthorityKind::Removal)
+                .count()
+        };
+        for pc in [&a, &b, &c] {
+            assert_eq!(
+                removals(pc),
+                1,
+                "no new removal is written after the restore"
+            );
+        }
+    }
+
     fn two_option_item(
         key: &wow_sync_core::paths::FolderKey,
         write: AuthorityRecord,
