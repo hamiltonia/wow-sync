@@ -458,6 +458,9 @@ mod tests {
     #[test]
     fn opening_the_service_attaches_os_services_and_survives_a_failed_attach() {
         let base = std::env::temp_dir().join(format!("wowsync-attach-{}", std::process::id()));
+        std::fs::create_dir_all(&base).unwrap();
+        // The local state rejects symlinked paths and macOS temp dirs sit behind one.
+        let base = std::fs::canonicalize(&base).unwrap();
         let mut opts = BackendOptions {
             interval: Duration::from_secs(1),
             crash_after: None,
