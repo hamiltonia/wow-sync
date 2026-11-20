@@ -1122,6 +1122,13 @@ tier = "offline"
 tests = [
     "e2e::tests::the_snapshot_lists_the_account_folders_consent_can_include",
 ]
+
+[[case]]
+id = "R4-integrate:diagnostics-journals"
+tier = "offline"
+tests = [
+    "e2e::tests::the_diagnostics_export_records_the_journals_left_on_disk",
+]
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag

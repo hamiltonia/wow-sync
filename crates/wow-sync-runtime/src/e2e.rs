@@ -3956,6 +3956,37 @@ mod tests {
     }
 
     #[test]
+    fn the_diagnostics_export_records_the_journals_left_on_disk() {
+        use wow_sync_core::diagnostics::ExportOptions;
+        let export = |pc: &mut Pc| {
+            let Ok(CommandOutcome::Exported(e)) = pc.svc.command(Command::ExportDiagnostics {
+                options: ExportOptions::default(),
+            }) else {
+                panic!("preview refused");
+            };
+            e.text
+        };
+        let mut f = two_package_fixture();
+        let clean = export(&mut f.b);
+        assert!(!clean.contains("journal:"), "{clean}");
+        f.b.svc.inject_crash_after(Some(3));
+        assert!(synced(&mut f.b).crashed);
+        assert!(f.b.journals() > 0);
+        let text = export(&mut f.b);
+        assert_eq!(
+            text.matches("journal: pending").count(),
+            f.b.journals(),
+            "{text}"
+        );
+        f.b.restart();
+        for _ in 0..3 {
+            synced(&mut f.b);
+        }
+        assert_eq!(f.b.journals(), 0);
+        assert!(!export(&mut f.b).contains("journal:"));
+    }
+
+    #[test]
     fn diagnostics_preview_and_save_match_and_never_land_in_the_shared_or_install_folders() {
         use crate::diag::{ExportError, SaveError};
         use wow_sync_core::diagnostics::ExportOptions;

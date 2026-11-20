@@ -268,6 +268,8 @@ pub struct StatusSnapshot {
     pub review_needed: bool,
     /// The newest update-check result; `None` until an update service has run.
     pub update: Option<wow_sync_core::update::UpdateResult>,
+    /// One entry per apply journal on disk, for the diagnostics export (ops.md §5.3 Holds).
+    pub journal_states: Vec<wow_sync_core::diagnostics::JournalState>,
 }
 
 impl StatusSnapshot {
@@ -2212,6 +2214,13 @@ impl SliceService {
             enrollment_names,
             review_needed: false,
             update: self.updates.as_ref().and_then(|u| u.last_result()),
+            journal_states: {
+                use wow_sync_core::diagnostics::JournalState as J;
+                std::iter::repeat_n(J::Pending, interrupted.len())
+                    .chain(std::iter::repeat_n(J::NeedsHelp, needs_help.len()))
+                    .chain(std::iter::repeat_n(J::Other, unknown_journals.len()))
+                    .collect()
+            },
         }
     }
 
