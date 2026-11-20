@@ -235,6 +235,7 @@ fn main() {
             app_version: env!("CARGO_PKG_VERSION").into(),
             recent_ms: cli.recent_ms,
             save_target: !developer,
+            os_services: !developer,
         },
         cmd_rx,
         shared.clone(),

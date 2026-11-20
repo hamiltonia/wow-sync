@@ -95,6 +95,8 @@ pub struct BackendOptions {
     pub recent_ms: u64,
     /// Remember the enrolled target for the next start (not in developer mode).
     pub save_target: bool,
+    /// Attach the real notifier and the update source (not in developer mode).
+    pub os_services: bool,
 }
 
 const CONFIG_FILE: &str = "target.txt";
@@ -201,6 +203,28 @@ fn refresh(svc: &mut SliceService, shared: &SharedState, wake: &Sender<()>, chec
     });
 }
 
+/// Opens the service and, when `attach` is given, attaches the OS notifier and update source.
+/// A failed attach costs notifications and update checks only; sync still runs.
+fn open_service(
+    cfg: ServiceConfig,
+    attach: Option<fn(&mut SliceService) -> Result<(), wow_sync_runtime::ServiceError>>,
+) -> Result<SliceService, wow_sync_runtime::ServiceError> {
+    let mut s = SliceService::new(cfg)?;
+    if let Some(f) = attach {
+        if let Err(e) = f(&mut s) {
+            crate::app::log(&format!("OS services not attached: {e}"));
+        }
+    }
+    Ok(s)
+}
+
+fn os_attach(
+    o: &BackendOptions,
+) -> Option<fn(&mut SliceService) -> Result<(), wow_sync_runtime::ServiceError>> {
+    o.os_services
+        .then_some(SliceService::attach_os_services as fn(&mut SliceService) -> _)
+}
+
 fn run(
     target: Option<Target>,
     setup: Option<SetupData>,
@@ -211,7 +235,7 @@ fn run(
 ) {
     let mut svc: Option<SliceService> = None;
     if let Some(t) = &target {
-        match SliceService::new(config_for(&opts, t)) {
+        match open_service(config_for(&opts, t), os_attach(&opts)) {
             Ok(mut s) => {
                 s.inject_crash_after(opts.crash_after);
                 svc = Some(s);
@@ -261,10 +285,11 @@ fn run(
             }
             Some(Cmd::Enroll(t, req)) => {
                 let _ = std::fs::create_dir_all(&t.shared_root);
-                let res = SliceService::new(config_for(&opts, &t)).and_then(|mut s| {
-                    s.enroll(&req)?;
-                    Ok(s)
-                });
+                let res =
+                    open_service(config_for(&opts, &t), os_attach(&opts)).and_then(|mut s| {
+                        s.enroll(&req)?;
+                        Ok(s)
+                    });
                 match res {
                     Ok(mut s) => {
                         if opts.save_target {
@@ -421,5 +446,50 @@ mod tests {
             "an empty field is not a target"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    static ATTACHED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    fn counting_attach(_: &mut SliceService) -> Result<(), wow_sync_runtime::ServiceError> {
+        ATTACHED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Err(wow_sync_runtime::ServiceError::Refused("test".into()))
+    }
+
+    #[test]
+    fn opening_the_service_attaches_os_services_and_survives_a_failed_attach() {
+        let base = std::env::temp_dir().join(format!("wowsync-attach-{}", std::process::id()));
+        let mut opts = BackendOptions {
+            interval: Duration::from_secs(1),
+            crash_after: None,
+            state_dir: base.join("state"),
+            display_name: "Desk".into(),
+            app_version: "0.0.0".into(),
+            recent_ms: 0,
+            save_target: false,
+            os_services: false,
+        };
+        let t = Target {
+            install_root: base.join("wow"),
+            variant_folder: "_retail_".into(),
+            shared_root: base.join("shared"),
+        };
+        for d in [&opts.state_dir, &t.install_root, &t.shared_root] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        assert!(
+            os_attach(&opts).is_none(),
+            "developer mode attaches nothing"
+        );
+        opts.os_services = true;
+        let attach = os_attach(&opts);
+        assert!(attach.is_some(), "startup attaches the OS services");
+        let before = ATTACHED.load(std::sync::atomic::Ordering::SeqCst);
+        let svc = open_service(config_for(&opts, &t), Some(counting_attach));
+        assert!(svc.is_ok(), "a failed attach does not stop sync");
+        assert_eq!(
+            ATTACHED.load(std::sync::atomic::Ordering::SeqCst),
+            before + 1
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

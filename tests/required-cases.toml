@@ -1246,6 +1246,11 @@ tests = [
   "win::tests::a_visibility_request_is_taken_once_and_the_latest_wins",
 ]
 
+[[case]]
+id = "R4-app:attach-os-services"
+tier = "offline"
+tests = ["backend::tests::opening_the_service_attaches_os_services_and_survives_a_failed_attach"]
+
 # <<< section: R4-app
 
 # >>> section: R4-mac-kit
