@@ -251,7 +251,7 @@ pub fn input_from(
         } else {
             OsFamily::Other
         },
-        os_version: None,
+        os_version: wow_sync_adapters::sysinfo::os_version(),
         arch: if cfg!(target_arch = "x86_64") {
             CpuArch::X64
         } else if cfg!(target_arch = "aarch64") {
@@ -259,7 +259,7 @@ pub fn input_from(
         } else {
             CpuArch::Other
         },
-        process_memory_mib: None,
+        process_memory_mib: wow_sync_adapters::sysinfo::process_private_mib(),
         wow_running: match detail.map(|d| &d.game) {
             Some(wow_sync_core::plan::Activity::NotRunning) => Tri::No,
             Some(wow_sync_core::plan::Activity::Running { .. }) => Tri::Yes,

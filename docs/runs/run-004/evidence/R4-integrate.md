@@ -371,6 +371,19 @@ target/decide/apply changes outside this packet's files.
   adapters `Cargo.toml` and `Cargo.lock`; then `diag::input_from` reads them. Outside this
   packet's files, so DEFERRED. DataAtRisk producer still DEFERRED (no design-defined trigger).
 
+- Follow-up (authorized): adapters `sysinfo::os_version()` (Windows `RtlGetVersion` via ntdll,
+  macOS `sw_vers -productVersion` parsed by `parse_version`, otherwise `None`) and
+  `sysinfo::process_private_mib()` (Windows `GetProcessMemoryInfo` `PrivateUsage`, rounded up;
+  `None` elsewhere because no honest private-memory figure exists without a new dependency).
+  windows-sys gains `Win32_System_ProcessStatus`; Cargo.lock unchanged by that feature if no
+  new crate is needed. Both feed `diag::input_from`. Tests: offline
+  `e2e::tests::the_diagnostics_export_reports_the_environment_the_adapters_read` (export lines
+  match the adapters, `unknown` exactly when they return `None`) and
+  `sysinfo::tests::version_text_parses_and_rejects_garbage` (negative); native
+  `sysinfo::tests::windows_reports_a_real_version_and_nonzero_private_memory`. A-38: wiring
+  `process_memory_mib: None` -> the e2e test fails on Windows. The macOS branches compile only on
+  macOS CI (not run here). The earlier "stay `None`" note above is superseded.
+
 ## Verification
 
 Final tree: `cargo xtask verify --tier offline` PASS; `cargo xtask verify --tier native` PASS

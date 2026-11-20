@@ -1129,6 +1129,21 @@ tier = "offline"
 tests = [
     "e2e::tests::the_diagnostics_export_records_the_journals_left_on_disk",
 ]
+
+[[case]]
+id = "R4-integrate:diagnostics-environment"
+tier = "offline"
+tests = [
+    "e2e::tests::the_diagnostics_export_reports_the_environment_the_adapters_read",
+    "sysinfo::tests::version_text_parses_and_rejects_garbage",
+]
+
+[[case]]
+id = "R4-integrate:diagnostics-environment-native"
+tier = "native"
+tests = [
+    "sysinfo::tests::windows_reports_a_real_version_and_nonzero_private_memory",
+]
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag
