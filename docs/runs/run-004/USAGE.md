@@ -14,9 +14,9 @@ Baseline: the cumulative orchestrator-session total at run-004 start is
 | 4 | R4-design-review (+ recheck, recheck2) | verification / gpt-6.1-sol | `07fd2769` | 511.0 | Review FAIL; recheck FAIL; recheck2 FAIL `e1fe458`; recheck3 FAIL (R4D-28) `6dfd530`; recheck4 **PASS** (minor R4D-32) `99e4877` |
 | 5 | R4-design-fix (+ retry 1 fix2, retry 2 fix3) | design / claude-opus-5.5 | `961ccd8a` | 2,835.7 | Merged `c939b30`; fix2 `3751253`; fix3 `e6a6790`; bounded R4D-28 amendment fix4 `832492d` (owner "continue" at the barrier, taken as option 1) |
 | 6 | R4-core-contracts | implementation / claude-sonnet-5.5 | `f645c783` | 930.5 | Merged `b8707ae` (3 passes; amendment 1; I-1 slip noted); both verify tiers PASS; T-C11 native NOT RUN (R4D-22) |
-| 7 | R4-core-removal | implementation / claude-sonnet-5.5 | `e741ccb0` | — | Running (phase C step 2) |
-| 8 | R4-core-settings | implementation / claude-sonnet-5.5 | `50cfd494` | — | Running (phase C step 2) |
-| 9 | R4-core-ops | implementation / claude-sonnet-5.5 | `8aee2e45` | — | Running (phase C step 2) |
+| 7 | R4-core-removal | implementation / claude-sonnet-5.5 | `e741ccb0` | 380.5 | Merged (`4162541`); lost uncommitted removal.rs via `git checkout --` during a mutation control, re-implemented as a same-task follow-up; 6 A-38 controls fail as expected; both tiers PASS; service.rs wiring + target/explain/status variants DEFERRED |
+| 8 | R4-core-settings | implementation / claude-sonnet-5.5 | `50cfd494` | 406.1 | Merged (`5ba828a`); both tiers PASS; only 3 of 15 A-38 controls run; ledger.rs rejects mixed-kind parents (contradicts settings.md §3.3, needs fix); hooks/rollback_flow wiring thin; Q-77 keeps real settings sync disabled |
+| 9 | R4-core-ops | implementation / claude-sonnet-5.5 | `8aee2e45` | 281.8 | Merged `c706ab7`; both tiers PASS; 5 A-38 controls fail as expected; hooks not wired into target/service/control (integration gap), kept queue not persisted (runtime lacks serde_json), 3 item builders missing |
 
 Follow-up R4-design-recheck (worker 4, same agent): FAIL. Blockers
 R4D-1, R4D-10 and R4D-17; 8 majors.
@@ -35,5 +35,6 @@ Stopped at the owner barrier: R4D-28 needs an owner-authorized bounded amendment
 |---|---|---|
 | Design PASS (recheck4 merged) | 23,002.6 | 5,589.6 |
 | C1 foundation merged | 24,397.4 | 6,984.4 |
+| C2 step 2 merged (removal, settings, ops) | 25,581.2 | 8,168.2 |
 
 Design review passed. Phase C remains blocked only on the PENDING OWNER product questions.
