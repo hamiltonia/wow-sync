@@ -120,6 +120,144 @@ impl<'de> Deserialize<'de> for Sha256 {
     }
 }
 
+/// A settings checkpoint reference: `sha256(exact manifest bytes)` (contracts.md §3.4).
+pub type CheckpointRef = Sha256;
+
+/// Unicode NFC form used for every identity comparison (contracts.md §3.3).
+pub fn nfc(s: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    s.nfc().collect()
+}
+
+/// Account scope or character scope of a settings file, from the WTF path. Text is stored in
+/// NFC and compared exactly (case-sensitive).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(try_from = "IdentityWire", into = "IdentityWire")]
+pub struct Identity {
+    account: String,
+    scope: Option<(String, String)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct IdentityWire {
+    account: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    realm: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    character: Option<String>,
+}
+
+impl TryFrom<IdentityWire> for Identity {
+    type Error = String;
+    fn try_from(w: IdentityWire) -> Result<Self, String> {
+        match (w.realm, w.character) {
+            (None, None) => Identity::account(&w.account),
+            (Some(r), Some(c)) => Identity::character(&w.account, &r, &c),
+            _ => Err("a character identity needs both realm and character".into()),
+        }
+    }
+}
+
+impl From<Identity> for IdentityWire {
+    fn from(i: Identity) -> Self {
+        let (realm, character) = match i.scope {
+            Some((r, c)) => (Some(r), Some(c)),
+            None => (None, None),
+        };
+        IdentityWire {
+            account: i.account,
+            realm,
+            character,
+        }
+    }
+}
+
+fn identity_part(s: &str) -> Result<String, String> {
+    if s.is_empty() || s.len() > 128 || s.chars().any(char::is_control) {
+        return Err("invalid identity text".into());
+    }
+    if s.contains(['/', '\\']) {
+        return Err("identity text contains a path separator".into());
+    }
+    Ok(nfc(s))
+}
+
+impl Identity {
+    pub fn account(account: &str) -> Result<Self, String> {
+        Ok(Self {
+            account: identity_part(account)?,
+            scope: None,
+        })
+    }
+
+    pub fn character(account: &str, realm: &str, character: &str) -> Result<Self, String> {
+        Ok(Self {
+            account: identity_part(account)?,
+            scope: Some((identity_part(realm)?, identity_part(character)?)),
+        })
+    }
+
+    pub fn account_name(&self) -> &str {
+        &self.account
+    }
+
+    pub fn realm_character(&self) -> Option<(&str, &str)> {
+        self.scope.as_ref().map(|(r, c)| (r.as_str(), c.as_str()))
+    }
+
+    fn lowered(&self) -> (String, Option<(String, String)>) {
+        (
+            self.account.to_lowercase(),
+            self.scope
+                .as_ref()
+                .map(|(r, c)| (r.to_lowercase(), c.to_lowercase())),
+        )
+    }
+
+    /// Two computers' identities that differ only by letter case are not matched (Q-69).
+    pub fn differs_only_by_case(&self, other: &Identity) -> bool {
+        self != other && self.lowered() == other.lowered()
+    }
+}
+
+/// Why an identity is not synced on this computer (contracts.md §3.3).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IdentityDiagnosis {
+    /// Two local paths whose NFC forms are equal but whose bytes differ. Both are named.
+    NormalizationCollision { first: String, second: String },
+    /// Two computers' identities differ only by letter case.
+    CaseMismatch { here: Identity, there: Identity },
+}
+
+/// Local path texts that collapse to one NFC form while differing in bytes.
+pub fn normalization_collisions(local_names: &[String]) -> Vec<IdentityDiagnosis> {
+    let mut by_form: std::collections::BTreeMap<String, Vec<&String>> = Default::default();
+    for n in local_names {
+        by_form.entry(nfc(n)).or_default().push(n);
+    }
+    let mut out = Vec::new();
+    for names in by_form.values() {
+        let mut distinct: Vec<&String> = names.clone();
+        distinct.sort();
+        distinct.dedup();
+        for pair in distinct.windows(2) {
+            out.push(IdentityDiagnosis::NormalizationCollision {
+                first: pair[0].clone(),
+                second: pair[1].clone(),
+            });
+        }
+    }
+    out
+}
+
+/// The scope of one syncable settings file: its addon folder and the WTF identity.
+/// Never keyed by package key (contracts.md §3.2).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct SettingsUnit {
+    pub folder: crate::paths::FolderKey,
+    pub identity: Identity,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
