@@ -1228,9 +1228,31 @@ pub fn sheet_quit_text(w: &World) -> Option<String> {
     }
 }
 
+/// The accessible name of a sidebar entry.
+pub fn nav_name(p: Page, needs: usize, current: bool) -> String {
+    let mut name = p.title().to_string();
+    if p == Page::Needs && needs > 0 {
+        name = format!("{name}, {needs} items");
+    }
+    if current {
+        name = format!("{name}, current page");
+    }
+    name
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn settings_sync_is_a_normal_entry_and_not_labelled_coming_later() {
+        assert_eq!(nav_name(Page::SettingsSync, 0, false), "Settings sync");
+        assert_eq!(
+            nav_name(Page::SettingsSync, 0, true),
+            "Settings sync, current page"
+        );
+        assert_eq!(nav_name(Page::Needs, 3, false), "Needs attention, 3 items");
+    }
 
     fn enrolled() -> World {
         let mut w = World::empty("0.0.0");

@@ -1319,6 +1319,13 @@ tier = "offline"
 tests = ["backend::tests::opening_the_service_attaches_os_services_and_survives_a_failed_attach"]
 
 [[case]]
+id = "R4-app:minor-fixes"
+tier = "offline"
+tests = [
+    "model::tests::settings_sync_is_a_normal_entry_and_not_labelled_coming_later",
+]
+
+[[case]]
 id = "R4-app:change-decision"
 tier = "offline"
 tests = [

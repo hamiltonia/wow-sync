@@ -5,8 +5,8 @@
 use crate::backend::{self, Cmd, SharedState, Target};
 use crate::consent::Consent;
 use crate::model::{
-    self, banners, headline, need_items, window_title, BannerAction, Detail, Filter, NeedTarget,
-    Page, NAV,
+    self, banners, headline, nav_name, need_items, window_title, BannerAction, Detail, Filter,
+    NeedTarget, Page, NAV,
 };
 use crate::theme::{Mode, Palette, ThemeChoice, Tone};
 use crate::ui::{icon, u, zoom};
@@ -1757,16 +1757,7 @@ impl Shell {
                 col = col.child(div().h(u(1.)).my(u(6.)).bg(rgb(pal.divider)));
             }
             let current = self.page == p;
-            let mut name = p.title().to_string();
-            if p == Page::Needs && needs > 0 {
-                name = format!("{name}, {needs} items");
-            }
-            if p == Page::SettingsSync {
-                name = format!("{name}, coming later");
-            }
-            if current {
-                name = format!("{name}, current page");
-            }
+            let name = nav_name(p, needs, current);
             let key = format!("nav:{}", p.title());
             let cur_idx = self.rov.get("nav").copied().unwrap_or(0);
             self.rov_keys
@@ -1824,14 +1815,6 @@ impl Shell {
                                     .text_color(rgb(pal.fg(Tone::Help)))
                                     .text_size(u(12.))
                                     .child(SharedString::from(needs.to_string())),
-                            )
-                        })
-                        .when(p == Page::SettingsSync, |d| {
-                            d.child(
-                                div()
-                                    .text_size(u(11.))
-                                    .text_color(rgb(pal.muted))
-                                    .child("Coming later"),
                             )
                         })
                 });
