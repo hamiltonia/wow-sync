@@ -1,0 +1,21 @@
+{
+  "schema": "wowsync.rejection-lift/1",
+  "group_id": "11111111111111111111111111111111",
+  "issuer": {
+    "computer_id": "01010101010101010101010101010101",
+    "enrollment_id": "01010101010101010101010101010101",
+    "issued_at_seq": 8
+  },
+  "folders": [
+    "suite"
+  ],
+  "lifts": [
+    "a8f3fc84699eeff6b31bf02ca52a42658078f444e7383f70ca53d2f17c9c20a6"
+  ],
+  "known": {
+    "seen": [],
+    "extra": [],
+    "parts": []
+  },
+  "written_unix_ms": 9
+}

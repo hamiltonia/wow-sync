@@ -62,6 +62,9 @@ mod tests {
             .map(str::trim)
             .filter(|l| !l.is_empty() && !l.starts_with('#'))
             .collect();
-        assert_eq!(deps, vec!["serde", "serde_json", "sha2"]);
+        assert_eq!(
+            deps,
+            vec!["serde", "serde_json", "sha2", "unicode-normalization"]
+        );
     }
 }

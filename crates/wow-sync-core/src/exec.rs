@@ -12,10 +12,30 @@ use crate::plan::{
     PlanBlock, PublishContext, PublishPlan,
 };
 use crate::records::{
-    decode, encode, ApplyJournal, ApplyReport, BasisEntry, JournalFolder, JournalPhase, Record,
-    RecoveryPoint, ReportKind, ReportResult, TreeRef,
+    decode_journal, decode_point, derive_paired, encode, AnyJournal, AnyPoint, ApplyJournal,
+    ApplyJournalV2, ApplyReport, BasisEntry, JournalFolder, JournalFolderV2, JournalPhase, OpKind,
+    PendingRecord, RecoveryPoint, RecoveryPointV2, RecoverySlot, ReportKind, ReportResult,
+    SettingsFileOp, TreeRef,
 };
 use std::collections::BTreeSet;
+
+/// A settings file location for the `/2` slot tables (settings.md §4.3).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SettingsSlot {
+    /// WTF-relative path of the live file.
+    Live { rel: String },
+    /// Staged blob `n` of an operation.
+    Staging { op: OpId, idx: usize },
+    /// The slot a live file moves to; `n` is the index in `settings_ops`.
+    Recovery { op: OpId, idx: usize },
+}
+
+fn unsupported(what: &str) -> EffectError {
+    EffectError::new(
+        EffectErrorKind::Unsafe,
+        format!("{what} is not supported here"),
+    )
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Slot {
@@ -114,6 +134,43 @@ pub trait ApplyEffects {
     fn list_recovery(&mut self, pkg: &FolderKey) -> Result<Vec<(String, Vec<u8>)>, EffectError>;
     fn remove_recovery(&mut self, pkg: &FolderKey, op: &OpId) -> Result<(), EffectError>;
     fn discard_staging(&mut self, op: &OpId) -> Result<(), EffectError>;
+
+    // `/2` operations (contracts.md §2.2). The defaults refuse, so an implementation that does
+    // not support them fails an operation before any live change.
+    fn write_journal_v2(&mut self, _j: &ApplyJournalV2) -> Result<(), EffectError> {
+        Err(unsupported("apply-journal/2"))
+    }
+    fn write_recovery_point_v2(&mut self, _rp: &RecoveryPointV2) -> Result<(), EffectError> {
+        Err(unsupported("recovery-point/2"))
+    }
+    /// Write one reserved record to `authority\` (write-if-absent, same bytes) and index it.
+    fn write_pending_record(&mut self, _p: &PendingRecord) -> Result<(), EffectError> {
+        Err(unsupported("pending records"))
+    }
+    /// Copy the blob named by `o.staged` to the staging slot of file `idx`.
+    fn settings_stage(
+        &mut self,
+        _op: &OpId,
+        _idx: usize,
+        _o: &SettingsFileOp,
+    ) -> Result<(), EffectError> {
+        Err(unsupported("settings files"))
+    }
+    /// Content hash of a settings file slot; `None` = absent.
+    fn settings_hash(&mut self, _s: &SettingsSlot) -> Result<Option<Sha256>, EffectError> {
+        Err(unsupported("settings files"))
+    }
+    /// Fails if `to` exists.
+    fn settings_rename(
+        &mut self,
+        _from: &SettingsSlot,
+        _to: &SettingsSlot,
+    ) -> Result<(), EffectError> {
+        Err(unsupported("settings files"))
+    }
+    fn discard_settings_staging(&mut self, _op: &OpId) -> Result<(), EffectError> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -380,8 +437,12 @@ fn needs_help(
 }
 
 fn needs_help_explanation(j: &ApplyJournal) -> Explanation {
-    let package = j.package.as_str().to_string();
-    let reason = j.reason.clone().unwrap_or_default();
+    explanation_for(&j.package, j.reason.as_deref())
+}
+
+fn explanation_for(package: &FolderKey, reason: Option<&str>) -> Explanation {
+    let package = package.as_str().to_string();
+    let reason = reason.unwrap_or_default().to_string();
     let (code, folder) = reason.split_once(':').unwrap_or((reason.as_str(), ""));
     let folder = folder.to_string();
     match code {
@@ -451,6 +512,9 @@ fn interrupted(why: Explanation, block: PlanBlock) -> Step {
 }
 
 fn apply_package(plan: &ApplyPlan, p: &PackageApply, fx: &mut impl ApplyEffects) -> Step {
+    if !journal_v2_for(plan, p).is_v1_expressible() {
+        return apply_package_v2(plan, p, fx);
+    }
     let name = p.package.as_str().to_string();
     let mut j = journal_for(plan, p);
     let mut folders: Vec<&FolderApply> = p.folders.iter().collect();
@@ -744,14 +808,48 @@ fn verify_and_finish(fx: &mut impl ApplyEffects, j: &mut ApplyJournal) -> Packag
     finalize(fx, j)
 }
 
+enum PointEntry {
+    V1(RecoveryPoint),
+    V2(RecoveryPointV2),
+}
+
+impl PointEntry {
+    fn pinned(&self) -> bool {
+        match self {
+            Self::V1(p) => p.pinned,
+            Self::V2(p) => p.pinned,
+        }
+    }
+    fn created(&self) -> u64 {
+        match self {
+            Self::V1(p) => p.created_unix_ms,
+            Self::V2(p) => p.created_unix_ms,
+        }
+    }
+    fn unpin(&mut self, fx: &mut impl ApplyEffects) -> Result<(), EffectError> {
+        match self {
+            Self::V1(p) => {
+                p.pinned = false;
+                fx.write_recovery_point(p)
+            }
+            Self::V2(p) => {
+                p.pinned = false;
+                fx.write_recovery_point_v2(p)
+            }
+        }
+    }
+}
+
 fn decode_points(
     fx: &mut impl ApplyEffects,
     pkg: &FolderKey,
-) -> Result<Vec<(OpId, RecoveryPoint)>, EffectError> {
+) -> Result<Vec<(OpId, PointEntry)>, EffectError> {
     let mut out = Vec::new();
     for (_, bytes) in fx.list_recovery(pkg)? {
-        if let Ok(rp) = decode::<RecoveryPoint>(&bytes, RecoveryPoint::LIMIT) {
-            out.push((rp.op.clone(), rp));
+        match decode_point(&bytes) {
+            Ok(AnyPoint::V1(rp)) => out.push((rp.op.clone(), PointEntry::V1(rp))),
+            Ok(AnyPoint::V2(rp)) => out.push((rp.op.clone(), PointEntry::V2(rp))),
+            Err(_) => {}
         }
     }
     Ok(out)
@@ -770,28 +868,35 @@ fn op_name(file: &str) -> String {
     base.strip_suffix(".json").unwrap_or(base).to_string()
 }
 
+/// Unpin this operation's point, prune to the retention limit, discard staging (apply.md §2.5).
+fn settle_points(
+    fx: &mut impl ApplyEffects,
+    pkg: &FolderKey,
+    op: &OpId,
+) -> Result<(), EffectError> {
+    let mut points = decode_points(fx, pkg)?;
+    for (o, rp) in &mut points {
+        if o == op && rp.pinned() {
+            rp.unpin(fx)?;
+        }
+    }
+    let journals = journal_ops(fx)?;
+    let mut prunable: Vec<&(OpId, PointEntry)> = points
+        .iter()
+        .filter(|(o, rp)| !rp.pinned() && (o == op || !journals.contains(o.as_str())))
+        .collect();
+    prunable.sort_by(|a, b| (b.1.created(), b.0.as_str()).cmp(&(a.1.created(), a.0.as_str())));
+    for (o, _) in prunable.into_iter().skip(KEEP_RECOVERY) {
+        fx.remove_recovery(pkg, o)?;
+    }
+    Ok(())
+}
+
 /// Apply.md §2.5 (verified): unpin, prune, discard staging, remove the journal last.
 fn finalize(fx: &mut impl ApplyEffects, j: &ApplyJournal) -> PackageResult {
     let name = j.package.as_str().to_string();
     let result = (|| -> Result<(), EffectError> {
-        let mut points = decode_points(fx, &j.package)?;
-        for (op, rp) in &mut points {
-            if *op == j.op && rp.pinned {
-                rp.pinned = false;
-                fx.write_recovery_point(rp)?;
-            }
-        }
-        let journals = journal_ops(fx)?;
-        let mut prunable: Vec<&(OpId, RecoveryPoint)> = points
-            .iter()
-            .filter(|(op, rp)| !rp.pinned && (*op == j.op || !journals.contains(op.as_str())))
-            .collect();
-        prunable.sort_by(|a, b| {
-            (b.1.created_unix_ms, b.0.as_str()).cmp(&(a.1.created_unix_ms, a.0.as_str()))
-        });
-        for (op, _) in prunable.into_iter().skip(KEEP_RECOVERY) {
-            fx.remove_recovery(&j.package, op)?;
-        }
+        settle_points(fx, &j.package, &j.op)?;
         fx.discard_staging(&j.op)?;
         fx.remove_journal(&j.op)
     })();
@@ -869,14 +974,9 @@ pub fn recover_interrupted(fx: &mut impl ApplyEffects) -> RecoveryOutcome {
             journals_remaining: true,
         };
     };
-    let mut items: Vec<(String, Result<ApplyJournal, ()>)> = raw
+    let mut items: Vec<(String, Result<AnyJournal, ()>)> = raw
         .into_iter()
-        .map(|(n, b)| {
-            (
-                op_name(&n),
-                decode::<ApplyJournal>(&b, ApplyJournal::LIMIT).map_err(|_| ()),
-            )
-        })
+        .map(|(n, b)| (op_name(&n), decode_journal(&b).map_err(|_| ())))
         .collect();
     items.sort_by(|a, b| a.0.cmp(&b.0));
     let mut ops = Vec::new();
@@ -893,8 +993,12 @@ pub fn recover_interrupted(fx: &mut impl ApplyEffects) -> RecoveryOutcome {
                     }),
                 ));
             }
-            Ok(mut j) => {
+            Ok(AnyJournal::V1(mut j)) => {
                 let result = recover_one(fx, &mut j);
+                ops.push((j.op.clone(), j.package.clone(), result));
+            }
+            Ok(AnyJournal::V2(mut j)) => {
+                let result = recover_one_v2(fx, &mut j);
                 ops.push((j.op.clone(), j.package.clone(), result));
             }
         }
@@ -1078,6 +1182,766 @@ fn fail_restore(
             },
         ),
     }
+}
+
+// ---------------------------------------------------------------- `/2` operations (contracts.md §2.2)
+//
+// One journal may mix install, replace and remove folder actions and settings file moves. Every
+// action is an `Item` with three slots and follows the same slot tables (apply.md §3, removal.md
+// §5.3, settings.md §4.3); the journal phase decides the direction on recovery.
+
+#[derive(Debug, Clone)]
+enum Tgt {
+    Dir(Slot),
+    File(SettingsSlot),
+}
+
+#[derive(Debug, Clone)]
+struct Item {
+    label: String,
+    live: Tgt,
+    staging: Tgt,
+    recovery: Tgt,
+    /// Live content before the operation; `None` = absent.
+    old: Option<Sha256>,
+    /// Live content after the operation; `None` = absent (a remove).
+    new: Option<Sha256>,
+    fingerprint: Option<Sha256>,
+}
+
+impl Item {
+    fn classify(&self, live: bool, staging: bool, recovery: bool) -> SlotConfig {
+        if self.new.is_none() {
+            return match (live, recovery) {
+                (true, false) => SlotConfig::Untouched,
+                (false, true) => SlotConfig::Done,
+                _ => SlotConfig::Unknown,
+            };
+        }
+        classify_slots(self.old.is_none(), live, staging, recovery)
+    }
+}
+
+fn items_of(j: &ApplyJournalV2) -> Vec<Item> {
+    let mut folders: Vec<&JournalFolderV2> = j.folders.iter().collect();
+    folders.sort_by(|a, b| a.key.cmp(&b.key));
+    let mut out = Vec::new();
+    for f in folders {
+        let (old, fingerprint) = match &f.expected_live {
+            ExpectedLive::Tree { tree, fingerprint } => (Some(*tree), Some(*fingerprint)),
+            ExpectedLive::Absent => (None, None),
+        };
+        if old.is_none() && f.staged.is_none() {
+            continue;
+        }
+        out.push(Item {
+            label: f.name.clone(),
+            live: Tgt::Dir(live(&f.name)),
+            staging: Tgt::Dir(staging(&j.op, &f.name)),
+            recovery: Tgt::Dir(Slot::Recovery {
+                pkg: j.package.clone(),
+                op: j.op.clone(),
+                folder: f.name.clone(),
+            }),
+            old,
+            new: f.staged,
+            fingerprint,
+        });
+    }
+    for (idx, o) in j.settings_ops.iter().enumerate() {
+        let old = match &o.expected_live {
+            ExpectedLive::Tree { tree, .. } => Some(*tree),
+            ExpectedLive::Absent => None,
+        };
+        if old.is_none() && o.staged.is_none() {
+            continue;
+        }
+        out.push(Item {
+            label: o.live_rel.as_str().to_string(),
+            live: Tgt::File(SettingsSlot::Live {
+                rel: o.live_rel.as_str().to_string(),
+            }),
+            staging: Tgt::File(SettingsSlot::Staging {
+                op: j.op.clone(),
+                idx,
+            }),
+            recovery: Tgt::File(SettingsSlot::Recovery {
+                op: j.op.clone(),
+                idx,
+            }),
+            old,
+            new: o.staged,
+            fingerprint: None,
+        });
+    }
+    out
+}
+
+fn t_present(fx: &mut impl ApplyEffects, t: &Tgt) -> Result<bool, EffectError> {
+    match t {
+        Tgt::Dir(s) => present(fx, s),
+        Tgt::File(s) => Ok(fx.settings_hash(s)?.is_some()),
+    }
+}
+
+fn t_hash(fx: &mut impl ApplyEffects, t: &Tgt) -> Result<Option<Sha256>, EffectError> {
+    match t {
+        Tgt::Dir(s) => fx.tree_of(s),
+        Tgt::File(s) => fx.settings_hash(s),
+    }
+}
+
+fn t_rename(fx: &mut impl ApplyEffects, from: &Tgt, to: &Tgt) -> Result<(), EffectError> {
+    match (from, to) {
+        (Tgt::Dir(a), Tgt::Dir(b)) => fx.rename(a, b),
+        (Tgt::File(a), Tgt::File(b)) => fx.settings_rename(a, b),
+        _ => Err(unsupported("a move between folder and file slots")),
+    }
+}
+
+fn slots_of(fx: &mut impl ApplyEffects, it: &Item) -> Result<SlotConfig, EffectError> {
+    let l = t_present(fx, &it.live)?;
+    let s = t_present(fx, &it.staging)?;
+    let r = t_present(fx, &it.recovery)?;
+    Ok(it.classify(l, s, r))
+}
+
+/// The live content is what the plan saw. `strict` also demands quiescence and re-hashes.
+fn live_unchanged(
+    fx: &mut impl ApplyEffects,
+    it: &Item,
+    strict: bool,
+) -> Result<bool, EffectError> {
+    match (&it.live, it.old) {
+        (Tgt::Dir(s), None) => Ok(fx.observe(s)?.is_none()),
+        (Tgt::Dir(s), Some(tree)) => match fx.observe(s)? {
+            Some(o)
+                if Some(o.fingerprint) == it.fingerprint && !(strict && o.recently_modified) =>
+            {
+                Ok(!strict || fx.tree_of(s)? == Some(tree))
+            }
+            _ => Ok(false),
+        },
+        (Tgt::File(s), old) => Ok(fx.settings_hash(s)? == old),
+    }
+}
+
+fn recovery_slot(op: &OpId, leaf: &str) -> RecoverySlot {
+    RecoverySlot::new(&format!("r/{op}/{leaf}")).expect("validated operation id and key")
+}
+
+fn journal_v2_for(plan: &ApplyPlan, p: &PackageApply) -> ApplyJournalV2 {
+    let mut folders: Vec<JournalFolderV2> = p
+        .folders
+        .iter()
+        .map(|f| JournalFolderV2 {
+            name: f.name.clone(),
+            key: f.key.clone(),
+            action: f.action,
+            expected_live: f.expected_live.clone(),
+            staged: Some(f.tree.tree),
+            recovery_slot: recovery_slot(&p.op, f.key.as_str()),
+        })
+        .collect();
+    folders.extend(p.removes.iter().map(|r| JournalFolderV2 {
+        name: r.name.clone(),
+        key: r.key.clone(),
+        action: FolderAction::Remove,
+        expected_live: r.expected_live.clone(),
+        staged: None,
+        recovery_slot: recovery_slot(&p.op, r.key.as_str()),
+    }));
+    let mut removals = p.removals.clone();
+    removals.sort();
+    removals.dedup();
+    ApplyJournalV2 {
+        op: p.op.clone(),
+        group_id: plan.group_id.clone(),
+        started_unix_ms: plan.started_unix_ms,
+        kind: p.kind,
+        package: p.package.clone(),
+        target_hash: match p.kind {
+            OpKind::Settings | OpKind::SettingsCleanup => None,
+            _ => Some(p.target_hash),
+        },
+        phase: JournalPhase::Staging,
+        from_phase: None,
+        reason: None,
+        halted_by_game: false,
+        folders,
+        removals,
+        pending_records: p.pending_records.clone(),
+        settings_ops: p.settings_ops.clone(),
+    }
+}
+
+fn recovery_point_v2(
+    plan: &ApplyPlan,
+    p: &PackageApply,
+    j: &ApplyJournalV2,
+) -> Option<RecoveryPointV2> {
+    let mut folders: Vec<&JournalFolderV2> = j.folders.iter().collect();
+    folders.sort_by(|a, b| a.key.cmp(&b.key));
+    let replaced: Vec<TreeRef> = folders
+        .iter()
+        .filter_map(|f| match &f.expected_live {
+            ExpectedLive::Tree { tree, .. } => Some(TreeRef {
+                name: f.name.clone(),
+                tree: *tree,
+            }),
+            ExpectedLive::Absent => None,
+        })
+        .collect();
+    let installed: Vec<TreeRef> = folders
+        .iter()
+        .filter(|f| f.action == FolderAction::Install)
+        .filter_map(|f| {
+            f.staged.map(|tree| TreeRef {
+                name: f.name.clone(),
+                tree,
+            })
+        })
+        .collect();
+    let code = !replaced.is_empty() || !installed.is_empty();
+    let paired = derive_paired(code, &p.settings_roots)?;
+    Some(RecoveryPointV2 {
+        op: j.op.clone(),
+        group_id: plan.group_id.clone(),
+        kind: j.kind,
+        package: j.package.clone(),
+        code_package_hash: if code { j.target_hash } else { None },
+        created_unix_ms: plan.started_unix_ms,
+        replaced,
+        installed,
+        removals: j.removals.clone(),
+        settings: p.settings_roots.clone(),
+        paired,
+        reason: match j.kind {
+            OpKind::Apply => "apply",
+            OpKind::Remove => "remove",
+            OpKind::Restore => "restore",
+            OpKind::Rollback => "rollback",
+            OpKind::Settings => "settings",
+            OpKind::SettingsCleanup => "settings_cleanup",
+        }
+        .to_string(),
+        pinned: true,
+    })
+}
+
+fn transition_v2(
+    fx: &mut impl ApplyEffects,
+    j: &mut ApplyJournalV2,
+    phase: JournalPhase,
+    from: Option<JournalPhase>,
+    reason: Option<String>,
+) -> Result<(), EffectError> {
+    j.phase = phase;
+    j.from_phase = from;
+    j.reason = reason;
+    j.halted_by_game = false;
+    fx.write_journal_v2(j)
+}
+
+fn record_game_halt_v2(fx: &mut impl ApplyEffects, j: &mut ApplyJournalV2, h: &Halt) {
+    if matches!(h.why, Explanation::InterruptedByGame { .. }) && !j.halted_by_game {
+        j.halted_by_game = true;
+        let _ = fx.write_journal_v2(j);
+    }
+}
+
+fn needs_help_v2(
+    fx: &mut impl ApplyEffects,
+    j: &mut ApplyJournalV2,
+    reason: &str,
+    why: Explanation,
+) -> PackageResult {
+    let _ = transition_v2(
+        fx,
+        j,
+        JournalPhase::NeedsHelp,
+        None,
+        Some(reason.to_string()),
+    );
+    PackageResult::NeedsHelp(why)
+}
+
+fn abort_staging_v2(
+    fx: &mut impl ApplyEffects,
+    j: &mut ApplyJournalV2,
+    result: PackageResult,
+    stop: Option<PlanBlock>,
+) -> Step {
+    if transition_v2(
+        fx,
+        j,
+        JournalPhase::RolledBack,
+        Some(JournalPhase::Staging),
+        None,
+    )
+    .is_ok()
+    {
+        let _ = cleanup_v2(fx, j);
+    }
+    (result, stop)
+}
+
+fn stage_failure(name: &str, folder: &str, e: EffectError) -> PackageResult {
+    match e.kind {
+        EffectErrorKind::NotFound | EffectErrorKind::CloudOnly => {
+            PackageResult::Skipped(Explanation::NotAvailableYet {
+                missing: Vec::new(),
+            })
+        }
+        EffectErrorKind::HashMismatch => PackageResult::Failed(Explanation::StagedMismatch {
+            folder: folder.to_string(),
+        }),
+        _ => failed(name, e),
+    }
+}
+
+fn interrupted_by(name: &str, e: EffectError) -> Step {
+    interrupted(
+        Explanation::InterruptedByError {
+            package: name.to_string(),
+            detail: e.to_string(),
+        },
+        PlanBlock::RenameFailed(e.to_string()),
+    )
+}
+
+fn apply_package_v2(plan: &ApplyPlan, p: &PackageApply, fx: &mut impl ApplyEffects) -> Step {
+    let name = p.package.as_str().to_string();
+    let mut j = journal_v2_for(plan, p);
+    let items = items_of(&j);
+    let mut folders: Vec<&FolderApply> = p.folders.iter().collect();
+    folders.sort_by(|a, b| a.key.cmp(&b.key));
+
+    if let Err(e) = fx.write_journal_v2(&j) {
+        return (failed(&name, e), None);
+    }
+    for f in &folders {
+        if let Err(e) = fx.stage_folder(&p.op, f) {
+            return abort_staging_v2(fx, &mut j, stage_failure(&name, &f.name, e), None);
+        }
+        match fx.tree_of(&staging(&p.op, &f.name)) {
+            Ok(Some(t)) if t == f.tree.tree => {}
+            Ok(_) => {
+                return abort_staging_v2(
+                    fx,
+                    &mut j,
+                    PackageResult::Failed(Explanation::StagedMismatch {
+                        folder: f.name.clone(),
+                    }),
+                    None,
+                )
+            }
+            Err(e) => return abort_staging_v2(fx, &mut j, failed(&name, e), None),
+        }
+    }
+    for (idx, o) in p.settings_ops.iter().enumerate() {
+        let Some(want) = o.staged else { continue };
+        if let Err(e) = fx.settings_stage(&p.op, idx, o) {
+            let label = o.live_rel.as_str();
+            return abort_staging_v2(fx, &mut j, stage_failure(&name, label, e), None);
+        }
+        let slot = SettingsSlot::Staging {
+            op: p.op.clone(),
+            idx,
+        };
+        match fx.settings_hash(&slot) {
+            Ok(Some(h)) if h == want => {}
+            Ok(_) => {
+                return abort_staging_v2(
+                    fx,
+                    &mut j,
+                    PackageResult::Failed(Explanation::StagedMismatch {
+                        folder: o.live_rel.as_str().to_string(),
+                    }),
+                    None,
+                )
+            }
+            Err(e) => return abort_staging_v2(fx, &mut j, failed(&name, e), None),
+        }
+    }
+
+    for it in &items {
+        match live_unchanged(fx, it, true) {
+            Ok(true) => {}
+            Ok(false) => {
+                return abort_staging_v2(
+                    fx,
+                    &mut j,
+                    PackageResult::Replanned(Explanation::DestinationChanged {
+                        folder: it.label.clone(),
+                    }),
+                    None,
+                )
+            }
+            Err(e) => return abort_staging_v2(fx, &mut j, failed(&name, e), None),
+        }
+    }
+
+    if let Err(h) = gate(fx, &name) {
+        return abort_staging_v2(fx, &mut j, PackageResult::Skipped(h.why), Some(h.block));
+    }
+    if let Some(rp) = recovery_point_v2(plan, p, &j) {
+        if let Err(e) = fx.write_recovery_point_v2(&rp) {
+            return abort_staging_v2(fx, &mut j, failed(&name, e), None);
+        }
+    }
+    if let Err(e) = transition_v2(fx, &mut j, JournalPhase::Committing, None, None) {
+        return abort_staging_v2(fx, &mut j, failed(&name, e), None);
+    }
+
+    for it in &items {
+        if it.old.is_some() {
+            match live_unchanged(fx, it, false) {
+                Ok(true) => {}
+                Ok(false) => {
+                    return interrupted(
+                        Explanation::DestinationChanged {
+                            folder: it.label.clone(),
+                        },
+                        PlanBlock::DestinationChanged,
+                    )
+                }
+                Err(e) => return interrupted_by(&name, e),
+            }
+            if let Err(h) = gate(fx, &name) {
+                record_game_halt_v2(fx, &mut j, &h);
+                return interrupted(h.why, h.block);
+            }
+            if let Err(e) = t_rename(fx, &it.live, &it.recovery) {
+                return interrupted_by(&name, e);
+            }
+        }
+        if it.new.is_some() {
+            if let Err(h) = gate(fx, &name) {
+                record_game_halt_v2(fx, &mut j, &h);
+                return interrupted(h.why, h.block);
+            }
+            if let Err(e) = t_rename(fx, &it.staging, &it.live) {
+                return interrupted_by(&name, e);
+            }
+        }
+    }
+    if let Err(e) = transition_v2(fx, &mut j, JournalPhase::Committed, None, None) {
+        return interrupted_by(&name, e);
+    }
+    let result = verify_and_finish_v2(fx, &mut j);
+    if let PackageResult::Interrupted(Explanation::InterruptedByGame { .. }) = &result {
+        record_game_halt_v2(
+            fx,
+            &mut j,
+            &Halt {
+                block: PlanBlock::GameRunning,
+                why: Explanation::InterruptedByGame {
+                    package: name.clone(),
+                },
+            },
+        );
+    }
+    (result, None).with_stop()
+}
+
+fn verify_items(fx: &mut impl ApplyEffects, items: &[Item]) -> Result<(), VerifyFail> {
+    for it in items {
+        if slots_of(fx, it).map_err(VerifyFail::Io)? != SlotConfig::Done {
+            return Err(VerifyFail::Unknown);
+        }
+        if let Some(new) = it.new {
+            if t_hash(fx, &it.live).map_err(VerifyFail::Io)? != Some(new) {
+                return Err(VerifyFail::Live(it.label.clone()));
+            }
+        }
+        if let Some(old) = it.old {
+            if t_hash(fx, &it.recovery).map_err(VerifyFail::Io)? != Some(old) {
+                return Err(VerifyFail::Recovery(it.label.clone()));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn verify_and_finish_v2(fx: &mut impl ApplyEffects, j: &mut ApplyJournalV2) -> PackageResult {
+    let name = j.package.as_str().to_string();
+    if let Err(h) = gate(fx, &name) {
+        return PackageResult::Interrupted(h.why);
+    }
+    match verify_items(fx, &items_of(j)) {
+        Ok(()) => {}
+        Err(VerifyFail::Live(f)) => {
+            return needs_help_v2(
+                fx,
+                j,
+                &format!("live_mismatch:{f}"),
+                Explanation::LiveMismatch { folder: f },
+            )
+        }
+        Err(VerifyFail::Recovery(f)) => {
+            return needs_help_v2(
+                fx,
+                j,
+                &format!("recovery_mismatch:{f}"),
+                Explanation::RecoveryMismatch { folder: f },
+            )
+        }
+        Err(VerifyFail::Unknown) => {
+            return needs_help_v2(
+                fx,
+                j,
+                "unknown_state",
+                Explanation::UnknownInterruptedState { package: name },
+            )
+        }
+        Err(VerifyFail::Io(e)) => {
+            return PackageResult::Interrupted(Explanation::InterruptedByError {
+                package: name,
+                detail: e.to_string(),
+            })
+        }
+    }
+    if let Err(e) = transition_v2(fx, j, JournalPhase::Verified, None, None) {
+        return PackageResult::Interrupted(Explanation::InterruptedByError {
+            package: name,
+            detail: e.to_string(),
+        });
+    }
+    finalize_v2(fx, j)
+}
+
+/// After verify: write the reserved records (idempotent), unpin and prune, discard staging, and
+/// remove the journal last. Every step may run again after a crash.
+fn finalize_v2(fx: &mut impl ApplyEffects, j: &ApplyJournalV2) -> PackageResult {
+    let result = (|| -> Result<(), EffectError> {
+        for p in &j.pending_records {
+            fx.write_pending_record(p)?;
+        }
+        settle_points(fx, &j.package, &j.op)?;
+        fx.discard_staging(&j.op)?;
+        fx.discard_settings_staging(&j.op)?;
+        fx.remove_journal(&j.op)
+    })();
+    match result {
+        Ok(()) => PackageResult::Applied {
+            recovery: j.op.clone(),
+        },
+        Err(e) => PackageResult::Failed(Explanation::FinalizeFailed {
+            package: j.package.as_str().to_string(),
+            detail: e.to_string(),
+        }),
+    }
+}
+
+/// Rolled back: the reserved records are discarded and never written.
+fn cleanup_v2(fx: &mut impl ApplyEffects, j: &mut ApplyJournalV2) -> PackageResult {
+    let name = j.package.as_str().to_string();
+    let rolled = PackageResult::RolledBack(Explanation::RolledBack {
+        package: name.clone(),
+    });
+    let err = |e: EffectError| {
+        PackageResult::Failed(Explanation::FinalizeFailed {
+            package: name.clone(),
+            detail: e.to_string(),
+        })
+    };
+    let items = items_of(j);
+    let committing = j.from_phase == Some(JournalPhase::Committing);
+    if committing {
+        for it in &items {
+            match t_hash(fx, &it.staging) {
+                Ok(None) => {}
+                Ok(Some(t)) if Some(t) == it.new => {}
+                Ok(Some(_)) => {
+                    return needs_help_v2(
+                        fx,
+                        j,
+                        "unexpected_staging",
+                        Explanation::UnexpectedStaging {
+                            package: name.clone(),
+                        },
+                    )
+                }
+                Err(e) => return err(e),
+            }
+        }
+    }
+    if let Err(e) = fx.discard_staging(&j.op) {
+        return err(e);
+    }
+    if let Err(e) = fx.discard_settings_staging(&j.op) {
+        return err(e);
+    }
+    let mut any_recovery = false;
+    if committing {
+        for it in &items {
+            match t_present(fx, &it.recovery) {
+                Ok(p) => any_recovery |= p,
+                Err(e) => return err(e),
+            }
+        }
+    }
+    if !any_recovery {
+        if let Err(e) = fx.remove_recovery(&j.package, &j.op) {
+            return err(e);
+        }
+    }
+    if let Err(e) = fx.remove_journal(&j.op) {
+        return err(e);
+    }
+    rolled
+}
+
+fn recover_one_v2(fx: &mut impl ApplyEffects, j: &mut ApplyJournalV2) -> PackageResult {
+    let name = j.package.as_str().to_string();
+    match j.phase {
+        JournalPhase::Staging => {
+            if let Err(e) = transition_v2(
+                fx,
+                j,
+                JournalPhase::RolledBack,
+                Some(JournalPhase::Staging),
+                None,
+            ) {
+                return failed(&name, e);
+            }
+            cleanup_v2(fx, j)
+        }
+        JournalPhase::Committing => match gate(fx, &name) {
+            Err(h) => PackageResult::Interrupted(h.why),
+            Ok(()) => rollback_v2(fx, j),
+        },
+        JournalPhase::Committed => verify_and_finish_v2(fx, j),
+        JournalPhase::Verified => finalize_v2(fx, j),
+        JournalPhase::RolledBack => cleanup_v2(fx, j),
+        JournalPhase::NeedsHelp => {
+            PackageResult::NeedsHelp(explanation_for(&j.package, j.reason.as_deref()))
+        }
+    }
+}
+
+fn restore_item(fx: &mut impl ApplyEffects, name: &str, it: &Item) -> Option<RestoreFail> {
+    if let Err(h) = gate(fx, name) {
+        return Some(RestoreFail::Gate(h));
+    }
+    if let Err(e) = t_rename(fx, &it.recovery, &it.live) {
+        return Some(RestoreFail::Rename(e));
+    }
+    match t_hash(fx, &it.live) {
+        Ok(t) if t == it.old => None,
+        Ok(_) => Some(RestoreFail::Mismatch),
+        Err(e) => Some(RestoreFail::Io(e)),
+    }
+}
+
+fn fail_restore_v2(
+    fx: &mut impl ApplyEffects,
+    j: &mut ApplyJournalV2,
+    res: RestoreFail,
+    label: &str,
+) -> PackageResult {
+    match res {
+        RestoreFail::Gate(h) => PackageResult::Interrupted(h.why),
+        RestoreFail::Rename(e) => PackageResult::Failed(Explanation::RestoreFailed {
+            folder: format!("{label} ({e})"),
+        }),
+        RestoreFail::Io(e) => failed(j.package.as_str(), e),
+        RestoreFail::Mismatch => needs_help_v2(
+            fx,
+            j,
+            &format!("restore_mismatch:{label}"),
+            Explanation::RestoreFailed {
+                folder: label.to_string(),
+            },
+        ),
+    }
+}
+
+/// Each action is rolled back from its observed slots, in reverse order, so a second crash never
+/// repeats a move (removal.md §5.3).
+fn rollback_v2(fx: &mut impl ApplyEffects, j: &mut ApplyJournalV2) -> PackageResult {
+    let name = j.package.as_str().to_string();
+    let items = items_of(j);
+    for it in items.iter().rev() {
+        let cfg = match slots_of(fx, it) {
+            Ok(c) => c,
+            Err(e) => return failed(&name, e),
+        };
+        match cfg {
+            SlotConfig::Untouched => {}
+            SlotConfig::Unknown => {
+                return needs_help_v2(
+                    fx,
+                    j,
+                    "unknown_state",
+                    Explanation::UnknownInterruptedState { package: name },
+                )
+            }
+            SlotConfig::Half => {
+                if let Some(res) = restore_item(fx, &name, it) {
+                    return fail_restore_v2(fx, j, res, &it.label);
+                }
+            }
+            SlotConfig::Done => {
+                if let Some(new) = it.new {
+                    match t_hash(fx, &it.live) {
+                        Ok(Some(t)) if t == new => {}
+                        Ok(_) => {
+                            return needs_help_v2(
+                                fx,
+                                j,
+                                &format!("live_mismatch:{}", it.label),
+                                Explanation::LiveMismatch {
+                                    folder: it.label.clone(),
+                                },
+                            )
+                        }
+                        Err(e) => return failed(&name, e),
+                    }
+                    if let Err(h) = gate(fx, &name) {
+                        return PackageResult::Interrupted(h.why);
+                    }
+                    if let Err(e) = t_rename(fx, &it.live, &it.staging) {
+                        return PackageResult::Failed(Explanation::RestoreFailed {
+                            folder: format!("{} ({e})", it.label),
+                        });
+                    }
+                }
+                if it.old.is_some() {
+                    if let Some(res) = restore_item(fx, &name, it) {
+                        return fail_restore_v2(fx, j, res, &it.label);
+                    }
+                }
+            }
+        }
+    }
+    for it in &items {
+        match t_hash(fx, &it.live) {
+            Err(e) => return failed(&name, e),
+            Ok(t) if t == it.old => {}
+            Ok(_) => {
+                return needs_help_v2(
+                    fx,
+                    j,
+                    &format!("restore_mismatch:{}", it.label),
+                    Explanation::RestoreFailed {
+                        folder: it.label.clone(),
+                    },
+                )
+            }
+        }
+    }
+    if let Err(e) = transition_v2(
+        fx,
+        j,
+        JournalPhase::RolledBack,
+        Some(JournalPhase::Committing),
+        None,
+    ) {
+        return failed(&name, e);
+    }
+    cleanup_v2(fx, j)
 }
 
 /// Used by status: the op names present in raw journal listings.

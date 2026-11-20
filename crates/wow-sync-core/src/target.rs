@@ -416,6 +416,444 @@ fn choose(
     }
 }
 
+// ---------------------------------------------------------------- release identity (contracts §4.2)
+
+/// What one side holds for one folder key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Content {
+    Tree(Sha256),
+    /// Known not to have the folder.
+    Absent,
+    /// Not `Ok`, not readable, not admitted, or outside a recorded scope.
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScopeMatch {
+    Same,
+    Different,
+    Unknown,
+}
+
+/// One computer's complete copy: an admitted state or the local inventory. It has no scope of its
+/// own; it answers any key (R4D-28).
+#[derive(Debug, Clone)]
+pub struct Source {
+    admitted: bool,
+    folders: BTreeMap<FolderKey, Content>,
+}
+
+impl Source {
+    pub fn from_inventory(inv: &Inventory) -> Self {
+        Self::build(&inv.folders, inv.listing_stable)
+    }
+
+    pub fn from_state(state: &CodeState, admitted: bool) -> Self {
+        Self::build(&state.folders, admitted && state.inventory_complete)
+    }
+
+    fn build(folders: &[FolderState], admitted: bool) -> Self {
+        let folders = folders
+            .iter()
+            .map(|f| {
+                let c = match (f.status, f.tree) {
+                    (FolderStatus::Ok, Some(t)) => Content::Tree(t),
+                    _ => Content::Unknown,
+                };
+                (f.key.clone(), c)
+            })
+            .collect();
+        Self { admitted, folders }
+    }
+
+    pub fn content(&self, k: &FolderKey) -> Content {
+        if !self.admitted {
+            return Content::Unknown;
+        }
+        self.folders.get(k).copied().unwrap_or(Content::Absent)
+    }
+}
+
+/// A recorded release entry: its scope and the trees it lists. A key of the scope it does not
+/// list was absent from that copy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Release {
+    scope: Vec<FolderKey>,
+    trees: BTreeMap<FolderKey, Sha256>,
+}
+
+impl Release {
+    pub fn new(scope: &[FolderKey], trees: &[(FolderKey, Sha256)]) -> Self {
+        let mut scope = scope.to_vec();
+        scope.sort();
+        scope.dedup();
+        Self {
+            scope,
+            trees: trees.iter().cloned().collect(),
+        }
+    }
+
+    pub fn scope(&self) -> &[FolderKey] {
+        &self.scope
+    }
+
+    pub fn content(&self, k: &FolderKey) -> Content {
+        if !self.scope.contains(k) {
+            return Content::Unknown;
+        }
+        self.trees
+            .get(k)
+            .map_or(Content::Absent, |t| Content::Tree(*t))
+    }
+}
+
+fn compare(a: Content, b: Content) -> ScopeMatch {
+    match (a, b) {
+        (Content::Unknown, _) | (_, Content::Unknown) => ScopeMatch::Unknown,
+        (x, y) if x == y => ScopeMatch::Same,
+        _ => ScopeMatch::Different,
+    }
+}
+
+fn fold_matches(parts: impl Iterator<Item = ScopeMatch>) -> ScopeMatch {
+    let mut out = ScopeMatch::Same;
+    for p in parts {
+        match p {
+            ScopeMatch::Different => return ScopeMatch::Different,
+            ScopeMatch::Unknown => out = ScopeMatch::Unknown,
+            ScopeMatch::Same => {}
+        }
+    }
+    out
+}
+
+/// Source against a recorded entry: K is the entry's scope only.
+pub fn same_release(m: &Source, e: &Release) -> ScopeMatch {
+    fold_matches(e.scope.iter().map(|k| compare(m.content(k), e.content(k))))
+}
+
+/// Two recorded entries: K is the union of their scopes.
+pub fn same_release_entries(x: &Release, y: &Release) -> ScopeMatch {
+    let keys: BTreeSet<&FolderKey> = x.scope.iter().chain(y.scope.iter()).collect();
+    fold_matches(
+        keys.into_iter()
+            .map(|k| compare(x.content(k), y.content(k))),
+    )
+}
+
+// ---------------------------------------------------------------- precedence (contracts §4.1)
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Level {
+    UnresolvedJournal = 1,
+    Rejection,
+    LocalHold,
+    MergedRemoval,
+    StaleCopy,
+    Constraint,
+    PendingRemoval,
+    Ordinary,
+}
+
+/// Which levels apply to one folder on this computer.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FolderFacts {
+    pub journal_unresolved: bool,
+    pub source_rejected: bool,
+    pub local_hold: bool,
+    pub merged_removal: bool,
+    pub stale_copy: bool,
+    /// `Some(tree)` when a live constraint names the folder; the tree may be absent.
+    pub constraint: Option<Option<Sha256>>,
+    pub pending_removal: bool,
+    /// The projection of the whole ordinary result.
+    pub ordinary: Option<Sha256>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FolderDecision {
+    pub level: Level,
+    /// The tree to install for the folder, when the level supplies one.
+    pub tree: Option<Sha256>,
+}
+
+/// The first applicable level decides (§4.1). `None` means no level applies.
+pub fn compose_folder(f: &FolderFacts) -> Option<FolderDecision> {
+    let at = |level, tree| Some(FolderDecision { level, tree });
+    if f.journal_unresolved {
+        at(Level::UnresolvedJournal, None)
+    } else if f.source_rejected {
+        at(Level::Rejection, None)
+    } else if f.local_hold {
+        at(Level::LocalHold, None)
+    } else if f.merged_removal {
+        at(Level::MergedRemoval, None)
+    } else if f.stale_copy {
+        at(Level::StaleCopy, None)
+    } else if let Some(t) = f.constraint {
+        at(Level::Constraint, t)
+    } else if f.pending_removal {
+        at(Level::PendingRemoval, None)
+    } else if f.ordinary.is_some() {
+        at(Level::Ordinary, f.ordinary)
+    } else {
+        None
+    }
+}
+
+/// The group target after the composition levels this foundation can evaluate. Levels 2, 5, 6
+/// and the code-choice parts of 8 come from hooks; with neutral hooks the result is exactly
+/// `compute_target` (slice behaviour).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Composed {
+    pub target: GroupTarget,
+    /// Folders a merged removal moves into recovery.
+    pub removed: BTreeSet<FolderKey>,
+    /// Folders whose installs wait for pending removal information.
+    pub deferred: BTreeSet<FolderKey>,
+    pub held: BTreeSet<FolderKey>,
+}
+
+pub fn compose(
+    input: &TargetInput,
+    ledger: &crate::ledger::Ledger,
+    removal: &dyn crate::hooks::RemovalHooks,
+    held: &BTreeSet<FolderKey>,
+) -> Composed {
+    let target = compute_target(input);
+    let mut removed = BTreeSet::new();
+    let mut deferred = BTreeSet::new();
+    let mut keys: BTreeSet<FolderKey> = input.local.folders.iter().map(|f| f.key.clone()).collect();
+    keys.extend(target.effective.keys().cloned());
+    for k in keys {
+        let view = removal.merged_removals(ledger, &k);
+        let facts = FolderFacts {
+            local_hold: held.contains(&k),
+            merged_removal: !view.live.is_empty(),
+            pending_removal: view.pending,
+            ..FolderFacts::default()
+        };
+        match compose_folder(&facts).map(|d| d.level) {
+            Some(Level::LocalHold) => {}
+            Some(Level::MergedRemoval) => {
+                removed.insert(k.clone());
+            }
+            Some(Level::PendingRemoval) => {
+                deferred.insert(k.clone());
+            }
+            _ => {}
+        }
+    }
+    Composed {
+        target,
+        removed,
+        deferred,
+        held: held.clone(),
+    }
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::*;
+    use crate::hooks::Neutral;
+    use crate::ledger::Ledger;
+    use crate::testkit::{addon, inventory, Scenario};
+
+    fn k(s: &str) -> FolderKey {
+        FolderKey::lossy(s)
+    }
+
+    fn t(n: u8) -> Sha256 {
+        crate::hash::sha256(&[n])
+    }
+
+    fn src(entries: &[(&str, Option<&str>)]) -> Source {
+        let scans = entries
+            .iter()
+            .map(|(n, tag)| addon(n, Some("1.0"), tag.unwrap_or("x")))
+            .collect();
+        Source::from_inventory(&inventory(scans))
+    }
+
+    #[test]
+    fn same_release_exact_source_unrelated_addon_is_ignored() {
+        // T-R4D28-exact-source-unrelated-addon: the source's extra folder is outside K.
+        let s = src(&[("A", Some("a")), ("Unrelated", Some("u"))]);
+        let tree = match s.content(&k("a")) {
+            Content::Tree(t) => t,
+            c => panic!("{c:?}"),
+        };
+        let e = Release::new(&[k("a")], &[(k("a"), tree)]);
+        assert_eq!(same_release(&s, &e), ScopeMatch::Same);
+    }
+
+    #[test]
+    fn same_release_table() {
+        // T-R4D23-same-release-table
+        let s = src(&[("A", Some("a"))]);
+        let tree = match s.content(&k("a")) {
+            Content::Tree(t) => t,
+            c => panic!("{c:?}"),
+        };
+        let same = Release::new(&[k("a")], &[(k("a"), tree)]);
+        let other = Release::new(&[k("a")], &[(k("a"), t(9))]);
+        let absent_in_entry = Release::new(&[k("a")], &[]);
+        let missing_in_source = Release::new(&[k("a"), k("b")], &[(k("a"), tree), (k("b"), t(2))]);
+        let both_absent = Release::new(&[k("a"), k("b")], &[(k("a"), tree)]);
+        assert_eq!(same_release(&s, &same), ScopeMatch::Same);
+        assert_eq!(same_release(&s, &other), ScopeMatch::Different);
+        assert_eq!(same_release(&s, &absent_in_entry), ScopeMatch::Different);
+        assert_eq!(same_release(&s, &missing_in_source), ScopeMatch::Different);
+        assert_eq!(same_release(&s, &both_absent), ScopeMatch::Same);
+    }
+
+    #[test]
+    fn same_release_unknown_waits() {
+        // T-R4D23-unknown-waits: Unknown never equals Same and never becomes Different.
+        let s = Source::from_state(
+            &crate::testkit::member_state(
+                &crate::testkit::computer(2),
+                1,
+                &inventory(vec![addon("A", Some("1.0"), "a")]),
+            ),
+            false,
+        );
+        let e = Release::new(&[k("a")], &[(k("a"), t(1))]);
+        assert_eq!(same_release(&s, &e), ScopeMatch::Unknown);
+        let x = Release::new(&[k("a")], &[(k("a"), t(1))]);
+        let y = Release::new(&[k("a"), k("b")], &[(k("a"), t(1)), (k("b"), t(2))]);
+        assert_eq!(same_release_entries(&x, &y), ScopeMatch::Unknown);
+        let z = Release::new(&[k("a"), k("b")], &[(k("a"), t(3)), (k("b"), t(2))]);
+        assert_eq!(same_release_entries(&x, &z), ScopeMatch::Different);
+    }
+
+    #[test]
+    fn same_release_regrouped_exclusion() {
+        // T-R4D28-regrouped-exclusion: a folder excluded in one entry but listed in another is
+        // not evidence of sameness.
+        let x = Release::new(&[k("a")], &[(k("a"), t(1))]);
+        let y = Release::new(&[k("a"), k("b")], &[(k("a"), t(1))]);
+        assert_ne!(same_release_entries(&x, &y), ScopeMatch::Same);
+        assert_ne!(same_release_entries(&y, &x), ScopeMatch::Same);
+    }
+
+    #[test]
+    fn no_hybrid_of_two_releases_in_one_package() {
+        // T-R4D24-no-hybrid: a newer core on one peer and newer data on another is never mixed.
+        let sc = Scenario::new(vec![
+            addon("Suite", Some("1.0"), "c1"),
+            addon("Suite_Data", Some("1.0"), "d1"),
+        ])
+        .peer(
+            2,
+            vec![
+                addon("Suite", Some("2.0"), "c2"),
+                addon("Suite_Data", Some("1.0"), "d1"),
+            ],
+        )
+        .peer(
+            3,
+            vec![
+                addon("Suite", Some("1.0"), "c1"),
+                addon("Suite_Data", Some("2.0"), "d2"),
+            ],
+        );
+        let t = sc.target();
+        let folders: Vec<&(FolderKey, Sha256)> = t
+            .effective
+            .values()
+            .flat_map(|e| e.folders.iter())
+            .collect();
+        let has = |key: &str, tree: Sha256| folders.iter().any(|(f, h)| *f == k(key) && *h == tree);
+        let hybrid = has("suite", sc.peer_tree(2, "suite"))
+            && has("suite_data", sc.peer_tree(3, "suite_data"));
+        assert!(!hybrid, "{:?}", t.effective);
+    }
+
+    #[test]
+    fn compose_precedence_adjacent_levels() {
+        // T-C14-compose-precedence: each level beats the next one down.
+        let order = [
+            FolderFacts {
+                journal_unresolved: true,
+                source_rejected: true,
+                ..Default::default()
+            },
+            FolderFacts {
+                source_rejected: true,
+                local_hold: true,
+                ..Default::default()
+            },
+            FolderFacts {
+                local_hold: true,
+                merged_removal: true,
+                ..Default::default()
+            },
+            FolderFacts {
+                merged_removal: true,
+                stale_copy: true,
+                ..Default::default()
+            },
+            FolderFacts {
+                stale_copy: true,
+                constraint: Some(None),
+                ..Default::default()
+            },
+            FolderFacts {
+                constraint: Some(None),
+                pending_removal: true,
+                ..Default::default()
+            },
+            FolderFacts {
+                pending_removal: true,
+                ordinary: Some(t(1)),
+                ..Default::default()
+            },
+        ];
+        let want = [
+            Level::UnresolvedJournal,
+            Level::Rejection,
+            Level::LocalHold,
+            Level::MergedRemoval,
+            Level::StaleCopy,
+            Level::Constraint,
+            Level::PendingRemoval,
+        ];
+        for (f, w) in order.iter().zip(want) {
+            assert_eq!(compose_folder(f).map(|d| d.level), Some(w));
+        }
+        assert_eq!(compose_folder(&FolderFacts::default()), None);
+        let ord = FolderFacts {
+            ordinary: Some(t(1)),
+            ..Default::default()
+        };
+        assert_eq!(compose_folder(&ord).map(|d| d.level), Some(Level::Ordinary));
+    }
+
+    #[test]
+    fn neutral_hooks_leave_the_slice_target_unchanged() {
+        let sc = Scenario::new(vec![addon("A", Some("1.0"), "a")])
+            .peer(2, vec![addon("A", Some("2.0"), "b")]);
+        let (group, variant, local_id) = (
+            crate::testkit::group_record(),
+            crate::testkit::confirmed_forever(),
+            crate::testkit::computer(1),
+        );
+        let input = TargetInput {
+            group: &group,
+            variant: &variant,
+            local: &sc.local,
+            local_client: &sc.local_client,
+            local_id: &local_id,
+            members: &sc.members,
+            trees: &sc.trees,
+        };
+        let c = compose(&input, &Ledger::new(), &Neutral, &BTreeSet::new());
+        assert_eq!(c.target, compute_target(&input));
+        assert!(c.removed.is_empty() && c.deferred.is_empty());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

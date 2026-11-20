@@ -66,6 +66,26 @@ impl NextAction {
     }
 }
 
+/// Scope sentences (ops.md §1.6). `None` when nothing is held. The app renders these; it never
+/// guesses how much is held.
+pub fn hold_sentence(h: &crate::status::HoldScope) -> Option<String> {
+    use crate::status::{AllHoldCause, HoldScope};
+    match h {
+        HoldScope::None => None,
+        HoldScope::Addons(a) if a.len() == 1 => {
+            Some("Only one add-on is waiting. Everything else keeps syncing.".into())
+        }
+        HoldScope::Addons(a) => Some(format!(
+            "Only these {} add-ons are waiting. Everything else keeps syncing.",
+            a.len()
+        )),
+        HoldScope::AllApplies(AllHoldCause::UnresolvedJournal { .. }) => {
+            Some("Nothing is updated on this computer until this is resolved.".into())
+        }
+        HoldScope::AllApplies(_) => Some("Nothing is updated on this computer right now.".into()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,6 +1,8 @@
 //! Port-trait implementations over the adapters, and the failure-injecting wrapper.
 
 use crate::activity::ActivitySource;
+use wow_sync_adapters::authority_store;
+use wow_sync_adapters::fs_install::SettingsSlot as AdSettingsSlot;
 use wow_sync_adapters::fs_install::{InstallArea, InstallLock, Slot as AdSlot};
 use wow_sync_adapters::fs_safe::Root;
 use wow_sync_adapters::fs_scan::{snapshot_folder, ScannedFile, Snapshot};
@@ -8,19 +10,25 @@ use wow_sync_adapters::localstate::LocalState;
 use wow_sync_adapters::provider::{ObjectObs, ProviderRoot};
 use wow_sync_adapters::{FsError, FsErrorKind};
 use wow_sync_core::exec::{
-    ApplyEffects, EffectError, EffectErrorKind, ObjectStat, PublishEffects, Slot, SlotObs,
+    ApplyEffects, EffectError, EffectErrorKind, ObjectStat, PublishEffects, SettingsSlot, Slot,
+    SlotObs,
 };
 use wow_sync_core::hash::tree_hash;
+use wow_sync_core::ids::ComputerId;
 use wow_sync_core::ids::EnrollmentId;
 use wow_sync_core::ids::{GroupId, OpId, Sha256};
 use wow_sync_core::inventory::FileEntry;
+use wow_sync_core::layout;
 use wow_sync_core::layout::blob;
 use wow_sync_core::paths::{validate_rel_path, FolderKey};
 use wow_sync_core::plan::{Activity, FolderApply, ObjectRef, ObjectSource};
 use wow_sync_core::records::{decode, encode, ApplyJournal, PendingReport, RecoveryPoint};
+use wow_sync_core::records::{ApplyJournalV2, PendingRecord, RecoveryPointV2, SettingsFileOp};
 use wow_sync_core::report::{finalized_result, record_pending};
 
 const OBJECT_LIMIT: u64 = 512 * 1024 * 1024;
+const AUTHORITY_LIMIT: u64 = 16 * 1024 * 1024;
+const SETTINGS_BLOB_LIMIT: u64 = 256 * 1024 * 1024;
 const JOURNAL_LIMIT: usize = 1024 * 1024;
 pub(crate) const PENDING_REPORT: &str = "pending-report.json";
 const PENDING_LIMIT: u64 = 1024 * 1024;
@@ -68,6 +76,20 @@ fn conv(s: &Slot) -> AdSlot<'_> {
             pkg: pkg.as_str(),
             op: op.as_str(),
             folder,
+        },
+    }
+}
+
+fn conv_settings(s: &SettingsSlot) -> AdSettingsSlot<'_> {
+    match s {
+        SettingsSlot::Live { rel } => AdSettingsSlot::Live { rel },
+        SettingsSlot::Staging { op, idx } => AdSettingsSlot::Staging {
+            op: op.as_str(),
+            idx: *idx,
+        },
+        SettingsSlot::Recovery { op, idx } => AdSettingsSlot::Recovery {
+            op: op.as_str(),
+            idx: *idx,
         },
     }
 }
@@ -323,11 +345,91 @@ impl ApplyEffects for RealEffects<'_> {
     fn remove_recovery(&mut self, pkg: &FolderKey, op: &OpId) -> Result<(), EffectError> {
         self.area
             .remove_recovery(pkg.as_str(), op.as_str())
+            .map_err(map_err)?;
+        self.area
+            .remove_settings_recovery(op.as_str())
             .map_err(map_err)
     }
 
     fn discard_staging(&mut self, op: &OpId) -> Result<(), EffectError> {
         self.area.remove_staging(op.as_str()).map_err(map_err)
+    }
+
+    fn write_journal_v2(&mut self, j: &ApplyJournalV2) -> Result<(), EffectError> {
+        self.area
+            .write_journal(j.op.as_str(), &encode(j))
+            .map_err(map_err)
+    }
+
+    fn write_recovery_point_v2(&mut self, rp: &RecoveryPointV2) -> Result<(), EffectError> {
+        self.area
+            .write_recovery_meta(rp.package.as_str(), rp.op.as_str(), &encode(rp))
+            .map_err(map_err)
+    }
+
+    fn write_pending_record(&mut self, p: &PendingRecord) -> Result<(), EffectError> {
+        let me = ComputerId::parse(&self.computer)
+            .map_err(|e| EffectError::new(EffectErrorKind::Unsafe, e.to_string()))?;
+        let rel = layout::authority_record(&self.group, &me, &p.hash);
+        authority_store::put_record(
+            self.provider,
+            &rel,
+            p.bytes.as_bytes(),
+            AUTHORITY_LIMIT,
+            &self.computer,
+        )
+        .map(|_| ())
+        .map_err(map_err)
+    }
+
+    fn settings_stage(
+        &mut self,
+        op: &OpId,
+        idx: usize,
+        o: &SettingsFileOp,
+    ) -> Result<(), EffectError> {
+        let Some(h) = o.staged else {
+            return Err(EffectError::new(
+                EffectErrorKind::Unsafe,
+                "a settings file with nothing staged",
+            ));
+        };
+        let rel = layout::settings_blob(&h);
+        let mut src = self
+            .provider
+            .open_read(&rel, SETTINGS_BLOB_LIMIT)
+            .map_err(map_err)?;
+        let size = src
+            .metadata()
+            .map_err(|e| EffectError::new(EffectErrorKind::Io, e.to_string()))?
+            .len();
+        self.area
+            .stage_settings(op.as_str(), idx, &mut src, h.0, size)
+            .map_err(map_err)
+    }
+
+    fn settings_hash(&mut self, s: &SettingsSlot) -> Result<Option<Sha256>, EffectError> {
+        Ok(self
+            .area
+            .settings_hash(conv_settings(s))
+            .map_err(map_err)?
+            .map(Sha256))
+    }
+
+    fn settings_rename(
+        &mut self,
+        from: &SettingsSlot,
+        to: &SettingsSlot,
+    ) -> Result<(), EffectError> {
+        self.area
+            .settings_rename(conv_settings(from), conv_settings(to))
+            .map_err(map_err)
+    }
+
+    fn discard_settings_staging(&mut self, op: &OpId) -> Result<(), EffectError> {
+        self.area
+            .remove_settings_staging(op.as_str())
+            .map_err(map_err)
     }
 }
 
@@ -494,5 +596,366 @@ impl<E: ApplyEffects> ApplyEffects for Faulty<'_, E> {
     fn discard_staging(&mut self, op: &OpId) -> Result<(), EffectError> {
         self.effect_gate()?;
         self.inner.discard_staging(op)
+    }
+    fn write_journal_v2(&mut self, j: &ApplyJournalV2) -> Result<(), EffectError> {
+        self.effect_gate()?;
+        self.inner.write_journal_v2(j)
+    }
+    fn write_recovery_point_v2(&mut self, rp: &RecoveryPointV2) -> Result<(), EffectError> {
+        self.effect_gate()?;
+        self.inner.write_recovery_point_v2(rp)
+    }
+    fn write_pending_record(&mut self, p: &PendingRecord) -> Result<(), EffectError> {
+        self.effect_gate()?;
+        self.inner.write_pending_record(p)
+    }
+    fn settings_stage(
+        &mut self,
+        op: &OpId,
+        idx: usize,
+        o: &SettingsFileOp,
+    ) -> Result<(), EffectError> {
+        self.effect_gate()?;
+        self.inner.settings_stage(op, idx, o)
+    }
+    fn settings_hash(&mut self, s: &SettingsSlot) -> Result<Option<Sha256>, EffectError> {
+        self.read_gate()?;
+        self.inner.settings_hash(s)
+    }
+    fn settings_rename(
+        &mut self,
+        from: &SettingsSlot,
+        to: &SettingsSlot,
+    ) -> Result<(), EffectError> {
+        self.effect_gate()?;
+        self.inner.settings_rename(from, to)
+    }
+    fn discard_settings_staging(&mut self, op: &OpId) -> Result<(), EffectError> {
+        self.effect_gate()?;
+        self.inner.discard_settings_staging(op)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::activity::ScriptedActivity;
+    use std::path::PathBuf;
+    use wow_sync_adapters::testkit::{SyntheticInstall, TempDir};
+    use wow_sync_core::exec::{recover_interrupted, run_apply, PackageResult};
+    use wow_sync_core::explain::Explanation;
+    use wow_sync_core::hash::{sha256, tree_hash};
+    use wow_sync_core::ids::{EnrollmentId, Identity, SettingsUnit};
+    use wow_sync_core::inventory::FileEntry;
+    use wow_sync_core::kinds::{Ack, AckItem, AckResult, AckSettings, Issuer};
+    use wow_sync_core::paths::{account_settings_path, validate_rel_path};
+    use wow_sync_core::plan::{ApplyPlan, ExpectedLive, FolderAction, PackageApply, RemoveApply};
+    use wow_sync_core::records::{
+        FolderTreeRecord, Location, OpKind, RecoverySlot, RootState, SettingsRoot,
+    };
+
+    fn fk(s: &str) -> FolderKey {
+        wow_sync_core::paths::validate_folder_name(s).unwrap()
+    }
+
+    const SETTINGS_REL: &str = "Account/ACC/SavedVariables/Alpha.lua";
+
+    fn hex(c: char) -> String {
+        c.to_string().repeat(32)
+    }
+
+    /// A synthetic install, provider folder and the plan inputs, all under one temp dir.
+    struct Lab {
+        _t: TempDir,
+        inst: SyntheticInstall,
+        provider: ProviderRoot,
+        addons: Root,
+        area: InstallArea,
+        group: GroupId,
+    }
+
+    impl Lab {
+        fn new() -> Lab {
+            let t = TempDir::new();
+            let inst = SyntheticInstall::new_forever(t.path(), "wow");
+            inst.add_addon("Alpha", "Alpha.toc", "## T\n", &[("a.lua", b"old")]);
+            inst.add_addon("AlphaX", "AlphaX.toc", "## T\n", &[("x.lua", b"x")]);
+            let settings = inst.variant_dir.join("WTF").join(SETTINGS_REL);
+            std::fs::create_dir_all(settings.parent().unwrap()).unwrap();
+            std::fs::write(&settings, b"old settings").unwrap();
+            inst.set_old_mtimes();
+            wow_sync_adapters::testkit::set_old_mtimes_under(&inst.variant_dir.join("WTF"));
+            std::fs::create_dir_all(t.join("dropbox")).unwrap();
+            let provider = ProviderRoot::open_or_create(&t.join("dropbox")).unwrap();
+            let addons = Root::open(
+                &inst.variant_dir.join("Interface").join("AddOns"),
+                wow_sync_adapters::fs_safe::ReparsePolicy::RejectAll,
+            )
+            .unwrap();
+            let area = InstallArea::open(&inst.variant_dir).unwrap();
+            Lab {
+                _t: t,
+                inst,
+                provider,
+                addons,
+                area,
+                group: GroupId::parse(&hex('1')).unwrap(),
+            }
+        }
+
+        fn fx<'a>(&'a self, act: &'a mut ScriptedActivity) -> RealEffects<'a> {
+            RealEffects::new(
+                &self.provider,
+                &self.addons,
+                &self.area,
+                &self.inst.variant_dir,
+                self.group.clone(),
+                hex('2'),
+                act,
+                0,
+            )
+        }
+
+        fn put_blob(&self, rel: &str, bytes: &[u8]) {
+            self.provider.write_atomic(rel, bytes, &hex('2')).unwrap();
+        }
+
+        fn live_file(&self, rel: &str) -> Option<String> {
+            std::fs::read_to_string(self.inst.variant_dir.join(rel)).ok()
+        }
+
+        fn expected_dir(&self, name: &str) -> ExpectedLive {
+            let (mut act, _h) = ScriptedActivity::new(Activity::NotRunning);
+            let mut fx = self.fx(&mut act);
+            let slot = Slot::Live {
+                folder: name.into(),
+            };
+            ExpectedLive::Tree {
+                tree: fx.tree_of(&slot).unwrap().unwrap(),
+                fingerprint: fx.observe(&slot).unwrap().unwrap().fingerprint,
+            }
+        }
+
+        /// A `/2` plan of the given kind over the lab's old state.
+        fn plan(&self, kind: OpKind) -> ApplyPlan {
+            let file = |p: &str, b: &[u8]| FileEntry {
+                path: validate_rel_path(p).unwrap(),
+                size: b.len() as u64,
+                sha256: sha256(b),
+            };
+            let new_a = file("a.lua", b"new");
+            self.put_blob(&layout::blob(&self.group, &new_a.sha256), b"new");
+            let new_settings = sha256(b"new settings");
+            self.put_blob(&layout::settings_blob(&new_settings), b"new settings");
+            let mut p = PackageApply::code_apply(
+                OpId::parse(&hex('7')).unwrap(),
+                fk("alpha"),
+                sha256(b"target"),
+                vec![],
+                Explanation::Installed {
+                    source: ComputerId::parse(&hex('3')).unwrap(),
+                },
+            );
+            p.kind = kind;
+            let unit = SettingsUnit {
+                folder: fk("alpha"),
+                identity: Identity::account("ACC").unwrap(),
+            };
+            p.settings_ops = vec![wow_sync_core::records::SettingsFileOp {
+                unit: unit.clone(),
+                live_rel: account_settings_path("ACC", "Alpha").unwrap(),
+                expected_live: ExpectedLive::Tree {
+                    tree: sha256(b"old settings"),
+                    fingerprint: sha256(b"unused"),
+                },
+                staged: Some(new_settings),
+                recovery_slot: RecoverySlot::new("r/0").unwrap(),
+            }];
+            p.settings_roots = vec![SettingsRoot {
+                unit,
+                state: RootState::Captured {
+                    checkpoint: sha256(b"checkpoint"),
+                    location: Location::Local,
+                },
+            }];
+            if kind == OpKind::Apply {
+                p.folders = vec![wow_sync_core::plan::FolderApply {
+                    name: "Alpha".into(),
+                    key: fk("alpha"),
+                    action: FolderAction::Replace,
+                    tree: FolderTreeRecord {
+                        tree: tree_hash(std::slice::from_ref(&new_a)),
+                        files: vec![new_a],
+                    },
+                    expected_live: self.expected_dir("Alpha"),
+                }];
+                p.removes = vec![RemoveApply {
+                    name: "AlphaX".into(),
+                    key: fk("alphax"),
+                    expected_live: self.expected_dir("AlphaX"),
+                }];
+                p.removals = vec![sha256(b"removal")];
+                let ack = Ack {
+                    group_id: self.group.clone(),
+                    issuer: Issuer {
+                        computer_id: ComputerId::parse(&hex('3')).unwrap(),
+                        enrollment_id: EnrollmentId::parse(&hex('4')).unwrap(),
+                        issued_at_seq: 4,
+                    },
+                    items: vec![AckItem {
+                        removal: sha256(b"removal"),
+                        folders: vec![fk("alphax")],
+                    }],
+                    result: AckResult::Absent,
+                    removed: vec![],
+                    settings: AckSettings::NotApplicable,
+                    written_unix_ms: 8,
+                };
+                let bytes = encode(&ack);
+                p.pending_records = vec![PendingRecord {
+                    hash: sha256(&bytes),
+                    bytes: String::from_utf8(bytes).unwrap(),
+                }];
+            }
+            ApplyPlan {
+                group_id: self.group.clone(),
+                started_unix_ms: 5,
+                packages: vec![p],
+                skipped: vec![],
+            }
+        }
+
+        fn record_path(&self, plan: &ApplyPlan) -> PathBuf {
+            let h = plan.packages[0].pending_records[0].hash;
+            self.provider.path().join(layout::authority_record(
+                &self.group,
+                &ComputerId::parse(&hex('2')).unwrap(),
+                &h,
+            ))
+        }
+
+        /// (Alpha code, AlphaX present, settings file, reserved record present).
+        fn state(&self, plan: &ApplyPlan) -> (Option<String>, bool, Option<String>, bool) {
+            (
+                self.live_file("Interface/AddOns/Alpha/a.lua"),
+                self.inst.addons.join("AlphaX").exists(),
+                self.live_file(&format!("WTF/{SETTINGS_REL}")),
+                !plan.packages[0].pending_records.is_empty() && self.record_path(plan).exists(),
+            )
+        }
+
+        fn leftovers(&self) -> Vec<String> {
+            let w = self.inst.variant_dir.join(".wowsync");
+            let mut out = Vec::new();
+            for d in ["journal", "staging", "settings-staging"] {
+                if let Ok(rd) = std::fs::read_dir(w.join(d)) {
+                    out.extend(rd.flatten().map(|e| format!("{d}/{:?}", e.file_name())));
+                }
+            }
+            out
+        }
+    }
+
+    fn old_state() -> (Option<String>, bool, Option<String>, bool) {
+        (Some("old".into()), true, Some("old settings".into()), false)
+    }
+
+    #[test]
+    fn a_v2_apply_with_a_remove_and_settings_runs_through_the_real_effects() {
+        let lab = Lab::new();
+        let plan = lab.plan(OpKind::Apply);
+        let (mut act, _h) = ScriptedActivity::new(Activity::NotRunning);
+        let out = run_apply(&plan, &mut lab.fx(&mut act));
+        assert!(
+            matches!(out.packages[0].1, PackageResult::Applied { .. }),
+            "{:?}",
+            out.packages
+        );
+        assert_eq!(
+            lab.state(&plan),
+            (Some("new".into()), false, Some("new settings".into()), true)
+        );
+        assert_eq!(
+            std::fs::read(lab.record_path(&plan)).unwrap(),
+            plan.packages[0].pending_records[0].bytes.as_bytes()
+        );
+        assert!(lab.leftovers().is_empty(), "{:?}", lab.leftovers());
+    }
+
+    #[test]
+    fn a_settings_only_apply_changes_just_the_file_and_keeps_the_old_copy_for_recovery() {
+        let lab = Lab::new();
+        let plan = lab.plan(OpKind::Settings);
+        let (mut act, _h) = ScriptedActivity::new(Activity::NotRunning);
+        let out = run_apply(&plan, &mut lab.fx(&mut act));
+        assert!(
+            matches!(out.packages[0].1, PackageResult::Applied { .. }),
+            "{:?}",
+            out.packages
+        );
+        let mut want = old_state();
+        want.2 = Some("new settings".into());
+        assert_eq!(lab.state(&plan), want);
+        assert!(lab.leftovers().is_empty(), "{:?}", lab.leftovers());
+        let kept = lab
+            .inst
+            .variant_dir
+            .join(".wowsync")
+            .join("settings-recovery");
+        assert!(kept.is_dir(), "the replaced file is kept for recovery");
+    }
+
+    #[test]
+    fn a_crash_at_every_effect_recovers_to_exactly_old_or_new_with_the_real_adapters() {
+        // T-C06c at runtime level
+        let clean = Lab::new();
+        let plan = clean.plan(OpKind::Apply);
+        let mut hooks = Hooks::default();
+        let (mut act, _h) = ScriptedActivity::new(Activity::NotRunning);
+        let mut f = Faulty::new(clean.fx(&mut act), FaultPlan::default(), &mut hooks);
+        assert!(matches!(
+            run_apply(&plan, &mut f).packages[0].1,
+            PackageResult::Applied { .. }
+        ));
+        let n = f.effects_run();
+        assert!(n > 8, "a mixed operation has many effects, got {n}");
+        let new_state = clean.state(&plan);
+        for k in 0..=n {
+            let lab = Lab::new();
+            let plan = lab.plan(OpKind::Apply);
+            {
+                let mut hooks = Hooks::default();
+                let (mut act, _h) = ScriptedActivity::new(Activity::NotRunning);
+                let plan_k = FaultPlan {
+                    crash_after: Some(k),
+                };
+                let mut f = Faulty::new(lab.fx(&mut act), plan_k, &mut hooks);
+                let _ = run_apply(&plan, &mut f);
+            }
+            for _ in 0..6 {
+                let (mut act, _h) = ScriptedActivity::new(Activity::NotRunning);
+                let r = recover_interrupted(&mut lab.fx(&mut act));
+                assert!(
+                    r.ops.iter().all(|(_, _, res)| !matches!(
+                        res,
+                        PackageResult::NeedsHelp(_) | PackageResult::Failed(_)
+                    )),
+                    "crash after {k}: {r:?}"
+                );
+                if !r.journals_remaining {
+                    break;
+                }
+            }
+            let got = lab.state(&plan);
+            assert!(
+                got == old_state() || got == new_state,
+                "crash after {k}: neither old nor new: {got:?}"
+            );
+            assert!(
+                lab.leftovers().is_empty(),
+                "crash after {k}: {:?}",
+                lab.leftovers()
+            );
+        }
     }
 }

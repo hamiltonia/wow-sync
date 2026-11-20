@@ -1,0 +1,21 @@
+{
+  "schema": "wowsync.removal-ack/1",
+  "group_id": "11111111111111111111111111111111",
+  "issuer": {
+    "computer_id": "01010101010101010101010101010101",
+    "enrollment_id": "01010101010101010101010101010101",
+    "issued_at_seq": 4
+  },
+  "items": [
+    {
+      "removal": "f56343b7c73d4ab685fc99859ff3c1abaf35dee5601383a9e3f854d7f77d0b60",
+      "folders": [
+        "suite"
+      ]
+    }
+  ],
+  "result": "removed",
+  "removed": [],
+  "settings": "not_applicable",
+  "written_unix_ms": 8
+}

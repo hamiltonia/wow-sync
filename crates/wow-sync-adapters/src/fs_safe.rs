@@ -640,6 +640,47 @@ impl Root {
     }
 }
 
+/// The settings scope of one install: `<variant>/WTF`, and only files below `Account/`
+/// (settings.md §1). Paths are validated per segment, so nothing can leave the scope.
+#[derive(Debug, Clone)]
+pub struct WtfScope {
+    root: Root,
+}
+
+impl WtfScope {
+    /// `None` when `WTF` does not exist and `create` is false. With `create`, a missing `WTF`
+    /// directory is made inside the variant folder (never above it).
+    pub fn open(variant_dir: &Path, create: bool) -> Result<Option<WtfScope>, FsError> {
+        let dir = variant_dir.join("WTF");
+        if create {
+            match std::fs::create_dir(&dir) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(e) => return Err(FsError::from_io(&dir, &e)),
+            }
+        }
+        match Root::open(&dir, ReparsePolicy::RejectAll) {
+            Ok(root) => Ok(Some(WtfScope { root })),
+            Err(e) if e.kind == FsErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// A settings file path: validated segments, below `Account/`, at least a file name deep.
+    pub fn check_rel(rel: &str) -> Result<(), FsError> {
+        let bad = |d: String| FsError::new(FsErrorKind::OutsideRoot, Path::new("WTF"), d);
+        let segs = split_rel(rel).map_err(|d| bad(format!("{d}: {rel:?}")))?;
+        if segs.len() < 2 || segs[0] != "Account" {
+            return Err(bad(format!("{rel:?} is not a settings file path")));
+        }
+        Ok(())
+    }
+
+    pub fn root(&self) -> &Root {
+        &self.root
+    }
+}
+
 fn remove_file_retry(p: &Path) -> Result<(), FsError> {
     match std::fs::remove_file(p) {
         Ok(()) => Ok(()),

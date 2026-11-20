@@ -1,0 +1,12 @@
+{
+  "schema": "wowsync.authority-part/1",
+  "group_id": "11111111111111111111111111111111",
+  "of": "known",
+  "items": [
+    {
+      "enrollment_id": "02020202020202020202020202020202",
+      "seq": 4
+    }
+  ],
+  "more": []
+}

@@ -1,0 +1,33 @@
+{
+  "schema": "wowsync.removal/1",
+  "group_id": "11111111111111111111111111111111",
+  "issuer": {
+    "computer_id": "02020202020202020202020202020202",
+    "enrollment_id": "02020202020202020202020202020202",
+    "issued_at_seq": 3
+  },
+  "evidence": "user_action",
+  "title": "Suite",
+  "folders": [
+    {
+      "key": "suite",
+      "name": "Suite",
+      "tree": "dc9c5edb8b2d479e697b4b0b8ab874f32b325138598ce9e7b759eb8292110622"
+    }
+  ],
+  "removed_hash": "e0ce1a7f3f76d7bfda0ffdae6e0226aa63b3009c4c4a770c321876aecad0a6c1",
+  "audience": [
+    {
+      "computer_id": "01010101010101010101010101010101",
+      "enrollment_id": "01010101010101010101010101010101"
+    },
+    {
+      "computer_id": "02020202020202020202020202020202",
+      "enrollment_id": "02020202020202020202020202020202"
+    }
+  ],
+  "settings": {
+    "kind": "none"
+  },
+  "written_unix_ms": 7
+}

@@ -25,6 +25,10 @@ pub struct TocInfo {
     pub title: Option<String>,
     pub hard_deps: Vec<String>,
     pub ids: Vec<ExternalId>,
+    /// `## SavedVariables:` names (account-wide settings files), in header order.
+    pub saved_variables: Vec<String>,
+    /// `## SavedVariablesPerCharacter:` names, in header order.
+    pub saved_variables_per_character: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +76,10 @@ pub fn parse_toc(bytes: &[u8]) -> Result<TocInfo, TocError> {
             "x-curse-project-id" => push_id(&mut info, IdKind::Curse, value),
             "x-wago-id" => push_id(&mut info, IdKind::Wago, value),
             "x-wowi-id" => push_id(&mut info, IdKind::WoWI, value),
+            "savedvariables" => push_names(&mut info.saved_variables, value),
+            "savedvariablespercharacter" => {
+                push_names(&mut info.saved_variables_per_character, value)
+            }
             k if k == "dependencies" || k == "requireddeps" || k.starts_with("dep") => {
                 info.hard_deps.extend(
                     value
@@ -85,6 +93,14 @@ pub fn parse_toc(bytes: &[u8]) -> Result<TocInfo, TocError> {
         }
     }
     Ok(info)
+}
+
+fn push_names(out: &mut Vec<String>, value: &str) {
+    for n in value.split(',').map(str::trim).filter(|n| !n.is_empty()) {
+        if !out.iter().any(|o| o == n) {
+            out.push(n.to_string());
+        }
+    }
 }
 
 fn push_id(info: &mut TocInfo, kind: IdKind, value: &str) {

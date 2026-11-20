@@ -1,0 +1,32 @@
+{
+  "schema": "wowsync.readd/1",
+  "group_id": "11111111111111111111111111111111",
+  "issuer": {
+    "computer_id": "01010101010101010101010101010101",
+    "enrollment_id": "01010101010101010101010101010101",
+    "issued_at_seq": 5000
+  },
+  "evidence": "user_add_back",
+  "title": "Suite",
+  "folders": [
+    {
+      "key": "suite",
+      "name": "Suite",
+      "tree": "dc9c5edb8b2d479e697b4b0b8ab874f32b325138598ce9e7b759eb8292110622"
+    }
+  ],
+  "present_hash": "4d4c7eee2e28d03cb2dbf3df639c3290ade66e18755e83caade2d8f37bd8c044",
+  "known": {
+    "seen": [
+      {
+        "enrollment_id": "02020202020202020202020202020202",
+        "seq": 3
+      }
+    ],
+    "extra": [
+      "d93bcabfad59e1dacb9bc2e32938cd106ddf2a1259b3f3b1e355a7efc4a35f84"
+    ],
+    "parts": []
+  },
+  "written_unix_ms": 9
+}

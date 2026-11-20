@@ -1,5 +1,6 @@
 //! The only place that decides which member state is used (publication.md §6, M-05).
 
+use crate::authority::{Barrier, RetVerdict, Retired};
 use crate::ids::{ComputerId, EnrollmentId};
 use crate::layout::parse_state_name;
 use crate::records::{
@@ -156,6 +157,62 @@ pub fn admit_member_states(
     });
     views.sort_by(|a, b| a.computer.cmp(&b.computer));
     (views, out)
+}
+
+/// What the retirement barrier says about one member state (contracts.md §6, ops.md §2.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BarrierGate {
+    Admitted,
+    /// Retired and above the cutoff: never admitted, whenever it is delivered.
+    AfterRetirement,
+    /// Retirement unresolved and above the lowest candidate cutoff: waits, never admitted.
+    Held,
+}
+
+pub fn barrier_gate(barrier: &Barrier, e: &EnrollmentId, seq: u64) -> BarrierGate {
+    match barrier.verdict(e, seq) {
+        RetVerdict::Valid => BarrierGate::Admitted,
+        RetVerdict::AfterRetirement => BarrierGate::AfterRetirement,
+        RetVerdict::RetirementUnresolved => BarrierGate::Held,
+    }
+}
+
+/// Applies the barrier after admission: states above a cutoff become unusable, retired members
+/// contribute no candidates, and the retired enrollments are listed separately.
+pub fn apply_barrier(
+    views: Vec<MemberView>,
+    barrier: &Barrier,
+) -> (Vec<MemberView>, Vec<EnrollmentId>) {
+    let mut kept = Vec::new();
+    let mut retired = Vec::new();
+    for mut v in views {
+        if barrier.retired(&v.enrollment) == Retired::Yes {
+            retired.push(v.enrollment.clone());
+            continue;
+        }
+        if let MemberLatest::Valid { seq, .. } = &v.latest {
+            let seq = *seq;
+            let reason = match barrier_gate(barrier, &v.enrollment, seq) {
+                BarrierGate::Admitted => None,
+                BarrierGate::AfterRetirement => Some("written after the computer was retired"),
+                BarrierGate::Held => Some("waiting for a retirement record"),
+            };
+            if let Some(r) = reason {
+                v.latest = MemberLatest::Unusable {
+                    seq,
+                    reason: r.into(),
+                };
+            }
+        }
+        kept.push(v);
+    }
+    (kept, retired)
+}
+
+/// Settings states have their own monotonic watermark: a lower seq than one already seen is a
+/// regression and is not admitted.
+pub fn settings_seq_admissible(max_seen: u64, seq: u64) -> bool {
+    seq >= max_seen
 }
 
 #[cfg(test)]

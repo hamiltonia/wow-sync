@@ -1,0 +1,52 @@
+{
+  "schema": "wowsync.apply-journal/2",
+  "op": "09090909090909090909090909090909",
+  "group_id": "11111111111111111111111111111111",
+  "started_unix_ms": 5,
+  "kind": "apply",
+  "package": "suite",
+  "target_hash": null,
+  "phase": "staging",
+  "folders": [
+    {
+      "name": "f0",
+      "key": "f0",
+      "action": "replace",
+      "expected_live": {
+        "kind": "absent"
+      },
+      "staged": "865ab0d317f36965e43d20d275b545a6773137adad19db1d61ecb8032f473e0b",
+      "recovery_slot": "recovery/f0"
+    },
+    {
+      "name": "f1",
+      "key": "f1",
+      "action": "remove",
+      "expected_live": {
+        "kind": "absent"
+      },
+      "staged": null,
+      "recovery_slot": "recovery/f1"
+    }
+  ],
+  "removals": [
+    "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d"
+  ],
+  "pending_records": [],
+  "settings_ops": [
+    {
+      "unit": {
+        "folder": "suite",
+        "identity": {
+          "account": "ACC"
+        }
+      },
+      "live_rel": "Account/ACC/SavedVariables/suite.lua",
+      "expected_live": {
+        "kind": "absent"
+      },
+      "staged": "043a718774c572bd8a25adbeb1bfcd5c0256ae11cecf9f9c3f925d0e52beaf89",
+      "recovery_slot": "recovery/s-suite"
+    }
+  ]
+}

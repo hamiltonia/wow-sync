@@ -14,3 +14,5 @@ testkit = []
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+# Unicode NFC for settings identities (contracts.md §3.3). MIT/Apache-2.0, widely used, small.
+unicode-normalization = "=0.1.24"

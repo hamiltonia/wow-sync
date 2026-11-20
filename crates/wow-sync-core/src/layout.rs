@@ -66,6 +66,65 @@ pub fn journal(op: &OpId) -> String {
     format!("journals/{op}.json")
 }
 
+/// Authority records of one member: own records and verbatim mirrors (contracts.md §1.2).
+pub fn authority_dir(g: &GroupId, c: &ComputerId) -> String {
+    format!("groups/{g}/members/{c}/authority")
+}
+
+pub fn authority_record(g: &GroupId, c: &ComputerId, h: &Sha256) -> String {
+    format!("{}/{h}.json", authority_dir(g, c))
+}
+
+pub fn authority_index_dir(g: &GroupId, c: &ComputerId) -> String {
+    format!("groups/{g}/members/{c}/authority-index")
+}
+
+pub fn authority_index_chunk(g: &GroupId, c: &ComputerId, h: &Sha256) -> String {
+    format!("{}/{h}.json", authority_index_dir(g, c))
+}
+
+/// Settings state stream of one member (settings.md §3.4).
+pub fn settings_state_dir(g: &GroupId, c: &ComputerId) -> String {
+    format!("groups/{g}/members/{c}/settings")
+}
+
+/// Local ledger: append-only segment files under the app data directory (contracts.md §1.7).
+pub fn ledger_segment(index: u32) -> String {
+    format!("authority/ledger/{index:08}.json")
+}
+
+pub fn ledger_dir() -> &'static str {
+    "authority/ledger"
+}
+
+/// Verbatim record bytes of the local ledger.
+pub fn ledger_object(h: &Sha256) -> String {
+    format!("authority/objects/{h}.json")
+}
+
+/// Local "Continue without it" choices; never published.
+pub fn ledger_dismissed() -> &'static str {
+    "authority/dismissed.json"
+}
+
+/// Historical membership set (contracts.md §1.10), local and grow-only.
+pub fn membership_file() -> &'static str {
+    "authority/membership.json"
+}
+
+/// Relative to `<variant>/.wowsync` (settings.md §3.1, §3.5).
+pub fn settings_local() -> &'static str {
+    "settings/local.json"
+}
+
+pub fn settings_blob(h: &Sha256) -> String {
+    format!("settings/blobs/{h}")
+}
+
+pub fn settings_manifest(h: &Sha256) -> String {
+    format!("settings/manifests/{h}.json")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

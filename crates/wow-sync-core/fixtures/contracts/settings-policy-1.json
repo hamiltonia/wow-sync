@@ -1,0 +1,27 @@
+{
+  "schema": "wowsync.settings-policy/1",
+  "group_id": "11111111111111111111111111111111",
+  "issuer": {
+    "computer_id": "01010101010101010101010101010101",
+    "enrollment_id": "01010101010101010101010101010101",
+    "issued_at_seq": 3
+  },
+  "master": null,
+  "folders": [
+    {
+      "folder": "addon00001",
+      "rule": "not_shared"
+    },
+    {
+      "folder": "addon00002",
+      "rule": "not_shared"
+    }
+  ],
+  "known": {
+    "seen": [],
+    "extra": [],
+    "parts": []
+  },
+  "folders_parts": [],
+  "written_unix_ms": 9
+}

@@ -169,9 +169,184 @@ pub fn validate_rel_path(path: &str) -> Result<RelPath, PathError> {
     Ok(RelPath(path.to_string()))
 }
 
+/// A validated path relative to the variant's `WTF` folder naming exactly one settings file
+/// (settings.md §1.1). Only the two supported shapes can be constructed or decoded.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SettingsPath(String);
+
+impl SettingsPath {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for SettingsPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl Serialize for SettingsPath {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for SettingsPath {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(d)?;
+        match classify_wtf_rel(&s) {
+            WtfClass::Account { .. } | WtfClass::Character { .. } => Ok(Self(s)),
+            WtfClass::Excluded => Err(serde::de::Error::custom("not a settings file path")),
+        }
+    }
+}
+
+/// Which supported shape a WTF-relative path has, or that it is out of scope.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WtfClass {
+    Account {
+        account: String,
+        folder: String,
+    },
+    Character {
+        account: String,
+        realm: String,
+        character: String,
+        folder: String,
+    },
+    Excluded,
+}
+
+/// Identity folder names may be non-ASCII (character names) but follow the other safe-name rules.
+fn validate_identity_component(name: &str) -> Result<(), PathError> {
+    if name.is_empty() {
+        return Err(PathError::Empty);
+    }
+    if name == "." || name == ".." {
+        return Err(PathError::DotSegment);
+    }
+    for c in name.chars() {
+        if c.is_control() || "<>:\"/\\|?*".contains(c) {
+            return Err(PathError::ForbiddenChar(c));
+        }
+    }
+    if name.len() > MAX_COMPONENT {
+        return Err(PathError::TooLong);
+    }
+    if name.starts_with(' ') || name.ends_with(' ') || name.ends_with('.') {
+        return Err(PathError::TrailingDotOrSpace);
+    }
+    if is_reserved(name) {
+        return Err(PathError::Reserved);
+    }
+    Ok(())
+}
+
+fn settings_file_folder(file: &str) -> Option<String> {
+    let stem = file.strip_suffix(".lua")?;
+    if stem.to_ascii_lowercase().starts_with("blizzard_") {
+        return None;
+    }
+    validate_folder_name(stem).ok()?;
+    Some(stem.to_string())
+}
+
+/// Classifies a `/`-separated path relative to `WTF` (settings.md §1.1). Backups, temporary
+/// files, WoW's own files and anything not exactly one of the two shapes are `Excluded`.
+pub fn classify_wtf_rel(rel: &str) -> WtfClass {
+    let parts: Vec<&str> = rel.split('/').collect();
+    if parts.first() != Some(&"Account") {
+        return WtfClass::Excluded;
+    }
+    if parts[1..]
+        .iter()
+        .any(|p| validate_identity_component(p).is_err())
+    {
+        return WtfClass::Excluded;
+    }
+    match parts.as_slice() {
+        ["Account", account, "SavedVariables", file] => match settings_file_folder(file) {
+            Some(folder) => WtfClass::Account {
+                account: (*account).to_string(),
+                folder,
+            },
+            None => WtfClass::Excluded,
+        },
+        ["Account", account, realm, character, "SavedVariables", file] => {
+            match settings_file_folder(file) {
+                Some(folder) => WtfClass::Character {
+                    account: (*account).to_string(),
+                    realm: (*realm).to_string(),
+                    character: (*character).to_string(),
+                    folder,
+                },
+                None => WtfClass::Excluded,
+            }
+        }
+        _ => WtfClass::Excluded,
+    }
+}
+
+/// `Account/<ACCOUNT>/SavedVariables/<Folder>.lua`.
+pub fn account_settings_path(account: &str, folder: &str) -> Result<SettingsPath, PathError> {
+    let rel = format!("Account/{account}/SavedVariables/{folder}.lua");
+    match classify_wtf_rel(&rel) {
+        WtfClass::Account { .. } => Ok(SettingsPath(rel)),
+        _ => Err(PathError::Absolute),
+    }
+}
+
+/// `Account/<ACCOUNT>/<Realm>/<Character>/SavedVariables/<Folder>.lua`.
+pub fn character_settings_path(
+    account: &str,
+    realm: &str,
+    character: &str,
+    folder: &str,
+) -> Result<SettingsPath, PathError> {
+    let rel = format!("Account/{account}/{realm}/{character}/SavedVariables/{folder}.lua");
+    match classify_wtf_rel(&rel) {
+        WtfClass::Character { .. } => Ok(SettingsPath(rel)),
+        _ => Err(PathError::Absolute),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wtf_paths_accept_only_the_two_shapes() {
+        let a = account_settings_path("ACCOUNT1", "WeakAuras").unwrap();
+        assert_eq!(a.as_str(), "Account/ACCOUNT1/SavedVariables/WeakAuras.lua");
+        let c = character_settings_path("ACCOUNT1", "Realm", "Chärlie", "Details").unwrap();
+        assert_eq!(
+            classify_wtf_rel(c.as_str()),
+            WtfClass::Character {
+                account: "ACCOUNT1".into(),
+                realm: "Realm".into(),
+                character: "Chärlie".into(),
+                folder: "Details".into()
+            }
+        );
+        for bad in [
+            "Config.wtf",
+            "Account/A1/config-cache.wtf",
+            "Account/A1/SavedVariables/Blizzard_Foo.lua",
+            "Account/A1/SavedVariables/Foo.lua.bak",
+            "Account/A1/SavedVariables/Foo.lua.old",
+            "Account/SavedVariables/Foo.lua",
+            "Account/A1/R/C/X/SavedVariables/Foo.lua",
+            "Account/../SavedVariables/Foo.lua",
+            "Account/A1/SavedVariables/../Foo.lua",
+            "Account/A1/SavedVariables/Foo.lua/",
+        ] {
+            assert_eq!(classify_wtf_rel(bad), WtfClass::Excluded, "{bad}");
+        }
+        assert!(account_settings_path("A1", "../Foo").is_err());
+        assert!(account_settings_path("A/1", "Foo").is_err());
+        assert!(serde_json::from_str::<SettingsPath>("\"Config.wtf\"").is_err());
+    }
 
     #[test]
     fn traversal_and_absolute_paths_rejected() {

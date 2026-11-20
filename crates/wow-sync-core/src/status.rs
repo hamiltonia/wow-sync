@@ -1,6 +1,7 @@
 //! Status derivation (core-api.md §8, R-12, A-24). A published record is never confirmation.
 
 use crate::admit::{MemberLatest, MemberView};
+use crate::decision::{DecisionReach, DecisionScope};
 use crate::exec::{ApplyOutcome, PackageResult};
 use crate::explain::{render, Explanation};
 use crate::ids::ComputerId;
@@ -350,6 +351,87 @@ pub fn render_result(r: &PackageResult) -> String {
 
 /// Journals present on disk split into interrupted packages and packages needing help
 /// (apply.md §4: a `needs_help` journal waits for the user; any other phase is resumable).
+/// How much is held (ops.md §1.6). `AllApplies` takes precedence over `Addons`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HoldScope {
+    None,
+    Addons(Vec<DecisionScope>),
+    AllApplies(AllHoldCause),
+}
+
+/// Why every game-file change on this computer waits. Local only: no variant is ever written to
+/// a shared or wire file (R4D-31), so none derives a serialization.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AllHoldCause {
+    UnresolvedJournal { folders: Vec<FolderKey> },
+    GameRunning,
+    ActivityUnknown,
+    Paused,
+    Retired,
+    RetirementUnresolved,
+}
+
+/// What a retired enrollment's listing shows (ops.md §2.2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RetiredInfo {
+    pub enrollment: crate::ids::EnrollmentId,
+    pub retired_by: ComputerId,
+    pub cutoff_seq: u64,
+}
+
+/// Runtime-supplied facts for the hold decision beyond the plan blocks.
+#[derive(Debug, Clone, Default)]
+pub struct HoldInputs {
+    pub paused: bool,
+    pub retired: bool,
+    pub retirement_unresolved: bool,
+    pub waiting_addons: Vec<DecisionScope>,
+}
+
+pub fn hold_scope(blocks: &[PlanBlock], unresolved: &[FolderKey], i: &HoldInputs) -> HoldScope {
+    let all = if !unresolved.is_empty() || blocks.contains(&PlanBlock::UnresolvedJournal) {
+        Some(AllHoldCause::UnresolvedJournal {
+            folders: unresolved.to_vec(),
+        })
+    } else if blocks.contains(&PlanBlock::GameRunning) {
+        Some(AllHoldCause::GameRunning)
+    } else if blocks
+        .iter()
+        .any(|b| matches!(b, PlanBlock::ActivityUnknown(_)))
+    {
+        Some(AllHoldCause::ActivityUnknown)
+    } else if i.retired {
+        Some(AllHoldCause::Retired)
+    } else if i.retirement_unresolved {
+        Some(AllHoldCause::RetirementUnresolved)
+    } else if i.paused {
+        Some(AllHoldCause::Paused)
+    } else {
+        None
+    };
+    match all {
+        Some(c) => HoldScope::AllApplies(c),
+        None if i.waiting_addons.is_empty() => HoldScope::None,
+        None => {
+            let mut a = i.waiting_addons.clone();
+            a.sort();
+            a.dedup();
+            HoldScope::Addons(a)
+        }
+    }
+}
+
+impl PackageStatus {
+    /// Who a decision about this status reaches, when it needs one.
+    pub fn reach(&self) -> Option<DecisionReach> {
+        match self {
+            Self::NeedsDecision(_) => Some(DecisionReach::Group),
+            Self::NeedsHelp(_) | Self::Interrupted => Some(DecisionReach::ThisComputer),
+            _ => None,
+        }
+    }
+}
+
 pub type JournalSplit = (Vec<FolderKey>, Vec<(FolderKey, String)>);
 
 pub fn journal_status(journals: &[ApplyJournal]) -> JournalSplit {

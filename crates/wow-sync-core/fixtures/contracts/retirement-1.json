@@ -1,0 +1,17 @@
+{
+  "schema": "wowsync.retirement/1",
+  "group_id": "11111111111111111111111111111111",
+  "issuer": {
+    "computer_id": "01010101010101010101010101010101",
+    "enrollment_id": "01010101010101010101010101010101",
+    "issued_at_seq": 1
+  },
+  "retired": {
+    "computer_id": "02020202020202020202020202020202",
+    "enrollment_id": "02020202020202020202020202020202"
+  },
+  "cutoff_seq": 10,
+  "was_settings_master": false,
+  "retirements_known": [],
+  "written_unix_ms": 7
+}

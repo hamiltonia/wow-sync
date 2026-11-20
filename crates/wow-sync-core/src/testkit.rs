@@ -3,7 +3,8 @@
 
 use crate::admit::{MemberLatest, MemberView};
 use crate::exec::{
-    ApplyEffects, EffectError, EffectErrorKind, ObjectStat, PublishEffects, Slot, SlotObs,
+    ApplyEffects, EffectError, EffectErrorKind, ObjectStat, PublishEffects, SettingsSlot, Slot,
+    SlotObs,
 };
 use crate::hash::sha256;
 use crate::ids::{ComputerId, EnrollmentId, GroupId, OpId, Sha256};
@@ -16,8 +17,9 @@ use crate::plan::{
     ObjectSource, PublishContext,
 };
 use crate::records::{
-    decode, encode, ApplyJournal, CodeState, FolderTreeRecord, GroupRecord, JournalFolder,
-    JournalPhase, MemberRecord, Record, RecoveryPoint,
+    decode, decode_journal, encode, AnyJournal, ApplyJournal, ApplyJournalV2, CodeState,
+    FolderTreeRecord, GroupRecord, JournalFolder, JournalPhase, MemberRecord, PendingRecord,
+    Record, RecoveryPoint, RecoveryPointV2, SettingsFileOp,
 };
 use crate::target::{compute_target, GroupTarget, TargetInput, TreeAvail};
 use crate::toc::{IdKind, TocCandidate};
@@ -503,6 +505,10 @@ pub enum Step {
     ObserveSource,
     WriteRecord,
     RemoveOwnRecord,
+    SettingsStage,
+    SettingsHash,
+    SettingsRename,
+    WritePending,
 }
 
 impl Step {
@@ -519,6 +525,9 @@ impl Step {
                 | Step::PutObject
                 | Step::WriteRecord
                 | Step::RemoveOwnRecord
+                | Step::SettingsStage
+                | Step::SettingsRename
+                | Step::WritePending
         )
     }
 }
@@ -569,6 +578,14 @@ pub struct FakeEffects {
     pub journals: BTreeMap<String, Vec<u8>>,
     pub objects: BTreeMap<String, FakeObj>,
     pub records: BTreeMap<String, Vec<u8>>,
+    /// Settings files by WTF-relative path, as content hashes (`/2` operations).
+    pub settings_live: BTreeMap<String, Sha256>,
+    pub settings_staging: BTreeMap<(String, usize), Sha256>,
+    pub settings_recovery: BTreeMap<(String, usize), Sha256>,
+    /// Records written at finalize, by hash.
+    pub pending_written: BTreeMap<Sha256, Vec<u8>>,
+    /// Blob hashes `settings_stage` can copy.
+    pub settings_blobs: Vec<Sha256>,
     pub log: Vec<Effect>,
     pub activity_script: VecDeque<Activity>,
     /// Report `Running` once this many renames have happened.
@@ -606,6 +623,11 @@ impl FakeEffects {
             journals: BTreeMap::new(),
             objects: BTreeMap::new(),
             records: BTreeMap::new(),
+            settings_live: BTreeMap::new(),
+            settings_staging: BTreeMap::new(),
+            settings_recovery: BTreeMap::new(),
+            pending_written: BTreeMap::new(),
+            settings_blobs: Vec::new(),
             log: Vec::new(),
             activity_script: VecDeque::new(),
             launch_after_renames: None,
@@ -676,6 +698,13 @@ impl FakeEffects {
         self.journals
             .get(op.as_str())
             .and_then(|b| decode::<ApplyJournal>(b, ApplyJournal::LIMIT).ok())
+    }
+
+    /// The journal of either major.
+    pub fn journal_any(&self, op: &OpId) -> Option<AnyJournal> {
+        self.journals
+            .get(op.as_str())
+            .and_then(|b| decode_journal(b).ok())
     }
 
     pub fn points_for(&self, pkg: &FolderKey) -> Vec<RecoveryPoint> {
@@ -945,6 +974,7 @@ impl ApplyEffects for FakeEffects {
         self.points.remove(&(pkg.to_string(), op.to_string()));
         self.recovery
             .retain(|(p, o, _), _| !(p == pkg.as_str() && o == op.as_str()));
+        self.settings_recovery.retain(|(o, _), _| o != op.as_str());
         Ok(())
     }
 
@@ -952,6 +982,112 @@ impl ApplyEffects for FakeEffects {
         self.enter(Step::DiscardStaging)?;
         self.log.push(Effect::DiscardStaging);
         self.staging.retain(|(o, _), _| o != op.as_str());
+        Ok(())
+    }
+
+    fn write_journal_v2(&mut self, j: &ApplyJournalV2) -> Result<(), EffectError> {
+        self.enter(Step::WriteJournal)?;
+        self.log.push(Effect::WriteJournal(j.phase));
+        self.journals.insert(j.op.to_string(), encode(j));
+        Ok(())
+    }
+
+    fn write_recovery_point_v2(&mut self, rp: &RecoveryPointV2) -> Result<(), EffectError> {
+        self.enter(Step::WriteRecovery)?;
+        self.log.push(Effect::WriteRecovery { pinned: rp.pinned });
+        self.points
+            .insert((rp.package.to_string(), rp.op.to_string()), encode(rp));
+        Ok(())
+    }
+
+    fn write_pending_record(&mut self, p: &PendingRecord) -> Result<(), EffectError> {
+        self.enter(Step::WritePending)?;
+        self.log.push(Effect::Other(Step::WritePending));
+        self.pending_written
+            .insert(p.hash, p.bytes.as_bytes().to_vec());
+        Ok(())
+    }
+
+    fn settings_stage(
+        &mut self,
+        op: &OpId,
+        idx: usize,
+        o: &SettingsFileOp,
+    ) -> Result<(), EffectError> {
+        self.enter(Step::SettingsStage)?;
+        let want = o.staged.expect("only staged files are copied");
+        if !self.settings_blobs.contains(&want) {
+            return Err(EffectError::new(EffectErrorKind::NotFound, "blob missing"));
+        }
+        self.settings_staging.insert((op.to_string(), idx), want);
+        Ok(())
+    }
+
+    fn settings_hash(&mut self, s: &SettingsSlot) -> Result<Option<Sha256>, EffectError> {
+        self.enter(Step::SettingsHash)?;
+        Ok(match s {
+            SettingsSlot::Live { rel } => self.settings_live.get(rel).copied(),
+            SettingsSlot::Staging { op, idx } => {
+                self.settings_staging.get(&(op.to_string(), *idx)).copied()
+            }
+            SettingsSlot::Recovery { op, idx } => {
+                self.settings_recovery.get(&(op.to_string(), *idx)).copied()
+            }
+        })
+    }
+
+    fn settings_rename(
+        &mut self,
+        from: &SettingsSlot,
+        to: &SettingsSlot,
+    ) -> Result<(), EffectError> {
+        self.enter(Step::SettingsRename)?;
+        self.log.push(Effect::Other(Step::SettingsRename));
+        let exists = match to {
+            SettingsSlot::Live { rel } => self.settings_live.contains_key(rel),
+            SettingsSlot::Staging { op, idx } => {
+                self.settings_staging.contains_key(&(op.to_string(), *idx))
+            }
+            SettingsSlot::Recovery { op, idx } => {
+                self.settings_recovery.contains_key(&(op.to_string(), *idx))
+            }
+        };
+        if exists {
+            return Err(EffectError::new(
+                EffectErrorKind::Exists,
+                "destination exists",
+            ));
+        }
+        let taken = match from {
+            SettingsSlot::Live { rel } => self.settings_live.remove(rel),
+            SettingsSlot::Staging { op, idx } => {
+                self.settings_staging.remove(&(op.to_string(), *idx))
+            }
+            SettingsSlot::Recovery { op, idx } => {
+                self.settings_recovery.remove(&(op.to_string(), *idx))
+            }
+        };
+        let Some(h) = taken else {
+            return Err(EffectError::new(EffectErrorKind::NotFound, "source absent"));
+        };
+        match to {
+            SettingsSlot::Live { rel } => {
+                self.settings_live.insert(rel.clone(), h);
+            }
+            SettingsSlot::Staging { op, idx } => {
+                self.settings_staging.insert((op.to_string(), *idx), h);
+            }
+            SettingsSlot::Recovery { op, idx } => {
+                self.settings_recovery.insert((op.to_string(), *idx), h);
+            }
+        }
+        self.renames += 1;
+        Ok(())
+    }
+
+    fn discard_settings_staging(&mut self, op: &OpId) -> Result<(), EffectError> {
+        self.enter(Step::DiscardStaging)?;
+        self.settings_staging.retain(|(o, _), _| o != op.as_str());
         Ok(())
     }
 }
@@ -1021,6 +1157,25 @@ impl PublishEffects for FakeEffects {
         self.records.remove(rel);
         Ok(())
     }
+}
+
+/// Compares `bytes` with `fixtures/contracts/<name>`. With `WOWSYNC_BLESS=1` a missing golden file
+/// is written from `bytes`; otherwise a missing file fails the test.
+pub fn golden(name: &str, bytes: &[u8]) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("fixtures")
+        .join("contracts")
+        .join(name);
+    if !path.exists() && std::env::var("WOWSYNC_BLESS").is_ok_and(|v| v == "1") {
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("create fixtures dir");
+        std::fs::write(&path, bytes).expect("write golden");
+    }
+    let want = std::fs::read(&path).unwrap_or_else(|_| panic!("missing golden {name}"));
+    assert_eq!(
+        String::from_utf8_lossy(&want),
+        String::from_utf8_lossy(bytes),
+        "golden {name}"
+    );
 }
 
 pub fn live_of(fx: &FakeEffects, names: &[&str]) -> Vec<Option<Sha256>> {
