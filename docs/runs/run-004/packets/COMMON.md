@@ -3,8 +3,9 @@
 Authority:
 - SPEC.md, ACCEPTANCE.md and ENGINEERING.md.
 - OWNER-DECISIONS.md: D-04, D-05, D-08, D-09, D-14, D-18, D-19, D-21, D-22,
-  D-23 and D-24. D-21 overrides earlier Q-21 and removal defaults. D-23
-  sets the run-004 scope and the R3D-13 simplification.
+  D-23, D-24 and D-25. D-21 overrides earlier Q-21 and removal defaults. D-23
+  sets the run-004 scope and the R3D-13 simplification. D-25 accepts the
+  run-004 design defaults (Q-55 to Q-87).
 - [../PLAN.md](../PLAN.md).
 
 Read AGENTS.md first. Each `R4-*` packet plus this file is the full work
