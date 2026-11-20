@@ -68,6 +68,7 @@ Status: **approved** (D-24). Active. Scope and ceiling are from D-23.
 | C2 | R4-core-removal | Implementation / sonnet-5.5 | Core and runtime removal plus recovery, with tests. Files: contracts.md §9.2 |
 | C2 | R4-core-settings | Implementation / sonnet-5.5 | Core and runtime settings sync plus rollback, with tests. Files: contracts.md §9.2 |
 | C2 | R4-core-ops | Implementation / sonnet-5.5 | Core retire, decision actions, typed scope (UQ-2). Files: contracts.md §9.2 |
+| C3 | R4-integrate | Implementation / sonnet-5.5 | Added after step 2: wire step-2 hooks into `service.rs`/`control.rs`/`target::compose` (an unmet C1 §9.1 obligation), fix the `ledger.rs` mixed-kind-parent bug, persistence, remaining A-38 controls. Packet `packets/R4-integrate.md`. Runs alone, before D |
 | D | R4-app | Implementation / sonnet-5.5 | GUI: resolve decisions, UQ-1 headline, retire, rollback, settings master/exceptions/push, removal and recovery screens. Files: contracts.md §9.3 |
 | D | R4-notify-diag | Implementation / sonnet-5.5 | OS notifications, update notice (per P4-1), diagnostics export. Files: contracts.md §9.3; receives `Cargo.lock` after C1 |
 | D | R4-mac-kit | Implementation / sonnet-5.5 | Mac build, run and memory script plus owner instructions |
