@@ -1244,7 +1244,10 @@ tests = [
 [[case]]
 id = "R4-app:snapshot-connect"
 tier = "offline"
-tests = ["features::tests::the_snapshot_fills_standing_retired_rows_and_held_releases"]
+tests = [
+    "features::tests::the_snapshot_fills_standing_retired_rows_and_held_releases",
+    "features::tests::only_active_other_computers_can_be_retired_and_the_retirement_date_is_shown",
+]
 
 [[case]]
 id = "R4-app:headline"

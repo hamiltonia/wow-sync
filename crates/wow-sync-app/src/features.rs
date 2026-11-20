@@ -467,6 +467,8 @@ pub struct FeatureData {
     pub decisions: Vec<DecisionItem>,
     /// Peer computer id (hex) to the enrollment a retirement would name.
     pub enrollments: Vec<(String, EnrollmentRef)>,
+    /// This computer's own enrollment, when active: it may be the settings master.
+    pub this_enrollment: Option<EnrollmentRef>,
     pub retired: Vec<RetiredComputer>,
     /// Rejected releases the owner may allow again. Pending snapshot field (R4-integrate).
     pub allow_again: Vec<crate::computers_ui::AllowAgainRow>,
@@ -496,6 +498,7 @@ impl Default for FeatureData {
             hold: HoldScope::None,
             decisions: Vec::new(),
             enrollments: Vec::new(),
+            this_enrollment: None,
             retired: Vec::new(),
             allow_again: Vec::new(),
             history: Vec::new(),
@@ -519,9 +522,18 @@ pub fn apply_snapshot(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot)
     f.review_needed = s.review_needed;
     f.update = s.update.clone();
     f.removed = s.removed.clone();
+    apply_peers(f, s);
+    let retired_on = |enrollment: &wow_sync_core::ids::EnrollmentId| {
+        s.peers
+            .iter()
+            .find(|p| &p.enrollment.enrollment_id == enrollment)
+            .and_then(|p| p.retired_at_ms)
+            .map(crate::world::day_text)
+            .unwrap_or_default()
+    };
     f.standing = match (&s.this_retirement, &s.hold) {
-        (Some(_), _) => Standing::Retired {
-            on: String::new(),
+        (Some(info), _) => Standing::Retired {
+            on: retired_on(&info.enrollment),
             by: s
                 .retirements
                 .iter()
@@ -538,7 +550,7 @@ pub fn apply_snapshot(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot)
         .filter(|r| !r.is_this)
         .map(|r| RetiredComputer {
             name: r.name.clone(),
-            on: String::new(),
+            on: retired_on(&r.enrollment),
             by: r.retired_by.clone(),
         })
         .collect();
@@ -559,6 +571,31 @@ pub fn apply_snapshot(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot)
             held_by: h.holders.join(", "),
         })
         .collect();
+}
+
+/// The enrollments a retire or a master choice may name: active computers only, never a
+/// retired or unresolved one. This computer is kept apart because it can be master, not retired.
+fn apply_peers(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot) {
+    use wow_sync_runtime::PeerStanding;
+    let active = s
+        .peers
+        .iter()
+        .filter(|p| p.standing == PeerStanding::Active);
+    f.enrollments = active
+        .clone()
+        .filter(|p| !p.is_this)
+        .map(|p| {
+            (
+                p.enrollment.computer_id.as_str().to_string(),
+                p.enrollment.clone(),
+            )
+        })
+        .collect();
+    f.this_enrollment = active
+        .filter(|p| p.is_this)
+        .map(|p| p.enrollment.clone())
+        .next();
+    f.master = s.settings.master_name.clone();
 }
 
 /// A disabled control carries its reason; an enabled one is `Ok`.
@@ -818,6 +855,77 @@ mod tests {
             Standing::Held,
             "unresolved is not shown as retired"
         );
+    }
+
+    fn peer(
+        id: &str,
+        name: &str,
+        standing: wow_sync_runtime::PeerStanding,
+        is_this: bool,
+        at: Option<u64>,
+    ) -> wow_sync_runtime::PeerRow {
+        use wow_sync_core::ids::{ComputerId, EnrollmentId};
+        wow_sync_runtime::PeerRow {
+            enrollment: EnrollmentRef {
+                computer_id: ComputerId::parse(id).unwrap(),
+                enrollment_id: EnrollmentId::parse(id).unwrap(),
+            },
+            name: name.into(),
+            standing,
+            retired_at_ms: at,
+            is_this,
+        }
+    }
+
+    #[test]
+    fn only_active_other_computers_can_be_retired_and_the_retirement_date_is_shown() {
+        use wow_sync_runtime::PeerStanding::*;
+        let den = "22222222222222222222222222222222";
+        let mut s = wow_sync_runtime::StatusSnapshot::default();
+        s.peers = vec![
+            peer(
+                "11111111111111111111111111111111",
+                "Desk",
+                Active,
+                true,
+                None,
+            ),
+            peer(den, "Den PC", Active, false, None),
+            peer(
+                "44444444444444444444444444444444",
+                "Old",
+                Retired,
+                false,
+                Some(1_768_219_200_000),
+            ),
+            peer(
+                "55555555555555555555555555555555",
+                "Maybe",
+                RetirementUnresolved,
+                false,
+                None,
+            ),
+        ];
+        let mut f = FeatureData::default();
+        apply_snapshot(&mut f, &s);
+        assert_eq!(
+            f.enrollments.len(),
+            1,
+            "retired and unresolved are not offered"
+        );
+        assert_eq!(f.enrollments[0].0, den);
+        assert!(f.this_enrollment.is_some(), "this computer is kept apart");
+        assert!(
+            f.enrollments
+                .iter()
+                .all(|(_, e)| Some(e) != f.this_enrollment.as_ref()),
+            "this computer is never offered for retirement"
+        );
+        s.retirements = vec![retirement("Old", "Den PC", false)];
+        s.retirements[0].enrollment =
+            wow_sync_core::ids::EnrollmentId::parse("44444444444444444444444444444444").unwrap();
+        apply_snapshot(&mut f, &s);
+        assert_eq!(f.retired[0].on, "12 January");
     }
 
     #[test]
