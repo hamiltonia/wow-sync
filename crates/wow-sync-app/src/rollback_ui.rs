@@ -2,9 +2,6 @@
 //! (rollback.md §1-§4, §8). Pure: the rows come from the snapshot (held releases), the words are
 //! decided here and the only thing it can produce is a typed `GroupAction`.
 
-// summary/exception_line wait for the snapshot's rollback outcome and recovery-size fields.
-#![allow(dead_code)]
-
 use crate::computers_ui::{allow_again, AllowAgainRow};
 use crate::features::{gate, ActionKind, GroupAction};
 use crate::world::World;
@@ -54,6 +51,7 @@ pub fn button(w: &World, r: &ReleaseRow) -> HistoryButton {
             title: r.title.clone(),
             version: r.version.clone(),
             rejections: r.rejections.clone(),
+            on: String::new(),
         };
         return match allow_again(w, &row) {
             Ok(a) => HistoryButton::AllowAgain(a),
@@ -95,6 +93,8 @@ pub fn confirm_text(installed: &str, r: &ReleaseRow) -> Vec<String> {
     ]
 }
 
+// The service does not report a rollback outcome or recovery sizes yet; only tests build these.
+#[allow(dead_code)]
 /// How the settings saved with the earlier version fared (rollback.md §4).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SettingsOutcome {
@@ -104,6 +104,7 @@ pub enum SettingsOutcome {
     NotApplicable,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Summary {
     pub text: String,
@@ -111,6 +112,7 @@ pub struct Summary {
     pub warning: bool,
 }
 
+#[allow(dead_code)]
 pub fn summary(title: &str, back_to: &str, from: &str, o: &SettingsOutcome) -> Summary {
     match o {
         SettingsOutcome::Paired { units } => Summary {
@@ -141,6 +143,7 @@ pub fn summary(title: &str, back_to: &str, from: &str, o: &SettingsOutcome) -> S
 }
 
 /// A visible temporary exception, with its size (three-states rule: recovery data is shown).
+#[allow(dead_code)]
 pub fn exception_line(what: &str, bytes: u64) -> String {
     let size = if bytes >= 1 << 20 {
         format!("{:.1} MB", bytes as f64 / (1u64 << 20) as f64)

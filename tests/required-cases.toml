@@ -1247,12 +1247,20 @@ tests = [
     "settings_ui::tests::master_and_exceptions_keep_each_other",
     "settings_ui::tests::a_retired_computer_cannot_change_settings_and_enable_needs_an_account",
     "settings_ui::tests::restore_says_the_current_copy_is_kept",
+    "settings_ui::tests::the_snapshot_drives_master_choice_and_the_precise_resume_sheet",
+    "settings_ui::tests::two_competing_masters_choose_nothing_and_block_exceptions_with_their_reason",
+    "settings_ui::tests::the_units_list_wires_share_choose_and_restore_from_the_snapshot",
+    "settings_ui::tests::units_that_cannot_share_or_restore_say_why_and_a_missing_cap_is_not_invented",
 ]
 
 [[case]]
 id = "R4-app:snapshot-connect"
 tier = "offline"
-tests = ["features::tests::the_snapshot_fills_standing_retired_rows_and_held_releases"]
+tests = [
+    "features::tests::the_snapshot_fills_standing_retired_rows_and_held_releases",
+    "features::tests::only_active_other_computers_can_be_retired_and_the_retirement_date_is_shown",
+    "features::tests::rejected_releases_become_allow_again_rows_and_mark_the_held_release_blocked",
+]
 
 [[case]]
 id = "R4-app:headline"
@@ -1265,6 +1273,7 @@ tier = "offline"
 tests = [
   "removed_ui::tests::lines_name_the_remover_and_who_is_still_awaited",
   "removed_ui::tests::nobody_awaited_means_no_waiting_line_and_empty_means_the_empty_text",
+  "removed_ui::tests::restore_names_the_removal_of_the_same_row_and_a_retired_computer_cannot",
 ]
 
 [[case]]

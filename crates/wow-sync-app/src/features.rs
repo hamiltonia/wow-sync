@@ -467,6 +467,8 @@ pub struct FeatureData {
     pub decisions: Vec<DecisionItem>,
     /// Peer computer id (hex) to the enrollment a retirement would name.
     pub enrollments: Vec<(String, EnrollmentRef)>,
+    /// This computer's own enrollment, when active: it may be the settings master.
+    pub this_enrollment: Option<EnrollmentRef>,
     pub retired: Vec<RetiredComputer>,
     /// Rejected releases the owner may allow again. Pending snapshot field (R4-integrate).
     pub allow_again: Vec<crate::computers_ui::AllowAgainRow>,
@@ -474,6 +476,8 @@ pub struct FeatureData {
     pub history: Vec<crate::rollback_ui::ReleaseRow>,
     /// Removals the group has recorded, for the Removed section.
     pub removed: Vec<wow_sync_runtime::RemovedRow>,
+    /// The removal record of each `removed` row (same index), which Restore names.
+    pub removal_hashes: Vec<Sha256>,
     /// Name of a live member whose WoW Sync can't block versions (Q-84), which blocks go-back.
     pub older_peer: Option<String>,
     /// Name of the settings master, when one is chosen.
@@ -496,10 +500,12 @@ impl Default for FeatureData {
             hold: HoldScope::None,
             decisions: Vec::new(),
             enrollments: Vec::new(),
+            this_enrollment: None,
             retired: Vec::new(),
             allow_again: Vec::new(),
             history: Vec::new(),
             removed: Vec::new(),
+            removal_hashes: Vec::new(),
             older_peer: None,
             master: None,
             review_needed: false,
@@ -510,18 +516,27 @@ impl Default for FeatureData {
     }
 }
 
-/// Fill what the status snapshot carries: standing, hold, retired computers and held releases.
-/// Not in the snapshot yet (handover): enrollments of active peers, settings units, the master,
-/// rejected releases to allow again and an older-peer flag; those stay empty and their controls
-/// say why they are unavailable.
+/// Fill what the status snapshot carries: standing, hold, peers, retired computers, held and
+/// rejected releases, removed rows, the older-peer flag and the settings facts. Still absent
+/// (handover): the settings units list, so Share, Choose, Restore and Pause say why they are off.
 pub fn apply_snapshot(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot) {
     f.hold = s.hold.clone();
     f.review_needed = s.review_needed;
     f.update = s.update.clone();
     f.removed = s.removed.clone();
+    f.removal_hashes = s.removal_hashes.clone();
+    apply_peers(f, s);
+    let retired_on = |enrollment: &wow_sync_core::ids::EnrollmentId| {
+        s.peers
+            .iter()
+            .find(|p| &p.enrollment.enrollment_id == enrollment)
+            .and_then(|p| p.retired_at_ms)
+            .map(crate::world::day_text)
+            .unwrap_or_default()
+    };
     f.standing = match (&s.this_retirement, &s.hold) {
-        (Some(_), _) => Standing::Retired {
-            on: String::new(),
+        (Some(info), _) => Standing::Retired {
+            on: retired_on(&info.enrollment),
             by: s
                 .retirements
                 .iter()
@@ -538,7 +553,7 @@ pub fn apply_snapshot(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot)
         .filter(|r| !r.is_this)
         .map(|r| RetiredComputer {
             name: r.name.clone(),
-            on: String::new(),
+            on: retired_on(&r.enrollment),
             by: r.retired_by.clone(),
         })
         .collect();
@@ -555,10 +570,129 @@ pub fn apply_snapshot(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot)
             },
             package_hash: h.release,
             current: false,
-            rejections: Vec::new(),
+            rejections: s
+                .rejected_releases
+                .iter()
+                .filter(|r| r.release == h.release)
+                .flat_map(|r| r.rejections.iter().copied())
+                .collect(),
             held_by: h.holders.join(", "),
         })
         .collect();
+    f.older_peer = s.older_peer.clone();
+    f.allow_again = s
+        .rejected_releases
+        .iter()
+        .map(|r| crate::computers_ui::AllowAgainRow {
+            title: r.folders.join(", "),
+            version: if r.label.is_empty() {
+                "from earlier".into()
+            } else {
+                r.label.clone()
+            },
+            rejections: r.rejections.clone(),
+            on: crate::world::day_text(r.rejected_at_ms),
+        })
+        .collect();
+}
+
+/// The enrollments a retire or a master choice may name: active computers only, never a
+/// retired or unresolved one. This computer is kept apart because it can be master, not retired.
+fn apply_peers(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot) {
+    use wow_sync_runtime::PeerStanding;
+    let active = s
+        .peers
+        .iter()
+        .filter(|p| p.standing == PeerStanding::Active);
+    f.enrollments = active
+        .clone()
+        .filter(|p| !p.is_this)
+        .map(|p| {
+            (
+                p.enrollment.computer_id.as_str().to_string(),
+                p.enrollment.clone(),
+            )
+        })
+        .collect();
+    f.this_enrollment = active
+        .filter(|p| p.is_this)
+        .map(|p| p.enrollment.clone())
+        .next();
+    f.master = s.settings.master_name.clone();
+    apply_settings(f, &s.settings);
+    f.settings.units = settings_unit_rows(&s.settings_units, s.settings.enabled);
+}
+
+fn apply_settings(f: &mut FeatureData, s: &wow_sync_runtime::SettingsSnapshot) {
+    let d = &mut f.settings;
+    d.enabled = s.enabled;
+    d.accounts = s.accounts.clone();
+    d.master = s.master.clone();
+    d.exceptions = s.exceptions.clone();
+    d.policy_conflict = s.policy_conflict;
+    d.paused = s.paused.clone();
+}
+
+/// The settings rows as the screen shows them. `enabled` tells a missing consent from a missing
+/// size limit, which the service reports as the same `Disabled`.
+pub fn settings_unit_rows(
+    rows: &[wow_sync_runtime::SettingsUnitRow],
+    enabled: bool,
+) -> Vec<crate::settings_ui::UnitRow> {
+    use crate::settings_ui::{Copy, UnitRow, UnitStatus};
+    use wow_sync_runtime::SettingsUnitStatus as S;
+    rows.iter()
+        .map(|r| {
+            let when = |c: &wow_sync_core::ids::Sha256| {
+                r.history.iter().find(|h| &h.checkpoint == c).map(|h| {
+                    format!(
+                        "the copy from {}",
+                        crate::world::day_text(h.written_unix_ms)
+                    )
+                })
+            };
+            UnitRow {
+                unit: r.unit.clone(),
+                addon: r.unit.folder.as_str().to_string(),
+                status: match r.status {
+                    S::Retired => UnitStatus::Retired,
+                    S::Disabled if enabled => UnitStatus::SizeLimitPending,
+                    S::Disabled => UnitStatus::Off,
+                    S::NotShared => UnitStatus::NotShared,
+                    S::PolicyConflict => UnitStatus::PolicyConflict,
+                    S::Paused => UnitStatus::Paused,
+                    S::NeedsChoice => UnitStatus::NeedsChoice,
+                    S::Active => UnitStatus::Active,
+                },
+                live: r.live,
+                latest_capture: r.latest_capture,
+                can_share: r.can_share,
+                heads: r
+                    .competing
+                    .iter()
+                    .enumerate()
+                    .map(|(i, h)| Copy {
+                        checkpoint: h.checkpoint,
+                        label: when(&h.checkpoint).unwrap_or_else(|| format!("copy {}", i + 1)),
+                    })
+                    .collect(),
+                shown_heads: r.shown_heads.clone(),
+                history: r
+                    .history
+                    .iter()
+                    .filter(|h| !h.is_head)
+                    .map(|h| Copy {
+                        checkpoint: h.checkpoint,
+                        label: format!(
+                            "the copy from {}",
+                            crate::world::day_text(h.written_unix_ms)
+                        ),
+                    })
+                    .collect(),
+                restore_possible: r.restore_possible,
+            }
+        })
+        .collect()
 }
 
 /// A disabled control carries its reason; an enabled one is `Ok`.
@@ -818,6 +952,130 @@ mod tests {
             Standing::Held,
             "unresolved is not shown as retired"
         );
+    }
+
+    fn peer(
+        id: &str,
+        name: &str,
+        standing: wow_sync_runtime::PeerStanding,
+        is_this: bool,
+        at: Option<u64>,
+    ) -> wow_sync_runtime::PeerRow {
+        use wow_sync_core::ids::{ComputerId, EnrollmentId};
+        wow_sync_runtime::PeerRow {
+            enrollment: EnrollmentRef {
+                computer_id: ComputerId::parse(id).unwrap(),
+                enrollment_id: EnrollmentId::parse(id).unwrap(),
+            },
+            name: name.into(),
+            standing,
+            retired_at_ms: at,
+            is_this,
+        }
+    }
+
+    #[allow(clippy::field_reassign_with_default)]
+    #[test]
+    fn only_active_other_computers_can_be_retired_and_the_retirement_date_is_shown() {
+        use wow_sync_runtime::PeerStanding::*;
+        let den = "22222222222222222222222222222222";
+        let mut s = wow_sync_runtime::StatusSnapshot::default();
+        s.peers = vec![
+            peer(
+                "11111111111111111111111111111111",
+                "Desk",
+                Active,
+                true,
+                None,
+            ),
+            peer(den, "Den PC", Active, false, None),
+            peer(
+                "44444444444444444444444444444444",
+                "Old",
+                Retired,
+                false,
+                Some(1_768_219_200_000),
+            ),
+            peer(
+                "55555555555555555555555555555555",
+                "Maybe",
+                RetirementUnresolved,
+                false,
+                None,
+            ),
+        ];
+        let mut f = FeatureData::default();
+        apply_snapshot(&mut f, &s);
+        assert_eq!(
+            f.enrollments.len(),
+            1,
+            "retired and unresolved are not offered"
+        );
+        assert_eq!(f.enrollments[0].0, den);
+        assert!(f.this_enrollment.is_some(), "this computer is kept apart");
+        assert!(
+            f.enrollments
+                .iter()
+                .all(|(_, e)| Some(e) != f.this_enrollment.as_ref()),
+            "this computer is never offered for retirement"
+        );
+        s.retirements = vec![retirement("Old", "Den PC", false)];
+        s.retirements[0].enrollment =
+            wow_sync_core::ids::EnrollmentId::parse("44444444444444444444444444444444").unwrap();
+        apply_snapshot(&mut f, &s);
+        assert_eq!(f.retired[0].on, "12 January");
+    }
+
+    #[allow(clippy::field_reassign_with_default)]
+    #[test]
+    fn rejected_releases_become_allow_again_rows_and_mark_the_held_release_blocked() {
+        let mut s = wow_sync_runtime::StatusSnapshot::default();
+        s.held_releases = vec![wow_sync_runtime::HeldRelease {
+            package: validate_folder_name("Details").unwrap(),
+            title: "Details".into(),
+            release: Sha256([7; 32]),
+            label: "2.0".into(),
+            holders: vec!["Den PC".into()],
+        }];
+        s.rejected_releases = vec![
+            wow_sync_runtime::RejectedRelease {
+                folders: vec!["Details".into(), "Details_Options".into()],
+                label: "2.0".into(),
+                release: Sha256([7; 32]),
+                rejections: vec![Sha256([1; 32]), Sha256([2; 32])],
+                rejected_at_ms: 1_768_219_200_000,
+            },
+            wow_sync_runtime::RejectedRelease {
+                folders: vec!["Bagnon".into()],
+                label: String::new(),
+                release: Sha256([8; 32]),
+                rejections: vec![Sha256([3; 32])],
+                rejected_at_ms: 1_768_219_200_000,
+            },
+        ];
+        s.older_peer = Some("Laptop".into());
+        let mut f = FeatureData::default();
+        apply_snapshot(&mut f, &s);
+        assert_eq!(f.allow_again.len(), 2);
+        assert_eq!(f.allow_again[0].title, "Details, Details_Options");
+        assert_eq!(
+            f.allow_again[0].rejections,
+            vec![Sha256([1; 32]), Sha256([2; 32])],
+            "every record that rejects it, and only those"
+        );
+        assert_eq!(f.allow_again[0].on, "12 January");
+        assert_eq!(f.allow_again[1].version, "from earlier");
+        assert_eq!(
+            f.history[0].rejections,
+            vec![Sha256([1; 32]), Sha256([2; 32])],
+            "the held release is blocked by its own rejections, not another's"
+        );
+        assert_eq!(f.older_peer.as_deref(), Some("Laptop"));
+        s.rejected_releases.clear();
+        s.older_peer = None;
+        apply_snapshot(&mut f, &s);
+        assert!(f.allow_again.is_empty() && f.history[0].rejections.is_empty());
+        assert_eq!(f.older_peer, None);
     }
 
     #[test]

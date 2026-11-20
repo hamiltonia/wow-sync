@@ -72,6 +72,13 @@ pub fn local_parts(unix_ms: i64) -> (i64, String) {
     (days, format!("{:02}:{:02}", rem / 3600, (rem % 3600) / 60))
 }
 
+/// The local date of a recorded time, e.g. "16 November" (a record's own clock, so day-level).
+pub fn day_text(unix_ms: u64) -> String {
+    let (days, _) = local_parts(i64::try_from(unix_ms).unwrap_or(i64::MAX / 2));
+    let (_, m, d) = civil(days);
+    format!("{d} {}", MONTHS[m])
+}
+
 /// Absolute local time of something `secs` ago, e.g. "21:02 on 16 November".
 pub fn absolute(secs: i64) -> String {
     let at = now_ms() - secs.max(0) * 1000;

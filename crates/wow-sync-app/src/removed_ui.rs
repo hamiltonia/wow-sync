@@ -1,12 +1,24 @@
 //! The "Removed" section (removal.md §9): what the group removed, who did it, who has not caught
 //! up, and how to bring it back. Pure text so it can be tested without a window.
 
+use crate::features::{gate, ActionKind, GroupAction};
+use crate::world::World;
 use wow_sync_runtime::RemovedRow;
 
-/// Why the restore button is off. The snapshot row carries no removal hash yet, so the app
-/// cannot name the removal to restore (handover to R4-integrate).
+/// Why the restore button is off when the snapshot gives no removal to name.
 pub const RESTORE_UNAVAILABLE: &str =
-    "Restoring from here is not available yet. Nothing was changed.";
+    "This removal can't be named yet, so it can't be restored from here. Nothing was changed.";
+
+/// Restore for the row at `index`: the removal record the snapshot lists for the same row.
+pub fn restore_action(w: &World, index: usize) -> Result<GroupAction, String> {
+    gate(w, ActionKind::RestoreRemoved)?;
+    match w.features.removal_hashes.get(index) {
+        Some(removal) if index < w.features.removed.len() => {
+            Ok(GroupAction::RestoreRemoved { removal: *removal })
+        }
+        _ => Err(RESTORE_UNAVAILABLE.into()),
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RemovedLine {
@@ -45,6 +57,7 @@ pub fn intro(count: usize) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wow_sync_core::ids::Sha256;
 
     fn row(awaiting: &[&str]) -> RemovedRow {
         RemovedRow {
@@ -61,6 +74,33 @@ mod tests {
         assert_eq!(l[0].folders, "Demo, Demo_Options");
         assert!(l[0].awaiting.as_deref().unwrap().contains("Laptop, Den"));
         assert_eq!(l[0].provenance, "Desk removed it");
+    }
+
+    #[test]
+    fn restore_names_the_removal_of_the_same_row_and_a_retired_computer_cannot() {
+        use crate::features::{Capabilities, Standing, RETIRED_REASON};
+        let mut w = World::empty("0.0.0");
+        w.features.caps = Capabilities::runtime();
+        w.features.removed = vec![row(&[]), row(&["Laptop"])];
+        w.features.removal_hashes = vec![Sha256([1; 32]), Sha256([2; 32])];
+        assert_eq!(
+            restore_action(&w, 1),
+            Ok(GroupAction::RestoreRemoved {
+                removal: Sha256([2; 32])
+            })
+        );
+        assert_eq!(restore_action(&w, 2), Err(RESTORE_UNAVAILABLE.into()));
+        w.features.removal_hashes.truncate(1);
+        assert_eq!(
+            restore_action(&w, 1),
+            Err(RESTORE_UNAVAILABLE.into()),
+            "a row without a hash is never given another row's"
+        );
+        w.features.standing = Standing::Retired {
+            on: String::new(),
+            by: "Den".into(),
+        };
+        assert_eq!(restore_action(&w, 0), Err(RETIRED_REASON.into()));
     }
 
     #[test]
