@@ -596,6 +596,17 @@ fn apply_peers(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot) {
         .map(|p| p.enrollment.clone())
         .next();
     f.master = s.settings.master_name.clone();
+    apply_settings(f, &s.settings);
+}
+
+fn apply_settings(f: &mut FeatureData, s: &wow_sync_runtime::SettingsSnapshot) {
+    let d = &mut f.settings;
+    d.enabled = s.enabled;
+    d.accounts = s.accounts.clone();
+    d.master = s.master.clone();
+    d.exceptions = s.exceptions.clone();
+    d.policy_conflict = false && s.policy_conflict;
+    d.paused = s.paused.clone();
 }
 
 /// A disabled control carries its reason; an enabled one is `Ok`.

@@ -1239,6 +1239,8 @@ tests = [
     "settings_ui::tests::master_and_exceptions_keep_each_other",
     "settings_ui::tests::a_retired_computer_cannot_change_settings_and_enable_needs_an_account",
     "settings_ui::tests::restore_says_the_current_copy_is_kept",
+    "settings_ui::tests::the_snapshot_drives_master_choice_and_the_precise_resume_sheet",
+    "settings_ui::tests::two_competing_masters_choose_nothing_and_block_exceptions_with_their_reason",
 ]
 
 [[case]]

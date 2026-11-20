@@ -2,9 +2,6 @@
 //! use shared, choose, restore (settings.md §4-§6, §9). Pure: every control is either a typed
 //! `GroupAction` or the reason it is unavailable; nothing here writes.
 
-// Fields and helpers wait for the snapshot's settings rows (pending snapshot field `settings`).
-#![allow(dead_code)]
-
 use crate::features::{gate, ActionKind, GroupAction};
 use crate::world::World;
 use wow_sync_core::ids::{SettingsUnit, Sha256};
@@ -13,6 +10,8 @@ use wow_sync_core::paths::FolderKey;
 use wow_sync_core::settings::{resume_preview, LocalReason, ResumeOption};
 
 /// What the unit is doing here, one per row of settings.md §9.1.
+// The snapshot has no units list yet, so only tests build most of these.
+#[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UnitStatus {
     Off,
@@ -58,8 +57,15 @@ pub struct SettingsData {
     pub master: Option<EnrollmentRef>,
     pub accounts: Vec<String>,
     pub enabled: bool,
-    pub paused: Vec<FolderKey>,
+    /// Competing master choices exist; nothing is chosen for the owner.
+    pub policy_conflict: bool,
+    /// Paused folders with what a resume would meet.
+    pub paused: Vec<wow_sync_runtime::PausedFolder>,
 }
+
+/// Why the per-add-on settings rows are not listed: the service does not report them yet.
+pub const UNITS_PENDING: &str =
+    "Per add-on and character settings are not listed here yet. Share, Choose, Restore and Pause appear when they are.";
 
 /// A button: its label and either the action it sends or why it is unavailable.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -241,6 +247,9 @@ pub fn resume_controls(
 }
 
 pub fn computer_name(w: &World, e: &EnrollmentRef) -> String {
+    if w.features.this_enrollment.as_ref() == Some(e) {
+        return "this computer".into();
+    }
     w.features
         .enrollments
         .iter()
@@ -253,18 +262,23 @@ pub fn computer_name(w: &World, e: &EnrollmentRef) -> String {
 /// Choose, change or clear the settings master. Exceptions are kept as they are.
 pub fn master_controls(w: &World) -> Vec<Control> {
     let d = &w.features.settings;
-    let mut out: Vec<Control> = w
+    let candidates = w
         .features
-        .enrollments
+        .this_enrollment
         .iter()
-        .filter(|(_, e)| d.master.as_ref() != Some(e))
-        .map(|(id, e)| {
+        .map(|e| ("this computer".to_string(), e))
+        .chain(w.features.enrollments.iter().map(|(id, e)| {
             let name = w
                 .peers
                 .iter()
                 .find(|p| p.id == *id)
                 .map(|p| p.name.clone())
                 .unwrap_or_else(|| "another computer".into());
+            (name, e)
+        }));
+    let mut out: Vec<Control> = candidates
+        .filter(|(_, e)| d.master.as_ref() != Some(*e))
+        .map(|(name, e)| {
             control(
                 w,
                 ActionKind::SetSettingsPolicy,
@@ -276,6 +290,12 @@ pub fn master_controls(w: &World) -> Vec<Control> {
             )
         })
         .collect();
+    if out.is_empty() && d.master.is_none() {
+        out.push(off(
+            "Choose a settings master",
+            "No other active computer is known yet. Try again after the next check.",
+        ));
+    }
     if d.master.is_some() {
         out.push(control(
             w,
@@ -302,10 +322,12 @@ fn without(rules: &[PolicyRule], folder: &FolderKey) -> Vec<PolicyRule> {
 pub fn exception_controls(w: &World, folder: &FolderKey) -> Vec<Control> {
     let d = &w.features.settings;
     let Some(master) = d.master.clone() else {
-        return vec![off(
-            "Add an exception…",
-            "Choose a settings master first; exceptions are changes to what it shares.",
-        )];
+        let why = if d.policy_conflict {
+            "The settings master was changed on two computers. Choose one master first."
+        } else {
+            "Choose a settings master first; exceptions are changes to what it shares."
+        };
+        return vec![off("Add an exception…", why)];
     };
     let rest = without(&d.exceptions, folder);
     let mut out = Vec::new();
@@ -331,7 +353,13 @@ pub fn exception_controls(w: &World, folder: &FolderKey) -> Vec<Control> {
             enrollment_id: None,
         },
     );
-    for (_, e) in w.features.enrollments.iter().filter(|(_, e)| *e != master) {
+    let sources = w
+        .features
+        .this_enrollment
+        .iter()
+        .chain(w.features.enrollments.iter().map(|(_, e)| e))
+        .filter(|e| **e != master);
+    for e in sources {
         set(
             format!("Use {} for this add-on", computer_name(w, e)),
             PolicyRule {
@@ -357,6 +385,8 @@ pub fn exception_controls(w: &World, folder: &FolderKey) -> Vec<Control> {
 }
 
 /// "Share settings for these accounts" before settings sync is on.
+// Waits for the list of accounts to choose from (not in the snapshot).
+#[allow(dead_code)]
 pub fn enable_control(w: &World, chosen: &[String]) -> Control {
     if chosen.is_empty() {
         return off("Turn on settings sync", "Choose at least one account.");
@@ -589,5 +619,89 @@ mod tests {
             rs[0].0.action,
             Ok(GroupAction::RestoreSettings { .. })
         ));
+    }
+
+    fn snapshot_world() -> World {
+        use wow_sync_runtime::{PausedFolder, PeerRow, PeerStanding};
+        let mut s = wow_sync_runtime::StatusSnapshot::default();
+        let this = EnrollmentRef {
+            computer_id: ComputerId::parse("11111111111111111111111111111111").unwrap(),
+            enrollment_id: EnrollmentId::parse("11111111111111111111111111111111").unwrap(),
+        };
+        s.peers = vec![
+            PeerRow {
+                enrollment: this.clone(),
+                name: "Desk".into(),
+                standing: PeerStanding::Active,
+                retired_at_ms: None,
+                is_this: true,
+            },
+            PeerRow {
+                enrollment: den(),
+                name: "Den PC".into(),
+                standing: PeerStanding::Active,
+                retired_at_ms: None,
+                is_this: false,
+            },
+        ];
+        s.settings.enabled = true;
+        s.settings.master = Some(den());
+        s.settings.master_name = Some("Den PC".into());
+        s.settings.paused = vec![
+            PausedFolder {
+                folder: folder("Details"),
+                here_changed: true,
+                shared_newer: false,
+            },
+            PausedFolder {
+                folder: folder("Bagnon"),
+                here_changed: false,
+                shared_newer: true,
+            },
+        ];
+        let mut w = world();
+        crate::features::apply_snapshot(&mut w.features, &s);
+        w
+    }
+
+    #[test]
+    fn the_snapshot_drives_master_choice_and_the_precise_resume_sheet() {
+        let w = snapshot_world();
+        assert_eq!(w.features.master.as_deref(), Some("Den PC"));
+        let labels: Vec<String> = master_controls(&w).into_iter().map(|c| c.label).collect();
+        assert_eq!(
+            labels,
+            [
+                "Use this computer as the settings master",
+                "Stop sharing with a master"
+            ]
+        );
+        let p = &w.features.settings.paused;
+        let a = resume_controls(&w, &p[0].folder, p[0].here_changed, p[0].shared_newer);
+        let b = resume_controls(&w, &p[1].folder, p[1].here_changed, p[1].shared_newer);
+        let la: Vec<_> = a.iter().map(|c| c.label.clone()).collect();
+        let lb: Vec<_> = b.iter().map(|c| c.label.clone()).collect();
+        assert_ne!(la, lb, "each folder meets its own differences");
+        assert_eq!(
+            la,
+            resume_controls(&w, &folder("Details"), true, false)
+                .iter()
+                .map(|c| c.label.clone())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn two_competing_masters_choose_nothing_and_block_exceptions_with_their_reason() {
+        let mut w = snapshot_world();
+        w.features.settings.master = None;
+        w.features.settings.policy_conflict = true;
+        let c = exception_controls(&w, &folder("Details"));
+        assert_eq!(c.len(), 1);
+        assert!(c[0].action.as_ref().unwrap_err().contains("two computers"));
+        assert!(
+            master_controls(&w).iter().all(|c| c.action.is_ok()),
+            "the owner may still choose one master"
+        );
     }
 }

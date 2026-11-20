@@ -1570,13 +1570,18 @@ impl Shell {
             self.content_first = Some("ss-banner".into());
             self.capture_first = false;
         }
-        let banner_text = match (&self.w.features.settings.master, self.w.features.settings.enabled) {
-            (Some(_), _) => format!(
+        let banner_text = match (
+            &self.w.features.settings.master,
+            self.w.features.settings.enabled,
+            self.w.features.settings.policy_conflict,
+        ) {
+            (_, _, true) => "The settings master was changed on two computers. Nothing is chosen for you; choose a master to share settings again.".to_string(),
+            (Some(_), _, _) => format!(
                 "{} shares its add-on settings with the group. Settings are never merged.",
                 self.w.features.master.clone().unwrap_or_else(|| "The settings master".into())
             ),
-            (None, true) => "No settings master is chosen, so settings are not shared yet.".to_string(),
-            (None, false) => "Settings sync is off. Add-on files are synced; your add-on settings stay as they are on each computer.".to_string(),
+            (None, true, _) => "No settings master is chosen, so settings are not shared yet.".to_string(),
+            (None, false, _) => "Settings sync is off. Add-on files are synced; your add-on settings stay as they are on each computer.".to_string(),
         };
         let banner = div()
             .id("ss-banner")
@@ -1676,7 +1681,7 @@ impl Shell {
         let mut s: Vec<AnyElement> = Vec::new();
         if units.is_empty() {
             s.push(
-                self.muted("No add-on settings are tracked on this computer yet.")
+                self.muted(crate::settings_ui::UNITS_PENDING)
                     .into_any_element(),
             );
         }
@@ -1742,19 +1747,31 @@ impl Shell {
         let folders: Vec<wow_sync_core::paths::FolderKey> = units
             .iter()
             .map(|r| r.unit.folder.clone())
+            .chain(paused.iter().map(|p| p.folder.clone()))
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .collect();
+        if folders.is_empty() {
+            p.push(
+                self.muted(crate::settings_ui::UNITS_PENDING)
+                    .into_any_element(),
+            );
+        }
         for f in folders {
             p.push(
                 div()
                     .child(SharedString::from(f.as_str().to_string()))
                     .into_any_element(),
             );
-            if paused.contains(&f) {
+            if let Some(pf) = paused.iter().find(|x| x.folder == f) {
                 let open = format!("ss-resume-{}", f.as_str());
                 if self.expanded.contains(&open) {
-                    let cs = crate::settings_ui::resume_controls(&self.w, &f, false, false);
+                    let cs = crate::settings_ui::resume_controls(
+                        &self.w,
+                        &f,
+                        pf.here_changed,
+                        pf.shared_newer,
+                    );
                     p.extend(self.control_buttons(&open, cs, cx));
                     p.push(
                         self.btn(
