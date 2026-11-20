@@ -1037,6 +1037,8 @@ pub enum SettingsWriteError {
     NotShared,
     /// A revision of the unit is not readable yet: a push now could orphan it.
     HistoryIncomplete,
+    /// An automatic revision needs the issuer to be the unit's authority.
+    NotAuthority,
 }
 
 /// The causal summary of the settings policies this ledger has learned.
@@ -1110,6 +1112,52 @@ pub fn build_policy(
         folders: rules,
         known: settings_known(l, group),
         folders_parts: Vec::new(),
+        written_unix_ms: now_unix_ms,
+    })
+}
+
+/// The automatic revision of the unit's authority after a completed, changed capture inside its
+/// epoch (settings.md §4.1). Parents are the issuer's basis, limited to nodes that exist.
+#[allow(clippy::too_many_arguments)]
+pub fn build_auto(
+    l: &Ledger,
+    d: &Derived,
+    group: &crate::ids::GroupId,
+    issuer: crate::kinds::Issuer,
+    unit: SettingsUnit,
+    checkpoint: CheckpointRef,
+    basis: &[Sha256],
+    now_unix_ms: u64,
+) -> Result<crate::kinds::SettingsRevision, SettingsWriteError> {
+    let heads = policy_heads(l, d);
+    match authority_for(&heads, &unit.folder) {
+        Authority::NoPolicy => return Err(SettingsWriteError::NoPolicy),
+        Authority::NotShared => return Err(SettingsWriteError::NotShared),
+        Authority::Holder(h) if h.enrollment_id == issuer.enrollment_id => {}
+        _ => return Err(SettingsWriteError::NotAuthority),
+    }
+    let g = graph_from_ledger(l, d, &unit);
+    if g.pending {
+        return Err(SettingsWriteError::HistoryIncomplete);
+    }
+    let mut parents: Vec<Sha256> = basis
+        .iter()
+        .filter(|b| g.nodes.contains_key(b))
+        .copied()
+        .collect();
+    parents.sort();
+    parents.dedup();
+    Ok(crate::kinds::SettingsRevision {
+        group_id: group.clone(),
+        issuer,
+        unit,
+        kind: RevisionKind::Auto,
+        checkpoint,
+        parents,
+        parents_parts: Vec::new(),
+        policy: witness_set(&heads),
+        code_package_hash: None,
+        known: settings_known(l, group),
         written_unix_ms: now_unix_ms,
     })
 }
