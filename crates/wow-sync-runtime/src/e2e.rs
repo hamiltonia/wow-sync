@@ -3,14 +3,19 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::removal_cycle::RemovalStore;
     use crate::*;
     use std::path::{Path, PathBuf};
     use wow_sync_adapters::fs_install::InstallArea;
     use wow_sync_adapters::localstate::LocalState;
     use wow_sync_adapters::testkit::{SyntheticInstall, TempDir};
+    use wow_sync_core::authority::{decode_authority, AuthorityRecord};
+    use wow_sync_core::decide::encode_authority;
     use wow_sync_core::hash::sha256;
-    use wow_sync_core::ids::GroupId;
+    use wow_sync_core::ids::{ComputerId, EnrollmentId, GroupId, Sha256};
+    use wow_sync_core::kinds::{EnrollmentRef, Issuer, Retirement};
     use wow_sync_core::layout;
+    use wow_sync_core::ledger::{derive, InvalidReason, Status};
     use wow_sync_core::plan::Activity;
 
     struct Pc {
@@ -1171,5 +1176,189 @@ mod tests {
             Some("alpha-v1"),
             "{r:?}"
         );
+    }
+
+    // ------------------------------------------------ authority plane (R4-integrate B1)
+
+    fn pc_ids(pc: &Pc) -> (ComputerId, EnrollmentId) {
+        let me = computer_id(pc);
+        let r = pc
+            .svc
+            .plane()
+            .members
+            .pairs()
+            .find(|p| p.computer_id.as_str() == me)
+            .expect("own pair is in the membership")
+            .clone();
+        (r.computer_id, r.enrollment_id)
+    }
+
+    fn provider_file(lab: &Lab, rel: &str) -> PathBuf {
+        rel.split('/')
+            .fold(lab.shared.join("WoWSync"), |a, s| a.join(s))
+    }
+
+    fn put_authority(lab: &Lab, g: &GroupId, into: &ComputerId, r: &AuthorityRecord) -> Sha256 {
+        let bytes = encode_authority(r);
+        let h = sha256(&bytes);
+        let p = provider_file(lab, &layout::authority_record(g, into, &h));
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, bytes).unwrap();
+        h
+    }
+
+    fn authority_files(lab: &Lab, g: &GroupId, c: &ComputerId) -> Vec<String> {
+        let dir = provider_file(lab, &layout::authority_dir(g, c));
+        let mut v: Vec<String> = std::fs::read_dir(dir)
+            .map(|d| {
+                d.flatten()
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        v.sort();
+        v
+    }
+
+    fn removal_hash(lab: &Lab, g: &GroupId, c: &ComputerId) -> Sha256 {
+        authority_files(lab, g, c)
+            .iter()
+            .map(|f| Sha256::parse(f.trim_end_matches(".json")).unwrap())
+            .find(|h| {
+                let p = provider_file(lab, &layout::authority_record(g, c, h));
+                let bytes = std::fs::read(p).unwrap();
+                matches!(decode_authority(&bytes, h), Ok(AuthorityRecord::Removal(_)))
+            })
+            .expect("a removal record")
+    }
+
+    fn status(pc: &Pc, g: &GroupId, h: &Sha256) -> Option<Status> {
+        let p = pc.svc.plane();
+        derive(&p.ledger, g, &p.members).status_of(h).cloned()
+    }
+
+    /// Makes `a` see Alpha disappear for longer than the confirmation gap, then runs its cycle:
+    /// a matured removal record is written.
+    fn a_removes_alpha(a: &mut Pc, g: &GroupId) {
+        a.addon("Alpha", "alpha-v1");
+        synced(a);
+        std::fs::remove_dir_all(a.install.addons.join("Alpha")).unwrap();
+        let st = LocalState::open_at(&a.cfg.state_dir).unwrap();
+        let store = RemovalStore::new(&st, g.clone());
+        let (base, mut obs) = store.load();
+        let key = base.packages.keys().next().expect("a baseline").clone();
+        obs.gone.insert(key, (1, 1));
+        store.save(&base, &obs).unwrap();
+        let r = synced(a);
+        assert!(!r.crashed, "{r:?}");
+    }
+
+    #[test]
+    fn matured_removal_is_written_learned_and_survives_a_restart() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        let g = a.create();
+        a_removes_alpha(&mut a, &g);
+        let (ac, _) = pc_ids(&a);
+        let files = authority_files(&lab, &g, &ac);
+        assert_eq!(
+            files.len(),
+            2,
+            "a removal and its own acknowledgement: {files:?}"
+        );
+        let h = removal_hash(&lab, &g, &ac);
+        assert_eq!(status(&a, &g, &h), Some(Status::Valid));
+        a.restart();
+        assert_eq!(
+            status(&a, &g, &h),
+            Some(Status::Valid),
+            "the learned record is loaded from local state before any scan"
+        );
+        b.join(&g);
+        synced(&mut b);
+        assert_eq!(status(&b, &g, &h), Some(Status::Valid));
+    }
+
+    #[test]
+    fn records_from_non_members_and_forged_copies_are_not_admitted() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        let g = a.create();
+        a_removes_alpha(&mut a, &g);
+        let (ac, _) = pc_ids(&a);
+        let h = removal_hash(&lab, &g, &ac);
+        let bytes =
+            std::fs::read(provider_file(&lab, &layout::authority_record(&g, &ac, &h))).unwrap();
+        let AuthorityRecord::Removal(mut forged) = decode_authority(&bytes, &h).unwrap() else {
+            panic!("a removal");
+        };
+        forged.issuer.enrollment_id = EnrollmentId::parse(&"7".repeat(32)).unwrap();
+        let fh = put_authority(&lab, &g, &ac, &AuthorityRecord::Removal(forged));
+        // A copy whose bytes do not hash to its name is not a record at all.
+        let bad_name = Sha256::parse(&"c".repeat(64)).unwrap();
+        let bad = provider_file(&lab, &layout::authority_record(&g, &ac, &bad_name));
+        std::fs::write(bad, b"{\"schema\":\"wowsync.removal/1\"}").unwrap();
+        b.join(&g);
+        synced(&mut b);
+        assert_eq!(
+            status(&b, &g, &fh),
+            Some(Status::Invalid(InvalidReason::NotAMember))
+        );
+        assert_eq!(status(&b, &g, &h), Some(Status::Valid));
+        assert_eq!(
+            status(&b, &g, &bad_name),
+            None,
+            "a bad copy teaches nothing"
+        );
+    }
+
+    #[test]
+    fn a_retired_computer_publishes_and_writes_nothing() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        synced(&mut a);
+        let (ac, ae) = pc_ids(&a);
+        let (bc, be) = pc_ids(&b);
+        let before = provider_state_files(&lab, &g, &b);
+        // A retires B's enrollment at cutoff 0: everything B issues from now on is above it.
+        let ret = AuthorityRecord::Retirement(Retirement {
+            group_id: g.clone(),
+            issuer: Issuer {
+                computer_id: ac.clone(),
+                enrollment_id: ae.clone(),
+                issued_at_seq: 1000,
+            },
+            retired: EnrollmentRef {
+                computer_id: bc.clone(),
+                enrollment_id: be.clone(),
+            },
+            cutoff_seq: 0,
+            was_settings_master: false,
+            retirements_known: vec![],
+            written_unix_ms: 1,
+        });
+        let rh = put_authority(&lab, &g, &ac, &ret);
+        b.addon("Beta", "beta-v1");
+        let r = synced(&mut b);
+        assert_eq!(status(&b, &g, &rh), Some(Status::Valid));
+        assert!(r.published.is_none(), "{r:?}");
+        assert!(
+            r.publish_note.as_deref().unwrap_or("").contains("retired"),
+            "{r:?}"
+        );
+        assert_eq!(provider_state_files(&lab, &g, &b), before);
+        assert!(authority_files(&lab, &g, &bc).is_empty());
+        // The group still works for the computer that was not retired.
+        a.addon("Gamma", "gamma-v1");
+        let r = synced(&mut a);
+        assert!(r.published.is_some(), "{r:?}");
     }
 }

@@ -910,6 +910,15 @@ tests = [
     "records::tests::authority_index_and_features_are_additive_and_old_readers_ignore_them",
     "plan::tests::publish_needed_decisions",
 ]
+
+[[case]]
+id = "R4-integrate:authority-plane-read-side"
+tier = "offline"
+tests = [
+    "e2e::tests::matured_removal_is_written_learned_and_survives_a_restart",
+    "e2e::tests::records_from_non_members_and_forged_copies_are_not_admitted",
+    "e2e::tests::a_retired_computer_publishes_and_writes_nothing",
+]
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag

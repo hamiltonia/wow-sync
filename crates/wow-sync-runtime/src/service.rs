@@ -3,13 +3,17 @@
 //! through the adapters, calls core, and runs the resulting plans through the effects.
 
 use crate::activity::{ActivitySource, WinprocActivity};
+use crate::decisions::write_own_record;
+use crate::decisions::{learn_from_directories, Plane};
 use crate::detail::{
     build_package_rows, folder_titles, member_rows, render_with_names, DetailInput, StatusDetail,
 };
 use crate::effects::{
     load_pending, FaultPlan, Faulty, Hooks, PendingSink, RealEffects, PENDING_REPORT,
 };
+use crate::removal_cycle::{step_3a, step_3b, RemovalStore};
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use wow_sync_adapters::fs_install::InstallArea;
 use wow_sync_adapters::fs_safe::{ReparsePolicy, Root};
@@ -22,27 +26,36 @@ use wow_sync_adapters::provider::{EntryState, ProviderRoot};
 use wow_sync_adapters::sysinfo::{now_unix_ms, random_id_hex};
 use wow_sync_adapters::{FsError, FsErrorKind};
 use wow_sync_core::admit::{
-    admit_member_states, newest_state_name, MemberLatest, MemberObs, MemberView, StateFileObs,
+    admit_member_states, apply_barrier, newest_state_name, MemberLatest, MemberObs, MemberView,
+    StateFileObs,
 };
+use wow_sync_core::authority::{AuthorityRecord, Retired};
+use wow_sync_core::decision::CycleCx;
 use wow_sync_core::exec::{
     apply_report, recover_interrupted, run_apply, run_publish, ApplyEffects, PublishOutcome,
 };
 use wow_sync_core::explain;
+use wow_sync_core::hooks::RemovalHooks;
 use wow_sync_core::ids::{ComputerId, EnrollmentId, GroupId, OpId, Sha256};
 use wow_sync_core::inventory::{build_inventory, FolderScan, Inventory, ScanStatus, ScannedFile};
+use wow_sync_core::kinds::EnrollmentRef;
 use wow_sync_core::layout;
+use wow_sync_core::ledger::derive;
 use wow_sync_core::package::ClientInfo;
 use wow_sync_core::paths::FolderKey;
 use wow_sync_core::plan::{
     own_publish_slot, plan_apply, plan_publish, publish_needed, ApplyGate, PlanBlock,
     PublishContext,
 };
+use wow_sync_core::plan::{Activity, ApplyPlan, PackageApply};
 use wow_sync_core::records::{
     decode, decode_tree, encode, AdmissionWatermarks, ApplyJournal, ApplyReport, BasisEntry,
     CodeState, GroupRecord, LocalComputer, LocalEnrollment, MemberRecord, PendingReport,
     RecordError, RecoveryPoint, RootFormat,
 };
+use wow_sync_core::removal::{removal_record, ObserveInput, RemovalBehaviour};
 use wow_sync_core::report::{outstanding, record_pending, store_needs_reconcile};
+use wow_sync_core::retire::OwnStanding;
 use wow_sync_core::status::{
     applied_here, derive_status, game_halted, headline_sentence, journal_status, remember_applied,
     render_block, render_headline, render_member, render_result, Headline, StatusInput, StatusView,
@@ -251,6 +264,8 @@ struct World {
     /// This enrollment's newest published state, if readable.
     own_latest: Option<CodeState>,
     titles: BTreeMap<String, String>,
+    own: EnrollmentRef,
+    standing: OwnStanding,
 }
 
 pub struct SliceService {
@@ -265,6 +280,7 @@ pub struct SliceService {
     applied_here: Vec<(FolderKey, wow_sync_core::explain::Explanation)>,
     last_blocks: Vec<PlanBlock>,
     provider_error: Option<String>,
+    plane: Plane,
 }
 
 fn file_obs(r: FileRead) -> FileObs {
@@ -289,6 +305,7 @@ impl SliceService {
         activity: Box<dyn ActivitySource>,
     ) -> Result<SliceService, ServiceError> {
         let state = LocalState::open_at(&cfg.state_dir).map_err(local)?;
+        let plane = Plane::load(&state);
         Ok(SliceService {
             cfg,
             activity,
@@ -301,6 +318,7 @@ impl SliceService {
             applied_here: Vec::new(),
             last_blocks: Vec::new(),
             provider_error: None,
+            plane,
         })
     }
 
@@ -465,6 +483,12 @@ impl SliceService {
             }
         }
         out
+    }
+
+    /// The learned records and membership, for tests.
+    #[cfg(test)]
+    pub(crate) fn plane(&self) -> &Plane {
+        &self.plane
     }
 
     /// Read-only: writes nothing locally or in the shared folder.
@@ -814,7 +838,45 @@ impl SliceService {
             None => AdmissionWatermarks::empty(group.group_id.clone()),
         };
         let obs = self.read_members(&provider, &group.group_id, &computer.computer_id)?;
+        let own = EnrollmentRef {
+            computer_id: computer.computer_id.clone(),
+            enrollment_id: enrollment.enrollment_id.clone(),
+        };
+        let mut computers: Vec<ComputerId> = vec![computer.computer_id.clone()];
+        self.plane.add_member(&own.computer_id, &own.enrollment_id);
+        if let Ok(list) = provider.list(&layout::state_dir(&group.group_id, &computer.computer_id))
+        {
+            for f in list {
+                if let Some((e, _)) = layout::parse_state_name(&f.name) {
+                    self.plane.add_member(&computer.computer_id, &e);
+                }
+            }
+        }
+        for m in &obs {
+            computers.push(m.computer.clone());
+            if let Ok(rec) = &m.member {
+                if rec.computer_id == m.computer {
+                    self.plane.add_member(&m.computer, &rec.enrollment_id);
+                }
+            }
+            for f in &m.files {
+                if let Some((e, _)) = layout::parse_state_name(&f.name) {
+                    self.plane.add_member(&m.computer, &e);
+                }
+            }
+        }
+        learn_from_directories(&mut self.plane, &provider, &group.group_id, &computers);
+        let derived = derive(&self.plane.ledger, &group.group_id, &self.plane.members);
+        if persist {
+            self.plane.save(&self.state).map_err(local)?;
+        }
+        let standing = match derived.barrier.retired(&own.enrollment_id) {
+            Retired::No => OwnStanding::Active,
+            Retired::Unresolved => OwnStanding::Held,
+            Retired::Yes => OwnStanding::Retired,
+        };
         let (views, marks) = admit_member_states(&group, &obs, &marks);
+        let (views, _retired) = apply_barrier(views, &derived.barrier);
         if persist {
             self.state
                 .write_atomic("admission.json", &encode(&marks))
@@ -893,6 +955,8 @@ impl SliceService {
             own_states,
             own_latest,
             titles,
+            own,
+            standing,
         })
     }
 
@@ -1171,13 +1235,38 @@ impl SliceService {
                     now_unix_ms: now_unix_ms() as u64,
                 };
                 let mut gen = || OpId::parse(&random_id_hex()).expect("random id");
-                match plan_apply(&w.target, &w.inventory, &mut gen, &gate) {
-                    Err(PlanBlock::NothingToDo) => {}
+                let game_blocks = !matches!(gate.activity, Activity::NotRunning);
+                let extra = Self::removal_steps(
+                    &self.state,
+                    &mut self.plane,
+                    &provider,
+                    &w,
+                    game_blocks,
+                    &mut report,
+                );
+                let mut planned = match plan_apply(&w.target, &w.inventory, &mut gen, &gate) {
+                    Ok(p) => Some(p),
+                    Err(PlanBlock::NothingToDo) => None,
                     Err(b) => {
                         report.apply_note = Some(render_block(&b));
                         self.last_blocks.push(b);
+                        None
                     }
-                    Ok(plan) => {
+                };
+                if !extra.is_empty() {
+                    let p = planned.get_or_insert_with(|| ApplyPlan {
+                        group_id: group_id.clone(),
+                        started_unix_ms: gate.now_unix_ms,
+                        packages: Vec::new(),
+                        skipped: Vec::new(),
+                    });
+                    let mut all = extra;
+                    all.append(&mut p.packages);
+                    p.packages = all;
+                }
+                match planned {
+                    None => {}
+                    Some(plan) => {
                         for (k, why) in &plan.skipped {
                             report.applied.push(AppliedLine {
                                 package: k.to_string(),
@@ -1289,6 +1378,126 @@ impl SliceService {
         Ok(report)
     }
 
+    /// Removal steps 3a, 3b and 6 (removal.md §1.6): observe and write matured removal records,
+    /// write `absent` acknowledgements, and plan remove operations. Ledger writes never touch
+    /// game files, so only the returned operations depend on `game_blocks_changes`. A computer
+    /// whose retirement is settled or unresolved writes nothing (ops.md §2, Q-60).
+    fn removal_steps(
+        state: &LocalState,
+        plane: &mut Plane,
+        provider: &ProviderRoot,
+        w: &World,
+        game_blocks_changes: bool,
+        report: &mut SyncReport,
+    ) -> Vec<PackageApply> {
+        if w.standing != OwnStanding::Active {
+            return Vec::new();
+        }
+        let gid = &w.group.group_id;
+        let now = now_unix_ms() as u64;
+        let mut next_seq = w.enrollment.next_seq;
+        let mut held: BTreeSet<FolderKey> = BTreeSet::new();
+        let mut written = false;
+        if w.inventory.listing_stable {
+            let identity = format!(
+                "{}|{}",
+                w.enrollment.install_root, w.enrollment.variant_folder
+            );
+            let journaled = BTreeSet::new();
+            let observed = match RemovalStore::new(state, gid.clone()).observe(&ObserveInput {
+                inventory: &w.inventory,
+                dir_identity: &identity,
+                variant: &w.enrollment.variant_folder,
+                now_unix_ms: now,
+                journaled: &journaled,
+            }) {
+                Ok(o) => o,
+                Err(e) => {
+                    report.apply_note = Some(format!("removal state could not be saved: {e}"));
+                    return Vec::new();
+                }
+            };
+            for (name, _) in &observed.held {
+                if let Some(fs) = observed.baseline.packages.get(name) {
+                    held.extend(fs.iter().map(|f| f.key.clone()));
+                }
+            }
+            let mut audience: Vec<EnrollmentRef> = w
+                .views
+                .iter()
+                .map(|v| EnrollmentRef {
+                    computer_id: v.computer.clone(),
+                    enrollment_id: v.enrollment.clone(),
+                })
+                .collect();
+            audience.push(w.own.clone());
+            for r in &observed.removed {
+                let rec = removal_record(gid, &w.own, audience.clone(), r, next_seq, now);
+                match write_own_record(
+                    plane,
+                    provider,
+                    gid,
+                    &w.own.computer_id,
+                    &AuthorityRecord::Removal(rec),
+                ) {
+                    Ok(_) => {
+                        next_seq += 1;
+                        written = true;
+                    }
+                    Err(e) => {
+                        report.apply_note = Some(format!("removal record not written: {e}"));
+                    }
+                }
+            }
+        }
+        let derived = derive(&plane.ledger, gid, &plane.members);
+        let behaviour = RemovalBehaviour::new(&plane.ledger, gid, &plane.members)
+            .with_inventory(w.inventory.clone(), next_seq);
+        let acks = {
+            let cx = CycleCx {
+                group_id: gid,
+                own: &w.own,
+                ledger: &plane.ledger,
+                derived: &derived,
+                members: &plane.members,
+                now_unix_ms: now,
+                held: &held,
+                roots: &[],
+            };
+            let items = behaviour.classify_due(&cx);
+            step_3b(&cx, &items, next_seq)
+        };
+        for a in acks {
+            if write_own_record(
+                plane,
+                provider,
+                gid,
+                &w.own.computer_id,
+                &AuthorityRecord::Ack(a),
+            )
+            .is_ok()
+            {
+                next_seq += 1;
+                written = true;
+            }
+        }
+        if written {
+            let _ = plane.save(state);
+        }
+        let derived = derive(&plane.ledger, gid, &plane.members);
+        let cx = CycleCx {
+            group_id: gid,
+            own: &w.own,
+            ledger: &plane.ledger,
+            derived: &derived,
+            members: &plane.members,
+            now_unix_ms: now,
+            held: &held,
+            roots: &[],
+        };
+        step_3a(&cx, &w.inventory, next_seq, game_blocks_changes)
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn publish_step<E: wow_sync_core::exec::PublishEffects>(
         cfg: &ServiceConfig,
@@ -1303,6 +1512,13 @@ impl SliceService {
         if journals_remaining {
             report.publish_note =
                 Some("not published: an interrupted update needs attention".into());
+            return;
+        }
+        if w.standing != OwnStanding::Active {
+            report.publish_note = Some(match w.standing {
+                OwnStanding::Retired => "not published: this computer is retired".into(),
+                _ => "not published: retirement is unresolved".into(),
+            });
             return;
         }
         let group_id = &w.group.group_id;
