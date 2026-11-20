@@ -41,7 +41,10 @@ pub use service::{
     AppliedLine, EnrollPreview, EnrollRequest, GroupInfo, JoinChoice, PackageLine, PreviewKind,
     ReconfirmRequest, ServiceConfig, ServiceError, SliceService, StatusSnapshot, SyncReport,
 };
-pub use settings_cycle::{PausedFolder, SettingsHistoryEntry, SettingsSnapshot};
+pub use settings_cycle::{
+    HeadChoice, PausedFolder, SettingsHistoryEntry, SettingsSnapshot, SettingsUnitRow,
+    SettingsUnitStatus,
+};
 pub use updates::{system_clock, Clock, Started, UpdateService, UpdateView};
 
 pub use wow_sync_core as core;
