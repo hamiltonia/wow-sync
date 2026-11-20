@@ -429,7 +429,9 @@ pub struct FeatureData {
     pub older_peer: Option<String>,
     /// Name of the settings master, when one is chosen.
     pub master: Option<String>,
-    /// Settings units, policy and accounts. Pending snapshot field (R4-integrate).
+    /// A guided reconfirmation is pending and nothing worse applies (ops.md §1.7).
+    pub review_needed: bool,
+    /// Settings units, policy and accounts. Not in the snapshot yet (handover).
     pub settings: crate::settings_ui::SettingsData,
 }
 
@@ -446,6 +448,7 @@ impl Default for FeatureData {
             history: Vec::new(),
             older_peer: None,
             master: None,
+            review_needed: false,
             settings: Default::default(),
         }
     }
@@ -457,6 +460,7 @@ impl Default for FeatureData {
 /// say why they are unavailable.
 pub fn apply_snapshot(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot) {
     f.hold = s.hold.clone();
+    f.review_needed = s.review_needed;
     f.standing = match (&s.this_retirement, &s.hold) {
         (Some(_), _) => Standing::Retired {
             on: String::new(),

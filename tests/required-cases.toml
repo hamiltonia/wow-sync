@@ -1214,6 +1214,11 @@ id = "R4-app:snapshot-connect"
 tier = "offline"
 tests = ["features::tests::the_snapshot_fills_standing_retired_rows_and_held_releases"]
 
+[[case]]
+id = "R4-app:headline"
+tier = "offline"
+tests = ["model::tests::review_needed_retired_held_and_removing_have_their_own_headlines"]
+
 # <<< section: R4-app
 
 # >>> section: R4-mac-kit

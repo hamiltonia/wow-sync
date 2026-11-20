@@ -1653,6 +1653,11 @@ impl Shell {
                             .text_color(rgb(pal.muted))
                             .child(SharedString::from(model::context_line(&self.w))),
                     )
+                    .when(model::headline_sub(&self.w).is_some(), |d| {
+                        d.child(div().text_size(u(13.)).text_color(rgb(pal.muted)).child(
+                            SharedString::from(model::headline_sub(&self.w).unwrap_or_default()),
+                        ))
+                    })
                     .when(matches!(self.w.busy, Some(Busy::Syncing { .. })), |d| {
                         let (done, total) = match self.w.busy {
                             Some(Busy::Syncing { done, total }) => (done, total),

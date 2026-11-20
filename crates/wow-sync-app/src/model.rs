@@ -126,11 +126,19 @@ fn plural(n: usize, one: &str, many: &str) -> String {
 }
 
 pub fn headline(w: &World) -> Head {
-    // Core's `Headline` is used as is (RV-5). Pause is not part of core's status, so it only
-    // replaces the headlines that say nothing is wrong; errors and needed help always show.
+    // Core's `Headline` is used as is (RV-5), then three app-side promotions (ops.md §1.6-§1.7):
+    // a retired or held self, and "Review needed". Pause is not part of core's status, so it only
+    // replaces the headlines that say nothing is wrong; errors and needed help always show, and
+    // none of the promotions hides them.
     let core_blocks_pause = matches!(w.view.headline, Headline::Error | Headline::NeedsHelp);
+    let standing = crate::computers_ui::standing_headline(&w.features.standing);
     let (text, tone) = if !w.enrolled {
         ("Set up this computer".to_string(), Tone::Unknown)
+    } else if let (false, Some((h, _))) = (core_blocks_pause, &standing) {
+        let held = matches!(w.features.standing, crate::features::Standing::Held);
+        (h.clone(), if held { Tone::Waiting } else { Tone::Help })
+    } else if w.features.review_needed && !core_blocks_pause {
+        ("Review needed".to_string(), Tone::Help)
     } else if w.busy == Some(Busy::Pausing) {
         (
             "Pausing, finishing the current step".to_string(),
@@ -151,7 +159,10 @@ pub fn headline(w: &World) -> Head {
                     Some(Busy::Syncing { done, total }) if *total > 0 => {
                         format!("Syncing: applying {done} of {total} updates")
                     }
-                    _ => "Syncing".to_string(),
+                    _ => match removing(w) {
+                        0 => "Syncing".to_string(),
+                        n => format!("Removing {}", plural(n, "add-on", "add-ons")),
+                    },
                 },
                 Tone::Working,
             ),
@@ -167,9 +178,36 @@ pub fn headline(w: &World) -> Head {
     }
 }
 
+fn removing(w: &World) -> usize {
+    w.view
+        .packages
+        .iter()
+        .filter(|(_, s, _)| *s == PackageStatus::Removing)
+        .count()
+}
+
+/// The line under the headline when the headline alone is not enough (ops.md §1.6-§1.7).
+pub fn headline_sub(w: &World) -> Option<String> {
+    if !w.enrolled || matches!(w.view.headline, Headline::Error | Headline::NeedsHelp) {
+        return None;
+    }
+    if let Some((_, sub)) = crate::computers_ui::standing_headline(&w.features.standing) {
+        return Some(sub);
+    }
+    w.features
+        .review_needed
+        .then(|| "Confirm this computer's WoW folders so syncing can continue.".to_string())
+}
+
 fn waiting_sentence(w: &World) -> String {
     if w.view.blocks.contains(&PlanBlock::GameRunning) {
-        return "Waiting: WoW is running".into();
+        return match removing(w) {
+            0 => "Waiting: WoW is running".into(),
+            n => format!(
+                "Waiting: WoW is running. {} will be removed when it closes",
+                plural(n, "add-on", "add-ons")
+            ),
+        };
     }
     let unavailable = w
         .view
@@ -1267,6 +1305,52 @@ mod tests {
         let t = last_check_text(&w);
         assert!(t.ends_with("next check about 14:07"), "{t}");
         assert!(!t.contains("min"), "no literal interval: {t}");
+    }
+
+    #[test]
+    fn review_needed_retired_held_and_removing_have_their_own_headlines() {
+        use crate::features::Standing;
+        let mut w = enrolled();
+        w.features.review_needed = true;
+        assert_eq!(headline(&w).text, "Review needed");
+        assert_eq!(headline(&w).tone, Tone::Help);
+        assert_eq!(
+            headline_sub(&w).as_deref(),
+            Some("Confirm this computer's WoW folders so syncing can continue.")
+        );
+        assert_eq!(tray_tooltip(&w), "WoW Sync: Review needed");
+        w.paused_since = Some("12:00".into());
+        assert_eq!(headline(&w).text, "Review needed", "pause never hides it");
+        for hard in [Headline::NeedsHelp, Headline::Error] {
+            w.view.headline = hard;
+            assert_ne!(headline(&w).text, "Review needed");
+            assert_eq!(headline_sub(&w), None);
+        }
+
+        let mut w = enrolled();
+        w.features.standing = Standing::Retired {
+            on: String::new(),
+            by: "Den PC".into(),
+        };
+        assert_eq!(headline(&w).text, "This computer was retired");
+        assert_eq!(headline(&w).tone, Tone::Help);
+        assert!(headline_sub(&w).unwrap().starts_with("Retired by Den PC."));
+        w.features.standing = Standing::Held;
+        assert_eq!(headline(&w).text, "Waiting for group history");
+        assert_eq!(headline(&w).tone, Tone::Waiting);
+
+        let mut w = world_with(
+            PackageStatus::Removing,
+            wow_sync_core::explain::Explanation::InSync,
+        );
+        w.view.headline = Headline::Working;
+        assert_eq!(headline(&w).text, "Removing 1 add-on");
+        w.view.headline = Headline::Waiting;
+        w.view.blocks.push(PlanBlock::GameRunning);
+        assert_eq!(
+            headline(&w).text,
+            "Waiting: WoW is running. 1 add-on will be removed when it closes"
+        );
     }
 
     fn world_with(status: PackageStatus, why: wow_sync_core::explain::Explanation) -> World {
