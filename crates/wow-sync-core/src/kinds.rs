@@ -726,6 +726,124 @@ pub fn validate_index_chunk(c: &AuthorityIndexChunk) -> Result<(), String> {
     Ok(())
 }
 
+// ---------------------------------------------------------------- writer: parts (§1.9)
+
+/// The result of packing one partable list: what stays inline, the heads to name in the
+/// parent's `…_parts` field, and every part file (`hash`, exact bytes) to write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Packed {
+    pub inline: Vec<PartItem>,
+    pub heads: Vec<Sha256>,
+    pub parts: Vec<(Sha256, Vec<u8>)>,
+}
+
+fn item_bytes<T: Serialize>(item: &T) -> usize {
+    serde_json::to_string_pretty(item).map_or(512, |s| {
+        s.len() + 8 + 4 * s.bytes().filter(|b| *b == b'\n').count()
+    })
+}
+
+/// Fills inline items until the parent would exceed 48 KiB (`base_bytes` is the parent without
+/// the list), then puts the rest into parts of at most 60 KiB, fan-out at most 16 per level.
+pub fn pack_items(
+    group: &GroupId,
+    of: PartOf,
+    mut items: Vec<PartItem>,
+    base_bytes: usize,
+) -> Packed {
+    items.sort();
+    items.dedup();
+    let mut used = base_bytes;
+    let split = items
+        .iter()
+        .position(|i| {
+            used += item_bytes(i);
+            used > INLINE_FILL_BYTES
+        })
+        .unwrap_or(items.len());
+    let rest = items.split_off(split);
+    let mut parts: Vec<(Sha256, Vec<u8>)> = Vec::new();
+    let mut emit = |p: Part| {
+        let bytes = crate::records::encode(&p);
+        let h = crate::hash::sha256(&bytes);
+        parts.push((h, bytes));
+        h
+    };
+    let mut level: Vec<Sha256> = Vec::new();
+    let mut cur: Vec<PartItem> = Vec::new();
+    let mut size = 512usize;
+    for i in rest {
+        let n = item_bytes(&i);
+        if !cur.is_empty() && size + n > MAX_PART_BYTES - KIB {
+            level.push(emit(Part {
+                group_id: group.clone(),
+                of,
+                items: std::mem::take(&mut cur),
+                more: vec![],
+            }));
+            size = 512;
+        }
+        size += n;
+        cur.push(i);
+    }
+    if !cur.is_empty() {
+        level.push(emit(Part {
+            group_id: group.clone(),
+            of,
+            items: cur,
+            more: vec![],
+        }));
+    }
+    while level.len() > MAX_PART_FANOUT {
+        level = level
+            .chunks(MAX_PART_FANOUT)
+            .map(|c| {
+                let mut more = c.to_vec();
+                more.sort();
+                emit(Part {
+                    group_id: group.clone(),
+                    of,
+                    items: vec![],
+                    more,
+                })
+            })
+            .collect();
+    }
+    level.sort();
+    Packed {
+        inline: items,
+        heads: level,
+        parts,
+    }
+}
+
+/// Packs a causal summary: `seen` entries and `extra` hashes (contracts.md §1.8).
+pub fn pack_known(
+    group: &GroupId,
+    seen: Vec<Seen>,
+    extra: Vec<Sha256>,
+    base_bytes: usize,
+) -> (Known, Vec<(Sha256, Vec<u8>)>) {
+    let items = seen
+        .into_iter()
+        .map(PartItem::Seen)
+        .chain(extra.into_iter().map(PartItem::Hash))
+        .collect();
+    let p = pack_items(group, PartOf::Known, items, base_bytes);
+    let mut k = Known::default();
+    for i in p.inline {
+        match i {
+            PartItem::Seen(s) => k.seen.push(s),
+            PartItem::Hash(h) => k.extra.push(h),
+            _ => {}
+        }
+    }
+    k.seen.sort();
+    k.extra.sort();
+    k.parts = p.heads;
+    (k, p.parts)
+}
+
 macro_rules! authority_record {
     ($t:ty, $schema:literal, $v:path) => {
         impl Record for $t {

@@ -378,6 +378,14 @@ fn one(
     if missing {
         return Status::Pending(PendingReason::MissingReference);
     }
+    for (of, heads) in part_chains(r) {
+        match read_parts(ledger, heads, of) {
+            Ok(_) => {}
+            Err("missing_part") => return Status::Pending(PendingReason::MissingReference),
+            Err("wrong_reference") => return Status::Invalid(I::WrongReference),
+            Err(why) => return Status::Invalid(I::Kind(why.into())),
+        }
+    }
     match r {
         AuthorityRecord::Retirement(_) => match ret.get(h) {
             Some(RetStatus::Void) => return Status::Invalid(I::VoidRetirement),
@@ -454,6 +462,9 @@ fn kind_rules(ledger: &Ledger, members: &Membership, r: &AuthorityRecord) -> Res
             }
         }
         AuthorityRecord::SettingsPolicy(p) => {
+            if let Err(why) = policy_folders(ledger, p) {
+                return Err(why.into());
+            }
             if let Some(m) = &p.master {
                 if !members.contains(&m.computer_id, &m.enrollment_id) {
                     return Err("policy_body".into());
@@ -472,8 +483,9 @@ fn kind_rules(ledger: &Ledger, members: &Membership, r: &AuthorityRecord) -> Res
     Ok(())
 }
 
-/// Reads a part chain: all items of the given `of`, following `more`. A part whose group or `of`
-/// differs, or a duplicate item across parts, makes the whole read fail (`bad_part`).
+/// Reads a part chain: all items of the given `of`, following `more`. A part reachable twice
+/// or deeper than 8 makes the read fail (`bad_part`), a part of another `of` fails with
+/// `wrong_reference`, and a part that is not (yet) readable fails with `missing_part`.
 pub fn read_parts(
     ledger: &Ledger,
     heads: &[Sha256],
@@ -484,7 +496,7 @@ pub fn read_parts(
     let mut stack: Vec<(Sha256, usize)> = heads.iter().map(|h| (*h, 1)).collect();
     while let Some((h, depth)) = stack.pop() {
         if !seen.insert(h) {
-            continue;
+            return Err("bad_part");
         }
         if depth > crate::kinds::MAX_PART_DEPTH {
             return Err("bad_part");
@@ -494,13 +506,84 @@ pub fn read_parts(
         };
         let p: &Part = p;
         if p.of != of {
-            return Err("bad_part");
+            return Err("wrong_reference");
         }
         out.extend(p.items.iter().cloned());
         stack.extend(p.more.iter().map(|m| (*m, depth + 1)));
     }
     out.sort();
     Ok(out)
+}
+
+/// The full value of a causal summary: inline entries plus every reachable part.
+pub fn resolve_known(
+    ledger: &Ledger,
+    k: &crate::kinds::Known,
+) -> Result<crate::kinds::Known, &'static str> {
+    let mut out = crate::kinds::Known {
+        seen: k.seen.clone(),
+        extra: k.extra.clone(),
+        parts: vec![],
+    };
+    for i in read_parts(ledger, &k.parts, PartOf::Known)? {
+        match i {
+            PartItem::Seen(s) => out.seen.push(s),
+            PartItem::Hash(h) => out.extra.push(h),
+            _ => return Err("bad_part"),
+        }
+    }
+    out.seen.sort();
+    out.seen.dedup();
+    out.extra.sort();
+    out.extra.dedup();
+    Ok(out)
+}
+
+/// The full rule list of a policy. The same folder twice, inline or in any part, is
+/// `policy_body` (settings.md §3.2).
+pub fn policy_folders(
+    ledger: &Ledger,
+    p: &crate::kinds::SettingsPolicy,
+) -> Result<Vec<crate::kinds::PolicyRule>, &'static str> {
+    let mut rules = p.folders.clone();
+    for i in read_parts(ledger, &p.folders_parts, PartOf::PolicyFolders)? {
+        match i {
+            PartItem::Rule(r) => rules.push(r),
+            _ => return Err("bad_part"),
+        }
+    }
+    rules.sort_by(|a, b| a.folder.cmp(&b.folder));
+    if rules.windows(2).any(|w| w[0].folder == w[1].folder) {
+        return Err("policy_body");
+    }
+    Ok(rules)
+}
+
+/// Every part chain a record names, with the `of` it must have.
+fn part_chains(r: &AuthorityRecord) -> Vec<(PartOf, &[Sha256])> {
+    match r {
+        AuthorityRecord::Readd(x) => vec![(PartOf::Known, &x.known.parts)],
+        AuthorityRecord::Lift(x) => vec![(PartOf::Known, &x.known.parts)],
+        AuthorityRecord::CodeChoice(x) => vec![
+            (PartOf::Known, &x.known.parts),
+            (PartOf::Considered, &x.considered_parts),
+            (PartOf::Exclude, &x.exclude_parts),
+            (PartOf::AllowAgain, &x.allow_again_parts),
+        ],
+        AuthorityRecord::Rejection(x) => vec![
+            (PartOf::Known, &x.known.parts),
+            (PartOf::Considered, &x.considered_parts),
+        ],
+        AuthorityRecord::SettingsPolicy(x) => vec![
+            (PartOf::Known, &x.known.parts),
+            (PartOf::PolicyFolders, &x.folders_parts),
+        ],
+        AuthorityRecord::SettingsRevision(x) => vec![
+            (PartOf::Known, &x.known.parts),
+            (PartOf::RevisionParents, &x.parents_parts),
+        ],
+        _ => vec![],
+    }
 }
 
 // ---------------------------------------------------------------- journal vs ledger (V-JRN)
@@ -536,12 +619,158 @@ pub fn validate_journal_against_ledger(
             _ => return Err("removal_not_valid".into()),
         }
     }
-    for f in j.folders.iter().filter(|f| f.action == FolderAction::Remove) {
+    for f in j
+        .folders
+        .iter()
+        .filter(|f| f.action == FolderAction::Remove)
+    {
         if !named.contains(&f.key) {
             return Err("remove_folder_unnamed".into());
         }
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------- authority index chain (§1.6)
+
+/// A member's published `authority_index` pointer in its code state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IndexHead {
+    pub head: Sha256,
+    pub total: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IndexError {
+    Missing(Sha256),
+    Bad(Sha256),
+    Foreign(Sha256),
+    Loop,
+    TotalMismatch { found: u64, total: u64 },
+}
+
+/// What one walk of an index chain produced. `refs` are the refs of the newly read chunks and
+/// are valid to learn even when `error` is set: a broken chain never makes learned refs go away.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexRead {
+    pub refs: Vec<crate::kinds::AuthorityRef>,
+    /// Chunk hash to the number of refs from the oldest chunk through it, for chunks read whole.
+    pub processed: BTreeMap<Sha256, u64>,
+    pub error: Option<IndexError>,
+}
+
+/// Walks from the head along `prev` until a chunk in `known_complete` (hash to cumulative ref
+/// count) is reached. The sum over the chain must equal `total`.
+pub fn read_index_chain(
+    head: &IndexHead,
+    group: &GroupId,
+    enrollment: &EnrollmentId,
+    known_complete: &BTreeMap<Sha256, u64>,
+    fetch: &dyn Fn(&Sha256) -> Option<Vec<u8>>,
+) -> IndexRead {
+    let mut chain: Vec<(Sha256, crate::kinds::AuthorityIndexChunk)> = Vec::new();
+    let mut base = 0u64;
+    let mut seen = BTreeSet::new();
+    let mut cur = Some(head.head);
+    let mut error = None;
+    while let Some(h) = cur {
+        if let Some(n) = known_complete.get(&h) {
+            base = *n;
+            break;
+        }
+        if !seen.insert(h) {
+            error = Some(IndexError::Loop);
+            break;
+        }
+        let Some(bytes) = fetch(&h) else {
+            error = Some(IndexError::Missing(h));
+            break;
+        };
+        let decoded = if sha256_matches(&bytes, &h) {
+            decode::<crate::kinds::AuthorityIndexChunk>(&bytes, crate::kinds::MAX_INDEX_BYTES).ok()
+        } else {
+            None
+        };
+        let Some(chunk) = decoded else {
+            error = Some(IndexError::Bad(h));
+            break;
+        };
+        if &chunk.group_id != group || &chunk.enrollment_id != enrollment {
+            error = Some(IndexError::Foreign(h));
+            break;
+        }
+        cur = chunk.prev;
+        chain.push((h, chunk));
+    }
+    let mut refs = Vec::new();
+    let mut processed = BTreeMap::new();
+    let mut count = base;
+    for (h, c) in chain.into_iter().rev() {
+        // A broken chain keeps the refs of the chunks read; only whole chains count as processed.
+        count += c.refs.len() as u64;
+        refs.extend(c.refs);
+        if error.is_none() {
+            processed.insert(h, count);
+        }
+    }
+    if error.is_none() && count != head.total {
+        error = Some(IndexError::TotalMismatch {
+            found: count,
+            total: head.total,
+        });
+    }
+    IndexRead {
+        refs,
+        processed,
+        error,
+    }
+}
+
+fn sha256_matches(bytes: &[u8], h: &Sha256) -> bool {
+    &crate::hash::sha256(bytes) == h
+}
+
+/// Adds refs to a chain. When the head chunk is not full it is replaced by a chunk with the same
+/// `prev` holding its refs plus the new ones; the rest follow in new chunks. Returns the chunk
+/// files to write (write-if-absent) and the new pointer.
+pub fn append_index_refs(
+    group: &GroupId,
+    enrollment: &EnrollmentId,
+    head: Option<(&Sha256, &crate::kinds::AuthorityIndexChunk)>,
+    total: u64,
+    new_refs: Vec<crate::kinds::AuthorityRef>,
+) -> (Vec<(Sha256, Vec<u8>)>, IndexHead) {
+    let max = crate::kinds::MAX_INDEX_REFS;
+    let (mut prev, mut pending) = match head {
+        Some((_, c)) if c.refs.len() < max => (c.prev, c.refs.clone()),
+        Some((h, _)) => (Some(*h), Vec::new()),
+        None => (None, Vec::new()),
+    };
+    pending.extend(new_refs.iter().cloned());
+    let added = new_refs.len() as u64;
+    let mut files = Vec::new();
+    let mut last = None;
+    for batch in pending.chunks(max) {
+        let chunk = crate::kinds::AuthorityIndexChunk {
+            group_id: group.clone(),
+            enrollment_id: enrollment.clone(),
+            prev,
+            refs: batch.to_vec(),
+        };
+        let bytes = crate::records::encode(&chunk);
+        let h = crate::hash::sha256(&bytes);
+        files.push((h, bytes));
+        prev = Some(h);
+        last = Some(h);
+    }
+    let head_hash = last.or(head.map(|(h, _)| *h)).expect("a chain has a head");
+    (
+        files,
+        IndexHead {
+            head: head_hash,
+            total: total + added,
+        },
+    )
 }
 
 // ---------------------------------------------------------------- segment files
@@ -837,5 +1066,326 @@ mod tests {
             back.extend(decode_segment(s).unwrap().entries);
         }
         assert_eq!(back, entries);
+    }
+
+    fn eid(n: u32) -> EnrollmentId {
+        EnrollmentId::parse(&format!("{:032x}", n + 0x1000)).unwrap()
+    }
+
+    fn readd_with(known: crate::kinds::Known) -> crate::kinds::Readd {
+        crate::kinds::Readd {
+            group_id: group_id(),
+            issuer: issuer(1, 5000),
+            evidence: crate::kinds::ReaddEvidence::UserAddBack,
+            rejection: None,
+            title: "Suite".into(),
+            folders: vec![ManifestFolder {
+                key: FolderKey::lossy("suite"),
+                name: "Suite".into(),
+                tree: sha256(b"tree"),
+            }],
+            present_hash: sha256(b"present"),
+            known,
+            written_unix_ms: 9,
+        }
+    }
+
+    fn learn_part(l: &mut Ledger, h: Sha256, bytes: &[u8]) {
+        l.learn(h, AuthorityKind::Part, vec![], None, Some(bytes));
+    }
+
+    #[test]
+    fn readd_after_1024_removals_fits_and_supersedes_them_but_not_a_concurrent_one() {
+        // T-C08-known-bound
+        use crate::kinds::{Known, Seen};
+        let known = Known {
+            seen: vec![Seen {
+                enrollment_id: enrollment(2),
+                seq: 1024,
+            }],
+            extra: vec![],
+            parts: vec![],
+        };
+        let bytes = encode(&readd_with(known.clone()));
+        assert!(bytes.len() < 64 * 1024, "{}", bytes.len());
+        let none = BTreeSet::new();
+        for s in 1..=1024u64 {
+            let h = sha256(&s.to_le_bytes());
+            assert!(crate::authority::covered(&known, &none, &issuer(2, s), &h));
+        }
+        let h = sha256(&1025u64.to_le_bytes());
+        assert!(!crate::authority::covered(
+            &known,
+            &none,
+            &issuer(2, 1025),
+            &h
+        ));
+        // A removal of another enrollment is not covered either.
+        assert!(!crate::authority::covered(&known, &none, &issuer(3, 1), &h));
+    }
+
+    #[test]
+    fn readd_after_1024_issuers_moves_seen_into_parts_and_waits_for_every_part() {
+        // T-R4D4-1024-issuers-readd
+        use crate::kinds::{pack_known, Known, Seen};
+        let seen: Vec<Seen> = (0..1024)
+            .map(|n| Seen {
+                enrollment_id: eid(n),
+                seq: 1,
+            })
+            .collect();
+        let base = encode(&readd_with(Known::default())).len();
+        let (known, parts) = pack_known(&group_id(), seen, vec![], base);
+        assert!(!known.parts.is_empty() && !parts.is_empty());
+        assert!(known.seen.len() < 1024);
+        let rd = readd_with(known.clone());
+        let bytes = encode(&rd);
+        assert!(bytes.len() <= 64 * 1024);
+        assert!(parts.iter().all(|(_, b)| b.len() <= 64 * 1024));
+        let mut l = Ledger::new();
+        let h = learn(&mut l, &rd, AuthorityKind::Readd);
+        let m = members(&[1]);
+        let status = |l: &Ledger| derive(l, &group_id(), &m).status_of(&h).cloned();
+        assert_eq!(
+            status(&l),
+            Some(Status::Pending(PendingReason::MissingReference))
+        );
+        for (ph, pb) in &parts[..parts.len() - 1] {
+            learn_part(&mut l, *ph, pb);
+        }
+        if parts.len() > 1 {
+            assert_eq!(
+                status(&l),
+                Some(Status::Pending(PendingReason::MissingReference))
+            );
+        }
+        let (ph, pb) = &parts[parts.len() - 1];
+        learn_part(&mut l, *ph, pb);
+        assert_eq!(status(&l), Some(Status::Valid));
+        let full = resolve_known(&l, &known).unwrap();
+        assert_eq!(full.seen.len(), 1024);
+        let none = BTreeSet::new();
+        for n in 0..1024 {
+            let by = Issuer {
+                computer_id: computer(1),
+                enrollment_id: eid(n),
+                issued_at_seq: 1,
+            };
+            assert!(crate::authority::covered(&full, &none, &by, &sha256(b"x")));
+        }
+    }
+
+    #[test]
+    fn readd_with_unreadable_issuer_indexes_lists_every_record_in_extra_parts() {
+        // T-R4D4-mirror-only-readd
+        use crate::kinds::{pack_known, Known};
+        let hashes: Vec<Sha256> = (0..1024u32).map(|n| sha256(&n.to_le_bytes())).collect();
+        let base = encode(&readd_with(Known::default())).len();
+        let (known, parts) = pack_known(&group_id(), vec![], hashes.clone(), base);
+        assert!(known.seen.is_empty() && !known.parts.is_empty());
+        let rd = readd_with(known.clone());
+        assert!(encode(&rd).len() <= 64 * 1024);
+        let mut l = Ledger::new();
+        for x in &known.extra {
+            l.learn(*x, AuthorityKind::Removal, vec![], None, None);
+        }
+        let h = learn(&mut l, &rd, AuthorityKind::Readd);
+        for (ph, pb) in &parts {
+            learn_part(&mut l, *ph, pb);
+        }
+        let d = derive(&l, &group_id(), &members(&[1]));
+        assert_eq!(d.status_of(&h), Some(&Status::Valid));
+        let full = resolve_known(&l, &known).unwrap();
+        assert_eq!(full.extra.len(), 1024);
+        let none = BTreeSet::new();
+        // The issuers are unknown here; only the hash covers them.
+        for x in &hashes {
+            assert!(crate::authority::covered(&full, &none, &issuer(9, 99), x));
+        }
+        assert!(!crate::authority::covered(
+            &full,
+            &none,
+            &issuer(9, 99),
+            &sha256(b"concurrent")
+        ));
+    }
+
+    fn rule(n: u32) -> crate::kinds::PolicyRule {
+        crate::kinds::PolicyRule {
+            folder: FolderKey::lossy(&format!("addon{n:05}")),
+            rule: crate::kinds::PolicyRuleKind::NotShared,
+            computer_id: None,
+            enrollment_id: None,
+        }
+    }
+
+    fn policy_with(
+        folders: Vec<crate::kinds::PolicyRule>,
+        parts: Vec<Sha256>,
+    ) -> crate::kinds::SettingsPolicy {
+        crate::kinds::SettingsPolicy {
+            group_id: group_id(),
+            issuer: issuer(1, 3),
+            master: None,
+            folders,
+            known: Default::default(),
+            folders_parts: parts,
+            written_unix_ms: 9,
+        }
+    }
+
+    #[test]
+    fn a_policy_of_5000_folders_round_trips_in_parts_and_a_duplicate_is_policy_body() {
+        // T-R4D4-full-policy
+        use crate::kinds::{pack_items, PartItem};
+        let rules: Vec<_> = (0..5000).map(rule).collect();
+        let base = encode(&policy_with(vec![], vec![])).len();
+        let packed = pack_items(
+            &group_id(),
+            PartOf::PolicyFolders,
+            rules.iter().cloned().map(PartItem::Rule).collect(),
+            base,
+        );
+        let inline: Vec<_> = packed
+            .inline
+            .iter()
+            .map(|i| match i {
+                PartItem::Rule(r) => r.clone(),
+                _ => unreachable!(),
+            })
+            .collect();
+        assert!(packed.parts.len() > 2 && packed.heads.len() <= 16);
+        let pol = policy_with(inline, packed.heads.clone());
+        assert!(encode(&pol).len() <= 64 * 1024);
+        assert!(packed.parts.iter().all(|(_, b)| b.len() <= 64 * 1024));
+        let mut l = Ledger::new();
+        let h = learn(&mut l, &pol, AuthorityKind::SettingsPolicy);
+        for (ph, pb) in &packed.parts {
+            learn_part(&mut l, *ph, pb);
+        }
+        let m = members(&[1]);
+        assert_eq!(
+            derive(&l, &group_id(), &m).status_of(&h),
+            Some(&Status::Valid)
+        );
+        assert_eq!(policy_folders(&l, &pol).unwrap(), rules);
+
+        // The same folder in two parts.
+        let part = |items: Vec<u32>| Part {
+            group_id: group_id(),
+            of: PartOf::PolicyFolders,
+            items: items.into_iter().map(|n| PartItem::Rule(rule(n))).collect(),
+            more: vec![],
+        };
+        let mut l = Ledger::new();
+        let mut heads = Vec::new();
+        for p in [part(vec![1, 7]), part(vec![7, 9])] {
+            let b = encode(&p);
+            let ph = sha256(&b);
+            learn_part(&mut l, ph, &b);
+            heads.push(ph);
+        }
+        heads.sort();
+        let dup = policy_with(vec![], heads);
+        let h = learn(&mut l, &dup, AuthorityKind::SettingsPolicy);
+        assert_eq!(
+            derive(&l, &group_id(), &m).status_of(&h),
+            Some(&Status::Invalid(InvalidReason::Kind("policy_body".into())))
+        );
+    }
+
+    fn refs(range: std::ops::Range<u32>) -> Vec<crate::kinds::AuthorityRef> {
+        range
+            .map(|n| crate::kinds::AuthorityRef {
+                hash: sha256(&n.to_le_bytes()),
+                kind: AuthorityKind::Removal,
+                folders: vec![FolderKey::lossy("suite")],
+            })
+            .collect()
+    }
+
+    #[test]
+    fn index_chain_replaces_a_partial_head_and_reports_a_broken_chain_without_forgetting() {
+        // T-C12-index-chain
+        let (g, e) = (group_id(), enrollment(2));
+        let mut store: BTreeMap<Sha256, Vec<u8>> = BTreeMap::new();
+        let put = |files: Vec<(Sha256, Vec<u8>)>, s: &mut BTreeMap<Sha256, Vec<u8>>| {
+            for (h, b) in files {
+                s.insert(h, b);
+            }
+        };
+
+        // A partial head chunk is replaced, not extended.
+        let (files, h1) = append_index_refs(&g, &e, None, 0, refs(0..3));
+        put(files, &mut store);
+        let old = decode::<crate::kinds::AuthorityIndexChunk>(&store[&h1.head], MIB).unwrap();
+        let (files, h2) = append_index_refs(&g, &e, Some((&h1.head, &old)), 3, refs(3..5));
+        assert_eq!(files.len(), 1);
+        put(files, &mut store);
+        assert_ne!(h2.head, h1.head);
+        assert!(
+            store.contains_key(&h1.head),
+            "the replaced chunk stays on disk"
+        );
+        let new = decode::<crate::kinds::AuthorityIndexChunk>(&store[&h2.head], MIB).unwrap();
+        assert_eq!((new.prev, new.refs.len(), h2.total), (old.prev, 5, 5));
+
+        // A long chain, read whole, then incrementally.
+        let (files, big) = append_index_refs(&g, &e, None, 0, refs(0..2500));
+        assert_eq!(files.len(), 3);
+        let mut store: BTreeMap<Sha256, Vec<u8>> = BTreeMap::new();
+        put(files, &mut store);
+        let fetch = |s: &BTreeMap<Sha256, Vec<u8>>, h: &Sha256| s.get(h).cloned();
+        let first = read_index_chain(&big, &g, &e, &BTreeMap::new(), &|h| fetch(&store, h));
+        assert_eq!((first.refs.len(), first.error.clone()), (2500, None));
+        let mut l = Ledger::new();
+        for r in &first.refs {
+            l.learn(r.hash, r.kind, r.folders.clone(), Some(&computer(2)), None);
+        }
+        assert_eq!(l.len(), 2500);
+
+        let head_chunk =
+            decode::<crate::kinds::AuthorityIndexChunk>(&store[&big.head], MIB).unwrap();
+        let (files, grown) = append_index_refs(
+            &g,
+            &e,
+            Some((&big.head, &head_chunk)),
+            2500,
+            refs(2500..2501),
+        );
+        put(files, &mut store);
+        let more = read_index_chain(&grown, &g, &e, &first.processed, &|h| fetch(&store, h));
+        assert_eq!((more.refs.len(), more.error.clone()), (453, None));
+
+        // A missing middle chunk: unreadable, and what was learned stays.
+        let mid = head_chunk.prev.expect("a middle chunk");
+        let mut broken = store.clone();
+        broken.remove(&mid);
+        let r = read_index_chain(&big, &g, &e, &BTreeMap::new(), &|h| fetch(&broken, h));
+        assert_eq!(r.error, Some(IndexError::Missing(mid)));
+        assert!(r.processed.is_empty());
+        for x in &r.refs {
+            l.learn(x.hash, x.kind, x.folders.clone(), Some(&computer(2)), None);
+        }
+        assert_eq!(l.len(), 2500);
+
+        // A bad copy, a total that does not add up, and a foreign chunk.
+        let mut bad = store.clone();
+        bad.insert(mid, b"damaged".to_vec());
+        let r = read_index_chain(&big, &g, &e, &BTreeMap::new(), &|h| fetch(&bad, h));
+        assert_eq!(r.error, Some(IndexError::Bad(mid)));
+        let off = IndexHead { total: 2499, ..big };
+        let r = read_index_chain(&off, &g, &e, &BTreeMap::new(), &|h| fetch(&store, h));
+        assert_eq!(
+            r.error,
+            Some(IndexError::TotalMismatch {
+                found: 2500,
+                total: 2499
+            })
+        );
+        let r = read_index_chain(&big, &g, &enrollment(3), &BTreeMap::new(), &|h| {
+            fetch(&store, h)
+        });
+        assert_eq!(r.error, Some(IndexError::Foreign(big.head)));
     }
 }
