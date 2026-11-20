@@ -988,6 +988,13 @@ tier = "offline"
 tests = [
     "e2e::tests::restoring_a_removed_addon_brings_it_back_and_it_is_not_removed_again",
 ]
+
+[[case]]
+id = "R4-integrate:settings-commands-dispatch"
+tier = "offline"
+tests = [
+    "e2e::tests::settings_policy_and_push_commands_record_explicit_intent_only",
+]
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag

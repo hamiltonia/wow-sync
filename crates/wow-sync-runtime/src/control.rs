@@ -288,6 +288,19 @@ pub enum Command {
         allow_again: Vec<wow_sync_core::ids::Sha256>,
         why: wow_sync_core::kinds::ChoiceReason,
     },
+    /// Choose the settings master and the per-folder exceptions (settings.md §5.2). Explicit only:
+    /// the whole policy is replaced, nothing elects a master. Recorded as intent; applying it to
+    /// real settings stays off until the settings size cap is approved (Q-77).
+    SetSettingsPolicy {
+        master: Option<wow_sync_core::kinds::EnrollmentRef>,
+        exceptions: Vec<wow_sync_core::kinds::PolicyRule>,
+    },
+    /// "Share my settings": publish this computer's captured settings of `unit` as a push. Any
+    /// computer may, master or not; `checkpoint` must already be in the local settings store.
+    ShareSettings {
+        unit: wow_sync_core::ids::SettingsUnit,
+        checkpoint: wow_sync_core::ids::Sha256,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -320,6 +333,10 @@ pub enum CommandError {
     UnknownCopy(wow_sync_core::ids::Sha256),
     /// No valid removal record has this hash.
     UnknownRemoval(wow_sync_core::ids::Sha256),
+    /// The settings record could not be built.
+    Settings(wow_sync_core::settings::SettingsWriteError),
+    /// The checkpoint is not in this computer's settings store.
+    UnknownCheckpoint(wow_sync_core::ids::Sha256),
     Service(String),
 }
 

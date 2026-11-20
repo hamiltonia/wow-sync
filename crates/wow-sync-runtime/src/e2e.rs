@@ -1888,6 +1888,194 @@ mod tests {
         }
     }
 
+    /// A settings checkpoint of one synthetic file in `pc`'s local store.
+    fn stored_checkpoint(pc: &Pc, unit: &wow_sync_core::ids::SettingsUnit, bytes: &[u8]) -> Sha256 {
+        use wow_sync_core::records::{encode, CheckpointFile, SettingsCheckpointManifest};
+        let store = wow_sync_adapters::settings_store::SettingsStore::open(
+            &pc.cfg.install_root.join(&pc.cfg.variant_folder),
+        )
+        .unwrap();
+        let blob = store.put_blob(bytes).unwrap();
+        let manifest = SettingsCheckpointManifest {
+            unit: unit.clone(),
+            files: vec![CheckpointFile {
+                name: "Alpha.lua".into(),
+                size: bytes.len() as u64,
+                blob: Sha256(blob),
+            }],
+        };
+        Sha256(store.put_manifest(&encode(&manifest), &[blob]).unwrap())
+    }
+
+    #[test]
+    fn settings_policy_and_push_commands_record_explicit_intent_only() {
+        use wow_sync_core::kinds::{PolicyRule, PolicyRuleKind, RevisionKind};
+        use wow_sync_core::settings::SettingsWriteError as W;
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        synced(&mut a);
+        let alpha = wow_sync_core::paths::validate_folder_name("Alpha").unwrap();
+        let beta = wow_sync_core::paths::validate_folder_name("Beta").unwrap();
+        let unit = wow_sync_core::ids::SettingsUnit {
+            folder: alpha.clone(),
+            identity: wow_sync_core::ids::Identity::account("ACC").unwrap(),
+        };
+        let cp = stored_checkpoint(&b, &unit, b"settings one");
+
+        // Nothing is written without a policy, a stored checkpoint or a live member.
+        assert_eq!(
+            b.svc.command(Command::ShareSettings {
+                unit: unit.clone(),
+                checkpoint: cp
+            }),
+            Err(CommandError::Settings(W::NoPolicy))
+        );
+        let ghost = sha256(b"no such checkpoint");
+        assert_eq!(
+            b.svc.command(Command::ShareSettings {
+                unit: unit.clone(),
+                checkpoint: ghost
+            }),
+            Err(CommandError::UnknownCheckpoint(ghost))
+        );
+        let nobody = EnrollmentRef {
+            computer_id: ComputerId::parse(&"9".repeat(32)).unwrap(),
+            enrollment_id: EnrollmentId::parse(&"8".repeat(32)).unwrap(),
+        };
+        assert_eq!(
+            a.svc.command(Command::SetSettingsPolicy {
+                master: Some(nobody),
+                exceptions: vec![]
+            }),
+            Err(CommandError::Settings(W::NotLive))
+        );
+        let malformed = PolicyRule {
+            folder: alpha.clone(),
+            rule: PolicyRuleKind::NotShared,
+            computer_id: Some(pc_ids(&b).0),
+            enrollment_id: None,
+        };
+        assert_eq!(
+            a.svc.command(Command::SetSettingsPolicy {
+                master: None,
+                exceptions: vec![malformed]
+            }),
+            Err(CommandError::Settings(W::BadRule))
+        );
+        let not_shared = |f: &wow_sync_core::paths::FolderKey| PolicyRule {
+            folder: f.clone(),
+            rule: PolicyRuleKind::NotShared,
+            computer_id: None,
+            enrollment_id: None,
+        };
+        assert_eq!(
+            a.svc.command(Command::SetSettingsPolicy {
+                master: None,
+                exceptions: vec![not_shared(&beta), not_shared(&beta)]
+            }),
+            Err(CommandError::Settings(W::BadRule)),
+            "one rule per folder"
+        );
+
+        // The master is chosen explicitly; a local-only exception is respected.
+        let out = a
+            .svc
+            .command(Command::SetSettingsPolicy {
+                master: Some(ref_of(&a)),
+                exceptions: vec![not_shared(&beta)],
+            })
+            .unwrap();
+        let CommandOutcome::Written(policy) = out else {
+            panic!("{out:?}")
+        };
+        synced(&mut a);
+        synced(&mut b);
+        assert_eq!(status(&b, &g, &policy), Some(Status::Valid));
+        assert_eq!(
+            b.svc.command(Command::ShareSettings {
+                unit: wow_sync_core::ids::SettingsUnit {
+                    folder: beta.clone(),
+                    identity: unit.identity.clone()
+                },
+                checkpoint: cp
+            }),
+            Err(CommandError::Settings(W::NotShared)),
+            "a not-shared folder publishes nothing"
+        );
+
+        // b is not the master; its explicit push is a valid push, never an automatic revision.
+        let out = b
+            .svc
+            .command(Command::ShareSettings {
+                unit: unit.clone(),
+                checkpoint: cp,
+            })
+            .unwrap();
+        let CommandOutcome::Written(push) = out else {
+            panic!("{out:?}")
+        };
+        synced(&mut b);
+        synced(&mut a);
+        assert_eq!(status(&a, &g, &push), Some(Status::Valid));
+        let history = a.svc.settings_history(&unit);
+        assert_eq!(history.len(), 1, "{history:?}");
+        assert_eq!(history[0].hash, push);
+        assert_eq!(history[0].kind, RevisionKind::Push);
+        assert!(history[0].is_head);
+        assert!(a
+            .svc
+            .settings_history(&wow_sync_core::ids::SettingsUnit {
+                folder: beta,
+                identity: unit.identity.clone()
+            })
+            .is_empty());
+
+        // A later push builds on the head, which stops being one.
+        let cp2 = stored_checkpoint(&b, &unit, b"settings two");
+        let out = b
+            .svc
+            .command(Command::ShareSettings {
+                unit: unit.clone(),
+                checkpoint: cp2,
+            })
+            .unwrap();
+        let CommandOutcome::Written(push2) = out else {
+            panic!("{out:?}")
+        };
+        synced(&mut b);
+        synced(&mut a);
+        let history = a.svc.settings_history(&unit);
+        assert_eq!(history.len(), 2);
+        let heads: Vec<_> = history
+            .iter()
+            .filter(|e| e.is_head)
+            .map(|e| e.hash)
+            .collect();
+        assert_eq!(heads, vec![push2]);
+
+        // A retired computer records no settings intent.
+        a.svc
+            .command(Command::Retire {
+                subject: ref_of(&b),
+            })
+            .unwrap();
+        synced(&mut a);
+        synced(&mut b);
+        assert_eq!(
+            b.svc.command(Command::SetSettingsPolicy {
+                master: Some(ref_of(&b)),
+                exceptions: vec![]
+            }),
+            Err(CommandError::NotAllowed)
+        );
+    }
+
     fn two_option_item(
         key: &wow_sync_core::paths::FolderKey,
         write: AuthorityRecord,

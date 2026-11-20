@@ -371,6 +371,23 @@ impl SliceService {
         &self.offered.0
     }
 
+    /// The `SettingsHistory` query: the valid revisions of `unit` as of the latest observation,
+    /// oldest first. It reads the plane only; nothing is written or applied.
+    pub fn settings_history(
+        &self,
+        unit: &wow_sync_core::ids::SettingsUnit,
+    ) -> Vec<crate::settings_cycle::SettingsHistoryEntry> {
+        let Ok(Some(enrollment)) = self.read_enrollment() else {
+            return Vec::new();
+        };
+        let derived = derive(
+            &self.plane.ledger,
+            &enrollment.group_id,
+            &self.plane.members,
+        );
+        crate::settings_cycle::settings_history(&self.plane.ledger, &derived, unit)
+    }
+
     /// Runs one group command (contracts.md §9.1) against the current observed state.
     pub fn command(&mut self, cmd: Command) -> Result<CommandOutcome, CommandError> {
         if cmd == Command::ReEnroll {
@@ -478,6 +495,41 @@ impl SliceService {
                 }
                 // Dispatched before observation, above.
                 Command::ReEnroll => return Err(CommandError::NotAllowed),
+                Command::SetSettingsPolicy { master, exceptions } => {
+                    let rec = wow_sync_core::settings::build_policy(
+                        &self.plane.ledger,
+                        &derived,
+                        &self.plane.members,
+                        &gid,
+                        issuer,
+                        master,
+                        exceptions,
+                        now,
+                    )
+                    .map_err(CommandError::Settings)?;
+                    DecisionEffect::Write(Box::new(AuthorityRecord::SettingsPolicy(rec)))
+                }
+                Command::ShareSettings { unit, checkpoint } => {
+                    let known_here =
+                        wow_sync_adapters::settings_store::SettingsStore::open(&self.variant_dir())
+                            .ok()
+                            .and_then(|s| s.get_manifest(&checkpoint.0).ok().flatten())
+                            .is_some();
+                    if !known_here {
+                        return Err(CommandError::UnknownCheckpoint(checkpoint));
+                    }
+                    let rec = wow_sync_core::settings::build_push(
+                        &self.plane.ledger,
+                        &derived,
+                        &gid,
+                        issuer,
+                        unit,
+                        checkpoint,
+                        now,
+                    )
+                    .map_err(CommandError::Settings)?;
+                    DecisionEffect::Write(Box::new(AuthorityRecord::SettingsRevision(rec)))
+                }
                 Command::Keep { scope, copy, why } => {
                     let valid = wow_sync_core::choice::valid_hashes(&derived);
                     let view = wow_sync_core::choice::ChoiceView::new(&self.plane.ledger, &valid);
