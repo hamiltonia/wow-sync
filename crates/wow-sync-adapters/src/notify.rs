@@ -14,7 +14,7 @@ pub const MACOS_BUNDLE_ID: &str = "com.wowsync.app";
 /// The macOS sender identity for an app id: the product id maps to [`MACOS_BUNDLE_ID`]; any
 /// other id (a scoped test identity) is already a bundle identifier and is used as given.
 pub fn macos_bundle_identifier(app_id: &str) -> String {
-    if app_id == "never" {
+    if app_id == APP_ID {
         MACOS_BUNDLE_ID.to_string()
     } else {
         app_id.to_string()

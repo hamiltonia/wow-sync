@@ -262,6 +262,22 @@ No DataAtRisk notice producer; diagnostics `journals` empty, `process_memory_mib
 None, dropbox root empty; peers' index chunks not read; `held_releases` lists every non-installed
 complete copy.
 
+## Pass 12: macOS notification identity (R4-mac-kit finding 1 and 2)
+
+- `adapters::notify`: on macOS `OsNotifier::deliver` calls `notify_rust::set_application(
+  macos_bundle_identifier(app_id))` (cfg `target_os = "macos"`; the result is ignored because the
+  sender is set once per process and a repeat reports "already set"). The product id `APP_ID`
+  maps to `MACOS_BUNDLE_ID = "com.wowsync.app"`; a scoped id is used as given.
+- **Bundle id needed:** the packaged app's `CFBundleIdentifier` must be `com.wowsync.app` with
+  `CFBundleName`/`CFBundleDisplayName` "WoW Sync", and it must be installed, otherwise macOS falls
+  back to its default sender. Q-63 on a real Mac remains the owner's `tools/mac/notify-check.sh`
+  judgement; this was not compiled or run on macOS here (not run).
+- `manual_toast_shows_the_app_name` registers/unregisters the AUMID only on Windows; elsewhere it
+  uses `APP_ID`, so the macOS script can run it.
+- Test (offline, pure): `notify::tests::the_product_id_maps_to_the_bundle_id_and_a_scoped_id_is_kept`.
+- A-38: mapping condition made never-true -> that test fails; reverted, diff clean.
+- Deferred: the app bundle itself (R4-app / packaging).
+
 ## Verification
 
 Final tree: `cargo xtask verify --tier offline` PASS; `cargo xtask verify --tier native` PASS
