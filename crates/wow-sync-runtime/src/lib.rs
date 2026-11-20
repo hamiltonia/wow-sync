@@ -23,7 +23,7 @@ mod e2e;
 pub use activity::{ActivityHandle, ActivitySource, ScriptedActivity, WinprocActivity};
 pub use control::{
     log_activity, pause_state, paused_since, read_activity, set_paused, ActivityEntry, AppSettings,
-    PauseState, QuitGate, StopState,
+    Command, CommandError, CommandOutcome, PauseState, QuitGate, StopState,
 };
 pub use detail::{
     strip_colour_codes, CandidateRow, FolderRow, MemberRow, PackageRow, StatusDetail,
@@ -33,9 +33,11 @@ pub use discover::{
     wow_candidates, DetectedInstall,
 };
 pub use effects::{FaultPlan, Faulty, Hooks, RealEffects};
+pub use rollback_flow::RollbackRefusal;
 pub use service::{
     AppliedLine, EnrollPreview, EnrollRequest, GroupInfo, JoinChoice, PackageLine, PreviewKind,
     ReconfirmRequest, ServiceConfig, ServiceError, SliceService, StatusSnapshot, SyncReport,
 };
+pub use settings_cycle::SettingsHistoryEntry;
 
 pub use wow_sync_core as core;

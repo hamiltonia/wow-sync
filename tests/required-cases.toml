@@ -1046,6 +1046,13 @@ tier = "offline"
 tests = [
     "e2e::tests::a_policy_with_thousands_of_exceptions_is_written_in_parts_and_read_back_whole",
 ]
+
+[[case]]
+id = "R4-integrate:public-api-exports"
+tier = "offline"
+tests = [
+    "every_command_can_be_built_and_every_refusal_named_from_outside_the_crate",
+]
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag
