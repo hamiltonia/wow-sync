@@ -605,7 +605,7 @@ fn apply_settings(f: &mut FeatureData, s: &wow_sync_runtime::SettingsSnapshot) {
     d.accounts = s.accounts.clone();
     d.master = s.master.clone();
     d.exceptions = s.exceptions.clone();
-    d.policy_conflict = false && s.policy_conflict;
+    d.policy_conflict = s.policy_conflict;
     d.paused = s.paused.clone();
 }
 
