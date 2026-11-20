@@ -1,0 +1,20 @@
+{
+  "schema": "wowsync.settings-local/1",
+  "units": [
+    {
+      "unit": {
+        "folder": "synalpha",
+        "identity": { "account": "account-1" }
+      },
+      "captures": [],
+      "basis": [],
+      "last_applied": null,
+      "pinned": false,
+      "authority_since": null
+    }
+  ],
+  "paused_folders": [],
+  "included_accounts": ["account-1"],
+  "consent": true,
+  "first_adoption": null
+}
