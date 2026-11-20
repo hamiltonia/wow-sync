@@ -4,11 +4,11 @@
 
 use crate::activity::{ActivitySource, WinprocActivity};
 use crate::control::{Command, CommandError, CommandOutcome};
-use crate::decisions::write_own_record;
 use crate::decisions::{
     learn_from_directories, plan_own_index, route, write_record, Constraints, KeptQueue,
     KeptRecord, Plane, RouteCx, Routed,
 };
+use crate::decisions::{write_own_bytes, write_own_record};
 use crate::detail::{
     build_package_rows, folder_titles, member_rows, render_with_names, DetailInput, StatusDetail,
 };
@@ -527,6 +527,7 @@ impl SliceService {
         let seq = w.enrollment.next_seq;
         let derived = derive(&self.plane.ledger, &gid, &self.plane.members);
         let held = BTreeSet::new();
+        let mut policy_parts: Vec<(wow_sync_core::ids::Sha256, Vec<u8>)> = Vec::new();
         let effect = {
             let cx = CycleCx {
                 group_id: &gid,
@@ -621,7 +622,7 @@ impl SliceService {
                 | Command::UseSharedSettings { .. }
                 | Command::Rollback { .. } => return Err(CommandError::NotAllowed),
                 Command::SetSettingsPolicy { master, exceptions } => {
-                    let rec = wow_sync_core::settings::build_policy(
+                    let (rec, parts) = wow_sync_core::settings::build_policy(
                         &self.plane.ledger,
                         &derived,
                         &self.plane.members,
@@ -632,6 +633,7 @@ impl SliceService {
                         now,
                     )
                     .map_err(CommandError::Settings)?;
+                    policy_parts = parts;
                     DecisionEffect::Write(Box::new(AuthorityRecord::SettingsPolicy(rec)))
                 }
                 Command::ShareSettings { unit, checkpoint } => {
@@ -787,6 +789,11 @@ impl SliceService {
             Routed::Refused(why) => Err(CommandError::Decide(why)),
             Routed::Local(l) => Ok(CommandOutcome::Local(l)),
             Routed::WriteNow(rec) => {
+                // Parts first: a policy whose parts are missing stays pending for every reader.
+                for (_, bytes) in &policy_parts {
+                    write_own_bytes(&mut self.plane, &provider, &gid, &w.own.computer_id, bytes)
+                        .map_err(|e| CommandError::Service(e.to_string()))?;
+                }
                 let h =
                     write_own_record(&mut self.plane, &provider, &gid, &w.own.computer_id, &rec)
                         .map_err(|e| CommandError::Service(e.to_string()))?;
@@ -797,6 +804,12 @@ impl SliceService {
                 Ok(CommandOutcome::Written(h))
             }
             Routed::Keep(rec, why) => {
+                // The kept policy names these parts, so they must outlive the wait; they are
+                // inert files without an issuer until the policy itself is written.
+                for (_, bytes) in &policy_parts {
+                    write_own_bytes(&mut self.plane, &provider, &gid, &w.own.computer_id, bytes)
+                        .map_err(|e| CommandError::Service(e.to_string()))?;
+                }
                 let mut q = KeptQueue::load(&self.state, &gid);
                 q.push(KeptRecord::reserve(&rec, seq, why));
                 q.save(&self.state, &gid)

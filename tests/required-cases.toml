@@ -1039,6 +1039,13 @@ tests = [
     "e2e::tests::confirming_settings_here_needs_an_account_and_nothing_is_applied_before_it",
     "e2e::tests::undoing_a_removal_restores_the_removed_units_settings_to_that_unit_only",
 ]
+
+[[case]]
+id = "R4-integrate:settings-policy-parts"
+tier = "offline"
+tests = [
+    "e2e::tests::a_policy_with_thousands_of_exceptions_is_written_in_parts_and_read_back_whole",
+]
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag

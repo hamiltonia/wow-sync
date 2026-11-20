@@ -2917,6 +2917,88 @@ mod tests {
         assert_eq!(a.svc.settings_history(&unit).len(), 1);
     }
 
+    #[test]
+    fn a_policy_with_thousands_of_exceptions_is_written_in_parts_and_read_back_whole() {
+        use wow_sync_core::kinds::{PolicyRule, PolicyRuleKind};
+        let lab = Lab::new();
+        let (mut a, mut b, g) = settings_pair(&lab, true, Some(1 << 20));
+        let (ac, _) = pc_ids(&a);
+        let before = authority_files(&lab, &g, &ac);
+        let not_shared = |name: &str| PolicyRule {
+            folder: wow_sync_core::paths::validate_folder_name(name).unwrap(),
+            rule: PolicyRuleKind::NotShared,
+            computer_id: None,
+            enrollment_id: None,
+        };
+        // "Alpha" sorts after every "A0…" rule, so its rule is in the last part, not inline.
+        let mut rules: Vec<_> = (0..3000).map(|n| not_shared(&format!("A{n:05}"))).collect();
+        rules.push(not_shared("Alpha"));
+        let out = a
+            .svc
+            .command(Command::SetSettingsPolicy {
+                master: Some(ref_of(&a)),
+                exceptions: rules,
+            })
+            .unwrap();
+        let CommandOutcome::Written(policy) = out else {
+            panic!("{out:?}")
+        };
+        let after = authority_files(&lab, &g, &ac);
+        let parts: Vec<String> = after
+            .iter()
+            .filter(|f| !before.contains(f) && **f != format!("{policy}.json"))
+            .cloned()
+            .collect();
+        assert!(
+            parts.len() >= 2,
+            "the rules were split into parts: {parts:?}"
+        );
+        for f in after.iter().filter(|f| !before.contains(f)) {
+            let len = std::fs::metadata(provider_file(
+                &lab,
+                &layout::authority_record(
+                    &g,
+                    &ac,
+                    &Sha256::parse(f.trim_end_matches(".json")).unwrap(),
+                ),
+            ))
+            .unwrap()
+            .len();
+            assert!(len <= 64 * 1024, "{f} is {len} bytes");
+        }
+        synced(&mut a);
+
+        // A part that has not arrived yet leaves the policy pending: it acts on nothing.
+        let part_file = |f: &str| {
+            provider_file(
+                &lab,
+                &layout::authority_record(
+                    &g,
+                    &ac,
+                    &Sha256::parse(f.trim_end_matches(".json")).unwrap(),
+                ),
+            )
+        };
+        let missing = part_file(&parts[0]);
+        let missing_bytes = std::fs::read(&missing).unwrap();
+        std::fs::remove_file(&missing).unwrap();
+        synced(&mut b);
+        assert_ne!(status(&b, &g, &policy), Some(Status::Valid));
+
+        std::fs::write(&missing, missing_bytes).unwrap();
+        synced(&mut b);
+        assert_eq!(status(&b, &g, &policy), Some(Status::Valid));
+
+        // The rule that lives in a part is honoured: Alpha's settings are not shared.
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        synced(&mut b);
+        assert_eq!(read_wtf(&b, "Alpha"), None);
+    }
+
     fn two_option_item(
         key: &wow_sync_core::paths::FolderKey,
         write: AuthorityRecord,

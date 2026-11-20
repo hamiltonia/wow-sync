@@ -1029,8 +1029,6 @@ pub enum SettingsWriteError {
     BadRule,
     /// The named computer is not a live member of the group.
     NotLive,
-    /// More rules than one record carries inline; writing parts is not built yet.
-    TooManyRules,
     /// No policy exists, so a revision has no witness.
     NoPolicy,
     /// The folder's settings are local only on every computer.
@@ -1083,7 +1081,9 @@ fn live_member(
 
 /// A policy naming `master` and the per-folder exceptions `rules`, covering every policy this
 /// ledger has learned. It is an explicit user choice: nothing elects a master (settings.md §5.2).
-#[allow(clippy::too_many_arguments)]
+/// A long rule list never refuses: the rules that do not fit inline go into parts (contracts.md
+/// §1.9), returned as the exact `(hash, bytes)` files to write before the policy.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn build_policy(
     l: &Ledger,
     d: &Derived,
@@ -1093,10 +1093,7 @@ pub fn build_policy(
     master: Option<EnrollmentRef>,
     mut rules: Vec<PolicyRule>,
     now_unix_ms: u64,
-) -> Result<SettingsPolicy, SettingsWriteError> {
-    if rules.len() > crate::kinds::MAX_FOLDERS {
-        return Err(SettingsWriteError::TooManyRules);
-    }
+) -> Result<(SettingsPolicy, Vec<(Sha256, Vec<u8>)>), SettingsWriteError> {
     if rules.iter().any(|r| !r.well_formed()) {
         return Err(SettingsWriteError::BadRule);
     }
@@ -1113,15 +1110,35 @@ pub fn build_policy(
     if named.into_iter().any(|w| !live_member(members, d, &w)) {
         return Err(SettingsWriteError::NotLive);
     }
-    Ok(SettingsPolicy {
+    let mut policy = SettingsPolicy {
         group_id: group.clone(),
         issuer,
         master,
-        folders: rules,
+        folders: Vec::new(),
         known: settings_known(l, group),
         folders_parts: Vec::new(),
         written_unix_ms: now_unix_ms,
-    })
+    };
+    let base = crate::records::encode(&policy).len();
+    let packed = crate::kinds::pack_items(
+        group,
+        crate::kinds::PartOf::PolicyFolders,
+        rules
+            .into_iter()
+            .map(crate::kinds::PartItem::Rule)
+            .collect(),
+        base,
+    );
+    policy.folders = packed
+        .inline
+        .into_iter()
+        .filter_map(|i| match i {
+            crate::kinds::PartItem::Rule(r) => Some(r),
+            _ => None,
+        })
+        .collect();
+    policy.folders_parts = packed.heads;
+    Ok((policy, packed.parts))
 }
 
 /// The automatic revision of the unit's authority after a completed, changed capture inside its
