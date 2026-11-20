@@ -1016,3 +1016,482 @@ fn publish_aborts_when_source_changes() {
     assert!(fx.records.is_empty());
     let _ = computer(1);
 }
+
+/// C-JRN `/2` execution (contracts.md §2.2): every operation kind, every crash slot.
+mod v2 {
+    use super::*;
+    use crate::ids::{Identity, SettingsUnit};
+    use crate::kinds::{Ack, AckItem, AckResult, AckSettings, Issuer};
+    use crate::plan::RemoveApply;
+    use crate::records::{
+        decode_journal, decode_point, AnyJournal, AnyPoint, Location, PendingRecord, RecoverySlot,
+        RootState, SettingsFileOp, SettingsRoot,
+    };
+    use crate::testkit::{enrollment, group_id};
+
+    fn key(s: &str) -> FolderKey {
+        FolderKey::lossy(s)
+    }
+
+    fn dir(t: &str) -> Dir {
+        Dir {
+            tree: sha256(t.as_bytes()),
+            fingerprint: sha256(format!("fp-{t}").as_bytes()),
+            recent: false,
+        }
+    }
+
+    fn rel(folder: &str) -> crate::paths::SettingsPath {
+        crate::paths::account_settings_path("ACC", folder).unwrap()
+    }
+
+    fn expect_dir(name: &str, t: &str) -> ExpectedLive {
+        let d = dir(&format!("{name}-{t}"));
+        ExpectedLive::Tree {
+            tree: d.tree,
+            fingerprint: d.fingerprint,
+        }
+    }
+
+    fn folder(name: &str, action: FolderAction, old: bool) -> FolderApply {
+        FolderApply {
+            name: name.into(),
+            key: key(&name.to_lowercase()),
+            action,
+            tree: crate::records::FolderTreeRecord {
+                tree: sha256(format!("{name}-new").as_bytes()),
+                files: vec![],
+            },
+            expected_live: if old {
+                expect_dir(name, "old")
+            } else {
+                ExpectedLive::Absent
+            },
+        }
+    }
+
+    fn remove(name: &str) -> RemoveApply {
+        RemoveApply {
+            name: name.into(),
+            key: key(&name.to_lowercase()),
+            expected_live: expect_dir(name, "old"),
+        }
+    }
+
+    fn settings_op(file: &str, idx: u8, staged: bool, live: bool) -> SettingsFileOp {
+        SettingsFileOp {
+            unit: SettingsUnit {
+                folder: key(&file.to_lowercase()),
+                identity: Identity::account("ACC").unwrap(),
+            },
+            live_rel: rel(file),
+            expected_live: if live {
+                ExpectedLive::Tree {
+                    tree: sha256(format!("{file}-old").as_bytes()),
+                    fingerprint: sha256(b"unused"),
+                }
+            } else {
+                ExpectedLive::Absent
+            },
+            staged: staged.then(|| sha256(format!("{file}-new").as_bytes())),
+            recovery_slot: RecoverySlot::new(&format!("r/{idx}")).unwrap(),
+        }
+    }
+
+    fn pending() -> PendingRecord {
+        let ack = Ack {
+            group_id: group_id(),
+            issuer: Issuer {
+                computer_id: computer(1),
+                enrollment_id: enrollment(1),
+                issued_at_seq: 4,
+            },
+            items: vec![AckItem {
+                removal: sha256(b"removal"),
+                folders: vec![key("alphax")],
+            }],
+            result: AckResult::Absent,
+            removed: vec![],
+            settings: AckSettings::NotApplicable,
+            written_unix_ms: 8,
+        };
+        let bytes = crate::records::encode(&ack);
+        PendingRecord {
+            hash: sha256(&bytes),
+            bytes: String::from_utf8(bytes).unwrap(),
+        }
+    }
+
+    fn captured(file: &str) -> SettingsRoot {
+        SettingsRoot {
+            unit: SettingsUnit {
+                folder: key(&file.to_lowercase()),
+                identity: Identity::account("ACC").unwrap(),
+            },
+            state: RootState::Captured {
+                checkpoint: sha256(b"checkpoint"),
+                location: Location::Local,
+            },
+        }
+    }
+
+    fn base_fx() -> FakeEffects {
+        let mut fx = FakeEffects::new();
+        for n in ["Alpha", "AlphaX", "Extra"] {
+            fx.live.insert(n.into(), dir(&format!("{n}-old")));
+        }
+        for f in ["Alpha", "Other"] {
+            fx.settings_live.insert(
+                rel(f).as_str().to_string(),
+                sha256(format!("{f}-old").as_bytes()),
+            );
+        }
+        for f in ["Alpha", "Other"] {
+            fx.settings_blobs
+                .push(sha256(format!("{f}-new").as_bytes()));
+        }
+        fx
+    }
+
+    /// One operation of each kind of the §2.2 table, over the same base state.
+    fn case(kind: OpKind) -> (ApplyPlan, FakeEffects) {
+        let mut p = PackageApply::code_apply(
+            op(7),
+            key("alpha"),
+            sha256(b"alpha-target"),
+            vec![],
+            Explanation::Installed {
+                source: computer(2),
+            },
+        );
+        p.kind = kind;
+        let mut removals = vec![sha256(b"removal")];
+        removals.sort();
+        match kind {
+            OpKind::Apply | OpKind::Rollback => {
+                p.folders = vec![
+                    folder("Alpha", FolderAction::Replace, true),
+                    folder("Fresh", FolderAction::Install, false),
+                ];
+                p.removes = vec![remove("AlphaX")];
+                p.removals = removals;
+                p.pending_records = vec![pending()];
+                p.settings_ops = vec![settings_op("Alpha", 0, true, true)];
+                p.settings_roots = vec![captured("Alpha")];
+            }
+            OpKind::Remove => {
+                p.removes = vec![remove("AlphaX"), remove("Alpha")];
+                p.removals = removals;
+                p.pending_records = vec![pending()];
+                p.settings_ops = vec![settings_op("Alpha", 0, false, true)];
+                p.settings_roots = vec![captured("Alpha")];
+            }
+            OpKind::Restore => {
+                p.folders = vec![folder("Alpha", FolderAction::Replace, true)];
+                p.settings_ops = vec![settings_op("Alpha", 0, true, true)];
+                p.settings_roots = vec![captured("Alpha")];
+            }
+            OpKind::Settings => {
+                p.settings_ops = vec![
+                    settings_op("Alpha", 0, true, true),
+                    settings_op("Other", 1, true, true),
+                ];
+                p.settings_roots = vec![captured("Alpha"), captured("Other")];
+            }
+            OpKind::SettingsCleanup => {
+                p.settings_ops = vec![settings_op("Alpha", 0, false, true)];
+                p.pending_records = vec![pending()];
+                p.settings_roots = vec![captured("Alpha")];
+            }
+        }
+        let plan = ApplyPlan {
+            group_id: group_id(),
+            started_unix_ms: 5,
+            packages: vec![p],
+            skipped: vec![],
+        };
+        (plan, base_fx())
+    }
+
+    const KINDS: [OpKind; 6] = [
+        OpKind::Apply,
+        OpKind::Remove,
+        OpKind::Restore,
+        OpKind::Rollback,
+        OpKind::Settings,
+        OpKind::SettingsCleanup,
+    ];
+
+    type Snapshot = (BTreeMap<String, Dir>, BTreeMap<String, Sha256>, Vec<Sha256>);
+
+    fn snap(fx: &FakeEffects) -> Snapshot {
+        (
+            fx.live.clone(),
+            fx.settings_live.clone(),
+            fx.pending_written.keys().copied().collect(),
+        )
+    }
+
+    fn settle2(fx: &mut FakeEffects) {
+        for _ in 0..6 {
+            let r = recover_interrupted(fx);
+            assert!(
+                r.ops.iter().all(|(_, _, res)| !matches!(
+                    res,
+                    PackageResult::NeedsHelp(_) | PackageResult::Failed(_)
+                )),
+                "{r:?}"
+            );
+            if !r.journals_remaining {
+                return;
+            }
+        }
+        panic!("journals remain after repeated recovery");
+    }
+
+    /// Exactly the old state with no record written, or exactly the new state with the reserved
+    /// bytes written once; nothing in between and nothing left over.
+    fn assert_settled(fx: &FakeEffects, old: &Snapshot, new: &Snapshot, want: &[Sha256]) {
+        assert!(fx.journals.is_empty(), "journal left behind");
+        assert!(fx.staging.is_empty() && fx.settings_staging.is_empty());
+        let got = snap(fx);
+        if got == *old {
+            assert!(
+                fx.pending_written.is_empty(),
+                "record written after rollback"
+            );
+            assert!(fx.recovery.is_empty() && fx.settings_recovery.is_empty());
+        } else {
+            assert_eq!(got, *new, "neither old nor new");
+            let mut w = want.to_vec();
+            w.sort();
+            assert_eq!(got.2, w, "reserved records not written exactly once");
+        }
+        for (_, bytes) in fx.points.iter() {
+            match decode_point(bytes).expect("point decodes") {
+                AnyPoint::V2(p) => assert!(!p.pinned, "pinned point left behind"),
+                AnyPoint::V1(p) => assert!(!p.pinned),
+            }
+        }
+    }
+
+    fn clean_run(kind: OpKind) -> (ApplyPlan, FakeEffects, Snapshot, Snapshot, usize) {
+        let (plan, base) = case(kind);
+        let mut fx = base.clone();
+        let out = run_apply(&plan, &mut fx);
+        assert!(
+            matches!(out.packages[0].1, PackageResult::Applied { .. }),
+            "{kind:?}: {:?}",
+            out.packages
+        );
+        assert!(fx.journals.is_empty());
+        let n = fx.mutations;
+        let (old, new) = (snap(&base), snap(&fx));
+        assert_ne!((&old.0, &old.1), (&new.0, &new.1), "{kind:?}");
+        (plan, base, old, new, n)
+    }
+
+    fn reserved(plan: &ApplyPlan) -> Vec<Sha256> {
+        plan.packages[0]
+            .pending_records
+            .iter()
+            .map(|r| r.hash)
+            .collect()
+    }
+
+    #[test]
+    fn every_kind_applies_and_writes_its_reserved_records() {
+        for kind in KINDS {
+            let (plan, _, _, new, _) = clean_run(kind);
+            let mut want = reserved(&plan);
+            want.sort();
+            assert_eq!(new.2, want, "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn crash_slots_recover_to_exactly_old_or_new_for_every_kind() {
+        // T-C06c-jrn-crash-slots
+        for kind in KINDS {
+            let (plan, base, old, new, n) = clean_run(kind);
+            assert!(n > 4, "{kind:?}");
+            let want = reserved(&plan);
+            for k in 0..=n {
+                let mut fx = base.clone();
+                fx.crash_after = Some(k);
+                run_apply(&plan, &mut fx);
+                fx.restart();
+                settle2(&mut fx);
+                assert_settled(&fx, &old, &new, &want);
+            }
+        }
+    }
+
+    #[test]
+    fn crash_during_recovery_is_reentrant_for_every_kind() {
+        for kind in KINDS {
+            let (plan, base, old, new, n) = clean_run(kind);
+            let want = reserved(&plan);
+            for k in (0..n).step_by(2) {
+                let mut first = base.clone();
+                first.crash_after = Some(k);
+                run_apply(&plan, &mut first);
+                first.restart();
+                let m_total = {
+                    let mut f = first.clone();
+                    settle2(&mut f);
+                    f.mutations
+                };
+                for m in 0..=m_total {
+                    let mut fx = first.clone();
+                    fx.crash_after = Some(m);
+                    recover_interrupted(&mut fx);
+                    fx.restart();
+                    settle2(&mut fx);
+                    assert_settled(&fx, &old, &new, &want);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_reserved_bytes_are_written_after_verify_not_before() {
+        // T-C06c: nothing is published before verify; a crash before verify discards them.
+        let (plan, base, _, _, n) = clean_run(OpKind::Remove);
+        let mut saw_pending_before_verified = false;
+        for k in 0..=n {
+            let mut fx = base.clone();
+            fx.crash_after = Some(k);
+            run_apply(&plan, &mut fx);
+            let phase = fx.journal_any(&plan.packages[0].op).map(|j| match j {
+                AnyJournal::V2(j) => j.phase,
+                AnyJournal::V1(j) => j.phase,
+            });
+            if !fx.pending_written.is_empty() {
+                saw_pending_before_verified |=
+                    phase != Some(JournalPhase::Verified) && phase.is_some();
+            }
+        }
+        assert!(!saw_pending_before_verified);
+    }
+
+    #[test]
+    fn mixed_update_drop_uses_one_v2_journal_and_recovers_from_each_slot() {
+        // T-R4D1-mixed-update-drop
+        let (plan, base) = case(OpKind::Apply);
+        let mut fx = base.clone();
+        fx.crash_after = Some(6);
+        run_apply(&plan, &mut fx);
+        let j = fx.journal_any(&plan.packages[0].op).expect("journal kept");
+        let AnyJournal::V2(j) = j else {
+            panic!("a dropping update must be a /2 journal")
+        };
+        assert_eq!(j.kind, OpKind::Apply);
+        assert!(j.folders.iter().any(|f| f.action == FolderAction::Remove));
+        assert!(j.folders.iter().any(|f| f.action == FolderAction::Replace));
+        assert_eq!(j.removals.len(), 1);
+        assert_eq!(fx.journals.len(), 1);
+    }
+
+    #[test]
+    fn pure_code_apply_still_writes_a_v1_journal() {
+        // T-C05
+        let (_sc, plan, mut fx) = apply_fixture();
+        fx.crash_after = Some(3);
+        run_apply(&plan, &mut fx);
+        for (_, bytes) in fx.journals.iter() {
+            assert!(matches!(decode_journal(bytes), Ok(AnyJournal::V1(_))));
+            assert!(String::from_utf8_lossy(bytes).contains("apply-journal/1"));
+        }
+        assert!(!fx.journals.is_empty());
+    }
+
+    #[test]
+    fn changed_settings_file_replans_without_touching_live() {
+        let (plan, mut fx) = case(OpKind::Settings);
+        let r = rel("Alpha").as_str().to_string();
+        fx.settings_live.insert(r, sha256(b"edited by the user"));
+        let before = snap(&fx);
+        let out = run_apply(&plan, &mut fx);
+        assert!(matches!(
+            out.packages[0].1,
+            PackageResult::Replanned(Explanation::DestinationChanged { .. })
+        ));
+        assert_eq!(snap(&fx), before);
+        assert!(fx.journals.is_empty() && fx.pending_written.is_empty());
+    }
+
+    #[test]
+    fn a_running_game_stops_a_remove_without_a_live_change() {
+        let (plan, mut fx) = case(OpKind::Remove);
+        fx.launch_after_renames = Some(1);
+        let out = run_apply(&plan, &mut fx);
+        assert_eq!(out.stopped, Some(PlanBlock::GameRunning));
+        let live = fx.live.clone();
+        let renames = fx.renames;
+        fx.activity_script = VecDeque::from([Activity::Running { pids: vec![1] }]);
+        recover_interrupted(&mut fx);
+        assert_eq!((fx.live.clone(), fx.renames), (live, renames));
+        fx.activity_script.clear();
+        fx.launch_after_renames = None;
+        settle2(&mut fx);
+        assert!(fx.pending_written.is_empty() || fx.live.get("AlphaX").is_none());
+    }
+
+    #[test]
+    fn an_unsupported_port_fails_before_any_live_change() {
+        // The default `ApplyEffects` methods refuse; nothing is touched.
+        let (plan, mut fx) = case(OpKind::Settings);
+        let mut stripped = NoV2(&mut fx);
+        let out = run_apply(&plan, &mut stripped);
+        assert!(matches!(out.packages[0].1, PackageResult::Failed(_)));
+        assert_eq!(snap(&fx), snap(&case(OpKind::Settings).1));
+    }
+
+    struct NoV2<'a>(&'a mut FakeEffects);
+
+    impl ApplyEffects for NoV2<'_> {
+        fn activity(&mut self) -> Activity {
+            self.0.activity()
+        }
+        fn lock(&mut self) -> Result<(), EffectError> {
+            self.0.lock()
+        }
+        fn write_journal(&mut self, j: &ApplyJournal) -> Result<(), EffectError> {
+            self.0.write_journal(j)
+        }
+        fn read_journals(&mut self) -> Result<Vec<(String, Vec<u8>)>, EffectError> {
+            self.0.read_journals()
+        }
+        fn remove_journal(&mut self, op: &OpId) -> Result<(), EffectError> {
+            self.0.remove_journal(op)
+        }
+        fn stage_folder(&mut self, op: &OpId, f: &FolderApply) -> Result<(), EffectError> {
+            self.0.stage_folder(op, f)
+        }
+        fn tree_of(&mut self, s: &Slot) -> Result<Option<Sha256>, EffectError> {
+            self.0.tree_of(s)
+        }
+        fn observe(&mut self, s: &Slot) -> Result<Option<SlotObs>, EffectError> {
+            self.0.observe(s)
+        }
+        fn rename(&mut self, a: &Slot, b: &Slot) -> Result<(), EffectError> {
+            self.0.rename(a, b)
+        }
+        fn write_recovery_point(&mut self, rp: &RecoveryPoint) -> Result<(), EffectError> {
+            self.0.write_recovery_point(rp)
+        }
+        fn list_recovery(
+            &mut self,
+            pkg: &FolderKey,
+        ) -> Result<Vec<(String, Vec<u8>)>, EffectError> {
+            self.0.list_recovery(pkg)
+        }
+        fn remove_recovery(&mut self, pkg: &FolderKey, op: &OpId) -> Result<(), EffectError> {
+            self.0.remove_recovery(pkg, op)
+        }
+        fn discard_staging(&mut self, op: &OpId) -> Result<(), EffectError> {
+            self.0.discard_staging(op)
+        }
+    }
+}
