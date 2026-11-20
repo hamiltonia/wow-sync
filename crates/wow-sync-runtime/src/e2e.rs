@@ -1710,6 +1710,84 @@ mod tests {
 
     // ------------------------------------------------ control commands (R4-integrate C1)
 
+    #[test]
+    fn a_rollback_installs_the_recovered_release_and_an_offline_peer_cannot_bring_the_rejected_one_back(
+    ) {
+        use wow_sync_core::hash::package_hash;
+        let lab = Lab::new();
+        let (mut a, mut b, mut c, g) = alpha_v2_published(&lab);
+        // C follows B to v2 and goes offline; A stays on v1, so v1 remains published by A.
+        synced(&mut c);
+        assert_eq!(c.read("Alpha/main.lua").as_deref(), Some("alpha-v2"));
+        let v1 = alpha_folder(&lab, &g, &a);
+        let v1_hash = package_hash(&[(v1.key.clone(), v1.tree.unwrap())]);
+        let v2 = alpha_folder(&lab, &g, &b);
+        let v2_hash = package_hash(&[(v2.key.clone(), v2.tree.unwrap())]);
+        let alpha = v1.key.clone();
+        synced(&mut b);
+
+        assert_eq!(
+            b.svc.command(Command::Rollback {
+                package: alpha.clone(),
+                recovered: wow_sync_core::ids::Sha256([9; 32]),
+            }),
+            Err(CommandError::UnknownCopy(wow_sync_core::ids::Sha256(
+                [9; 32]
+            ))),
+            "an unknown release is refused"
+        );
+        assert_eq!(
+            b.svc.command(Command::Rollback {
+                package: alpha.clone(),
+                recovered: v2_hash,
+            }),
+            Err(CommandError::Rollback(
+                crate::rollback_flow::RollbackRefusal::SameRelease
+            )),
+            "rolling back to what is installed is refused"
+        );
+        let (bc, _) = pc_ids(&b);
+        assert!(
+            authority_files(&lab, &g, &bc).is_empty(),
+            "nothing queued, nothing written"
+        );
+        synced(&mut b);
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v2"));
+
+        assert_eq!(
+            b.svc.command(Command::Rollback {
+                package: alpha,
+                recovered: v1_hash,
+            }),
+            Ok(CommandOutcome::Recorded)
+        );
+        let r = synced(&mut b);
+        assert_eq!(
+            b.read("Alpha/main.lua").as_deref(),
+            Some("alpha-v1"),
+            "{r:?}"
+        );
+        assert!(
+            !authority_files(&lab, &g, &bc).is_empty(),
+            "the rejection is written with the install"
+        );
+        synced(&mut b);
+
+        // C comes back still holding v2: it is moved to v1 and never publishes v2 again.
+        for _ in 0..2 {
+            let r = synced(&mut c);
+            assert_eq!(
+                c.read("Alpha/main.lua").as_deref(),
+                Some("alpha-v1"),
+                "{r:?}"
+            );
+        }
+        for pc in [&mut a, &mut b, &mut c] {
+            synced(pc);
+            assert_eq!(pc.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        }
+    }
+
     fn ref_of(pc: &Pc) -> EnrollmentRef {
         let (c, e) = pc_ids(pc);
         EnrollmentRef {

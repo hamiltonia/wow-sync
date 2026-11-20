@@ -304,6 +304,14 @@ pub enum Command {
     /// Consent to settings sync on this computer for these accounts (settings.md §5.4). Local
     /// only; nothing of WTF is read until it is recorded.
     EnableSettings { included_accounts: Vec<String> },
+    /// "Go back to this release": install the held release `recovered` (its package hash) of
+    /// `package` and reject what is installed now for the group. The request is checked against
+    /// the live state now and queued; the operation runs when the game is closed and writes the
+    /// rejection together with the install (rollback.md §1).
+    Rollback {
+        package: wow_sync_core::paths::FolderKey,
+        recovered: wow_sync_core::ids::Sha256,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -342,6 +350,9 @@ pub enum CommandError {
     Settings(wow_sync_core::settings::SettingsWriteError),
     /// The checkpoint is not in this computer's settings store.
     UnknownCheckpoint(wow_sync_core::ids::Sha256),
+    /// The rollback cannot be planned from what is live (unknown release, same release, nothing
+    /// installed, files not in the shared folder). Nothing was queued.
+    Rollback(crate::rollback_flow::RollbackRefusal),
     Service(String),
 }
 

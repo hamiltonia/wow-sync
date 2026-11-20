@@ -425,6 +425,43 @@ impl SliceService {
             return Ok(CommandOutcome::Recorded);
         }
         let now = now_unix_ms() as u64;
+        if let Command::Rollback { package, recovered } = &cmd {
+            let request = crate::rollback_flow::RollbackRequest {
+                package: package.clone(),
+                recovered: *recovered,
+            };
+            let mut audience: Vec<EnrollmentRef> = w
+                .views
+                .iter()
+                .map(|v| EnrollmentRef {
+                    computer_id: v.computer.clone(),
+                    enrollment_id: v.enrollment.clone(),
+                })
+                .collect();
+            audience.push(w.own.clone());
+            crate::rollback_flow::plan_requested(&crate::rollback_flow::PlanArgs {
+                request: &request,
+                group: &gid,
+                own: &w.own,
+                audience,
+                inventory: &w.inventory,
+                copies: &w.copies,
+                plane: &self.plane,
+                provider: &provider,
+                op: OpId::parse(&random_id_hex()).expect("random id"),
+                seq: w.enrollment.next_seq,
+                now_unix_ms: now,
+            })
+            .map_err(|why| match why {
+                crate::rollback_flow::RollbackRefusal::UnknownRelease(h) => {
+                    CommandError::UnknownCopy(h)
+                }
+                other => CommandError::Rollback(other),
+            })?;
+            crate::rollback_flow::save_request(&self.state, &gid, &request)
+                .map_err(|e| CommandError::Service(e.to_string()))?;
+            return Ok(CommandOutcome::Recorded);
+        }
         let seq = w.enrollment.next_seq;
         let derived = derive(&self.plane.ledger, &gid, &self.plane.members);
         let held = BTreeSet::new();
@@ -515,7 +552,7 @@ impl SliceService {
                     DecisionEffect::Write(Box::new(AuthorityRecord::Readd(readd)))
                 }
                 // Dispatched before observation, above.
-                Command::ReEnroll | Command::EnableSettings { .. } => {
+                Command::ReEnroll | Command::EnableSettings { .. } | Command::Rollback { .. } => {
                     return Err(CommandError::NotAllowed)
                 }
                 Command::SetSettingsPolicy { master, exceptions } => {
@@ -1765,6 +1802,44 @@ impl SliceService {
                 } else {
                     Vec::new()
                 };
+                let rollback = if w.standing == OwnStanding::Active
+                    && !game_blocks
+                    && crate::rollback_flow::load_request(&self.state, &group_id).is_some()
+                {
+                    let request = crate::rollback_flow::load_request(&self.state, &group_id)
+                        .expect("checked above");
+                    let mut audience: Vec<EnrollmentRef> = w
+                        .views
+                        .iter()
+                        .map(|v| EnrollmentRef {
+                            computer_id: v.computer.clone(),
+                            enrollment_id: v.enrollment.clone(),
+                        })
+                        .collect();
+                    audience.push(w.own.clone());
+                    let args = crate::rollback_flow::PlanArgs {
+                        request: &request,
+                        group: &group_id,
+                        own: &w.own,
+                        audience,
+                        inventory: &w.inventory,
+                        copies: &w.copies,
+                        plane: &self.plane,
+                        provider: &provider,
+                        op: gen(),
+                        seq: next_seq,
+                        now_unix_ms: now_unix_ms() as u64,
+                    };
+                    match crate::rollback_flow::step(&self.state, &args, &w.enrollment) {
+                        Ok(p) => Some(p),
+                        Err(why) => {
+                            report.apply_note = Some(format!("rollback not applied: {why:?}"));
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
                 let mut planned = match plan_apply(&w.target, &w.inventory, &mut gen, &gate) {
                     Ok(p) => Some(p),
                     Err(PlanBlock::NothingToDo) => None,
@@ -1784,6 +1859,24 @@ impl SliceService {
                     let mut all = extra;
                     all.append(&mut p.packages);
                     p.packages = all;
+                }
+                if let Some(rb) = rollback {
+                    let p = planned.get_or_insert_with(|| ApplyPlan {
+                        group_id: group_id.clone(),
+                        started_unix_ms: gate.now_unix_ms,
+                        packages: Vec::new(),
+                        skipped: Vec::new(),
+                    });
+                    let mut mine: BTreeSet<FolderKey> =
+                        rb.folders.iter().map(|f| f.key.clone()).collect();
+                    mine.extend(rb.removes.iter().map(|r| r.key.clone()));
+                    mine.insert(rb.package.clone());
+                    p.packages.retain(|q| {
+                        !mine.contains(&q.package)
+                            && !q.folders.iter().any(|f| mine.contains(&f.key))
+                            && !q.removes.iter().any(|r| mine.contains(&r.key))
+                    });
+                    p.packages.insert(0, rb);
                 }
                 if !settings_ops.is_empty() {
                     let p = planned.get_or_insert_with(|| ApplyPlan {
