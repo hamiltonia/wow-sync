@@ -2,9 +2,6 @@
 //! then delivers each notice once. A delivery failure is logged once per kind per session and
 //! never retried; the ledger already records the notice as announced.
 
-// Not yet reachable from `lib.rs` (R4-integrate re-exports it); drop this allowance then.
-#![allow(dead_code)]
-
 use crate::updates::ActivitySink;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
@@ -91,12 +88,12 @@ impl NoticeRunner {
             failed: 0,
             not_saved: false,
         };
-        if next == *ledger {
+        if next == *ledger && notices.is_empty() {
             return out;
         }
         // Saved before delivery: a crash between the two loses a notification rather than
-        // repeating it.
-        if self.store.write_notices(&next.encode()).is_err() {
+        // repeating it. A summary leaves the ledger unchanged but is still delivered.
+        if next != *ledger && self.store.write_notices(&next.encode()).is_err() {
             out.not_saved = true;
             return out;
         }

@@ -328,6 +328,11 @@ pub struct SliceService {
         Vec<wow_sync_core::decision::DecisionItem>,
         wow_sync_core::decide::Plans,
     ),
+    /// Delivers notices at the end of a cycle; none until a notifier is attached.
+    notices: Option<crate::notices::NoticeRunner>,
+    /// Update checks; none until a release source is attached.
+    updates: Option<crate::updates::UpdateService>,
+    started_ms: i64,
 }
 
 fn file_obs(r: FileRead) -> FileObs {
@@ -377,6 +382,244 @@ impl SliceService {
             plane,
             settings_cap: wow_sync_core::records::MAX_SETTINGS_FILE_BYTES,
             offered: Default::default(),
+            notices: None,
+            updates: None,
+            started_ms: now_unix_ms(),
+        })
+    }
+
+    fn shared_state(&self) -> Result<std::sync::Arc<LocalState>, ServiceError> {
+        LocalState::open_at(&self.cfg.state_dir)
+            .map(std::sync::Arc::new)
+            .map_err(local)
+    }
+
+    fn activity_sink(&self) -> Result<crate::updates::ActivitySink, ServiceError> {
+        let store = self.shared_state()?;
+        Ok(std::sync::Arc::new(move |text: &str| {
+            crate::control::log_activity(&store, "update-check-failed", None, text)
+        }))
+    }
+
+    /// Delivers the end-of-cycle notices through `notifier` (ops.md §3).
+    pub fn attach_notifier(
+        &mut self,
+        notifier: std::sync::Arc<dyn wow_sync_adapters::notify::Notifier>,
+        policy: wow_sync_core::notice::NoticePolicy,
+    ) -> Result<(), ServiceError> {
+        let sink = self.activity_sink()?;
+        self.notices = Some(crate::notices::NoticeRunner::new(
+            self.shared_state()?,
+            notifier,
+            policy,
+            sink,
+        ));
+        Ok(())
+    }
+
+    /// Checks for updates through `source` on the automatic schedule and on request (ops.md §4).
+    pub fn attach_updates(
+        &mut self,
+        source: std::sync::Arc<dyn wow_sync_adapters::update_http::ReleaseSource>,
+        clock: crate::updates::Clock,
+    ) -> Result<(), ServiceError> {
+        let current = wow_sync_core::update::SemVer::parse(&self.cfg.app_version)
+            .or_else(|| wow_sync_core::update::SemVer::parse(env!("CARGO_PKG_VERSION")))
+            .ok_or_else(|| {
+                ServiceError::Refused("the app version is not a release number".into())
+            })?;
+        let sink = self.activity_sink()?;
+        self.updates = Some(crate::updates::UpdateService::new(
+            self.shared_state()?,
+            source,
+            current,
+            clock,
+            sink,
+        ));
+        Ok(())
+    }
+
+    /// Production wiring: registers the toast identity (Windows), then attaches the OS notifier
+    /// and the GitHub release source.
+    pub fn attach_os_services(&mut self) -> Result<(), ServiceError> {
+        use wow_sync_adapters::notify::{OsNotifier, APP_ID, APP_NAME};
+        #[cfg(windows)]
+        {
+            // A failed registration only costs the app name on toasts.
+            let _ = wow_sync_adapters::winproc::register_app_user_model_id(APP_ID, APP_NAME, None);
+            let _ = wow_sync_adapters::winproc::set_process_app_user_model_id(APP_ID);
+        }
+        let source = wow_sync_adapters::update_http::GithubReleases::new()
+            .map_err(|e| ServiceError::Refused(format!("update source unavailable: {e:?}")))?;
+        self.attach_notifier(
+            std::sync::Arc::new(OsNotifier::with_app_id(APP_ID)),
+            wow_sync_core::notice::NoticePolicy::default(),
+        )?;
+        let _ = APP_NAME;
+        self.attach_updates(std::sync::Arc::new(source), crate::updates::system_clock())
+    }
+
+    /// Blocks until no update check is in flight (tests and shutdown).
+    pub fn wait_for_updates(&self) {
+        if let Some(u) = &self.updates {
+            u.wait_idle();
+        }
+    }
+
+    /// Notices and the update schedule at the end of a cycle (ops.md §3, §4.2).
+    fn notify_cycle(&mut self, w: &World, report: &SyncReport) {
+        let settings = self.toggles();
+        let now = now_unix_ms();
+        if let Some(u) = &self.updates {
+            u.tick(settings.update_check, now - self.started_ms);
+        }
+        let Some(runner) = &self.notices else { return };
+        use wow_sync_core::notice::{
+            fingerprint, GameActivity, NoticeEvent, NoticeKey, NoticeKind, NoticePrefs, NoticeScope,
+        };
+        let mut events: Vec<NoticeEvent> = Vec::new();
+        let mut open: BTreeSet<NoticeKey> = BTreeSet::new();
+        for item in &self.offered.0 {
+            let name = match &item.scope {
+                wow_sync_core::decision::DecisionScope::Folders(keys) => keys
+                    .iter()
+                    .map(|k| k.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                wow_sync_core::decision::DecisionScope::Settings(_) => "Saved settings".to_string(),
+            };
+            let key = NoticeKey {
+                kind: NoticeKind::ActionNeeded,
+                scope: NoticeScope::Addon(name.clone()),
+            };
+            open.insert(key.clone());
+            events.push(NoticeEvent {
+                key,
+                fingerprint: fingerprint(format!("{:?}", item.reason).as_bytes()),
+                name,
+            });
+        }
+        if w.standing == OwnStanding::Retired {
+            let name = w.computer.display_name.clone();
+            let key = NoticeKey {
+                kind: NoticeKind::ActionNeeded,
+                scope: NoticeScope::Computer(name.clone()),
+            };
+            open.insert(key.clone());
+            events.push(NoticeEvent {
+                key,
+                fingerprint: fingerprint(b"retired"),
+                name,
+            });
+        }
+        for a in &report.applied {
+            events.push(NoticeEvent {
+                key: NoticeKey {
+                    kind: NoticeKind::Summary,
+                    scope: NoticeScope::Addon(a.package.clone()),
+                },
+                fingerprint: fingerprint(a.text.as_bytes()),
+                name: a.package.clone(),
+            });
+        }
+        let mut update_tag = None;
+        if let Some(u) = &self.updates {
+            let (event, still_open) = u.notice_event();
+            if let Some(k) = still_open {
+                open.insert(k);
+            }
+            if let Some(e) = event {
+                if let NoticeScope::Update(tag) = &e.key.scope {
+                    update_tag = Some(tag.clone());
+                }
+                events.push(e);
+            }
+        }
+        let game = match self.activity.observe(&self.variant_dir()) {
+            Activity::NotRunning => GameActivity::NotRunning,
+            Activity::Running { .. } => GameActivity::Running,
+            Activity::Unknown(_) => GameActivity::Unknown,
+        };
+        let out = runner.after_cycle(
+            &events,
+            &open,
+            game,
+            NoticePrefs {
+                summaries: settings.notify_summaries,
+                needs_me: settings.notify_needs_me,
+            },
+            now,
+        );
+        if let (Some(tag), Some(u)) = (update_tag, &self.updates) {
+            if out.notices.iter().any(|n| n.kind == NoticeKind::AppUpdate) {
+                u.note_notified(&tag);
+            }
+        }
+    }
+
+    fn redaction_context(
+        &self,
+        snap: &StatusSnapshot,
+    ) -> wow_sync_core::diagnostics::RedactionContext {
+        let env = |a: &str, b: &str| {
+            std::env::var(a)
+                .or_else(|_| std::env::var(b))
+                .unwrap_or_default()
+        };
+        let mut names: Vec<String> = snap
+            .detail
+            .iter()
+            .flat_map(|d| d.members.iter().map(|m| m.name.clone()))
+            .collect();
+        if !snap.computer_name.is_empty() {
+            names.push(snap.computer_name.clone());
+        }
+        names.sort();
+        names.dedup();
+        wow_sync_core::diagnostics::RedactionContext {
+            home_dir: env("USERPROFILE", "HOME"),
+            os_user_name: env("USERNAME", "USER"),
+            display_names: names,
+            install_roots: vec![self.cfg.install_root.to_string_lossy().into_owned()],
+            shared_root: self.cfg.shared_root.to_string_lossy().into_owned(),
+            local_state_root: self.cfg.state_dir.to_string_lossy().into_owned(),
+            ..Default::default()
+        }
+    }
+
+    fn diagnostics_command(&mut self, cmd: &Command) -> Result<CommandOutcome, CommandError> {
+        let snap = self.status();
+        let s = self.toggles();
+        let input = crate::diag::input_from(
+            &snap,
+            wow_sync_core::diagnostics::Toggles {
+                update_check: s.update_check,
+                notify_summaries: s.notify_summaries,
+                notify_needs_me: s.notify_needs_me,
+            },
+            &self.activity_log(50),
+            now_unix_ms(),
+        );
+        let ctx = self.redaction_context(&snap);
+        let result = match cmd {
+            Command::ExportDiagnostics { options } => {
+                crate::diag::export_diagnostics(&input, &ctx, *options)
+                    .map_err(crate::diag::ExportError::Refused)
+            }
+            Command::SaveDiagnostics { options, dest } => {
+                let forbidden = vec![self.cfg.shared_root.clone(), self.cfg.install_root.clone()];
+                crate::diag::export_and_save(&input, &ctx, *options, dest, &forbidden)
+            }
+            _ => return Err(CommandError::NotAllowed),
+        };
+        result.map(CommandOutcome::Exported).map_err(|e| {
+            crate::control::log_activity(
+                &self.state,
+                "export-refused",
+                None,
+                "Diagnostics export was refused",
+            );
+            CommandError::Export(e)
         })
     }
 
@@ -420,6 +663,18 @@ impl SliceService {
 
     /// Runs one group command (contracts.md §9.1) against the current observed state.
     pub fn command(&mut self, cmd: Command) -> Result<CommandOutcome, CommandError> {
+        match &cmd {
+            Command::CheckUpdates => {
+                return match &self.updates {
+                    Some(u) => Ok(CommandOutcome::UpdateCheck(u.check_now())),
+                    None => Err(CommandError::UpdatesUnavailable),
+                };
+            }
+            Command::ExportDiagnostics { .. } | Command::SaveDiagnostics { .. } => {
+                return self.diagnostics_command(&cmd);
+            }
+            _ => {}
+        }
         if cmd == Command::ReEnroll {
             return self.re_enroll();
         }
@@ -794,6 +1049,10 @@ impl SliceService {
                     .map_err(CommandError::Write)?;
                     DecisionEffect::Write(Box::new(AuthorityRecord::CodeChoice(rec)))
                 }
+                // Answered before the group state is read.
+                Command::CheckUpdates
+                | Command::ExportDiagnostics { .. }
+                | Command::SaveDiagnostics { .. } => return Err(CommandError::NotAllowed),
             }
         };
         let routed = route(
@@ -1905,7 +2164,7 @@ impl SliceService {
             removed,
             enrollment_names,
             review_needed: false,
-            update: None,
+            update: self.updates.as_ref().and_then(|u| u.last_result()),
         }
     }
 
@@ -2314,6 +2573,7 @@ impl SliceService {
         if let Ok(fresh) = self.observe_world(false) {
             w = fresh;
         }
+        self.notify_cycle(&w, &report);
         report.status = self.snapshot(&w, &area);
         self.log_cycle(&report);
         Ok(report)
@@ -2601,6 +2861,14 @@ impl SliceService {
 
     pub fn app_settings(&self) -> crate::control::AppSettings {
         crate::control::AppSettings::load(&self.state)
+    }
+
+    pub fn toggles(&self) -> crate::control::AppToggles {
+        crate::control::AppToggles::load(&self.state)
+    }
+
+    pub fn save_toggles(&self, t: &crate::control::AppToggles) -> Result<(), ServiceError> {
+        t.save(&self.state).map_err(ServiceError::Local)
     }
 
     pub fn save_app_settings(&self, s: &crate::control::AppSettings) -> Result<(), ServiceError> {

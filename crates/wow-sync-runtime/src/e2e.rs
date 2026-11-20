@@ -3,7 +3,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::control::{Command, CommandError, CommandOutcome};
+    use crate::control::{AppToggles, Command, CommandError, CommandOutcome};
     use crate::removal_cycle::RemovalStore;
     use crate::*;
     use std::path::{Path, PathBuf};
@@ -3553,5 +3553,169 @@ mod tests {
             removed[0].awaiting.contains(&c_name),
             "the offline computer has not acknowledged: {removed:?}"
         );
+    }
+
+    fn recording() -> std::sync::Arc<wow_sync_adapters::notify::RecordingNotifier> {
+        std::sync::Arc::new(wow_sync_adapters::notify::RecordingNotifier::new())
+    }
+
+    fn release_json(tag: &str) -> Vec<u8> {
+        format!("{{\"tag_name\":\"{tag}\"}}").into_bytes()
+    }
+
+    fn fake_releases(
+        tags: &[&str],
+    ) -> std::sync::Arc<wow_sync_adapters::update_http::FakeReleases> {
+        std::sync::Arc::new(wow_sync_adapters::update_http::FakeReleases::new(
+            tags.iter().map(|t| Ok(release_json(t))).collect(),
+        ))
+    }
+
+    #[test]
+    fn an_applied_change_is_announced_once_and_not_when_summaries_are_off() {
+        use wow_sync_core::notice::{NoticeKind, NoticePolicy};
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        let mut c = lab.pc("c");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        let (nb, nc) = (recording(), recording());
+        b.join(&g);
+        c.join(&g);
+        b.svc
+            .attach_notifier(nb.clone(), NoticePolicy::default())
+            .unwrap();
+        c.svc
+            .attach_notifier(nc.clone(), NoticePolicy::default())
+            .unwrap();
+        c.svc
+            .save_toggles(&AppToggles {
+                notify_summaries: false,
+                ..AppToggles::default()
+            })
+            .unwrap();
+        assert_eq!(synced(&mut b).applied.len(), 1);
+        assert_eq!(synced(&mut c).applied.len(), 1);
+        assert_eq!(nb.sent().len(), 1, "{:?}", nb.sent());
+        assert!(nb.sent()[0].body.contains("alpha"), "{:?}", nb.sent());
+        assert!(!nb.sent()[0].urgent);
+        synced(&mut b);
+        assert_eq!(nb.sent().len(), 1, "an unchanged cycle announces nothing");
+        assert!(nc.sent().is_empty(), "summaries off: {:?}", nc.sent());
+        let _ = NoticeKind::Summary;
+    }
+
+    #[test]
+    fn an_update_check_fills_the_snapshot_and_a_new_release_is_announced_once() {
+        use wow_sync_core::notice::NoticePolicy;
+        use wow_sync_core::update::UpdateResult;
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        a.addon("Alpha", "alpha-v1");
+        a.create();
+        assert_eq!(
+            a.svc.command(Command::CheckUpdates),
+            Err(CommandError::UpdatesUnavailable)
+        );
+        assert_eq!(a.svc.status().update, None);
+        let source = fake_releases(&["v9.9.9", "v9.9.9"]);
+        let notes = recording();
+        a.svc
+            .attach_updates(source.clone(), system_clock())
+            .unwrap();
+        a.svc
+            .attach_notifier(notes.clone(), NoticePolicy::default())
+            .unwrap();
+        a.svc
+            .save_toggles(&AppToggles {
+                update_check: false,
+                ..AppToggles::default()
+            })
+            .unwrap();
+        synced(&mut a);
+        a.svc.wait_for_updates();
+        assert_eq!(source.calls(), 0, "automatic check is off");
+        assert_eq!(
+            a.svc.command(Command::CheckUpdates),
+            Ok(CommandOutcome::UpdateCheck(Started::Started)),
+            "a manual check works with the automatic one off"
+        );
+        a.svc.wait_for_updates();
+        assert_eq!(source.calls(), 1);
+        assert!(matches!(
+            a.svc.status().update,
+            Some(UpdateResult::Available { ref tag, .. }) if tag == "v9.9.9"
+        ));
+        synced(&mut a);
+        let sent: Vec<_> = notes
+            .sent()
+            .into_iter()
+            .filter(|n| n.body.contains("9.9.9"))
+            .collect();
+        assert_eq!(sent.len(), 1, "{:?}", notes.sent());
+        synced(&mut a);
+        synced(&mut a);
+        let again = notes
+            .sent()
+            .into_iter()
+            .filter(|n| n.body.contains("9.9.9"))
+            .count();
+        assert_eq!(again, 1, "the same release is not announced twice");
+    }
+
+    #[test]
+    fn diagnostics_preview_and_save_match_and_never_land_in_the_shared_or_install_folders() {
+        use crate::diag::{ExportError, SaveError};
+        use wow_sync_core::diagnostics::ExportOptions;
+        let lab = Lab::new();
+        let mut a = lab.pc("workstation-one");
+        a.addon("Alpha", "alpha-v1");
+        a.create();
+        synced(&mut a);
+        let options = ExportOptions::default();
+        let Ok(CommandOutcome::Exported(preview)) =
+            a.svc.command(Command::ExportDiagnostics { options })
+        else {
+            panic!("preview refused");
+        };
+        assert!(
+            preview.text.contains("alpha"),
+            "folder names are on by default: {}",
+            preview.text
+        );
+        assert!(
+            !preview.text.contains("workstation-one"),
+            "{}",
+            preview.text
+        );
+        let shared = lab.shared.to_string_lossy().into_owned();
+        assert!(!preview.text.contains(&shared));
+
+        let out = lab.tmp.join("elsewhere");
+        std::fs::create_dir(&out).unwrap();
+        let dest = out.join("diagnostics.txt");
+        let Ok(CommandOutcome::Exported(saved)) = a.svc.command(Command::SaveDiagnostics {
+            options,
+            dest: dest.clone(),
+        }) else {
+            panic!("save refused");
+        };
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), saved.text);
+
+        for forbidden in [lab.shared.clone(), a.install.root.clone()] {
+            let bad = forbidden.join("diagnostics.txt");
+            assert_eq!(
+                a.svc.command(Command::SaveDiagnostics {
+                    options,
+                    dest: bad.clone()
+                }),
+                Err(CommandError::Export(ExportError::Save(
+                    SaveError::ForbiddenLocation
+                )))
+            );
+            assert!(!bad.exists(), "nothing is written into {forbidden:?}");
+        }
     }
 }

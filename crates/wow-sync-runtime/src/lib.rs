@@ -23,22 +23,25 @@ mod e2e;
 pub use activity::{ActivityHandle, ActivitySource, ScriptedActivity, WinprocActivity};
 pub use control::{
     log_activity, pause_state, paused_since, read_activity, set_paused, ActivityEntry, AppSettings,
-    Command, CommandError, CommandOutcome, PauseState, QuitGate, StopState,
+    AppToggles, Command, CommandError, CommandOutcome, PauseState, QuitGate, StopState,
 };
 pub use detail::{
     strip_colour_codes, CandidateRow, FolderRow, HeldRelease, MemberRow, PackageRow, RemovedRow,
     RetirementRow, StatusDetail,
 };
+pub use diag::{ExportError, SaveError};
 pub use discover::{
     dropbox_defaults, dropbox_info_files, dropbox_paths_from_info, find_dropbox, find_wow,
     wow_candidates, DetectedInstall,
 };
 pub use effects::{FaultPlan, Faulty, Hooks, RealEffects};
+pub use notices::{CycleOutcome, NoticeRunner};
 pub use rollback_flow::RollbackRefusal;
 pub use service::{
     AppliedLine, EnrollPreview, EnrollRequest, GroupInfo, JoinChoice, PackageLine, PreviewKind,
     ReconfirmRequest, ServiceConfig, ServiceError, SliceService, StatusSnapshot, SyncReport,
 };
 pub use settings_cycle::SettingsHistoryEntry;
+pub use updates::{system_clock, Clock, Started, UpdateService, UpdateView};
 
 pub use wow_sync_core as core;

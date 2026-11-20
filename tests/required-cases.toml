@@ -1065,6 +1065,16 @@ tests = [
     "e2e::tests::the_snapshot_lists_held_releases_but_never_the_installed_one",
     "e2e::tests::the_snapshot_lists_removed_addons_with_who_has_not_acknowledged",
 ]
+
+[[case]]
+id = "R4-integrate:notify-update-diagnostics-wiring"
+tier = "offline"
+tests = [
+    "e2e::tests::an_applied_change_is_announced_once_and_not_when_summaries_are_off",
+    "e2e::tests::an_update_check_fills_the_snapshot_and_a_new_release_is_announced_once",
+    "e2e::tests::diagnostics_preview_and_save_match_and_never_land_in_the_shared_or_install_folders",
+    "control::tests::toggles_default_on_persist_apart_from_the_window_settings",
+]
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag
