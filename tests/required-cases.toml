@@ -1236,6 +1236,16 @@ tests = [
   "about_ui::tests::changing_an_option_drops_the_preview_and_a_refusal_is_shown_not_saved",
 ]
 
+[[case]]
+id = "R4-app:macos-platform-logic"
+tier = "offline"
+tests = [
+  "platform::tests::the_mac_state_folder_is_under_application_support",
+  "platform::tests::utc_offsets_parse_and_bad_text_is_refused",
+  "platform::tests::a_second_launch_socket_is_per_instance_key",
+  "win::tests::a_visibility_request_is_taken_once_and_the_latest_wins",
+]
+
 # <<< section: R4-app
 
 # >>> section: R4-mac-kit

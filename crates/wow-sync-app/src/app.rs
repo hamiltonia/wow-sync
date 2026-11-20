@@ -386,6 +386,15 @@ impl Shell {
                 {
                     break;
                 }
+                if let Some(show) = crate::win::take_visibility_request() {
+                    cx.update(|app| {
+                        if show {
+                            app.activate(true);
+                        } else {
+                            app.hide();
+                        }
+                    });
+                }
             }
         })
         .detach();

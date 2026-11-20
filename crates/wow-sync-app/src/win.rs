@@ -104,16 +104,74 @@ mod imp {
 
 #[cfg(not(windows))]
 mod imp {
-    pub fn set_visible(_hwnd: isize, _show: bool) {}
-    pub fn single_instance(_key: &str) -> Option<isize> {
+    use std::os::unix::net::{UnixListener, UnixStream};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    static SHOW: AtomicBool = AtomicBool::new(false);
+
+    /// Hide and show are carried out by the tray loop, which has the application handle.
+    pub fn set_visible(_hwnd: isize, show: bool) {
+        super::request_visibility(show);
+    }
+
+    /// The first launch listens on a per-instance socket; a later launch connects to it, which
+    /// asks the first to show its window, and gets `None` so it exits.
+    pub fn single_instance(key: &str) -> Option<isize> {
+        let path = crate::platform::show_socket_path(&std::env::temp_dir(), key);
+        if UnixStream::connect(&path).is_ok() {
+            return None;
+        }
+        let _ = std::fs::remove_file(&path);
+        if let Ok(listener) = UnixListener::bind(&path) {
+            std::thread::spawn(move || {
+                for conn in listener.incoming() {
+                    if conn.is_ok() {
+                        SHOW.store(true, Ordering::SeqCst);
+                    }
+                }
+            });
+        }
         Some(0)
     }
     pub fn show_requested(_ev: isize) -> bool {
-        false
+        SHOW.swap(false, Ordering::SeqCst)
     }
     pub fn local_offset_minutes() -> i32 {
-        0
+        crate::platform::local_offset_minutes()
+    }
+}
+
+use std::sync::atomic::{AtomicU8, Ordering};
+
+static VISIBILITY: AtomicU8 = AtomicU8::new(0);
+
+/// Records that the window should be hidden (`false`) or shown (`true`) by the tray loop.
+#[cfg_attr(windows, allow(dead_code))]
+pub fn request_visibility(show: bool) {
+    VISIBILITY.store(if show { 2 } else { 1 }, Ordering::SeqCst);
+}
+
+/// The last request, once: `Some(true)` show, `Some(false)` hide.
+pub fn take_visibility_request() -> Option<bool> {
+    match VISIBILITY.swap(0, Ordering::SeqCst) {
+        1 => Some(false),
+        2 => Some(true),
+        _ => None,
     }
 }
 
 pub use imp::{local_offset_minutes, set_visible, show_requested, single_instance};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_visibility_request_is_taken_once_and_the_latest_wins() {
+        assert_eq!(take_visibility_request(), None);
+        request_visibility(false);
+        request_visibility(true);
+        assert_eq!(take_visibility_request(), Some(true));
+        assert_eq!(take_visibility_request(), None);
+    }
+}
