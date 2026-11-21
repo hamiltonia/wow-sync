@@ -1391,7 +1391,7 @@ tests = [
     "notice::tests::a_result_with_no_known_action_page_uses_the_current_page",
     "notice::tests::a_rollback_notice_stays_on_its_add_on_and_settles_when_done",
     "rollback_ui::tests::a_rollback_request_is_done_when_installed_or_an_outcome_is_set_and_not_before",
-    "rollback_ui::tests::a_same_version_confirmation_says_this_computers_copy_and_claims_no_group_effect",
+    "rollback_ui::tests::a_same_version_confirmation_states_the_group_switch_and_that_the_current_copy_is_kept",
 ]
 
 # <<< section: R4-app
