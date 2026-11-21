@@ -27,7 +27,7 @@ pub use control::{
 };
 pub use detail::{
     strip_colour_codes, CandidateRow, FolderRow, HeldRelease, MemberRow, PackageRow, PeerRow,
-    PeerStanding, RejectedRelease, RemovedRow, RetirementRow, StatusDetail,
+    PeerStanding, RecoveryRow, RejectedRelease, RemovedRow, RetirementRow, StatusDetail,
 };
 pub use diag::{ExportError, SaveError};
 pub use discover::{
@@ -36,7 +36,7 @@ pub use discover::{
 };
 pub use effects::{FaultPlan, Faulty, Hooks, RealEffects};
 pub use notices::{CycleOutcome, NoticeRunner};
-pub use rollback_flow::RollbackRefusal;
+pub use rollback_flow::{RollbackOutcome, RollbackOutcomeKind, RollbackRefusal};
 pub use service::{
     AppliedLine, EnrollPreview, EnrollRequest, GroupInfo, JoinChoice, PackageLine, PreviewKind,
     ReconfirmRequest, ServiceConfig, ServiceError, SliceService, StatusSnapshot, SyncReport,

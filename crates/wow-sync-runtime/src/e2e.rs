@@ -1834,6 +1834,165 @@ mod tests {
         assert!(!authority_files(&lab, &g, &ac).is_empty(), "{r:?}");
     }
 
+    #[test]
+    fn a_rollback_whose_files_vanish_after_it_is_queued_reports_not_available() {
+        use wow_sync_core::hash::package_hash;
+        use wow_sync_core::records::decode_tree;
+        let lab = Lab::new();
+        let (_a, mut b, c, g) = alpha_v2_published(&lab);
+        let v1 = alpha_folder(&lab, &g, &c);
+        let tree = v1.tree.unwrap();
+        let v1_hash = package_hash(&[(v1.key.clone(), tree)]);
+        let rec = std::fs::read(provider_file(&lab, &layout::tree_record(&g, &tree))).unwrap();
+        let files = decode_tree(&rec, &tree).unwrap().files;
+        synced(&mut b);
+        assert_eq!(
+            b.svc.command(Command::Rollback {
+                package: v1.key.clone(),
+                recovered: v1_hash,
+            }),
+            Ok(CommandOutcome::Recorded)
+        );
+        for f in &files {
+            std::fs::remove_file(provider_file(&lab, &layout::blob(&g, &f.sha256))).unwrap();
+        }
+        synced(&mut b);
+        assert_eq!(
+            b.read("Alpha/main.lua").as_deref(),
+            Some("alpha-v2"),
+            "nothing changed"
+        );
+        let out = b.svc.status().rollback_outcome.expect("a visible outcome");
+        assert_eq!(
+            out.kind,
+            crate::rollback_flow::RollbackOutcomeKind::NotAvailable
+        );
+        assert_eq!(out.recovered, v1_hash);
+        // Asking again clears the old outcome.
+        assert!(b
+            .svc
+            .command(Command::Rollback {
+                package: v1.key.clone(),
+                recovered: v1_hash,
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn a_rollback_with_its_files_present_applies_and_leaves_no_outcome() {
+        use wow_sync_core::hash::package_hash;
+        let lab = Lab::new();
+        let (_a, mut b, c, g) = alpha_v2_published(&lab);
+        let v1 = alpha_folder(&lab, &g, &c);
+        let v1_hash = package_hash(&[(v1.key.clone(), v1.tree.unwrap())]);
+        synced(&mut b);
+        assert_eq!(
+            b.svc.command(Command::Rollback {
+                package: v1.key.clone(),
+                recovered: v1_hash,
+            }),
+            Ok(CommandOutcome::Recorded)
+        );
+        synced(&mut b);
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        assert_eq!(b.svc.status().rollback_outcome, None);
+    }
+
+    #[test]
+    fn a_rollback_whose_files_left_the_shared_folder_is_refused_not_silently_dropped() {
+        use wow_sync_core::hash::package_hash;
+        use wow_sync_core::records::decode_tree;
+        let lab = Lab::new();
+        let (_a, mut b, c, g) = alpha_v2_published(&lab);
+        let v1 = alpha_folder(&lab, &g, &c);
+        let tree = v1.tree.unwrap();
+        let v1_hash = package_hash(&[(v1.key.clone(), tree)]);
+        let rec = std::fs::read(provider_file(&lab, &layout::tree_record(&g, &tree))).unwrap();
+        let files = decode_tree(&rec, &tree).unwrap().files;
+        synced(&mut b);
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v2"));
+        for f in &files {
+            std::fs::remove_file(provider_file(&lab, &layout::blob(&g, &f.sha256))).unwrap();
+        }
+        // The files are already gone: refused at once, nothing queued.
+        assert_eq!(
+            b.svc.command(Command::Rollback {
+                package: v1.key.clone(),
+                recovered: v1_hash,
+            }),
+            Err(CommandError::Rollback(
+                crate::rollback_flow::RollbackRefusal::NotAvailable
+            ))
+        );
+        synced(&mut b);
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v2"));
+        assert_eq!(b.svc.status().rollback_outcome, None);
+    }
+
+    #[test]
+    fn a_release_only_a_local_recovery_point_holds_is_listed_and_can_be_restored() {
+        use wow_sync_core::hash::package_hash;
+        use wow_sync_core::records::decode_tree;
+        let lab = Lab::new();
+        let (mut a, mut b, mut c, g) = alpha_v2_published(&lab);
+        let v1 = alpha_folder(&lab, &g, &c);
+        let tree = v1.tree.unwrap();
+        let v1_hash = package_hash(&[(v1.key.clone(), tree)]);
+        // Everyone follows B to v2, so no computer publishes v1 any more; A and C hold it only
+        // in a local recovery point.
+        for _ in 0..2 {
+            synced(&mut a);
+            synced(&mut c);
+        }
+        synced(&mut b);
+        assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v2"));
+        let rec_rel = layout::tree_record(&g, &tree);
+        let rec = std::fs::read(provider_file(&lab, &rec_rel)).unwrap();
+        for f in decode_tree(&rec, &tree).unwrap().files {
+            std::fs::remove_file(provider_file(&lab, &layout::blob(&g, &f.sha256))).unwrap();
+        }
+        std::fs::remove_file(provider_file(&lab, &rec_rel)).unwrap();
+
+        let st = a.svc.status();
+        let row = st
+            .recovery_points
+            .iter()
+            .find(|r| r.release == v1_hash)
+            .expect("the displaced v1 is listed");
+        assert_eq!(row.package, v1.key);
+        assert!(row.set_aside_unix_ms > 0 && !row.reason.is_empty() && !row.id.is_empty());
+        assert_eq!(
+            st.held_release_dates.get(&v1_hash),
+            Some(&row.set_aside_unix_ms)
+        );
+
+        // Negative: B changed to v2 by hand, so it holds nothing and lists nothing.
+        assert!(b.svc.status().recovery_points.is_empty());
+        assert_eq!(
+            b.svc.command(Command::Rollback {
+                package: v1.key.clone(),
+                recovered: v1_hash,
+            }),
+            Err(CommandError::UnknownCopy(v1_hash))
+        );
+
+        assert_eq!(
+            a.svc.command(Command::Rollback {
+                package: v1.key.clone(),
+                recovered: row.release,
+            }),
+            Ok(CommandOutcome::Recorded)
+        );
+        let r = synced(&mut a);
+        assert_eq!(
+            a.read("Alpha/main.lua").as_deref(),
+            Some("alpha-v1"),
+            "{r:?}"
+        );
+        let (ac, _) = pc_ids(&a);
+        assert!(!authority_files(&lab, &g, &ac).is_empty(), "{r:?}");
+    }
+
     // ------------------------------------------------ control commands (R4-integrate C1)
 
     #[test]

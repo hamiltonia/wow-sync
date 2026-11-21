@@ -270,6 +270,16 @@ pub struct StatusSnapshot {
     pub update: Option<wow_sync_core::update::UpdateResult>,
     /// One entry per apply journal on disk, for the diagnostics export (ops.md §5.3 Holds).
     pub journal_states: Vec<wow_sync_core::diagnostics::JournalState>,
+    /// How the latest rollback request ended when it did not complete (rollback.md §1: "not
+    /// available, try later"); cleared when a new rollback is requested or one applies.
+    pub rollback_outcome: Option<crate::rollback_flow::RollbackOutcome>,
+    /// Releases held in local recovery points, newest first per add-on (rollback.md §7).
+    /// Restore one with `Command::Rollback { package, recovered: row.release }`.
+    pub recovery_points: Vec<crate::detail::RecoveryRow>,
+    /// When a held release was set aside, by release hash, for the rollback candidates in
+    /// `held_releases`. Only releases this computer holds locally have a date: no shared record
+    /// carries a per-release date (the code state has none), so a peer-only release has no entry.
+    pub held_release_dates: std::collections::BTreeMap<wow_sync_core::ids::Sha256, u64>,
 }
 
 impl StatusSnapshot {
@@ -808,6 +818,7 @@ impl SliceService {
                 }
                 other => CommandError::Rollback(other),
             })?;
+            crate::rollback_flow::clear_outcome(&self.state, &gid);
             crate::rollback_flow::save_request(&self.state, &gid, &request)
                 .map_err(|e| CommandError::Service(e.to_string()))?;
             return Ok(CommandOutcome::Recorded);
@@ -2000,6 +2011,8 @@ impl SliceService {
                 }
             }
         }
+        let recovery_points =
+            crate::detail::recovery_rows(&self.cfg.install_root.join(&self.cfg.variant_folder));
         let blocks: Vec<PlanBlock> = self
             .last_blocks
             .iter()
@@ -2221,6 +2234,16 @@ impl SliceService {
                     .chain(std::iter::repeat_n(J::Other, unknown_journals.len()))
                     .collect()
             },
+            rollback_outcome: crate::rollback_flow::load_outcome(&self.state, &w.group.group_id),
+            held_release_dates: recovery_points
+                .iter()
+                .map(|r| (r.release, r.set_aside_unix_ms))
+                .fold(std::collections::BTreeMap::new(), |mut m, (h, d)| {
+                    let e = m.entry(h).or_insert(d);
+                    *e = (*e).max(d);
+                    m
+                }),
+            recovery_points,
         }
     }
 
@@ -2441,7 +2464,10 @@ impl SliceService {
                         now_unix_ms: now_unix_ms() as u64,
                     };
                     match crate::rollback_flow::step(&self.state, &args, &w.enrollment) {
-                        Ok(p) => Some(p),
+                        Ok(p) => {
+                            crate::rollback_flow::clear_outcome(&self.state, &group_id);
+                            Some(p)
+                        }
                         Err(why) => {
                             report.apply_note = Some(format!("rollback not applied: {why:?}"));
                             None

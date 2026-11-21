@@ -481,6 +481,47 @@ pub struct HeldRelease {
     pub holders: Vec<String>,
 }
 
+/// A release this computer still holds in a local recovery point (rollback.md §7), whether or
+/// not any computer publishes it any more. "Go back" on it is `Command::Rollback`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecoveryRow {
+    pub package: FolderKey,
+    /// The recovery point's operation id: the id the folder under `.wowsync\recovery` carries.
+    pub id: String,
+    /// Pass this to `Command::Rollback { recovered }`.
+    pub release: Sha256,
+    /// The add-on's version from the held copy's TOC, when it has one.
+    pub version: Option<String>,
+    /// When the copy was set aside (the recovery point was written), Unix milliseconds.
+    pub set_aside_unix_ms: u64,
+    /// Why it was kept, as recorded by the operation that set it aside.
+    pub reason: String,
+    pub pinned: bool,
+}
+
+pub(crate) fn recovery_rows(variant_dir: &std::path::Path) -> Vec<RecoveryRow> {
+    let mut rows: Vec<RecoveryRow> = crate::effects::local_points(variant_dir)
+        .into_iter()
+        .map(|p| RecoveryRow {
+            package: p.package,
+            id: p.op,
+            release: p.release,
+            version: p.version,
+            set_aside_unix_ms: p.created_unix_ms,
+            reason: p.reason,
+            pinned: p.pinned,
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        (&a.package, std::cmp::Reverse(a.set_aside_unix_ms), &a.id).cmp(&(
+            &b.package,
+            std::cmp::Reverse(b.set_aside_unix_ms),
+            &b.id,
+        ))
+    });
+    rows
+}
+
 /// Effective retirements only; unresolved ones are reported through the hold, not as rows.
 pub fn retirement_rows(
     ledger: &wow_sync_core::ledger::Ledger,

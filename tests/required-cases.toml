@@ -1144,6 +1144,22 @@ tier = "native"
 tests = [
     "sysinfo::tests::windows_reports_a_real_version_and_nonzero_private_memory",
 ]
+
+[[case]]
+id = "R4-integrate:rollback-missing-files-visible"
+tier = "offline"
+tests = [
+    "e2e::tests::a_rollback_whose_files_left_the_shared_folder_is_refused_not_silently_dropped",
+    "e2e::tests::a_rollback_whose_files_vanish_after_it_is_queued_reports_not_available",
+    "e2e::tests::a_rollback_with_its_files_present_applies_and_leaves_no_outcome",
+]
+
+[[case]]
+id = "R4-integrate:local-recovery-points-restorable"
+tier = "offline"
+tests = [
+    "e2e::tests::a_release_only_a_local_recovery_point_holds_is_listed_and_can_be_restored",
+]
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag
