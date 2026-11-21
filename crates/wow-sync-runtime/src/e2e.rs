@@ -2596,7 +2596,12 @@ mod tests {
 
         let out = a.svc.command(Command::RestoreRemoved { removal }).unwrap();
         assert!(matches!(out, CommandOutcome::Written(_)));
-        for _ in 0..3 {
+        // The code's own return needs a holder or the removal's manifest; this slice has neither,
+        // so the code is put back by hand and only the settings half is judged here.
+        for pc in [&mut a, &mut b] {
+            pc.addon_with("Alpha", "alpha-v1", SV_TOC);
+        }
+        for _ in 0..6 {
             synced(&mut a);
             synced(&mut b);
         }
@@ -3741,6 +3746,72 @@ mod tests {
             texts(&lb)
         );
         assert!(offered_kinds(&a).is_empty() && offered_kinds(&b).is_empty());
+    }
+
+    #[test]
+    fn an_uninstall_after_a_group_restore_converges_on_every_computer() {
+        use wow_sync_core::hash::package_hash;
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Amb", "from-a");
+        b.addon("Amb", "from-b");
+        let g = a.create();
+        b.join(&g);
+        for _ in 0..3 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        let hash_of = |pc: &Pc| {
+            let f = folder_of(&lab, &g, pc, "amb");
+            (f.key.clone(), package_hash(&[(f.key, f.tree.unwrap())]))
+        };
+        let (key, a_rel) = hash_of(&a);
+        let (_, b_rel) = hash_of(&b);
+        b.svc
+            .command(Command::Keep {
+                scope: vec![key.clone()],
+                copy: b_rel,
+                why: wow_sync_core::kinds::ChoiceReason::Ambiguous,
+            })
+            .unwrap();
+        for _ in 0..4 {
+            synced(&mut b);
+            synced(&mut a);
+        }
+        a.svc
+            .command(Command::Rollback {
+                package: key.clone(),
+                recovered: a_rel,
+            })
+            .unwrap();
+        for _ in 0..5 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        assert_eq!(b.read("Amb/main.lua").as_deref(), Some("from-a"));
+
+        std::fs::remove_dir_all(a.install.addons.join("Amb")).unwrap();
+        for _ in 0..3 {
+            synced(&mut a);
+        }
+        let st = LocalState::open_at(&a.cfg.state_dir).unwrap();
+        let store = RemovalStore::new(&st, g.clone());
+        let (base, mut obs) = store.load();
+        obs.gone
+            .insert(base.packages.keys().next().unwrap().clone(), (1, 1));
+        store.save(&base, &obs).unwrap();
+        for _ in 0..6 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        assert_eq!(
+            a.read("Amb/main.lua"),
+            None,
+            "the originating computer is not given the code back"
+        );
+        assert_eq!(b.read("Amb/main.lua"), None);
+        assert_eq!(a.svc.status().removed.len(), 1, "it is offered in Removed");
     }
 
     #[test]

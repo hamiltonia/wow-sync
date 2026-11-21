@@ -1429,6 +1429,13 @@ tests = [
     "e2e::tests::a_settings_file_over_the_cap_is_not_moved_by_an_uninstall",
     "e2e::tests::a_file_exactly_at_the_cap_is_captured_by_an_uninstall",
 ]
+
+[[case]]
+id = "R5-check-F1:uninstall-converges"
+tier = "offline"
+tests = [
+    "e2e::tests::an_uninstall_after_a_group_restore_converges_on_every_computer",
+]
 # <<< section: R5-remove
 
 # >>> section: R5-decide
