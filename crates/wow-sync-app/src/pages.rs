@@ -922,21 +922,12 @@ impl Shell {
             .filter(|r| r.package.as_str() == key)
             .cloned()
             .collect();
-        let installed = rows.iter().find(|r| r.current).map(|r| r.version.clone());
+        let installed = crate::rollback_ui::installed_version(&self.w, key);
         if rows.iter().all(|r| r.current) {
             rec.push(self.muted(crate::change_ui::NO_EARLIER).into_any_element());
         }
         for (j, r) in rows.iter().cloned().enumerate() {
-            let mut line = format!("Version {}", r.version);
-            if !r.held_by.is_empty() {
-                line.push_str(&format!(", held by {}", r.held_by));
-            }
-            if r.current {
-                line.push_str(" (installed now)");
-            }
-            if let Some(chip) = crate::rollback_ui::blocked_chip(&r) {
-                line.push_str(&format!(" [{chip}]"));
-            }
+            let line = crate::rollback_ui::release_line(&r);
             rec.push(div().child(SharedString::from(line)).into_any_element());
             let k = format!("rb-{j}");
             match crate::rollback_ui::button(&self.w, &r) {

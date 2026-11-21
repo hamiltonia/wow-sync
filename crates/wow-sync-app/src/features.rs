@@ -412,14 +412,20 @@ pub fn result_text(kind: ActionKind, r: &ActionResult) -> String {
             ActionKind::Retire => "Retired. It is shared with the group.".into(),
             ActionKind::ReEnroll => "This computer joined the group again.".into(),
             ActionKind::Rollback => {
-                "Going back is queued. It is applied when WoW is closed.".into()
+                "Requested. It will happen on the next sync, when WoW is closed.".into()
             }
             ActionKind::RestoreRemoved => "Restored for every computer in the group.".into(),
             ActionKind::AllowAgain => "Allowed again for every computer in the group.".into(),
             _ => "Saved and shared with the group.".into(),
         },
         ActionResult::Kept => "Saved. It is shared when you resume syncing.".into(),
-        ActionResult::Local => "Saved on this computer.".into(),
+        ActionResult::Local => match kind {
+            ActionKind::Rollback => {
+                "Requested. It will happen on the next sync, when WoW is closed. Nothing has changed yet."
+                    .into()
+            }
+            _ => "Saved on this computer.".into(),
+        },
         ActionResult::Changed => {
             "Something changed while you were choosing. Nothing was saved. Look at the new choices and choose again."
                 .into()
@@ -429,7 +435,12 @@ pub fn result_text(kind: ActionKind, r: &ActionResult) -> String {
                 .into()
         }
         ActionResult::NotAllowed => RETIRED_REASON.into(),
-        ActionResult::NothingToDo => "Nothing needed to change.".into(),
+        ActionResult::NothingToDo => match kind {
+            ActionKind::Rollback => {
+                "Nothing was queued: there was nothing to go back from. Nothing was changed.".into()
+            }
+            _ => "Nothing needed to change.".into(),
+        },
         ActionResult::NotWired => NOT_WIRED.into(),
         ActionResult::Failed(e) => format!("That didn't work: {e}. Nothing was changed."),
     }
@@ -577,6 +588,7 @@ pub fn apply_snapshot(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot)
                 .flat_map(|r| r.rejections.iter().copied())
                 .collect(),
             held_by: h.holders.join(", "),
+            held_on: None,
         })
         .collect();
     f.older_peer = s.older_peer.clone();
@@ -799,6 +811,29 @@ mod tests {
         assert!(
             gate(&w, ActionKind::ReEnroll).is_ok(),
             "Join again is the one group action a retired computer has"
+        );
+    }
+
+    #[test]
+    fn a_queued_rollback_is_worded_as_requested_not_saved() {
+        for r in [ActionResult::Local, ActionResult::Written] {
+            let t = result_text(ActionKind::Rollback, &r);
+            assert!(
+                t.starts_with("Requested. It will happen on the next sync"),
+                "{t}"
+            );
+            assert!(!t.contains("Saved"));
+        }
+        let t = result_text(ActionKind::Rollback, &ActionResult::NothingToDo);
+        assert!(t.starts_with("Nothing was queued"));
+        assert_eq!(
+            result_text(ActionKind::Decide, &ActionResult::Local),
+            "Saved on this computer.",
+            "other local saves keep their wording"
+        );
+        assert!(
+            result_text(ActionKind::Rollback, &ActionResult::Failed("x".into()))
+                .contains("Nothing was changed")
         );
     }
 

@@ -367,8 +367,18 @@ pub fn active_master(w: &World) -> Option<&EnrollmentRef> {
     active.then_some(m)
 }
 
+/// Whether a production size limit for settings files has been approved. None is approved yet
+/// (Q-77), so settings are never transferred; this mirrors the service's own limit.
+pub fn settings_cap_approved() -> bool {
+    wow_sync_core::records::MAX_SETTINGS_FILE_BYTES.is_some()
+}
+
 /// The sentence at the top of the Settings sync page.
 pub fn banner_text(w: &World) -> String {
+    banner_text_with(w, settings_cap_approved())
+}
+
+pub fn banner_text_with(w: &World, cap_approved: bool) -> String {
     let d = &w.features.settings;
     if d.policy_conflict {
         return "The settings master was changed on two computers. Nothing is chosen for you; choose a master to share settings again.".into();
@@ -384,11 +394,13 @@ pub fn banner_text(w: &World) -> String {
         );
     }
     if d.master.is_some() {
-        if w.features
-            .settings
-            .units
-            .iter()
-            .any(|u| u.status == UnitStatus::SizeLimitPending)
+        if d.enabled
+            && (!cap_approved
+                || w.features
+                    .settings
+                    .units
+                    .iter()
+                    .any(|u| u.status == UnitStatus::SizeLimitPending))
         {
             return format!(
                 "{name} is the settings master, but settings sharing is off until a size limit is approved."
@@ -850,7 +862,7 @@ mod tests {
         use wow_sync_runtime::PeerStanding;
         let w = snapshot_world();
         assert_eq!(
-            banner_text(&w),
+            banner_text_with(&w, true),
             "Den PC shares its add-on settings with the group. Settings are never merged."
         );
         assert!(active_master(&w).is_some());
@@ -862,7 +874,7 @@ mod tests {
             }
         });
         assert!(active_master(&w).is_none());
-        let t = banner_text(&w);
+        let t = banner_text_with(&w, true);
         assert!(t.contains("no active master") && !t.contains("shares its add-on settings"));
         let c = exception_controls(&w, &folder("Details"));
         assert_eq!(c.len(), 1);
@@ -884,11 +896,33 @@ mod tests {
         use wow_sync_runtime::SettingsUnitStatus as S;
         let (w, _) = controls_for(|_| {}, S::Disabled, true);
         assert_eq!(
-            banner_text(&w),
+            banner_text_with(&w, true),
             "Den PC is the settings master, but settings sharing is off until a size limit is approved."
         );
         let (w, _) = controls_for(|_| {}, S::Disabled, false);
-        assert!(banner_text(&w).contains("settings sync is off on this computer"));
+        assert!(banner_text_with(&w, true).contains("settings sync is off on this computer"));
+    }
+
+    #[test]
+    fn a_fresh_consent_with_no_units_and_no_approved_cap_does_not_claim_sharing() {
+        let w = snapshot_world_with(|s| {
+            s.settings.enabled = true;
+            s.settings_units.clear();
+        });
+        assert!(w.features.settings.units.is_empty());
+        let t = banner_text_with(&w, false);
+        assert_eq!(
+            t,
+            "Den PC is the settings master, but settings sharing is off until a size limit is approved."
+        );
+        assert!(banner_text_with(&w, true).contains("shares its add-on settings"));
+        let off = snapshot_world_with(|s| s.settings.enabled = false);
+        assert!(banner_text_with(&off, false).contains("settings sync is off on this computer"));
+        assert_eq!(
+            banner_text(&w),
+            banner_text_with(&w, settings_cap_approved()),
+            "the page uses the real production limit"
+        );
     }
 
     fn runtime_row(

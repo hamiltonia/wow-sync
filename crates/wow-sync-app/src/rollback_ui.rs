@@ -20,6 +20,33 @@ pub struct ReleaseRow {
     pub rejections: Vec<Sha256>,
     /// Names of the computers that hold this copy.
     pub held_by: String,
+    /// When this copy was first held, once the snapshot provides it. Pending snapshot field.
+    pub held_on: Option<String>,
+}
+
+/// The version installed on this computer, or `None` when it is not known.
+pub fn installed_version(w: &World, package: &str) -> Option<String> {
+    w.addon(package)
+        .map(|a| a.version.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+/// The history line for a release: version, holder, held date and state.
+pub fn release_line(r: &ReleaseRow) -> String {
+    let mut line = format!("Version {}", r.version);
+    if !r.held_by.is_empty() {
+        line.push_str(&format!(", held by {}", r.held_by));
+    }
+    if let Some(d) = &r.held_on {
+        line.push_str(&format!(", held since {d}"));
+    }
+    if r.current {
+        line.push_str(" (installed now)");
+    }
+    if let Some(chip) = blocked_chip(r) {
+        line.push_str(&format!(" [{chip}]"));
+    }
+    line
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -185,7 +212,41 @@ mod tests {
                 vec![]
             },
             held_by: "Den PC".into(),
+            held_on: None,
         }
+    }
+
+    #[test]
+    fn the_installed_version_comes_from_the_add_on_and_the_line_shows_a_held_date() {
+        let mut w = world();
+        assert_eq!(installed_version(&w, "details"), None);
+        w.addons.push(crate::world::Addon {
+            key: "details".into(),
+            title: "Details".into(),
+            version: "2.0.0".into(),
+            target_version: None,
+            folders: vec![],
+            kind: crate::world::Kind::InSync,
+            candidates: vec![],
+            why: String::new(),
+            next: wow_sync_core::view::NextAction::Nothing,
+            awaiting: vec![],
+        });
+        let v = installed_version(&w, "details");
+        assert_eq!(v.as_deref(), Some("2.0.0"));
+        let t = confirm_text(v.as_deref(), &row("1.0.0", false, false));
+        assert!(
+            t[0].contains("replaces version 2.0.0 with 1.0.0"),
+            "{}",
+            t[0]
+        );
+        let mut r = row("1.0.0", false, false);
+        assert_eq!(release_line(&r), "Version 1.0.0, held by Den PC");
+        r.held_on = Some("3 Nov".into());
+        assert_eq!(
+            release_line(&r),
+            "Version 1.0.0, held by Den PC, held since 3 Nov"
+        );
     }
 
     fn world() -> World {

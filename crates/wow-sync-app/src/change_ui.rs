@@ -99,6 +99,7 @@ mod tests {
             current,
             rejections: vec![],
             held_by: "Den PC".into(),
+            held_on: None,
         }
     }
 
