@@ -1834,6 +1834,101 @@ mod tests {
         assert!(!authority_files(&lab, &g, &ac).is_empty(), "{r:?}");
     }
 
+    #[test]
+    fn a_rollback_whose_files_vanish_after_it_is_queued_reports_not_available() {
+        use wow_sync_core::hash::package_hash;
+        use wow_sync_core::records::decode_tree;
+        let lab = Lab::new();
+        let (_a, mut b, c, g) = alpha_v2_published(&lab);
+        let v1 = alpha_folder(&lab, &g, &c);
+        let tree = v1.tree.unwrap();
+        let v1_hash = package_hash(&[(v1.key.clone(), tree)]);
+        let rec = std::fs::read(provider_file(&lab, &layout::tree_record(&g, &tree))).unwrap();
+        let files = decode_tree(&rec, &tree).unwrap().files;
+        synced(&mut b);
+        assert_eq!(
+            b.svc.command(Command::Rollback {
+                package: v1.key.clone(),
+                recovered: v1_hash,
+            }),
+            Ok(CommandOutcome::Recorded)
+        );
+        for f in &files {
+            std::fs::remove_file(provider_file(&lab, &layout::blob(&g, &f.sha256))).unwrap();
+        }
+        synced(&mut b);
+        assert_eq!(
+            b.read("Alpha/main.lua").as_deref(),
+            Some("alpha-v2"),
+            "nothing changed"
+        );
+        let out = b.svc.status().rollback_outcome.expect("a visible outcome");
+        assert_eq!(
+            out.kind,
+            crate::rollback_flow::RollbackOutcomeKind::NotAvailable
+        );
+        assert_eq!(out.recovered, v1_hash);
+        // Asking again clears the old outcome.
+        assert!(b
+            .svc
+            .command(Command::Rollback {
+                package: v1.key.clone(),
+                recovered: v1_hash,
+            })
+            .is_err());
+    }
+
+    #[test]
+    fn a_rollback_with_its_files_present_applies_and_leaves_no_outcome() {
+        use wow_sync_core::hash::package_hash;
+        let lab = Lab::new();
+        let (_a, mut b, c, g) = alpha_v2_published(&lab);
+        let v1 = alpha_folder(&lab, &g, &c);
+        let v1_hash = package_hash(&[(v1.key.clone(), v1.tree.unwrap())]);
+        synced(&mut b);
+        assert_eq!(
+            b.svc.command(Command::Rollback {
+                package: v1.key.clone(),
+                recovered: v1_hash,
+            }),
+            Ok(CommandOutcome::Recorded)
+        );
+        synced(&mut b);
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        assert_eq!(b.svc.status().rollback_outcome, None);
+    }
+
+    #[test]
+    fn a_rollback_whose_files_left_the_shared_folder_is_refused_not_silently_dropped() {
+        use wow_sync_core::hash::package_hash;
+        use wow_sync_core::records::decode_tree;
+        let lab = Lab::new();
+        let (_a, mut b, c, g) = alpha_v2_published(&lab);
+        let v1 = alpha_folder(&lab, &g, &c);
+        let tree = v1.tree.unwrap();
+        let v1_hash = package_hash(&[(v1.key.clone(), tree)]);
+        let rec = std::fs::read(provider_file(&lab, &layout::tree_record(&g, &tree))).unwrap();
+        let files = decode_tree(&rec, &tree).unwrap().files;
+        synced(&mut b);
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v2"));
+        for f in &files {
+            std::fs::remove_file(provider_file(&lab, &layout::blob(&g, &f.sha256))).unwrap();
+        }
+        // The files are already gone: refused at once, nothing queued.
+        assert_eq!(
+            b.svc.command(Command::Rollback {
+                package: v1.key.clone(),
+                recovered: v1_hash,
+            }),
+            Err(CommandError::Rollback(
+                crate::rollback_flow::RollbackRefusal::NotAvailable
+            ))
+        );
+        synced(&mut b);
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v2"));
+        assert_eq!(b.svc.status().rollback_outcome, None);
+    }
+
     // ------------------------------------------------ control commands (R4-integrate C1)
 
     #[test]

@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 use wow_sync_adapters::localstate::LocalState;
 use wow_sync_adapters::provider::ProviderRoot;
+use wow_sync_adapters::FsErrorKind;
 use wow_sync_core::authority::AuthorityRecord;
 use wow_sync_core::ids::{GroupId, OpId, SettingsUnit, Sha256};
 use wow_sync_core::inventory::{FolderStatus, Inventory};
@@ -25,6 +26,7 @@ use wow_sync_core::target::PackageCopies;
 use crate::decisions::Plane;
 
 const TREE_LIMIT: u64 = 32 * 1024 * 1024;
+const OBJECT_LIMIT: u64 = 512 * 1024 * 1024;
 
 /// A rollback the owner asked for, kept until the apply gate lets it run. It names the release
 /// by package hash only; everything else is read again from the live state when it runs.
@@ -49,6 +51,48 @@ pub enum RollbackRefusal {
 
 fn request_name(group: &GroupId) -> String {
     format!("rollback-request-{group}.json")
+}
+
+/// How the latest rollback request ended, kept so the GUI can say so after the request itself
+/// is consumed (a request that quietly did nothing would read as success).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RollbackOutcome {
+    pub package: FolderKey,
+    pub recovered: Sha256,
+    pub kind: RollbackOutcomeKind,
+    /// The operation's result as rendered for the activity log ("not applied: ...").
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RollbackOutcomeKind {
+    /// The release is installed and the rejection is written.
+    Applied,
+    /// The release could not be read when the cycle ran it (rollback.md §1: "not available,
+    /// try later"). Nothing changed; the owner can ask again.
+    NotAvailable,
+    /// The operation ran and did not complete (held, interrupted, rolled back).
+    NotApplied,
+}
+
+fn outcome_name(group: &GroupId) -> String {
+    format!("rollback-outcome-{group}.json")
+}
+
+pub fn load_outcome(state: &LocalState, group: &GroupId) -> Option<RollbackOutcome> {
+    let b = state.read(&outcome_name(group), 64 * 1024).ok().flatten()?;
+    serde_json::from_slice(&b).ok()
+}
+
+pub fn save_outcome(state: &LocalState, group: &GroupId, o: &RollbackOutcome) {
+    let _ = state.write_atomic(
+        &outcome_name(group),
+        &serde_json::to_vec(o).expect("plain data serializes"),
+    );
+}
+
+pub fn clear_outcome(state: &LocalState, group: &GroupId) {
+    let _ = state.remove(&outcome_name(group));
 }
 
 pub fn load_request(state: &LocalState, group: &GroupId) -> Option<RollbackRequest> {
@@ -97,6 +141,22 @@ pub(crate) fn step(
 ) -> Result<PackageApply, RollbackRefusal> {
     let out = plan_requested(a);
     clear_request(state, a.group);
+    match &out {
+        Ok(_) => {}
+        Err(why) => save_outcome(
+            state,
+            a.group,
+            &RollbackOutcome {
+                package: a.request.package.clone(),
+                recovered: a.request.recovered,
+                kind: match why {
+                    RollbackRefusal::NotAvailable => RollbackOutcomeKind::NotAvailable,
+                    _ => RollbackOutcomeKind::NotApplied,
+                },
+                text: format!("rollback not applied: {why:?}"),
+            },
+        ),
+    }
     if out.is_ok() {
         let mut le = enrollment.clone();
         le.next_seq = a.seq + 1;
@@ -153,6 +213,17 @@ pub(crate) fn plan_requested(a: &PlanArgs) -> Result<PackageApply, RollbackRefus
                 })
             })
             .ok_or(RollbackRefusal::NotAvailable)?;
+        // A file the shared folder lost is staged from a local recovery point or not at all
+        // (effects.rs `stage_folder`); refuse now rather than queue an install that cannot run.
+        let blob_missing = record.files.iter().any(|file| {
+            matches!(
+                a.provider.open_read(&layout::blob(a.group, &file.sha256), OBJECT_LIMIT),
+                Err(e) if e.kind == FsErrorKind::NotFound
+            )
+        });
+        if blob_missing && crate::effects::local_release(a.variant_dir, &f.name, &tree).is_none() {
+            return Err(RollbackRefusal::NotAvailable);
+        }
         r0.push(TargetFolder {
             key: f.key.clone(),
             name: f.name.clone(),

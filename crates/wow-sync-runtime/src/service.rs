@@ -270,6 +270,9 @@ pub struct StatusSnapshot {
     pub update: Option<wow_sync_core::update::UpdateResult>,
     /// One entry per apply journal on disk, for the diagnostics export (ops.md §5.3 Holds).
     pub journal_states: Vec<wow_sync_core::diagnostics::JournalState>,
+    /// How the latest rollback request ended when it did not complete (rollback.md §1: "not
+    /// available, try later"); cleared when a new rollback is requested or one applies.
+    pub rollback_outcome: Option<crate::rollback_flow::RollbackOutcome>,
 }
 
 impl StatusSnapshot {
@@ -808,6 +811,7 @@ impl SliceService {
                 }
                 other => CommandError::Rollback(other),
             })?;
+            crate::rollback_flow::clear_outcome(&self.state, &gid);
             crate::rollback_flow::save_request(&self.state, &gid, &request)
                 .map_err(|e| CommandError::Service(e.to_string()))?;
             return Ok(CommandOutcome::Recorded);
@@ -2221,6 +2225,7 @@ impl SliceService {
                     .chain(std::iter::repeat_n(J::Other, unknown_journals.len()))
                     .collect()
             },
+            rollback_outcome: crate::rollback_flow::load_outcome(&self.state, &w.group.group_id),
         }
     }
 
@@ -2441,7 +2446,10 @@ impl SliceService {
                         now_unix_ms: now_unix_ms() as u64,
                     };
                     match crate::rollback_flow::step(&self.state, &args, &w.enrollment) {
-                        Ok(p) => Some(p),
+                        Ok(p) => {
+                            crate::rollback_flow::clear_outcome(&self.state, &group_id);
+                            Some(p)
+                        }
                         Err(why) => {
                             report.apply_note = Some(format!("rollback not applied: {why:?}"));
                             None
