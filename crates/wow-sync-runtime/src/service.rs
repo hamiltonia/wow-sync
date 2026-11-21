@@ -923,25 +923,40 @@ impl SliceService {
                 // Code still installed here only needs the re-add; otherwise the code is put back
                 // by a queued restore operation (removal.md §7.4).
                 if rm.folders.iter().any(|m| w.inventory.get(&m.key).is_none()) {
-                    crate::restore_flow::clear_issue(&self.state, &gid);
-                    crate::restore_flow::plan_requested(&crate::restore_flow::PlanArgs {
-                        removal: *removal,
-                        group: &gid,
-                        own: &w.own,
-                        inventory: &w.inventory,
-                        plane: &self.plane,
-                        provider: &provider,
-                        variant_dir: &self.variant_dir(),
-                        op: OpId::parse(&random_id_hex()).expect("random id"),
-                        seq,
-                        now_unix_ms: now,
-                    })
-                    .map_err(|why| match why {
-                        crate::restore_flow::RestoreRefusal::UnknownRemoval => {
-                            CommandError::UnknownRemoval(*removal)
-                        }
-                        other => CommandError::Service(other.text()),
-                    })?;
+                    let planned =
+                        crate::restore_flow::plan_requested(&crate::restore_flow::PlanArgs {
+                            removal: *removal,
+                            group: &gid,
+                            own: &w.own,
+                            inventory: &w.inventory,
+                            plane: &self.plane,
+                            provider: &provider,
+                            variant_dir: &self.variant_dir(),
+                            op: OpId::parse(&random_id_hex()).expect("random id"),
+                            seq,
+                            now_unix_ms: now,
+                        });
+                    if let Err(why) = planned {
+                        // A refusal stays listed (replacing an older reason) until a restore
+                        // succeeds or the owner dismisses it; the error is still returned.
+                        return Err(match why {
+                            crate::restore_flow::RestoreRefusal::UnknownRemoval => {
+                                CommandError::UnknownRemoval(*removal)
+                            }
+                            other => {
+                                crate::restore_flow::clear_request(&self.state, &gid);
+                                crate::restore_flow::save_issue(
+                                    &self.state,
+                                    &gid,
+                                    &crate::restore_flow::RestoreIssue {
+                                        removal: *removal,
+                                        reason: other.reason(),
+                                    },
+                                );
+                                CommandError::Service(other.text())
+                            }
+                        });
+                    }
                     crate::restore_flow::clear_issue(&self.state, &gid);
                     crate::restore_flow::save_request(
                         &self.state,
@@ -2635,6 +2650,7 @@ impl SliceService {
                     &self.plane.ledger,
                     &derive(&self.plane.ledger, &group_id, &self.plane.members),
                 );
+                let mut restore_pending: Option<(FolderKey, Sha256, String)> = None;
                 let restore = if w.standing == OwnStanding::Active
                     && !game_blocks
                     && rollback.is_none()
@@ -2665,12 +2681,17 @@ impl SliceService {
                                 game_blocks,
                             )
                             .captured_units(&keys);
-                            report.apply_note = Some(crate::restore_flow::settings_note(
-                                crate::restore_flow::expected_units(
-                                    &self.plane.ledger,
-                                    &request.removal,
+                            // The note is shown only once the restore has verified and applied.
+                            restore_pending = Some((
+                                p.package.clone(),
+                                request.removal,
+                                crate::restore_flow::settings_note(
+                                    crate::restore_flow::expected_units(
+                                        &self.plane.ledger,
+                                        &request.removal,
+                                    ),
+                                    captured,
                                 ),
-                                captured,
                             ));
                             Some(p)
                         }
@@ -2773,6 +2794,20 @@ impl SliceService {
                             });
                         }
                         remember_applied(&mut self.applied_here, &plan, &outcome);
+                        if let Some((pkg, removal, note)) = restore_pending.take() {
+                            crate::restore_flow::settle(
+                                &self.state,
+                                &group_id,
+                                &removal,
+                                outcome
+                                    .packages
+                                    .iter()
+                                    .find(|(k, _)| *k == pkg)
+                                    .map(|(_, r)| r),
+                                note,
+                                &mut report.apply_note,
+                            );
+                        }
                         let removed_here: BTreeSet<FolderKey> = plan
                             .packages
                             .iter()

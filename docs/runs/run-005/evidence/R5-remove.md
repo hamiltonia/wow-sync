@@ -72,3 +72,23 @@ No .NET file API was used.
 **A-38 control.** Mutating `progress` to ignore `stands` (`true || stands(..)`) made the first test fail (exit 101); reverted, diff clean. A first mutation of `prune`'s request check passed because `progress` filters independently, so `prune` has no direct test.
 
 No .NET file API was used.
+
+## F4 (R5-check recheck): refusals persist
+
+`service.rs` `RestoreRemoved`: Try again no longer clears the refusal before re-planning. Any refusal at command time (not `UnknownRemoval`) clears the queued request and saves a `RestoreIssue` with the new reason, and the `CommandError` is still returned. A successful plan clears the issue and queues. Cycle-time refusals and RV5-01 `settle` failures already saved issues. So an `Unavailable` entry stays until a restore succeeds or `DismissRestoreIssue`. Tests: `a_restore_refused_when_asked_for_is_kept_as_unavailable_and_a_good_retry_clears_it` (command-time refusal persists, stays across cycles, retry after the blobs return clears it and installs), `a_retried_restore_replaces_the_shown_refusal` (failed retry keeps `Unavailable`). Required-case `RV-04:restore-progress` extended. A-38: skipping the command-time `save_issue` made the first test fail (exit 101); reverted.
+
+No .NET file API was used.
+
+## Round 5: R5-review fixes
+
+**RV5-01.** `restore_flow::settle` (called in `service.rs` right after `run_apply`) now decides the outcome: the settings note is set only when the restore package is `Applied`; `Failed`/`NeedsHelp` clears the request and saves a `RestoreIssue` (reason from `explain::render`), so the status shows `Unavailable` and the restore is not planned again each cycle. Try again (`RestoreRemoved`) clears the issue and re-plans. Interrupted/replanned results stay queued. Test: `a_restore_whose_shared_copy_is_corrupt_installs_nothing_and_says_so_without_retrying` (present but wrong-hash blobs: nothing installed, 0 journals, no settings note, `Unavailable`, no per-cycle retry, retry re-queues).
+
+**RV5-02.** `effects.rs` `stage_folder` falls back to `stage_from_recovery` on `HashMismatch` as well as `NotFound` (returns the original error if the local copy fails too). Test: `a_corrupt_shared_copy_is_replaced_by_the_intact_local_recovery_copy`.
+
+**RV5-07.** `an_uninstall_and_restore_keep_each_account_and_character_file_to_its_own_identity` (included account file + per-character file + excluded second account; `SV_TOC` now also declares `SavedVariablesPerCharacter: AlphaChar`). Asserts the excluded account is never moved, and each file returns to its own path with its own content and none crosses to the peer.
+
+**RV5-04.** settings.md (rows for `TooLarge`, Q-77 paragraph, T-S-size-cap-pending) and contracts.md §8 now state D-26's 32 MiB (33,554,432 bytes) as built.
+
+**A-38 control.** `Failed|NeedsHelp` arm in `settle` disabled (`if false`): the RV5-01 test failed (exit 101); reverted, no residue. Required cases `RV5-01:failed-restore-is-unavailable`, `RV5-07:uninstall-restore-identity-boundary`.
+
+No .NET file API was used.

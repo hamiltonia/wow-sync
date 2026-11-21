@@ -489,16 +489,22 @@ impl ApplyEffects for RealEffects<'_> {
                 }
                 Err(e) => return Err(map_err(e)),
             };
-            self.area
-                .stage_file(
-                    op.as_str(),
-                    &f.name,
-                    file.path.as_str(),
-                    &mut src,
-                    file.sha256.0,
-                    file.size,
-                )
-                .map_err(map_err)?;
+            if let Err(e) = self.area.stage_file(
+                op.as_str(),
+                &f.name,
+                file.path.as_str(),
+                &mut src,
+                file.sha256.0,
+                file.size,
+            ) {
+                let e = map_err(e);
+                // A shared copy that fails its hash may still be held intact in a local recovery
+                // point; that copy is verified the same way.
+                if e.kind == EffectErrorKind::HashMismatch {
+                    return self.stage_from_recovery(op, f).map_err(|_| e);
+                }
+                return Err(e);
+            }
         }
         Ok(())
     }

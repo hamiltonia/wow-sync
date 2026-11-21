@@ -2475,7 +2475,7 @@ mod tests {
         );
     }
 
-    const SV_TOC: &str = "## Interface: 11508\n## Version: 1.0\n## SavedVariables: AlphaDB\n";
+    const SV_TOC: &str = "## Interface: 11508\n## Version: 1.0\n## SavedVariables: AlphaDB\n## SavedVariablesPerCharacter: AlphaChar\n";
 
     fn wtf_file(pc: &Pc, folder: &str) -> PathBuf {
         pc.install
@@ -2953,14 +2953,179 @@ mod tests {
         a.act.set(Activity::NotRunning);
         synced(&mut a);
         assert_eq!(restores_of(&mut a).len(), 1);
-        let _ = a.svc.command(Command::RestoreRemoved { removal });
+        assert!(a.svc.command(Command::RestoreRemoved { removal }).is_err());
+        let shown = restores_of(&mut a);
+        assert_eq!(shown.len(), 1, "a failed retry keeps the entry: {shown:?}");
+        assert!(matches!(
+            shown[0].state,
+            crate::restore_flow::RestoreState::Unavailable { .. }
+        ));
+    }
+
+    #[test]
+    fn a_restore_refused_when_asked_for_is_kept_as_unavailable_and_a_good_retry_clears_it() {
+        use crate::restore_flow::RestoreState;
+        let (lab, mut a, _b, g, removal) = uninstalled_everywhere();
+        let manifest = removed_manifest(&a, &removal);
+        let mut saved = Vec::new();
+        for f in &manifest {
+            let rec = wow_sync_core::records::decode_tree(
+                &std::fs::read(provider_file(&lab, &layout::tree_record(&g, &f.tree))).unwrap(),
+                &f.tree,
+            )
+            .unwrap();
+            for file in rec.files {
+                let p = provider_file(&lab, &layout::blob(&g, &file.sha256));
+                saved.push((p.clone(), std::fs::read(p).unwrap()));
+            }
+        }
+        delete_removed_blobs(&lab, &g, &manifest);
+        let err = a
+            .svc
+            .command(Command::RestoreRemoved { removal })
+            .unwrap_err();
         assert!(
-            !restores_of(&mut a).iter().any(|p| matches!(
-                p.state,
-                crate::restore_flow::RestoreState::Unavailable { .. }
-            )),
-            "the old refusal is replaced by the new attempt"
+            matches!(&err, CommandError::Service(t) if t.contains("unavailable")),
+            "{err:?}"
         );
+        let shown = restores_of(&mut a);
+        assert_eq!(
+            shown.len(),
+            1,
+            "refusal at command time is listed: {shown:?}"
+        );
+        assert!(matches!(shown[0].state, RestoreState::Unavailable { .. }));
+        synced(&mut a);
+        assert_eq!(restores_of(&mut a).len(), 1, "it stays across cycles");
+        for (p, bytes) in saved {
+            std::fs::write(p, bytes).unwrap();
+        }
+        a.svc.command(Command::RestoreRemoved { removal }).unwrap();
+        assert!(
+            restores_of(&mut a)
+                .iter()
+                .all(|p| matches!(p.state, RestoreState::Waiting { .. })),
+            "a good retry clears the refusal"
+        );
+        synced(&mut a);
+        assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        assert!(restores_of(&mut a).is_empty());
+    }
+
+    fn corrupt_removed_blobs(lab: &Lab, g: &GroupId, m: &[wow_sync_core::kinds::ManifestFolder]) {
+        for f in m {
+            let p = provider_file(lab, &layout::tree_record(g, &f.tree));
+            let rec =
+                wow_sync_core::records::decode_tree(&std::fs::read(p).unwrap(), &f.tree).unwrap();
+            for file in rec.files {
+                let p = provider_file(lab, &layout::blob(g, &file.sha256));
+                let mut bytes = std::fs::read(&p).unwrap();
+                bytes[0] ^= 0xff;
+                std::fs::write(&p, bytes).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn a_restore_whose_shared_copy_is_corrupt_installs_nothing_and_says_so_without_retrying() {
+        use crate::restore_flow::RestoreState;
+        let (lab, mut a, _b, g, removal) = uninstalled_everywhere();
+        corrupt_removed_blobs(&lab, &g, &removed_manifest(&a, &removal));
+        a.svc.command(Command::RestoreRemoved { removal }).unwrap();
+        let first = synced(&mut a);
+        assert_eq!(a.read("Alpha/main.lua"), None);
+        assert!(
+            !a.install.addons.join("Alpha").exists(),
+            "nothing installed"
+        );
+        assert_eq!(a.journals(), 0);
+        assert_ne!(
+            first.apply_note.as_deref(),
+            Some("Settings are restored with the code"),
+            "no settings note before the restore verified"
+        );
+        let shown = restores_of(&mut a);
+        assert_eq!(shown.len(), 1, "{shown:?}");
+        assert!(matches!(shown[0].state, RestoreState::Unavailable { .. }));
+        assert!(
+            shown[0].text.contains("can't be restored"),
+            "{}",
+            shown[0].text
+        );
+        let again = synced(&mut a);
+        assert!(
+            again.applied.is_empty(),
+            "not retried every cycle: {:?}",
+            again.applied
+        );
+        assert_eq!(restores_of(&mut a).len(), 1);
+        // Try again re-plans
+        a.svc.command(Command::RestoreRemoved { removal }).unwrap();
+        assert!(restores_of(&mut a)
+            .iter()
+            .all(|p| matches!(p.state, RestoreState::Waiting { .. })));
+    }
+
+    #[test]
+    fn a_corrupt_shared_copy_is_replaced_by_the_intact_local_recovery_copy() {
+        let (lab, _a, mut b, g, removal) = uninstalled_everywhere();
+        corrupt_removed_blobs(&lab, &g, &removed_manifest(&b, &removal));
+        b.svc.command(Command::RestoreRemoved { removal }).unwrap();
+        synced(&mut b);
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        assert!(restores_of(&mut b).is_empty());
+    }
+
+    #[test]
+    fn an_uninstall_and_restore_keep_each_account_and_character_file_to_its_own_identity() {
+        let (lab, mut a, mut b, g) = settings_removal_ready(1 << 20);
+        let svars = |pc: &Pc, rel: &str| pc.install.variant_dir.join(format!("WTF/{rel}"));
+        let put = |pc: &Pc, rel: &str, text: &str| {
+            let p = svars(pc, rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, text).unwrap();
+        };
+        let get = |pc: &Pc, rel: &str| std::fs::read_to_string(svars(pc, rel)).ok();
+        let chr = "Account/ACC/Realm/Thrall/SavedVariables/Alpha.lua";
+        let other = "Account/OTHER/SavedVariables/Alpha.lua";
+        put(&a, chr, "AlphaDB = { who = \"thrall\" }\n");
+        put(&a, other, "AlphaDB = { who = \"excluded account\" }\n");
+        write_wtf(&b, "Alpha", "AlphaDB = { peer = true }\n");
+        for _ in 0..2 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        uninstall_alpha_on(&mut a, &g);
+        assert_eq!(read_wtf(&a, "Alpha"), None);
+        assert_eq!(get(&a, chr), None, "the character file left with the code");
+        assert_eq!(
+            get(&a, other).as_deref(),
+            Some("AlphaDB = { who = \"excluded account\" }\n"),
+            "an account outside the sharing is never moved"
+        );
+        let (ac, _) = pc_ids(&a);
+        let removal = removal_hash(&lab, &g, &ac);
+        a.svc.command(Command::RestoreRemoved { removal }).unwrap();
+        for _ in 0..8 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        assert_eq!(
+            read_wtf(&a, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 1 }\n")
+        );
+        assert_eq!(
+            get(&a, chr).as_deref(),
+            Some("AlphaDB = { who = \"thrall\" }\n"),
+            "the character file returns to its own character"
+        );
+        assert_eq!(
+            get(&a, other).as_deref(),
+            Some("AlphaDB = { who = \"excluded account\" }\n")
+        );
+        assert_eq!(get(&b, chr), None, "no file crosses to another identity");
+        assert_eq!(get(&b, other), None);
     }
 
     #[test]

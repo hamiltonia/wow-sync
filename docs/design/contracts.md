@@ -1220,7 +1220,7 @@ need owner approval; unapproved ones are **PENDING OWNER**.
 | 100 MiB background memory; sync within 10 s | product gate | approved (AGENTS, R-14) |
 | Removal settle 2 scans / 30 s | product gate | approved (Q-41) |
 | 72 h "not heard from" emphasis | product gate | approved (Q-27) |
-| Settings saved-file size cap | product gate | **PENDING OWNER** (Q-77); settings sync blocked until set |
+| Settings saved-file size cap | product gate | **32 MiB (33,554,432 bytes)**, owner decision D-26 (Q-77), as built; a missing value keeps settings sync disabled |
 | 6 h repeat suppression of an unchanged notice | product gate | **PENDING OWNER** (Q-85); never applies to `DataAtRisk` |
 | `DataAtRisk` and the notification toggle | product gate | **PENDING OWNER** (Q-86): respects the toggle; always shown in the app |
 | 24 h automatic update-check interval | product gate | **PENDING OWNER** (Q-87) |
