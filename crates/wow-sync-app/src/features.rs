@@ -594,7 +594,7 @@ pub fn apply_snapshot(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot)
                 .flat_map(|r| r.rejections.iter().copied())
                 .collect(),
             held_by: h.holders.join(", "),
-            held_on: None,
+            held_on: crate::rollback_ui::held_on(&s.held_release_dates, &h.release),
         })
         .collect();
     f.recovery = crate::recovery_ui::entries(&s.recovery_points);

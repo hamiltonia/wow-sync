@@ -1368,6 +1368,7 @@ tests = [
     "recovery_ui::tests::entries_list_the_add_ons_recovery_points_and_restore_is_a_group_rollback",
     "recovery_ui::tests::nothing_listed_for_other_add_ons_duplicates_or_when_none_are_kept",
     "rollback_ui::tests::a_rollback_outcome_is_told_on_its_own_add_on_page_only",
+    "rollback_ui::tests::a_held_date_is_mapped_in_local_time_and_absent_for_a_peer_only_release",
     "recovery_ui::tests::a_retired_computer_cannot_restore_and_is_told_why",
 ]
 

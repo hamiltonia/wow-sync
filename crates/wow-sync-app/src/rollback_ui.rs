@@ -24,6 +24,14 @@ pub struct ReleaseRow {
     pub held_on: Option<String>,
 }
 
+/// The local date a held release was set aside, when the snapshot has one for it.
+pub fn held_on(
+    dates: &std::collections::BTreeMap<Sha256, u64>,
+    release: &Sha256,
+) -> Option<String> {
+    dates.get(release).map(|ms| crate::world::day_text(*ms))
+}
+
 /// The version installed on this computer, or `None` when it is not known.
 pub fn installed_version(w: &World, package: &str) -> Option<String> {
     w.addon(package)
@@ -265,6 +273,19 @@ mod tests {
             None,
             "success needs no warning"
         );
+    }
+
+    #[test]
+    fn a_held_date_is_mapped_in_local_time_and_absent_for_a_peer_only_release() {
+        let mut dates = std::collections::BTreeMap::new();
+        dates.insert(Sha256([5; 32]), 1_700_000_000_000u64);
+        let d = held_on(&dates, &Sha256([5; 32])).unwrap();
+        assert_eq!(d, crate::world::day_text(1_700_000_000_000));
+        assert!(d.contains("Nov"), "{d}");
+        assert_eq!(held_on(&dates, &Sha256([6; 32])), None);
+        let mut r = row("1.0.0", false, false);
+        r.held_on = Some(d.clone());
+        assert!(release_line(&r).contains(&format!("held since {d}")));
     }
 
     #[test]
