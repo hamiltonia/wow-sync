@@ -186,7 +186,8 @@ pub enum GroupAction {
         options: ExportOptions,
     },
     SaveDiagnostics {
-        options: ExportOptions,
+        /// The exact export the preview on screen showed.
+        export: wow_sync_core::diagnostics::Export,
         dest: PathBuf,
     },
 }
@@ -277,8 +278,8 @@ impl GroupAction {
             }
             GroupAction::CheckUpdates => Command::CheckUpdates,
             GroupAction::ExportDiagnostics { options } => Command::ExportDiagnostics { options },
-            GroupAction::SaveDiagnostics { options, dest } => {
-                Command::SaveDiagnostics { options, dest }
+            GroupAction::SaveDiagnostics { export, dest } => {
+                Command::SavePreviewedDiagnostics { export, dest }
             }
         }
     }
@@ -310,6 +311,8 @@ pub enum ActionResult {
     Exported {
         text: String,
         summary: String,
+        /// The runtime's export, kept so a save sends exactly what the preview showed.
+        export: wow_sync_core::diagnostics::Export,
     },
     /// The export or save was refused; the text says why in plain words.
     ExportRefused(String),
@@ -325,7 +328,8 @@ impl ActionResult {
             Ok(CommandOutcome::UpdateCheck(_)) => Self::UpdateStarted,
             Ok(CommandOutcome::Exported(e)) => Self::Exported {
                 summary: e.replaced.summary(),
-                text: e.text,
+                text: e.text.clone(),
+                export: e,
             },
             Err(CommandError::UpdatesUnavailable) => {
                 Self::Failed("update checking is not available in this build".into())
@@ -426,6 +430,10 @@ pub fn result_text(kind: ActionKind, r: &ActionResult) -> String {
             }
             _ => "Saved on this computer.".into(),
         },
+        ActionResult::Changed if kind == ActionKind::SaveDiagnostics => {
+            "The details changed since the preview. Preview again before saving. Nothing was saved."
+                .into()
+        }
         ActionResult::Changed => {
             "Something changed while you were choosing. Nothing was saved. Look at the new choices and choose again."
                 .into()

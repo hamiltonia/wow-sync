@@ -1343,6 +1343,8 @@ tests = [
   "about_ui::tests::update_states_use_core_text_and_an_empty_state",
   "about_ui::tests::a_toggle_flips_only_its_own_flag_and_unknown_keys_do_nothing",
   "about_ui::tests::changing_an_option_drops_the_preview_and_a_refusal_is_shown_not_saved",
+  "about_ui::tests::save_sends_the_exact_previewed_export_and_never_a_rebuilt_one",
+  "about_ui::tests::a_stale_preview_says_so_drops_the_preview_and_other_changes_keep_their_wording",
 ]
 
 [[case]]

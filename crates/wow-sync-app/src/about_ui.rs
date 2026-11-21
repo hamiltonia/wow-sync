@@ -39,6 +39,8 @@ pub struct DiagState {
 pub struct Preview {
     pub text: String,
     pub summary: String,
+    /// The runtime's export; Save sends exactly this.
+    pub export: wow_sync_core::diagnostics::Export,
 }
 
 impl DiagState {
@@ -59,14 +61,26 @@ impl DiagState {
     /// Takes the result of a preview or save.
     pub fn absorb(&mut self, kind: ActionKind, r: &ActionResult) {
         match (kind, r) {
-            (ActionKind::ExportDiagnostics, ActionResult::Exported { text, summary }) => {
+            (
+                ActionKind::ExportDiagnostics,
+                ActionResult::Exported {
+                    text,
+                    summary,
+                    export,
+                },
+            ) => {
                 self.preview = Some(Preview {
                     text: text.clone(),
                     summary: summary.clone(),
+                    export: export.clone(),
                 });
                 self.message = None;
             }
             (ActionKind::SaveDiagnostics, ActionResult::Exported { .. }) => {
+                self.message = Some(crate::features::result_text(kind, r));
+            }
+            (ActionKind::SaveDiagnostics, ActionResult::Changed) => {
+                self.preview = None;
                 self.message = Some(crate::features::result_text(kind, r));
             }
             (
@@ -140,6 +154,7 @@ mod tests {
             &ActionResult::Exported {
                 text: "x".into(),
                 summary: "Replaced: 1".into(),
+                export: sample_export("x"),
             },
         );
         assert!(d.preview.is_some());
@@ -153,5 +168,65 @@ mod tests {
         );
         assert_eq!(d.message.as_deref(), Some("That place is not allowed."));
         assert!(warnings()[1].contains("shared Dropbox folder"));
+    }
+
+    fn sample_export(text: &str) -> wow_sync_core::diagnostics::Export {
+        wow_sync_core::diagnostics::Export {
+            text: text.into(),
+            replaced: wow_sync_core::diagnostics::Replaced {
+                folder_paths: 1,
+                computer_names: 0,
+                addon_names: 0,
+            },
+        }
+    }
+
+    #[test]
+    fn save_sends_the_exact_previewed_export_and_never_a_rebuilt_one() {
+        use crate::features::GroupAction;
+        use wow_sync_runtime::{Command, CommandOutcome};
+        let shown = sample_export("what the preview showed");
+        let r = ActionResult::from_outcome(Ok(CommandOutcome::Exported(shown.clone())));
+        let mut d = DiagState::default();
+        d.absorb(ActionKind::ExportDiagnostics, &r);
+        let p = d.preview.clone().unwrap();
+        assert_eq!(p.export, shown);
+        let save = GroupAction::SaveDiagnostics {
+            export: p.export,
+            dest: PathBuf::from("out.txt"),
+        };
+        assert_eq!(
+            save.to_command(),
+            Command::SavePreviewedDiagnostics {
+                export: shown,
+                dest: PathBuf::from("out.txt"),
+            }
+        );
+    }
+
+    #[test]
+    fn a_stale_preview_says_so_drops_the_preview_and_other_changes_keep_their_wording() {
+        use wow_sync_core::decision::DecideError;
+        use wow_sync_runtime::CommandError;
+        let mut d = DiagState::default();
+        d.absorb(
+            ActionKind::ExportDiagnostics,
+            &ActionResult::Exported {
+                text: "x".into(),
+                summary: "s".into(),
+                export: sample_export("x"),
+            },
+        );
+        let r = ActionResult::from_outcome(Err(CommandError::Decide(DecideError::Changed)));
+        d.absorb(ActionKind::SaveDiagnostics, &r);
+        assert_eq!(
+            d.message.as_deref(),
+            Some(
+                "The details changed since the preview. Preview again before saving. Nothing was saved."
+            )
+        );
+        assert!(d.preview.is_none());
+        let other = crate::features::result_text(ActionKind::Decide, &r);
+        assert!(other.starts_with("Something changed while you were choosing"));
     }
 }
