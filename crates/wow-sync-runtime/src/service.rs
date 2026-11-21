@@ -347,6 +347,8 @@ pub struct SliceService {
     /// The approved saved-settings size cap. No value is approved (Q-77), so it is `None` and
     /// settings sync never touches real data; only tests set one.
     settings_cap: Option<u64>,
+    /// The text the latest diagnostics preview returned; a previewed save must match it.
+    previewed: Option<String>,
     /// The decisions currently offered to the owner and what answering each one does.
     offered: (
         Vec<wow_sync_core::decision::DecisionItem>,
@@ -405,6 +407,7 @@ impl SliceService {
             provider_error: None,
             plane,
             settings_cap: wow_sync_core::records::MAX_SETTINGS_FILE_BYTES,
+            previewed: None,
             offered: Default::default(),
             notices: None,
             updates: None,
@@ -581,7 +584,7 @@ impl SliceService {
         }
     }
 
-    fn redaction_context(
+    pub(crate) fn redaction_context(
         &self,
         snap: &StatusSnapshot,
     ) -> wow_sync_core::diagnostics::RedactionContext {
@@ -600,14 +603,22 @@ impl SliceService {
         }
         names.sort();
         names.dedup();
+        let (wtf_accounts, wtf_realms, wtf_chars) =
+            crate::settings_cycle::wtf_names(&self.variant_dir());
+        let mut computers = vec![env("COMPUTERNAME", "HOSTNAME")];
+        computers.retain(|c| !c.is_empty());
         wow_sync_core::diagnostics::RedactionContext {
             home_dir: env("USERPROFILE", "HOME"),
             os_user_name: env("USERNAME", "USER"),
+            computer_names: computers,
             display_names: names,
             install_roots: vec![self.cfg.install_root.to_string_lossy().into_owned()],
             shared_root: self.cfg.shared_root.to_string_lossy().into_owned(),
+            dropbox_root: self.cfg.shared_root.to_string_lossy().into_owned(),
             local_state_root: self.cfg.state_dir.to_string_lossy().into_owned(),
-            ..Default::default()
+            wtf_account_names: wtf_accounts,
+            wtf_realm_names: wtf_realms,
+            wtf_character_names: wtf_chars,
         }
     }
 
@@ -630,12 +641,26 @@ impl SliceService {
                 crate::diag::export_diagnostics(&input, &ctx, *options)
                     .map_err(crate::diag::ExportError::Refused)
             }
+            Command::SavePreviewedDiagnostics { export, dest } => {
+                if self.previewed.as_deref() != Some(export.text.as_str()) {
+                    return Err(CommandError::Decide(
+                        wow_sync_core::decision::DecideError::Changed,
+                    ));
+                }
+                let forbidden = vec![self.cfg.shared_root.clone(), self.cfg.install_root.clone()];
+                crate::diag::save_export(export, dest, &forbidden)
+                    .map(|()| export.clone())
+                    .map_err(crate::diag::ExportError::Save)
+            }
             Command::SaveDiagnostics { options, dest } => {
                 let forbidden = vec![self.cfg.shared_root.clone(), self.cfg.install_root.clone()];
                 crate::diag::export_and_save(&input, &ctx, *options, dest, &forbidden)
             }
             _ => return Err(CommandError::NotAllowed),
         };
+        if let (Command::ExportDiagnostics { .. }, Ok(export)) = (cmd, &result) {
+            self.previewed = Some(export.text.clone());
+        }
         result.map(CommandOutcome::Exported).map_err(|e| {
             crate::control::log_activity(
                 &self.state,
@@ -694,7 +719,9 @@ impl SliceService {
                     None => Err(CommandError::UpdatesUnavailable),
                 };
             }
-            Command::ExportDiagnostics { .. } | Command::SaveDiagnostics { .. } => {
+            Command::ExportDiagnostics { .. }
+            | Command::SaveDiagnostics { .. }
+            | Command::SavePreviewedDiagnostics { .. } => {
                 return self.diagnostics_command(&cmd);
             }
             _ => {}
@@ -1077,7 +1104,8 @@ impl SliceService {
                 // Answered before the group state is read.
                 Command::CheckUpdates
                 | Command::ExportDiagnostics { .. }
-                | Command::SaveDiagnostics { .. } => return Err(CommandError::NotAllowed),
+                | Command::SaveDiagnostics { .. }
+                | Command::SavePreviewedDiagnostics { .. } => return Err(CommandError::NotAllowed),
             }
         };
         let routed = route(

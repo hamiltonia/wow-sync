@@ -1162,6 +1162,14 @@ tests = [
     "e2e::tests::restoring_a_copy_a_keep_displaced_converges_the_group_on_it",
     "e2e::tests::a_rollback_of_a_copy_the_group_never_displaced_is_still_refused",
 ]
+
+[[case]]
+id = "R4-integrate:diagnostics-save-is-the-previewed-text"
+tier = "offline"
+tests = [
+    "e2e::tests::a_previewed_save_writes_the_previewed_bytes_even_after_the_state_changed",
+    "e2e::tests::the_redaction_context_knows_wtf_names_and_the_provider_root",
+]
 # <<< section: R4-integrate
 
 # >>> section: R4-notify-diag

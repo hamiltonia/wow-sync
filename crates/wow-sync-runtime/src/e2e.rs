@@ -3664,20 +3664,154 @@ mod tests {
 
     #[test]
     fn a_rollback_of_a_copy_the_group_never_displaced_is_still_refused() {
+        use wow_sync_core::hash::package_hash;
         let lab = Lab::new();
         let mut a = lab.pc("a");
         a.addon("Amb", "from-a");
+        a.addon("Other", "unrelated");
         let g = a.create();
-        synced(&mut a);
+        for _ in 0..3 {
+            synced(&mut a);
+        }
         let f = folder_of(&lab, &g, &a, "amb");
-        let ghost = wow_sync_core::ids::Sha256([7; 32]);
+        let other = folder_of(&lab, &g, &a, "other");
+        let other_release = package_hash(&[(other.key.clone(), other.tree.unwrap())]);
+        let (ac, _) = pc_ids(&a);
+        let before = authority_files(&lab, &g, &ac);
+        // A real, held release, but of another add-on: it is not a copy of Amb.
         assert_eq!(
             a.svc.command(Command::Rollback {
                 package: f.key,
-                recovered: ghost
+                recovered: other_release
             }),
-            Err(CommandError::UnknownCopy(ghost))
+            Err(CommandError::UnknownCopy(other_release))
         );
+        for _ in 0..3 {
+            synced(&mut a);
+        }
+        assert_eq!(
+            authority_files(&lab, &g, &ac),
+            before,
+            "a refused rollback writes no rejection"
+        );
+        assert_eq!(a.read("Amb/main.lua").as_deref(), Some("from-a"));
+    }
+
+    #[test]
+    fn a_previewed_save_writes_the_previewed_bytes_even_after_the_state_changed() {
+        use crate::diag::ExportError;
+        use wow_sync_core::decision::DecideError;
+        use wow_sync_core::diagnostics::ExportOptions;
+        let lab = Lab::new();
+        let mut a = lab.pc("workstation-one");
+        a.addon("Alpha", "alpha-v1");
+        a.create();
+        synced(&mut a);
+        let options = ExportOptions::default();
+        let Ok(CommandOutcome::Exported(preview)) =
+            a.svc.command(Command::ExportDiagnostics { options })
+        else {
+            panic!("preview refused");
+        };
+        // The state changes after the preview: a new add-on is picked up and published.
+        a.addon("Beta", "beta-v1");
+        for _ in 0..3 {
+            synced(&mut a);
+        }
+        let Ok(CommandOutcome::Exported(fresh)) =
+            a.svc.command(Command::ExportDiagnostics { options })
+        else {
+            panic!("refused");
+        };
+        assert_ne!(fresh.text, preview.text, "the export really did change");
+        // The older preview is no longer the latest one, so it is refused and nothing is written.
+        let out = lab.tmp.join("saved");
+        std::fs::create_dir(&out).unwrap();
+        let dest = out.join("d.txt");
+        assert_eq!(
+            a.svc.command(Command::SavePreviewedDiagnostics {
+                export: preview.clone(),
+                dest: dest.clone()
+            }),
+            Err(CommandError::Decide(DecideError::Changed))
+        );
+        assert!(!dest.exists());
+        // Text the service never produced is refused too.
+        let mut forged = fresh.clone();
+        forged.text.push_str("extra");
+        assert!(a
+            .svc
+            .command(Command::SavePreviewedDiagnostics {
+                export: forged,
+                dest: dest.clone()
+            })
+            .is_err());
+        assert!(!dest.exists());
+        // The state changes again after the latest preview; the save still writes those bytes.
+        a.addon("Gamma", "gamma-v1");
+        for _ in 0..3 {
+            synced(&mut a);
+        }
+        assert_eq!(
+            a.svc.command(Command::SavePreviewedDiagnostics {
+                export: fresh.clone(),
+                dest: dest.clone()
+            }),
+            Ok(CommandOutcome::Exported(fresh.clone()))
+        );
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), fresh.text);
+        assert_ne!(
+            std::fs::read_to_string(&dest).unwrap(),
+            {
+                let Ok(CommandOutcome::Exported(now)) =
+                    a.svc.command(Command::ExportDiagnostics { options })
+                else {
+                    panic!("refused");
+                };
+                now.text
+            },
+            "a rebuild would have differed"
+        );
+        // The forbidden folders are still refused for a previewed save.
+        let Ok(CommandOutcome::Exported(p)) = a.svc.command(Command::ExportDiagnostics { options })
+        else {
+            panic!("refused");
+        };
+        let bad = lab.shared.join("d.txt");
+        assert!(matches!(
+            a.svc.command(Command::SavePreviewedDiagnostics {
+                export: p,
+                dest: bad.clone()
+            }),
+            Err(CommandError::Export(ExportError::Save(_)))
+        ));
+        assert!(!bad.exists());
+    }
+
+    #[test]
+    fn the_redaction_context_knows_wtf_names_and_the_provider_root() {
+        let lab = Lab::new();
+        let mut a = lab.pc("workstation-one");
+        a.addon("Alpha", "alpha-v1");
+        a.create();
+        synced(&mut a);
+        // Negative: no WTF folder gives no WTF names.
+        let snap = a.svc.status();
+        let ctx = a.svc.redaction_context(&snap);
+        assert!(
+            ctx.wtf_account_names.is_empty()
+                && ctx.wtf_realm_names.is_empty()
+                && ctx.wtf_character_names.is_empty()
+        );
+        let wtf = a.install.variant_dir.join("WTF/Account");
+        std::fs::create_dir_all(wtf.join("PLANTEDACCT/Plantedrealm/Plantedchar")).unwrap();
+        std::fs::create_dir_all(wtf.join("PLANTEDACCT/SavedVariables")).unwrap();
+        let ctx = a.svc.redaction_context(&snap);
+        assert_eq!(ctx.wtf_account_names, vec!["PLANTEDACCT"]);
+        assert_eq!(ctx.wtf_realm_names, vec!["Plantedrealm"]);
+        assert_eq!(ctx.wtf_character_names, vec!["Plantedchar"]);
+        assert!(ctx.shared_root.contains(&*lab.shared.to_string_lossy()));
+        assert_eq!(ctx.dropbox_root, ctx.shared_root);
     }
 
     /// A keep of `owner`'s own Alpha release, written into `owner`'s authority folder.
