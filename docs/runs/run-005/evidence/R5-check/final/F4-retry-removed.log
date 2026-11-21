@@ -1,0 +1,22 @@
+ControlType.Group | enabled=True offscreen=False focus=False | Status
+ControlType.StatusBar | enabled=True offscreen=False focus=False | This computer is up to date. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Final-A
+ControlType.Button | enabled=True offscreen=False focus=False | Sync now
+ControlType.Button | enabled=True offscreen=False focus=False | Pause syncing
+ControlType.Group | enabled=True offscreen=False focus=False | Sections
+ControlType.Button | enabled=True offscreen=False focus=False | Overview
+ControlType.Button | enabled=True offscreen=False focus=False | Computers
+ControlType.Button | enabled=True offscreen=False focus=False | Add-ons, current page
+ControlType.Button | enabled=True offscreen=False focus=False | Needs attention, 1 items
+ControlType.Button | enabled=True offscreen=False focus=False | Activity
+ControlType.Button | enabled=True offscreen=False focus=False | Settings sync
+ControlType.Button | enabled=True offscreen=False focus=False | App settings
+ControlType.Button | enabled=True offscreen=False focus=False | About
+ControlType.StatusBar | enabled=True offscreen=False focus=False | synfinal can't be restored: a file of SynFinal is not in the shared folder or in a local copy. Nothing was changed.
+ControlType.Button | enabled=True offscreen=False focus=False | Dismiss
+ControlType.Text | enabled=True offscreen=False focus=False | Add-ons
+ControlType.Text | enabled=True offscreen=False focus=False | Removed
+ControlType.Text | enabled=True offscreen=False focus=False | synfinal
+ControlType.Button | enabled=True offscreen=False focus=True | Try again
+ControlType.Button | enabled=True offscreen=False focus=False | Dismiss
+ControlType.Button | enabled=True offscreen=False focus=False | Restore
+ControlType.Button | enabled=True offscreen=False focus=False | Cancel

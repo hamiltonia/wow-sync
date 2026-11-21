@@ -524,3 +524,204 @@ The read-only observation helper names only its scoped synthetic fixture.
 Main status was empty during final inspection and is checked again before commit.
 Only owned evidence is staged. No product/test edits, push, tag, nested
 workers or budget-counter resets were made.
+
+## Final recheck
+
+Source/tag candidate: `8ecb62160ed070a456f1cea5abf2126ef082ce86`, after
+`git merge main` in `D:\GitHub\wow-sync.worktrees\R5-check`, branch
+`run005/R5-check`. Windows 11 x64, 2026-11-21. Fresh lab:
+`D:\WoWSyncLab\R5-check\final`, with one enrolled synthetic computer and
+one settings-enabled addon. This bounded final check does not repeat the
+earlier two-peer restoration, memory or other blocked GUI observations.
+All new recovery requests are made through the real GUI; the terminal is
+used only for fixture/fault setup and read-only outcome checks.
+
+| Final item | Verdict |
+|---|---|
+| 1. F3 last-addon GUI recovery | PASS |
+| 2. F4 refusal, failed retry and repaired retry | PASS |
+| 3. RV5-01 corrupt-blob refusal | PASS |
+| 4. Assigned release artifact smoke | PASS |
+| 5. Assigned candidate CI jobs | PASS |
+
+### Final F3 — PASS
+
+Rebuilt the release app and devkit binaries with
+`WOWSYNC_BUILD_COMMIT=8ecb62160ed070a456f1cea5abf2126ef082ce86` and
+`cargo build --release --locked -p wow-sync-app`:
+[build](R5-check/final/build.log).
+An initial invocation wrongly treated the `devkit` binary as a separate
+package and failed before building; the corrected successful build above
+supersedes it.
+
+Created and enrolled only a scoped, marked synthetic installation:
+[enrollment](R5-check/final/enroll.log). Enabled its synthetic-account
+settings scope and explicitly selected this computer as settings master.
+The rendered page confirmed settings syncing. An exploratory assumption
+that settings use the code-blob filename layout was wrong; this is not
+credited as a product failure or as publication evidence.
+
+Captured app PID 31228, creation `2026-11-21T22:11:15.0829990Z`.
+Launch used `--dev`, explicit final-lab installation/provider/state paths,
+`--name Final-A --interval-ms 1000 --recent-ms 100`, and scoped lab home/log
+overrides. Cargo bin was prepended to PATH in every shell; tests use the
+final lab's `temp` directory as TEMP/TMP.
+
+GUI pause, deletion of only the two synthetic addon code files, removal of
+the empty directory, GUI resume and a 36-second observation genuinely
+uninstall the last active addon including its owned settings:
+[absent](R5-check/final/F3-absent.log).
+Despite zero active addons, Removed and Restore remain actionable:
+[UIA](R5-check/final/F3-empty.log).
+GUI confirmation restores code, TOC and settings, with all three SHA-256
+values matching the [baseline](R5-check/final/baseline.log):
+[restored](R5-check/final/F3-restored.log).
+No unrelated anchor and no hand-installed replacement code/settings were
+needed. F3 is closed on this source.
+
+### Final F4 — PASS
+
+Repeat the genuine uninstall; the originating computer has no recoverable
+local code bytes. Delete the required provider code blob whose expected
+SHA-256 is `d80d1c876a39615b81e045874f4111bdf3c0f014daff6359cc9c45f3da01119b`.
+
+- Immediate GUI Restore refusal persists as Unavailable on Removed, with
+  Try again and Dismiss:
+  [row](R5-check/final/F4-immediate-removed.log).
+  Needs attention still contains the actionable issue after another
+  five seconds/multiple normal cycles:
+  [item](R5-check/final/F4-immediate-needs.log).
+  No live code/settings is installed:
+  [absence](R5-check/final/F4-immediate-absent.log).
+- Restore the provider bytes from the retained synthetic lab copy, verify
+  its SHA-256, deliberately Dismiss the initial issue, pause syncing and
+  queue a valid GUI Restore. The actual window shows Waiting for syncing:
+  [OCR](R5-check/final/F4-queued-ocr.log).
+  The queued request file is independently checked before fault injection.
+  Delete the same provider blob, then resume:
+  [Unavailable](R5-check/final/F4-queued-unavailable.log).
+- Try again with the blob still missing. The persistent issue and row's
+  Try again/Dismiss survive the failed retry:
+  [Removed](R5-check/final/F4-retry-removed.log),
+  [Needs attention](R5-check/final/F4-retry-needs.log).
+  Neither code nor settings is partially installed:
+  [absence](R5-check/final/F4-retry-absent.log).
+- Put back only the provider blob from the retained lab copy; never put
+  live addon/settings files back manually.
+  [Verified identical copy](R5-check/final/F4-copy-match.log).
+  Activate Try again: all three baseline hashes match:
+  [complete restore](R5-check/final/F4-restored.log).
+  Needs attention clears:
+  [cleared](R5-check/final/F4-cleared.log).
+
+F4 is closed on the tested source. Provider repairs are fault-fixture setup
+explicitly requested for this check, not a terminal product recovery path.
+
+### Final RV5-01 — PASS
+
+Uninstall again:
+[absence](R5-check/final/RV5-before-absent.log).
+Replace the provider code blob with incorrect content while leaving it
+present:
+[fault condition](R5-check/final/RV5-corrupt.log).
+No recoverable local code bytes exist. GUI Restore is accepted, but download
+verification fails and becomes Unavailable, not an endlessly queued restore:
+[UIA](R5-check/final/RV5-result.log),
+[rendered text](R5-check/final/RV5-result-ocr.log).
+Observed: “the downloaded copy of SynFinal did not verify; nothing was
+changed.” No “Settings are restored” note or “next sync” line appears.
+After another seven seconds/multiple cycles the issue remains actionable:
+[lasting item](R5-check/final/RV5-lasting.log),
+[persisted issue](R5-check/final/RV5-issue.json).
+No live code/settings exists:
+[absence](R5-check/final/RV5-absent.log).
+The misleading settings-success/endless-waiting defect is not reproduced.
+
+### Final local tiers
+
+Both required post-merge tiers passed, with scoped TEMP/TMP:
+`cargo xtask verify --tier offline`:
+[log](R5-check/final/offline.log);
+`cargo xtask verify --tier native`:
+[log](R5-check/final/native.log),
+[source-identifying report](R5-check/final/native-report.json).
+Seven native cases were verified against 762 results.
+The post-report [final offline log](R5-check/final/offline-final.log) and
+[report](R5-check/final/offline-report.json) also pass all six checks.
+No product code, tests or required-case assertions were changed.
+
+### Final assigned CI — PASS
+
+[Run 44955214721](https://github.com/hamiltonia/wow-sync/actions/runs/44955214721)
+is on `8ecb62160ed070a456f1cea5abf2126ef082ce86`.
+All six jobs completed successfully:
+[job/step metadata](R5-check/final/ci.json).
+
+| Job | Result |
+|---|---|
+| verify-offline (windows-latest), including its native tier | PASS |
+| verify-offline (macos-latest) | PASS |
+| build-only x86_64-pc-windows-msvc | PASS |
+| build-only aarch64-pc-windows-msvc | PASS |
+| build-only x86_64-apple-darwin | PASS |
+| build-only aarch64-apple-darwin | PASS |
+
+Build-only cross-target jobs are not runtime verification for those targets.
+
+### Final assigned artifact — PASS
+
+Waited for
+[dispatch 44955214908](https://github.com/hamiltonia/wow-sync/actions/runs/44955214908)
+using `gh run watch 44955214908 --repo hamiltonia/wow-sync --exit-status`,
+then downloaded it to `D:\WoWSyncLab\R5-check\artifact-final`.
+[Watch output](R5-check/final/release-watch.log);
+[completed source/job metadata](R5-check/final/release.json).
+The source is exactly `8ecb62160ed070a456f1cea5abf2126ef082ce86`;
+build succeeded and publish was skipped. No release/tag was published.
+
+Archive verification:
+[metadata](R5-check/final/artifact-metadata.log).
+
+- Name: `wow-sync-0.1.0-windows-x64.zip`, 7,723,704 bytes.
+- SHA-256:
+  `f3224865f4a5ece98a661dd730a9690367e7fafda1526388dc8cd1f88de3f1aa`,
+  matching the downloaded `.sha256`.
+- Exactly four files: `wow-sync.exe`, `LICENSE`, `README.md`,
+  `RELEASE-NOTES.md`.
+- Packaged notes match `docs\release\v0.1.0.md` byte-for-byte, not merely
+  after line-ending normalization.
+
+Stopped the development app after validating its captured PID/creation time
+before launching the actual extracted executable against the scoped final
+synthetic lab. Artifact PID 3748, creation
+`2026-11-21T22:33:03.2328920Z`, opened the real window.
+About shows version 0.1.0:
+[OCR](R5-check/final/artifact-about-ocr.log)
+(Windows OCR represents the leading numeric zero as “O”).
+Through App settings → Export diagnostics → Preview → Save, the artifact
+generated a scoped diagnostic text export. Its actual `build_commit` was
+read and compared with the full candidate SHA:
+[metadata](R5-check/final/artifact-diagnostics.log).
+An initial lookup incorrectly assumed a `.json` filename; locating the
+actual scoped `.txt` export resolved the observation without accessing any
+real user folder or clipboard.
+The captured artifact PID/creation time was checked and stopped:
+[cleanup](R5-check/final/cleanup.log).
+
+### Final scope and hygiene
+
+No new findings in these final items. F3/F4 are closed on the candidate and
+RV5-01 is not reproduced. This is a PASS for the assigned final checks,
+not a claim that earlier blocked observations or the owner Q-24 real-data
+gate were completed.
+
+Both manually launched roots are stopped; no real game/client, unrelated
+process, real settings or real provider data was touched. The fresh lab
+remains only under the approved synthetic root. No addon Lua was executed.
+At final inspection the owned evidence folder was 638,776 bytes across
+129 files, below 1 MB. Retained logs contain scoped synthetic metadata,
+labelled fingerprints and redacted account labels, not addon/settings
+payloads, user-profile paths or secrets.
+Only owned evidence is staged; main cleanliness, product-file diff and
+evidence whitespace are checked before committing. No push, tag, nested
+worker or counter reset was performed.
