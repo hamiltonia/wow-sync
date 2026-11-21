@@ -7,7 +7,7 @@ discrepancy (README "Authority and approval").
 
 Maintained under E-08 and A-40. This map records locations, not progress: for
 current run state, blockers and next steps read
-`docs/runs/<run-id>/HANDOFF.md` (run-001: [HANDOFF.md](runs/run-001/HANDOFF.md)).
+`docs/runs/<run-id>/HANDOFF.md` of the latest run (run-004: [HANDOFF.md](runs/run-004/HANDOFF.md)).
 
 ## Start here
 
@@ -32,15 +32,17 @@ outside the repository.
 
 ## Runs, packets, evidence
 
-Run state lives under `docs/runs/<run-id>/` (D-06). For run-001:
+Run state lives under `docs/runs/<run-id>/` (D-06). Each run has the files
+below; the latest closed run is run-004.
 
-| What | Where |
+| What | Where (run-004) |
 |---|---|
-| Approved run plan (phases, packet table, spikes, stop conditions) | [PLAN.md](runs/run-001/PLAN.md) |
-| Current state and resume point for a fresh orchestrator | [HANDOFF.md](runs/run-001/HANDOFF.md) |
-| Cumulative AI-credit and model usage ledger | [USAGE.md](runs/run-001/USAGE.md) |
-| Work packets, one per worker | [packets/](runs/run-001/packets/) |
-| Worker and verifier evidence, one file per packet | [evidence/](runs/run-001/evidence/) |
+| Approved run plan (phases, packet table, spikes, stop conditions) | [PLAN.md](runs/run-004/PLAN.md) |
+| Current state and resume point for a fresh orchestrator | [HANDOFF.md](runs/run-004/HANDOFF.md) |
+| Run report | [REPORT.md](runs/run-004/REPORT.md) |
+| Cumulative AI-credit and model usage ledger | [USAGE.md](runs/run-004/USAGE.md) |
+| Work packets, one per worker | [packets/](runs/run-004/packets/) |
+| Worker and verifier evidence, one file per packet | [evidence/](runs/run-004/evidence/) |
 
 ### How a worker finds its scope
 
@@ -87,6 +89,7 @@ not here.
 | Runtime: port implementations over adapters, `SliceService`, failure-injecting effects, e2e slice tests | [crates/wow-sync-runtime/](../crates/wow-sync-runtime/) |
 | GPUI shell (tray, window, G1-G9 screens) and `devkit` synthetic-install helper | [crates/wow-sync-app/](../crates/wow-sync-app/) |
 | Frozen D-21 UI prototype over fake scenarios; only D-21 copy fixes, to be retired or merged later | [crates/wow-sync-proto/](../crates/wow-sync-proto/); see [design/ui/prototype.md](design/ui/prototype.md) |
+| macOS owner build, bundle, run and memory scripts | [tools/mac/](../tools/mac/); steps in [MAC-OWNER.md](runs/run-004/MAC-OWNER.md) |
 
 ## Spikes
 

@@ -1,12 +1,13 @@
 # WoW Sync: intent specification seed
 
 Status: specification approved by the owner at `7a2ccdf` on 2026-11-14.
-Run-001 (bootstrap and feasibility) is complete pending owner decisions.
-Run-002 (design and a synthetic-data-only Windows vertical slice: enroll,
-inventory, publish, apply addon code, recover, GPUI tray app) is closed at
-budget review; it is not usable on real WoW data and not a release. Report:
-[docs/runs/run-002/REPORT.md](docs/runs/run-002/REPORT.md). Current state:
-[docs/runs/run-002/HANDOFF.md](docs/runs/run-002/HANDOFF.md).
+Runs 001 to 004 are closed. Run-004 added removal, rollback, actionable
+decisions, retire, settings sync (disabled on real data until Q-77), OS
+notifications and diagnostics, on synthetic data only; it is not usable on
+real WoW data and not a release. Report:
+[docs/runs/run-004/REPORT.md](docs/runs/run-004/REPORT.md). Current state and
+open owner questions:
+[docs/runs/run-004/HANDOFF.md](docs/runs/run-004/HANDOFF.md).
 Decisions: [docs/OWNER-DECISIONS.md](docs/OWNER-DECISIONS.md).
 Repository layout: [docs/REPO-MAP.md](docs/REPO-MAP.md).
 
@@ -97,9 +98,9 @@ must become owner decisions before a large implementation investment.
 
 ## Not included or authorized
 
-- No product features or application behavior beyond the approved run-001
-  scope (D-05, D-15).
-- No worker/model or budget authority beyond D-04, D-05, D-13 and D-16.
+- No product features or application behavior beyond the approved run plans
+  (latest: run-004, D-24).
+- No worker/model or budget authority beyond the recorded run approvals.
 - No access to real WoW installations, Dropbox data, accounts or credentials,
   except the scopes recorded in D-08, D-09 and D-14.
 - No cloud service, telemetry vendor, paid subscription or public publishing.
