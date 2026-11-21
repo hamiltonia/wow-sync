@@ -9,6 +9,28 @@ use wow_sync_runtime::RemovedRow;
 pub const RESTORE_UNAVAILABLE: &str =
     "This removal can't be named yet, so it can't be restored from here. Nothing was changed.";
 
+/// The restore in progress for the removed row at `index`, matched by its first folder.
+pub fn progress_for(w: &World, index: usize) -> Option<&wow_sync_runtime::RestoreProgress> {
+    let first = w.features.removed.get(index)?.folders.first()?;
+    w.features
+        .restores
+        .iter()
+        .find(|p| p.package.as_str().eq_ignore_ascii_case(first))
+}
+
+/// A restore's sentence as plain text (the runtime already strips colour codes; this keeps
+/// markup from an add-on title out of the window whatever the source).
+pub fn plain(text: &str) -> String {
+    wow_sync_runtime::strip_colour_codes(text)
+}
+
+/// Dismiss a refused restore (it leaves Needs attention).
+pub fn dismiss_action(p: &wow_sync_runtime::RestoreProgress) -> GroupAction {
+    GroupAction::DismissRestoreIssue {
+        package: p.package.clone(),
+    }
+}
+
 /// What the confirmation says before a restore is sent (removal.md §7.4 step 2).
 pub fn confirm_text(title: &str) -> String {
     format!(
@@ -66,6 +88,7 @@ pub fn intro(count: usize) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::features::{result_text_named, ActionResult};
     use wow_sync_core::ids::Sha256;
 
     fn row(awaiting: &[&str]) -> RemovedRow {
@@ -122,7 +145,6 @@ mod tests {
 
     #[test]
     fn a_queued_restore_says_it_installs_everywhere_and_waits_for_the_game() {
-        use crate::features::{result_text_named, ActionResult};
         use wow_sync_runtime::CommandError;
         let q = result_text_named(
             ActionKind::RestoreRemoved,
@@ -140,6 +162,38 @@ mod tests {
         );
         let other = ActionResult::from_outcome(Err(CommandError::Service("boom".into())));
         assert!(matches!(other, ActionResult::Failed(_)));
+    }
+
+    #[test]
+    fn progress_belongs_to_the_row_of_its_first_folder_and_dismiss_names_that_folder() {
+        use wow_sync_runtime::{RestoreProgress, RestoreState, RestoreWait};
+        let mut w = World::empty("0.0.0");
+        w.features.removed = vec![row(&[]), {
+            let mut r = row(&[]);
+            r.folders = vec!["Other".into()];
+            r
+        }];
+        let p = RestoreProgress {
+            package: wow_sync_core::paths::validate_folder_name("Other").unwrap(),
+            title: "Other".into(),
+            state: RestoreState::Waiting {
+                reason: RestoreWait::Paused,
+            },
+            text: "Restoring Other: waiting for syncing to resume.".into(),
+        };
+        w.features.restores = vec![p.clone()];
+        assert!(progress_for(&w, 0).is_none());
+        assert_eq!(progress_for(&w, 1), Some(&p));
+        assert_eq!(
+            dismiss_action(&p),
+            GroupAction::DismissRestoreIssue {
+                package: p.package.clone()
+            }
+        );
+        assert_eq!(
+            result_text_named(ActionKind::DismissRestoreIssue, &ActionResult::Local, None),
+            "Dismissed. Nothing was changed."
+        );
     }
 
     #[test]

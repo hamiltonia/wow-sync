@@ -835,6 +835,54 @@ impl Shell {
                 body.push(self.muted(a).into_any_element());
             }
             let open = format!("removed-restore-{i}-open");
+            let progress = crate::removed_ui::progress_for(&self.w, i).cloned();
+            if let Some(p) = &progress {
+                let text = SharedString::from(crate::removed_ui::plain(&p.text));
+                match &p.state {
+                    wow_sync_runtime::RestoreState::Waiting { .. } => {
+                        body.push(self.muted(text).into_any_element());
+                    }
+                    wow_sync_runtime::RestoreState::Unavailable { .. } => {
+                        let pal = self.pal();
+                        body.push(
+                            div()
+                                .id(SharedString::from(format!("removed-restore-{i}-issue")))
+                                .role(Role::Status)
+                                .text_color(rgb(pal.fg(Tone::Error)))
+                                .child(text)
+                                .into_any_element(),
+                        );
+                        body.push(
+                            match crate::removed_ui::restore_action(&self.w, i) {
+                                Ok(a) => self.btn(
+                                    &format!("removed-retry-{i}"),
+                                    "Try again",
+                                    Bk::Primary,
+                                    Act::Group(a),
+                                    cx,
+                                ),
+                                Err(why) => self.btn_off(
+                                    &format!("removed-retry-{i}"),
+                                    "Try again",
+                                    &why,
+                                    cx,
+                                ),
+                            }
+                            .into_any_element(),
+                        );
+                        body.push(
+                            self.btn(
+                                &format!("removed-dismiss-{i}"),
+                                "Dismiss",
+                                Bk::Secondary,
+                                Act::Group(crate::removed_ui::dismiss_action(p)),
+                                cx,
+                            )
+                            .into_any_element(),
+                        );
+                    }
+                }
+            }
             match crate::removed_ui::restore_action(&self.w, i) {
                 Ok(a) if self.expanded.contains(&open) => {
                     body.push(

@@ -2024,6 +2024,7 @@ impl Shell {
     pub fn needs_target_act(t: &NeedTarget) -> Act {
         match t {
             NeedTarget::Error | NeedTarget::Risk => Act::Nav(Page::Needs),
+            NeedTarget::Restore => Act::Nav(Page::Addons),
             NeedTarget::Reconfirm => Act::OpenReconfirm,
             NeedTarget::NeedsHelp(k) => Act::OpenNeedsHelp(k.clone()),
             NeedTarget::Decision(k) => Act::OpenDecision(k.clone()),
