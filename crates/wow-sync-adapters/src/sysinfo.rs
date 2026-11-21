@@ -33,7 +33,7 @@ pub fn os_version() -> Option<(u32, u32, u32)> {
     }
     #[cfg(target_os = "macos")]
     {
-        let out = std::process::Command::new("sw_vers")
+        let out = std::process::Command::new("/usr/bin/sw_vers")
             .arg("-productVersion")
             .output()
             .ok()?;

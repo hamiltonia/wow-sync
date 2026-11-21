@@ -56,7 +56,6 @@ fn command_name(c: &Command) -> &'static str {
         Command::Rollback { .. } => "rollback",
         Command::CheckUpdates => "check-updates",
         Command::ExportDiagnostics { .. } => "export-diagnostics",
-        Command::SaveDiagnostics { .. } => "save-diagnostics",
         Command::SavePreviewedDiagnostics { .. } => "save-previewed-diagnostics",
     }
 }
@@ -133,10 +132,6 @@ fn every_command_can_be_built_and_every_refusal_named_from_outside_the_crate() {
         Command::ExportDiagnostics {
             options: ExportOptions::default(),
         },
-        Command::SaveDiagnostics {
-            options: ExportOptions::default(),
-            dest: std::path::PathBuf::from("diagnostics.txt"),
-        },
         Command::SavePreviewedDiagnostics {
             export: Export {
                 text: "previewed".into(),
@@ -152,7 +147,7 @@ fn every_command_can_be_built_and_every_refusal_named_from_outside_the_crate() {
     let mut names: Vec<_> = commands.iter().map(command_name).collect();
     names.sort_unstable();
     names.dedup();
-    assert_eq!(names.len(), 21, "one of each command");
+    assert_eq!(names.len(), 20, "one of each command");
 
     assert_eq!(outcome_name(&CommandOutcome::Written(hash)), "written");
     assert_eq!(outcome_name(&CommandOutcome::Kept), "kept");

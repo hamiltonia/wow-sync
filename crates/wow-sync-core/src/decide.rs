@@ -101,8 +101,13 @@ pub fn new_version_item(
 ) -> Result<(DecisionItem, Plans), WriteError> {
     let shown: Vec<CopyEntry> = copies
         .iter()
+        .chain(nv.absent_kept.iter())
         .map(|c| CopyEntry::from_copy(c, &nv.scope))
         .collect::<Result<_, _>>()?;
+    let kept_entry = match &nv.absent_kept {
+        Some(_) => &shown[copies.len()],
+        None => &shown[nv.kept],
+    };
     let mut planned = Vec::new();
     let mut next = 0u32;
     let mut push = |label: OptionLabel,
@@ -125,7 +130,7 @@ pub fn new_version_item(
         next += 1;
     };
     let reason = ChoiceReason::NewVersionAfterDecision;
-    let kept = &copies[nv.kept];
+    let kept = nv.kept_copy(copies);
     push(
         OptionLabel::KeepCurrent,
         kept.holders.clone(),
@@ -135,7 +140,7 @@ pub fn new_version_item(
             cx,
             reason,
             &nv.scope,
-            &shown[nv.kept],
+            kept_entry,
             &shown,
             &kept.source,
         )?,

@@ -8,13 +8,14 @@ use crate::authority::{covered, AuthorityRecord};
 use crate::decision::{Constraint, ConstraintKind};
 use crate::hash::package_hash;
 use crate::hooks::{ConstraintHooks, Neutral};
-use crate::ids::{EnrollmentId, GroupId, Sha256};
+use crate::ids::{ComputerId, EnrollmentId, GroupId, Sha256};
+use crate::inventory::{FolderState, FolderStatus, TocKind, TocSummary};
 use crate::kinds::{
     validate_choice, ChoiceAction, ChoiceReason, CodeChoice, Considered, EnrollmentRef, Exclude,
     Issuer, KeepEntry, Known, ManifestFolder, PartItem, PartOf, TreeEntry, MAX_RECORD_BYTES,
 };
 use crate::ledger::{read_parts, resolve_known, Derived, Ledger, Status};
-use crate::package::{compare_package, Package, PackageOrder, PackageVersion};
+use crate::package::{compare_package, ClientInfo, Package, PackageOrder, PackageVersion};
 use crate::paths::FolderKey;
 use crate::records::encode;
 use crate::target::{same_release, Release, ScopeMatch, Source};
@@ -278,13 +279,17 @@ impl<'a> ChoiceView<'a> {
                     Release::new(&c.folders, &t)
                 })
                 .collect();
-            let Some(kept_index) = copies
+            let (kept_index, absent_kept) = match copies
                 .iter()
                 .position(|x| same_release(&x.source, &keep_rel) == ScopeMatch::Same)
-            else {
-                continue;
+            {
+                Some(i) => (i, None),
+                None => (copies.len(), Some(absent_copy(p, keep, &keep_rel))),
             };
-            let kept_pv = project(&copies[kept_index].version, &c.folders);
+            let kept_pv = match &absent_kept {
+                Some(c) => c.version.clone(),
+                None => project(&copies[kept_index].version, &c.folders),
+            };
             let mut raised = Vec::new();
             for (i, copy) in copies.iter().enumerate() {
                 let all_different = considered
@@ -306,6 +311,7 @@ impl<'a> ChoiceView<'a> {
                     keep: hash,
                     scope: c.folders.clone(),
                     kept: kept_index,
+                    absent_kept,
                     copies: raised,
                 });
             }
@@ -323,13 +329,82 @@ pub struct Copy {
 }
 
 /// A live keep and the indexes (into the `copies` passed in) that raise `NewVersionAfterDecision`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct NewVersion {
     pub keep: Sha256,
     pub scope: Vec<FolderKey>,
-    /// The copy the keep pins.
+    /// The copy the keep pins: an index into the copies, unused when `absent_kept` is set.
     pub kept: usize,
+    /// The kept release as the keep record lists it, when no source holds it now (Q-88: the
+    /// owner's computer replaced it with a newer local copy). Its version cannot be read, so
+    /// any unconsidered copy is unordered against it.
+    pub absent_kept: Option<Copy>,
     pub copies: Vec<usize>,
+}
+
+impl PartialEq for NewVersion {
+    fn eq(&self, o: &Self) -> bool {
+        self.keep == o.keep
+            && self.scope == o.scope
+            && self.kept == o.kept
+            && self.absent_kept.as_ref().map(|c| c.version.hash)
+                == o.absent_kept.as_ref().map(|c| c.version.hash)
+            && self.copies == o.copies
+    }
+}
+
+impl Eq for NewVersion {}
+
+impl NewVersion {
+    /// The raised copies that only `own` holds: they exist on this computer alone and were
+    /// never shared (Q-88, D-26). Such a copy stays installed and unpublished until answered.
+    pub fn local_only(&self, copies: &[Copy], own: &ComputerId) -> Vec<usize> {
+        self.copies
+            .iter()
+            .copied()
+            .filter(|i| {
+                let h = &copies[*i].holders;
+                !h.is_empty() && h.iter().all(|e| &e.computer_id == own)
+            })
+            .collect()
+    }
+
+    /// The kept copy, from the copies passed to `new_versions` or the stand-in.
+    pub fn kept_copy<'a>(&'a self, copies: &'a [Copy]) -> &'a Copy {
+        self.absent_kept.as_ref().unwrap_or(&copies[self.kept])
+    }
+}
+
+/// A holder-less copy of the kept release, rebuilt from the keep record.
+fn absent_copy(p: &Package, keep: &KeepEntry, rel: &Release) -> Copy {
+    let folders = keep
+        .folders
+        .iter()
+        .map(|m| FolderState {
+            name: m.name.clone(),
+            key: m.key.clone(),
+            status: FolderStatus::Ok,
+            tree: Some(m.tree),
+            fingerprint: None,
+            files: 0,
+            bytes: 0,
+            toc: TocSummary::empty(TocKind::None),
+            file_entries: Vec::new(),
+        })
+        .collect();
+    Copy {
+        version: PackageVersion {
+            package: p.key.clone(),
+            hash: keep.package_hash,
+            folders,
+            client: ClientInfo {
+                build_version: None,
+                toc_mapping: String::new(),
+            },
+        },
+        source: Source::from_release(rel),
+        holders: Vec::new(),
+    }
 }
 
 fn project(pv: &PackageVersion, scope: &[FolderKey]) -> PackageVersion {

@@ -4,6 +4,7 @@
 
 use crate::control::ActivityEntry;
 use crate::service::StatusSnapshot;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use wow_sync_core::diagnostics::{
     build, ActivityKind, ActivityRow, AddonRow, AddonStatus, ComputerRow, CpuArch,
@@ -11,6 +12,8 @@ use wow_sync_core::diagnostics::{
     HoldKind, IdentityStatus, OsFamily, PlanBlockKind, ReasonKind, RedactionContext, ReportState,
     SourceText, Toggles, Tri, VariantKind, VariantRow,
 };
+use wow_sync_core::hash::package_hash;
+use wow_sync_core::inventory::Inventory;
 use wow_sync_core::status::{AllHoldCause, HoldScope, MemberSummary, PackageStatus};
 use wow_sync_core::target::DecisionReason;
 
@@ -96,6 +99,7 @@ pub fn save_export(export: &Export, dest: &Path, forbidden: &[PathBuf]) -> Resul
 }
 
 /// Build, then save. When the build is refused nothing is written.
+#[cfg(test)]
 pub fn export_and_save(
     input: &DiagnosticsInput,
     ctx: &RedactionContext,
@@ -152,6 +156,37 @@ fn addon_status(s: &PackageStatus) -> (AddonStatus, ReasonKind) {
     }
 }
 
+/// The compile-time build commit (`WOWSYNC_BUILD_COMMIT`, set by the release workflow);
+/// `dev` when it is absent or empty.
+fn commit_or_dev(set: Option<&'static str>) -> &'static str {
+    set.map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("dev")
+}
+
+/// One fingerprint per addon, over its folders' tree hashes in the local inventory. A folder
+/// that is unreadable or unsafe has no tree hash, so its addon gets none.
+pub fn fingerprints_from(snap: &StatusSnapshot, inv: &Inventory) -> BTreeMap<String, [u8; 32]> {
+    let mut out = BTreeMap::new();
+    let Some(detail) = snap.detail.as_ref() else {
+        return out;
+    };
+    for p in &detail.packages {
+        let trees: Option<Vec<_>> = p
+            .folders
+            .iter()
+            .map(|f| {
+                let s = inv.folders.iter().find(|s| s.name == f.name)?;
+                Some((s.key.clone(), s.tree?))
+            })
+            .collect();
+        if let Some(trees) = trees.filter(|t| !t.is_empty()) {
+            out.insert(p.key.clone(), package_hash(&trees).0);
+        }
+    }
+    out
+}
+
 /// The export input from a live snapshot. Only classes and counts are carried; texts that could
 /// hold private data stay out (the core build refuses any that slip in).
 pub fn input_from(
@@ -159,6 +194,7 @@ pub fn input_from(
     toggles: Toggles,
     activity: &[ActivityEntry],
     now_unix_ms: i64,
+    fingerprints: &BTreeMap<String, [u8; 32]>,
 ) -> DiagnosticsInput {
     let detail = snap.detail.as_ref();
     let label = detail
@@ -233,7 +269,7 @@ pub fn input_from(
                         reason,
                         hold: HoldKind::None,
                         source_text: SourceText::default(),
-                        fingerprint: None,
+                        fingerprint: fingerprints.get(&p.key).copied(),
                     }
                 })
                 .collect::<Vec<_>>()
@@ -241,7 +277,7 @@ pub fn input_from(
         .unwrap_or_default();
     DiagnosticsInput {
         app_version: env!("CARGO_PKG_VERSION"),
-        build_commit: option_env!("WOWSYNC_BUILD_COMMIT").unwrap_or("dev"),
+        build_commit: commit_or_dev(option_env!("WOWSYNC_BUILD_COMMIT")),
         toggles,
         schema_majors: vec![("authority", 1)],
         os: if cfg!(windows) {
@@ -347,6 +383,15 @@ mod tests {
             .collect();
         v.sort();
         v
+    }
+
+    #[test]
+    fn the_build_commit_is_the_stamped_one_or_dev() {
+        assert_eq!(commit_or_dev(Some("abc1234")), "abc1234");
+        assert_eq!(commit_or_dev(Some("  abc1234\n")), "abc1234");
+        assert_eq!(commit_or_dev(Some("")), "dev");
+        assert_eq!(commit_or_dev(Some("   ")), "dev");
+        assert_eq!(commit_or_dev(None), "dev");
     }
 
     #[test]

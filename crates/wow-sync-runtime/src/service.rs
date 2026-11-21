@@ -3,7 +3,10 @@
 //! through the adapters, calls core, and runs the resulting plans through the effects.
 
 use crate::activity::{ActivitySource, WinprocActivity};
-use crate::control::{Command, CommandError, CommandOutcome};
+use crate::control::{
+    inventory_without, target_without, withheld_local_versions, Command, CommandError,
+    CommandOutcome, LocalOnlyVersion,
+};
 use crate::decisions::{
     learn_from_directories, plan_own_index, route, write_record, Constraints, KeptQueue,
     KeptRecord, Plane, RouteCx, Routed,
@@ -266,6 +269,11 @@ pub struct StatusSnapshot {
     /// "Review needed" (ops.md §1.7): a guided reconfirmation is pending and neither
     /// `NeedsHelp` nor `Error` applies. The app shows it above Paused and Working.
     pub review_needed: bool,
+    /// Newer local-only versions held back after a keep (Q-88): installed here, not shared.
+    pub local_only_versions: Vec<LocalOnlyVersion>,
+    /// Conditions that put the owner's data at risk. Always shown in the app (headline, tray,
+    /// Needs attention), whatever the OS notification toggle says (Q-85, Q-86).
+    pub data_at_risk: Vec<crate::notices::DataAtRisk>,
     /// The newest update-check result; `None` until an update service has run.
     pub update: Option<wow_sync_core::update::UpdateResult>,
     /// One entry per apply journal on disk, for the diagnostics export (ops.md §5.3 Holds).
@@ -320,6 +328,10 @@ struct World {
         wow_sync_core::decide::Plans,
     )>,
     copies: Vec<PackageCopies>,
+    /// Folders of a live keep whose package has a newer copy that only this computer holds
+    /// (Q-88): neither replaced by the keep nor published until the owner answers.
+    withheld: BTreeSet<FolderKey>,
+    local_only: Vec<crate::control::LocalOnlyVersion>,
     own_states: Vec<String>,
     /// This enrollment's newest published state, if readable.
     own_latest: Option<CodeState>,
@@ -354,6 +366,8 @@ pub struct SliceService {
         Vec<wow_sync_core::decision::DecisionItem>,
         wow_sync_core::decide::Plans,
     ),
+    /// Data-at-risk conditions the latest apply produced (recovery copy failed, disk full).
+    at_risk_apply: Vec<crate::notices::DataAtRisk>,
     /// Delivers notices at the end of a cycle; none until a notifier is attached.
     notices: Option<crate::notices::NoticeRunner>,
     /// Update checks; none until a release source is attached.
@@ -409,6 +423,7 @@ impl SliceService {
             settings_cap: wow_sync_core::records::MAX_SETTINGS_FILE_BYTES,
             previewed: None,
             offered: Default::default(),
+            at_risk_apply: Vec::new(),
             notices: None,
             updates: None,
             started_ms: now_unix_ms(),
@@ -493,6 +508,14 @@ impl SliceService {
         }
     }
 
+    fn data_at_risk(&self) -> Vec<crate::notices::DataAtRisk> {
+        let mut v: Vec<_> = crate::notices::local_state_risk(&self.state)
+            .into_iter()
+            .collect();
+        v.extend(self.at_risk_apply.iter().cloned());
+        v
+    }
+
     /// Notices and the update schedule at the end of a cycle (ops.md §3, §4.2).
     fn notify_cycle(&mut self, w: &World, report: &SyncReport) {
         let settings = self.toggles();
@@ -525,6 +548,10 @@ impl SliceService {
                 fingerprint: fingerprint(format!("{:?}", item.reason).as_bytes()),
                 name,
             });
+        }
+        for risk in self.data_at_risk() {
+            open.insert(risk.key());
+            events.push(risk.event());
         }
         if w.standing == OwnStanding::Retired {
             let name = w.computer.display_name.clone();
@@ -624,6 +651,14 @@ impl SliceService {
 
     fn diagnostics_command(&mut self, cmd: &Command) -> Result<CommandOutcome, CommandError> {
         let snap = self.status();
+        let wants_fingerprints = matches!(
+            cmd,
+            Command::ExportDiagnostics { options } if options.include_fingerprints
+        );
+        let fingerprints = match self.observe_world(false) {
+            Ok(w) if wants_fingerprints => crate::diag::fingerprints_from(&snap, &w.inventory),
+            _ => Default::default(),
+        };
         let s = self.toggles();
         let input = crate::diag::input_from(
             &snap,
@@ -634,6 +669,7 @@ impl SliceService {
             },
             &self.activity_log(50),
             now_unix_ms(),
+            &fingerprints,
         );
         let ctx = self.redaction_context(&snap);
         let result = match cmd {
@@ -651,10 +687,6 @@ impl SliceService {
                 crate::diag::save_export(export, dest, &forbidden)
                     .map(|()| export.clone())
                     .map_err(crate::diag::ExportError::Save)
-            }
-            Command::SaveDiagnostics { options, dest } => {
-                let forbidden = vec![self.cfg.shared_root.clone(), self.cfg.install_root.clone()];
-                crate::diag::export_and_save(&input, &ctx, *options, dest, &forbidden)
             }
             _ => return Err(CommandError::NotAllowed),
         };
@@ -719,9 +751,7 @@ impl SliceService {
                     None => Err(CommandError::UpdatesUnavailable),
                 };
             }
-            Command::ExportDiagnostics { .. }
-            | Command::SaveDiagnostics { .. }
-            | Command::SavePreviewedDiagnostics { .. } => {
+            Command::ExportDiagnostics { .. } | Command::SavePreviewedDiagnostics { .. } => {
                 return self.diagnostics_command(&cmd);
             }
             _ => {}
@@ -1104,7 +1134,6 @@ impl SliceService {
                 // Answered before the group state is read.
                 Command::CheckUpdates
                 | Command::ExportDiagnostics { .. }
-                | Command::SaveDiagnostics { .. }
                 | Command::SavePreviewedDiagnostics { .. } => return Err(CommandError::NotAllowed),
             }
         };
@@ -1953,10 +1982,12 @@ impl SliceService {
             &self.plane.ledger,
             &constraints,
         );
-        let offers = {
+        let (offers, withheld, local_only) = {
             let valid = wow_sync_core::choice::valid_hashes(&derived);
             let view = wow_sync_core::choice::ChoiceView::new(&self.plane.ledger, &valid);
-            decision_items(
+            let (withheld, local_only) =
+                withheld_local_versions(&view, &copies, &computer.computer_id, &titles);
+            let offers = decision_items(
                 &view,
                 &wow_sync_core::choice::WriteCx {
                     group: &group.group_id,
@@ -1969,7 +2000,8 @@ impl SliceService {
                 },
                 &target,
                 &copies,
-            )
+            );
+            (offers, withheld, local_only)
         };
         let own_states =
             match provider.list(&layout::state_dir(&group.group_id, &computer.computer_id)) {
@@ -2001,6 +2033,8 @@ impl SliceService {
             views,
             target,
             offers,
+            withheld,
+            local_only,
             copies,
             own_states,
             own_latest,
@@ -2254,6 +2288,8 @@ impl SliceService {
             older_peer,
             enrollment_names,
             review_needed: false,
+            local_only_versions: w.local_only.clone(),
+            data_at_risk: self.data_at_risk(),
             update: self.updates.as_ref().and_then(|u| u.last_result()),
             journal_states: {
                 use wow_sync_core::diagnostics::JournalState as J;
@@ -2330,6 +2366,7 @@ impl SliceService {
 
     pub fn sync_once(&mut self) -> Result<SyncReport, ServiceError> {
         let mut report = SyncReport::default();
+        self.at_risk_apply.clear();
         let mut w = match self.observe_world(true) {
             Ok(w) => {
                 self.provider_error = None;
@@ -2504,7 +2541,8 @@ impl SliceService {
                 } else {
                     None
                 };
-                let mut planned = match plan_apply(&w.target, &w.inventory, &mut gen, &gate) {
+                let apply_target = target_without(&w.target, &w.withheld);
+                let mut planned = match plan_apply(&apply_target, &w.inventory, &mut gen, &gate) {
                     Ok(p) => Some(p),
                     Err(PlanBlock::NothingToDo) => None,
                     Err(b) => {
@@ -2573,6 +2611,7 @@ impl SliceService {
                             });
                         }
                         let outcome = run_apply(&plan, &mut fx);
+                        self.at_risk_apply = crate::notices::risks_from_outcome(&outcome);
                         for (k, r) in &outcome.packages {
                             report.applied.push(AppliedLine {
                                 package: k.to_string(),
@@ -2854,9 +2893,10 @@ impl SliceService {
             plane.mark_listed(&own_index.adopt, latest_seq);
         }
         let index_head = own_index.head;
+        let publishable = inventory_without(&w.inventory, &w.withheld);
         if !publish_needed(
             w.own_latest.as_ref(),
-            &w.inventory,
+            &publishable,
             apply_rep.is_some(),
             index_head.as_ref(),
             &features,
@@ -2898,7 +2938,7 @@ impl SliceService {
             authority_index: index_head,
             features,
         };
-        let plan = match plan_publish(&w.inventory, &ctx) {
+        let plan = match plan_publish(&publishable, &ctx) {
             Ok(p) => p,
             Err(b) => {
                 report.publish_note = Some(format!("not published: {}", render_block(&b)));

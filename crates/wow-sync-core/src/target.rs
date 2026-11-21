@@ -562,6 +562,16 @@ impl Source {
         }
         self.folders.get(k).copied().unwrap_or(Content::Absent)
     }
+
+    /// A source standing in for a recorded release (a keep whose copy nobody holds now). Like
+    /// any source it is compared over a recorded entry's scope only.
+    pub fn from_release(r: &Release) -> Self {
+        let folders = r.scope.iter().map(|k| (k.clone(), r.content(k))).collect();
+        Self {
+            admitted: true,
+            folders,
+        }
+    }
 }
 
 /// A recorded release entry: its scope and the trees it lists. A key of the scope it does not
