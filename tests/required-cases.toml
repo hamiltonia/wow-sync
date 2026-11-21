@@ -1306,9 +1306,9 @@ tests = [
     "settings_ui::tests::turning_on_offers_only_listed_accounts_from_the_snapshot",
     "settings_ui::tests::the_units_list_wires_share_choose_and_restore_from_the_snapshot",
     "settings_ui::tests::a_retired_master_is_not_shown_as_sharing_and_nothing_replaces_it",
-    "settings_ui::tests::the_banner_does_not_claim_sharing_without_consent_or_a_size_limit",
-    "settings_ui::tests::a_fresh_consent_with_no_units_and_no_approved_cap_does_not_claim_sharing",
-    "settings_ui::tests::units_that_cannot_share_or_restore_say_why_and_a_missing_cap_is_not_invented",
+    "settings_ui::tests::the_banner_never_waits_for_a_size_limit_and_names_a_missing_consent",
+    "settings_ui::tests::a_fresh_consent_with_no_units_says_the_master_shares_and_no_limit_is_awaited",
+    "settings_ui::tests::units_that_cannot_share_or_restore_say_why",
 ]
 
 [[case]]
@@ -1481,6 +1481,29 @@ id = "R5-app:mac-helper-paths"
 tier = "offline"
 tests = [
     "platform::tests::helper_programs_are_absolute_paths",
+]
+
+[[case]]
+id = "R5-app:q77-banner-gone"
+tier = "offline"
+tests = [
+    "settings_ui::tests::the_banner_never_waits_for_a_size_limit_and_names_a_missing_consent",
+    "settings_ui::tests::a_fresh_consent_with_no_units_says_the_master_shares_and_no_limit_is_awaited",
+]
+
+[[case]]
+id = "R5-app:q88-local-only"
+tier = "offline"
+tests = [
+    "decisions_ui::tests::a_new_version_after_keep_says_it_is_only_here_and_offers_the_four_answers",
+    "model::tests::a_local_only_version_stays_in_needs_attention_until_answered",
+]
+
+[[case]]
+id = "R5-app:data-at-risk"
+tier = "offline"
+tests = [
+    "model::tests::data_at_risk_shows_in_headline_tray_and_needs_attention_whatever_the_toggles_say",
 ]
 # <<< section: R5-app
 

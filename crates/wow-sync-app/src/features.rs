@@ -484,6 +484,10 @@ pub struct FeatureData {
     pub standing: Standing,
     pub hold: HoldScope,
     pub decisions: Vec<DecisionItem>,
+    /// Newer copies that exist only on this computer after a keep (Q-88).
+    pub local_only: Vec<wow_sync_runtime::LocalOnlyVersion>,
+    /// Conditions that threaten the user's data; shown whatever the notification toggles say.
+    pub data_at_risk: Vec<wow_sync_runtime::DataAtRisk>,
     /// Peer computer id (hex) to the enrollment a retirement would name.
     pub enrollments: Vec<(String, EnrollmentRef)>,
     /// This computer's own enrollment, when active: it may be the settings master.
@@ -522,6 +526,8 @@ impl Default for FeatureData {
             standing: Standing::Active,
             hold: HoldScope::None,
             decisions: Vec::new(),
+            local_only: Vec::new(),
+            data_at_risk: Vec::new(),
             enrollments: Vec::new(),
             this_enrollment: None,
             retired: Vec::new(),
@@ -550,6 +556,8 @@ pub fn apply_snapshot(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot)
     f.update = s.update.clone();
     f.removed = s.removed.clone();
     f.removal_hashes = s.removal_hashes.clone();
+    f.local_only = s.local_only_versions.clone();
+    f.data_at_risk = s.data_at_risk.clone();
     apply_peers(f, s);
     let retired_on = |enrollment: &wow_sync_core::ids::EnrollmentId| {
         s.peers
@@ -648,7 +656,7 @@ fn apply_peers(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot) {
         .next();
     f.master = s.settings.master_name.clone();
     apply_settings(f, &s.settings);
-    f.settings.units = settings_unit_rows(&s.settings_units, s.settings.enabled);
+    f.settings.units = settings_unit_rows(&s.settings_units);
 }
 
 fn apply_settings(f: &mut FeatureData, s: &wow_sync_runtime::SettingsSnapshot) {
@@ -662,11 +670,9 @@ fn apply_settings(f: &mut FeatureData, s: &wow_sync_runtime::SettingsSnapshot) {
     d.paused = s.paused.clone();
 }
 
-/// The settings rows as the screen shows them. `enabled` tells a missing consent from a missing
-/// size limit, which the service reports as the same `Disabled`.
+/// The settings rows as the screen shows them.
 pub fn settings_unit_rows(
     rows: &[wow_sync_runtime::SettingsUnitRow],
-    enabled: bool,
 ) -> Vec<crate::settings_ui::UnitRow> {
     use crate::settings_ui::{Copy, UnitRow, UnitStatus};
     use wow_sync_runtime::SettingsUnitStatus as S;
@@ -685,7 +691,6 @@ pub fn settings_unit_rows(
                 addon: r.unit.folder.as_str().to_string(),
                 status: match r.status {
                     S::Retired => UnitStatus::Retired,
-                    S::Disabled if enabled => UnitStatus::SizeLimitPending,
                     S::Disabled => UnitStatus::Off,
                     S::NotShared => UnitStatus::NotShared,
                     S::PolicyConflict => UnitStatus::PolicyConflict,

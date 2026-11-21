@@ -2022,7 +2022,7 @@ impl Shell {
 
     pub fn needs_target_act(t: &NeedTarget) -> Act {
         match t {
-            NeedTarget::Error => Act::Nav(Page::Needs),
+            NeedTarget::Error | NeedTarget::Risk => Act::Nav(Page::Needs),
             NeedTarget::Reconfirm => Act::OpenReconfirm,
             NeedTarget::NeedsHelp(k) => Act::OpenNeedsHelp(k.clone()),
             NeedTarget::Decision(k) => Act::OpenDecision(k.clone()),

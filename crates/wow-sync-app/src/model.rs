@@ -134,6 +134,8 @@ pub fn headline(w: &World) -> Head {
     let standing = crate::computers_ui::standing_headline(&w.features.standing);
     let (text, tone) = if !w.enrolled {
         ("Set up this computer".to_string(), Tone::Unknown)
+    } else if let Some(r) = w.features.data_at_risk.first() {
+        (r.text.clone(), Tone::Error)
     } else if let (false, Some((h, _))) = (core_blocks_pause, &standing) {
         let held = matches!(w.features.standing, crate::features::Standing::Held);
         (h.clone(), if held { Tone::Waiting } else { Tone::Help })
@@ -188,7 +190,10 @@ fn removing(w: &World) -> usize {
 
 /// The line under the headline when the headline alone is not enough (ops.md §1.6-§1.7).
 pub fn headline_sub(w: &World) -> Option<String> {
-    if !w.enrolled || matches!(w.view.headline, Headline::Error | Headline::NeedsHelp) {
+    if !w.enrolled
+        || !w.features.data_at_risk.is_empty()
+        || matches!(w.view.headline, Headline::Error | Headline::NeedsHelp)
+    {
         return None;
     }
     if let Some((_, sub)) = crate::computers_ui::standing_headline(&w.features.standing) {
@@ -665,10 +670,35 @@ pub enum NeedTarget {
     NeedsHelp(String),
     Decision(String),
     Computer(usize),
+    Risk,
+}
+
+/// What to do about each data-at-risk condition, one sentence.
+fn risk_reason(k: wow_sync_runtime::RiskKind) -> &'static str {
+    use wow_sync_runtime::RiskKind as R;
+    match k {
+        R::LocalStateUnreadable => {
+            "Restart WoW Sync. If this stays, the saved state on this computer may be damaged."
+        }
+        R::RecoveryCopyFailed => {
+            "Check that this computer's disk has free space and that WoW Sync's folder can be written to."
+        }
+        R::StorageFull => "Free up space on this computer's disk.",
+    }
 }
 
 pub fn need_items(w: &World) -> Vec<NeedItem> {
     let mut v = Vec::new();
+    for r in &w.features.data_at_risk {
+        v.push(NeedItem {
+            title: r.text.clone(),
+            reason: risk_reason(r.kind).into(),
+            affects: "Your add-ons and settings may not be recoverable".into(),
+            button: "See what to do",
+            tone: Tone::Error,
+            target: NeedTarget::Risk,
+        });
+    }
     if let Some(e) = &w.provider_error {
         v.push(NeedItem {
             title: "Can't read the shared folder".into(),
@@ -712,6 +742,35 @@ pub fn need_items(w: &World) -> Vec<NeedItem> {
                 target: NeedTarget::Decision(a.key.as_str().into()),
             });
         }
+    }
+    for item in &w.features.decisions {
+        let wow_sync_core::decision::DecisionScope::Folders(ks) = &item.scope else {
+            continue;
+        };
+        let Some(first) = ks.first() else { continue };
+        if item.reason != wow_sync_core::decision::DecisionKind::NewVersionAfterDecision
+            || w.addons.iter().any(|a| {
+                a.key.as_str() == first.as_str() && matches!(a.kind, Kind::NeedsDecision(_))
+            })
+        {
+            continue;
+        }
+        let id = wow_sync_core::decision::DecisionId(item.scope.clone());
+        let title = crate::decisions_ui::scope_title(w, &item.scope);
+        let local = w.features.local_only.iter().find(|l| l.decision == id);
+        v.push(NeedItem {
+            title: format!("{title}: a newer version is not shared"),
+            reason: match local {
+                Some(lo) => crate::decisions_ui::local_only_sentence(lo),
+                None => {
+                    format!("A new version of {title} appeared after you made a choice about it.")
+                }
+            },
+            affects: String::new(),
+            button: "Choose",
+            tone: Tone::Help,
+            target: NeedTarget::Decision(first.as_str().into()),
+        });
     }
     for (i, p) in w.peers.iter().enumerate() {
         if matches!(
@@ -1293,6 +1352,67 @@ mod tests {
         w.paused_since = None;
         w.pause_damaged = true;
         assert!(headline(&w).text.contains("pause setting can't be read"));
+    }
+
+    #[test]
+    fn data_at_risk_shows_in_headline_tray_and_needs_attention_whatever_the_toggles_say() {
+        use wow_sync_runtime::{DataAtRisk, RiskKind};
+        let mut w = enrolled();
+        w.features.toggles = wow_sync_runtime::AppToggles {
+            update_check: false,
+            notify_summaries: false,
+            notify_needs_me: false,
+        };
+        assert!(need_items(&w).is_empty());
+        w.features.data_at_risk = vec![DataAtRisk::new(RiskKind::StorageFull)];
+        let h = headline(&w);
+        assert_eq!(
+            h.text,
+            "WoW Sync can't keep recovery copies: the disk is full"
+        );
+        assert_eq!(h.tone, Tone::Error);
+        assert_eq!(tray_shape(&w), TrayShape::Cross);
+        assert!(tray_tooltip(&w).contains("the disk is full"));
+        assert_eq!(headline_sub(&w), None);
+        let items = need_items(&w);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].title, h.text);
+        assert_eq!(items[0].tone, Tone::Error);
+        assert_eq!(items[0].target, NeedTarget::Risk);
+    }
+
+    #[test]
+    fn a_local_only_version_stays_in_needs_attention_until_answered() {
+        use wow_sync_core::decision::{
+            DecisionId, DecisionItem, DecisionKind, DecisionReach, DecisionScope, EvidenceToken,
+        };
+        use wow_sync_core::ids::Sha256;
+        let key = wow_sync_core::paths::validate_folder_name("Details").unwrap();
+        let scope = DecisionScope::Folders(vec![key.clone()]);
+        let mut w = enrolled();
+        w.features.decisions = vec![DecisionItem {
+            scope: scope.clone(),
+            reason: DecisionKind::NewVersionAfterDecision,
+            reach: DecisionReach::Group,
+            options: vec![],
+            evidence: EvidenceToken(Sha256([1; 32])),
+        }];
+        w.features.local_only = vec![wow_sync_runtime::LocalOnlyVersion {
+            package: key.clone(),
+            title: "Details".into(),
+            scope: vec![key],
+            version_label: Some("9.1".into()),
+            decision: DecisionId(scope),
+        }];
+        let items = need_items(&w);
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0].reason,
+            "Version 9.1 of Details is installed only on this computer and is not shared with the group."
+        );
+        assert_eq!(items[0].target, NeedTarget::Decision("details".into()));
+        w.features.decisions.clear();
+        assert!(need_items(&w).is_empty(), "answered: it goes away");
     }
 
     #[test]
