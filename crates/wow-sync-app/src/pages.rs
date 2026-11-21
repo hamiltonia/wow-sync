@@ -914,6 +914,17 @@ impl Shell {
             folders.push(self.muted(g.clone()).into_any_element());
         }
         let mut rec: Vec<AnyElement> = Vec::new();
+        if let Some(t) = crate::rollback_ui::outcome_line(&self.w, key) {
+            rec.push(
+                div()
+                    .id("rollback-outcome")
+                    .role(Role::Status)
+                    .aria_label(SharedString::from(t.clone()))
+                    .text_color(rgb(pal.fg(Tone::Help)))
+                    .child(SharedString::from(t))
+                    .into_any_element(),
+            );
+        }
         let rows: Vec<crate::rollback_ui::ReleaseRow> = self
             .w
             .features

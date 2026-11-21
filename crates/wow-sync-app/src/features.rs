@@ -487,6 +487,8 @@ pub struct FeatureData {
     pub history: Vec<crate::rollback_ui::ReleaseRow>,
     /// Earlier versions this computer set aside, per add-on (local recovery points).
     pub recovery: Vec<crate::recovery_ui::RecoveryEntry>,
+    /// The last rollback result the service recorded, shown on that add-on's page.
+    pub rollback_outcome: Option<wow_sync_runtime::RollbackOutcome>,
     /// Removals the group has recorded, for the Removed section.
     pub removed: Vec<wow_sync_runtime::RemovedRow>,
     /// The removal record of each `removed` row (same index), which Restore names.
@@ -518,6 +520,7 @@ impl Default for FeatureData {
             allow_again: Vec::new(),
             history: Vec::new(),
             recovery: Vec::new(),
+            rollback_outcome: None,
             removed: Vec::new(),
             removal_hashes: Vec::new(),
             older_peer: None,
@@ -595,6 +598,7 @@ pub fn apply_snapshot(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot)
         })
         .collect();
     f.recovery = crate::recovery_ui::entries(&s.recovery_points);
+    f.rollback_outcome = s.rollback_outcome.clone();
     f.older_peer = s.older_peer.clone();
     f.allow_again = s
         .rejected_releases
