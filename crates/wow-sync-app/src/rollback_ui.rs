@@ -24,6 +24,14 @@ pub struct ReleaseRow {
     pub held_on: Option<String>,
 }
 
+/// The local date a held release was set aside, when the snapshot has one for it.
+pub fn held_on(
+    dates: &std::collections::BTreeMap<Sha256, u64>,
+    release: &Sha256,
+) -> Option<String> {
+    dates.get(release).map(|ms| crate::world::day_text(*ms))
+}
+
 /// The version installed on this computer, or `None` when it is not known.
 pub fn installed_version(w: &World, package: &str) -> Option<String> {
     w.addon(package)
@@ -62,6 +70,29 @@ pub enum HistoryButton {
 }
 
 pub const GO_BACK: &str = "Go back to this version…";
+
+/// The last rollback outcome the service recorded for an add-on, as the page says it. An applied
+/// rollback needs no note; the new version is simply installed.
+pub fn outcome_line(w: &World, package: &str) -> Option<String> {
+    use wow_sync_runtime::RollbackOutcomeKind as K;
+    let o = w.features.rollback_outcome.as_ref()?;
+    if o.package.as_str() != package {
+        return None;
+    }
+    let detail = o.text.trim();
+    match o.kind {
+        K::Applied => None,
+        K::NotAvailable => Some(
+            "The earlier version could not be read when WoW Sync tried to go back. Nothing was changed; you can ask again later."
+                .to_string(),
+        ),
+        K::NotApplied => Some(if detail.is_empty() {
+            "Going back did not complete. Nothing was changed.".to_string()
+        } else {
+            format!("Going back did not complete ({detail}). Nothing was changed.")
+        }),
+    }
+}
 pub const ALLOW_AGAIN: &str = "Allow again…";
 
 pub fn blocked_chip(r: &ReleaseRow) -> Option<String> {
@@ -214,6 +245,47 @@ mod tests {
             held_by: "Den PC".into(),
             held_on: None,
         }
+    }
+
+    #[test]
+    fn a_rollback_outcome_is_told_on_its_own_add_on_page_only() {
+        use wow_sync_runtime::{RollbackOutcome, RollbackOutcomeKind as K};
+        let mut w = world();
+        assert_eq!(outcome_line(&w, "details"), None);
+        fn set(w: &mut World, kind: K, text: &str) {
+            w.features.rollback_outcome = Some(RollbackOutcome {
+                package: key(),
+                recovered: Sha256([5; 32]),
+                kind,
+                text: text.into(),
+            });
+        }
+        set(&mut w, K::NotAvailable, "not available");
+        let t = outcome_line(&w, "details").unwrap();
+        assert!(t.contains("could not be read") && t.contains("Nothing was changed"));
+        assert_eq!(outcome_line(&w, "other"), None);
+        set(&mut w, K::NotApplied, "not applied: interrupted");
+        let t = outcome_line(&w, "details").unwrap();
+        assert!(t.contains("did not complete (not applied: interrupted)"));
+        set(&mut w, K::Applied, "done");
+        assert_eq!(
+            outcome_line(&w, "details"),
+            None,
+            "success needs no warning"
+        );
+    }
+
+    #[test]
+    fn a_held_date_is_mapped_in_local_time_and_absent_for_a_peer_only_release() {
+        let mut dates = std::collections::BTreeMap::new();
+        dates.insert(Sha256([5; 32]), 1_700_000_000_000u64);
+        let d = held_on(&dates, &Sha256([5; 32])).unwrap();
+        assert_eq!(d, crate::world::day_text(1_700_000_000_000));
+        assert!(d.contains("Nov"), "{d}");
+        assert_eq!(held_on(&dates, &Sha256([6; 32])), None);
+        let mut r = row("1.0.0", false, false);
+        r.held_on = Some(d.clone());
+        assert!(release_line(&r).contains(&format!("held since {d}")));
     }
 
     #[test]

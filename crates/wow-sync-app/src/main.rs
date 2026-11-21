@@ -23,6 +23,7 @@ mod model;
 mod notice;
 mod pages;
 mod platform;
+mod recovery_ui;
 mod removed_ui;
 mod rollback_ui;
 mod settings_ui;
