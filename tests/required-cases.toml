@@ -1409,3 +1409,18 @@ tests = [
 
 # >>> section: R4-mac-kit
 # <<< section: R4-mac-kit
+
+# >>> section: R5-remove
+# <<< section: R5-remove
+
+# >>> section: R5-decide
+# <<< section: R5-decide
+
+# >>> section: R5-app
+# <<< section: R5-app
+
+# >>> section: R5-release
+# <<< section: R5-release
+
+# >>> section: R5-check
+# <<< section: R5-check

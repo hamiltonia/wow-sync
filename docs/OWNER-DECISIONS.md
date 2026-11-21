@@ -170,6 +170,16 @@ Answers from an interactive review session with the orchestrator.
   - UI direction.
   - Run-003 scope and credit ceiling.
 
+### D-27: Run-005 plan approved (2026-11-21)
+
+- The owner said "draft and execute the plan, unless there's a real
+  conflict that needs my attention, keep going. Use a swarm."
+- The orchestrator drafted [run-005 PLAN.md](runs/run-005/PLAN.md) within
+  the D-26 ceiling (10,000 AIU, stop at 9,500) and the D-26 answers. That
+  instruction is recorded as approval of the plan as committed.
+- Publishing the `v0.1.0` pre-release (D-26) happens only after the plan's
+  artifact smoke test passes.
+
 ### D-26: Run-004 open decisions answered; run-005 ceiling (2026-11-21)
 
 - **Q-88: option (a).** After a live keep, a demonstrably newer version
@@ -398,4 +408,5 @@ phase D barrier.
 | 2026-11-17 | D-23 | Run-004 scope and 20,000 AIU ceiling; R3D-13 simplify; DA-1 yes, DA-2 to DA-4 deferred; UQ-1/UQ-2 yes; A-31 deferred; Mac available | `1dbd81e` |
 | 2026-11-17 | D-24 | Run-004 plan approved; P4-1 GitHub Releases check yes; P4-2 notification crate yes | `573615b` |
 | 2026-11-20 | D-25 | Run-004 design defaults accepted for Q-55..Q-87 pending set; Q-77 no value (real settings sync disabled); R4D-28 bounded fix | `a951c2f` |
-| 2026-11-21 | D-26 | Q-88 (a); Q-77 32 MiB; owner runs macOS kit; v0.1.0 Windows pre-release approved; run-005 ceiling 10,000 AIU, plan pending | this commit |
+| 2026-11-21 | D-26 | Q-88 (a); Q-77 32 MiB; owner runs macOS kit; v0.1.0 Windows pre-release approved; run-005 ceiling 10,000 AIU, plan pending | `9ca8f10` |
+| 2026-11-21 | D-27 | Run-005 plan drafted and approved by owner instruction ("draft and execute") | this commit |
