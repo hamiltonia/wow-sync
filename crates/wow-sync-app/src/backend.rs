@@ -44,6 +44,7 @@ pub enum Cmd {
 pub struct GroupResult {
     pub seq: u64,
     pub kind: ActionKind,
+    pub subject: Option<String>,
     pub result: ActionResult,
 }
 
@@ -339,9 +340,15 @@ fn run(
                 if let Some(s) = svc.as_mut() {
                     let result = dispatch(s, &a);
                     let kind = a.kind();
+                    let subject = a.subject();
                     publish(&shared, &wake, |g| {
                         let seq = g.group_result.as_ref().map_or(1, |r| r.seq + 1);
-                        g.group_result = Some(GroupResult { seq, kind, result });
+                        g.group_result = Some(GroupResult {
+                            seq,
+                            kind,
+                            subject,
+                            result,
+                        });
                     });
                     refresh(s, &shared, &wake, false);
                 }

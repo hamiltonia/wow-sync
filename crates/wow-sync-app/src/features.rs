@@ -131,6 +131,8 @@ pub enum GroupAction {
     },
     RestoreRemoved {
         removal: Sha256,
+        /// The plain-text title, for the confirmation and the result only; never sent.
+        title: String,
     },
     RestoreRemovedSettings {
         removal: Sha256,
@@ -218,6 +220,14 @@ impl GroupAction {
         }
     }
 
+    /// The add-on the action is about, in plain text, when the result sentence names it.
+    pub fn subject(&self) -> Option<String> {
+        match self {
+            GroupAction::RestoreRemoved { title, .. } => Some(title.clone()),
+            _ => None,
+        }
+    }
+
     /// The runtime command carrying exactly the typed fields the screen chose.
     pub fn to_command(&self) -> Command {
         match self.clone() {
@@ -233,7 +243,7 @@ impl GroupAction {
             GroupAction::Retire { subject } => Command::Retire { subject },
             GroupAction::ReEnroll => Command::ReEnroll,
             GroupAction::AllowAgain { rejections } => Command::AllowAgain { rejections },
-            GroupAction::RestoreRemoved { removal } => Command::RestoreRemoved { removal },
+            GroupAction::RestoreRemoved { removal, .. } => Command::RestoreRemoved { removal },
             GroupAction::RestoreRemovedSettings { removal, unit } => {
                 Command::RestoreRemovedSettings { removal, unit }
             }
@@ -285,6 +295,9 @@ impl GroupAction {
     }
 }
 
+/// How the runtime starts the text of a restore it refused (restore_flow `RestoreRefusal`).
+const RESTORE_UNAVAILABLE_PREFIX: &str = "restore unavailable:";
+
 /// What came back from the sync thread, in the app's own terms.
 #[allow(dead_code)]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -316,6 +329,9 @@ pub enum ActionResult {
     },
     /// The export or save was refused; the text says why in plain words.
     ExportRefused(String),
+    /// A restore of removed code was refused before anything was queued; the reason is the
+    /// runtime's, without its "restore unavailable:" prefix.
+    RestoreUnavailable(String),
     Failed(String),
 }
 
@@ -380,6 +396,9 @@ impl ActionResult {
             Err(CommandError::UseShareSettings) => {
                 Self::Failed("resuming never shares your settings; use Share my settings".into())
             }
+            Err(CommandError::Service(t)) if t.starts_with(RESTORE_UNAVAILABLE_PREFIX) => {
+                Self::RestoreUnavailable(t[RESTORE_UNAVAILABLE_PREFIX.len()..].trim().to_string())
+            }
             Err(CommandError::Service(_)) => {
                 Self::Failed("the sync service could not do that".into())
             }
@@ -405,7 +424,20 @@ pub fn export_refusal(e: &ExportError) -> String {
 
 /// The sentence shown after an action (decision flows: ops.md §1.3, rollback.md §1).
 pub fn result_text(kind: ActionKind, r: &ActionResult) -> String {
+    result_text_named(kind, r, None)
+}
+
+/// As `result_text`, naming the add-on the action was about (removal.md §7.4).
+pub fn result_text_named(kind: ActionKind, r: &ActionResult, subject: Option<&str>) -> String {
+    let x = subject.unwrap_or("This add-on");
     match r {
+        ActionResult::RestoreUnavailable(why) => format!(
+            "{x} can't be restored: {}. Nothing was changed.",
+            why.trim_end_matches('.')
+        ),
+        ActionResult::Local if kind == ActionKind::RestoreRemoved => format!(
+            "{x} will be reinstalled on all computers in this group. If World of Warcraft is running, it waits until the game closes."
+        ),
         ActionResult::UpdateStarted => "Checking for updates…".into(),
         ActionResult::Exported { summary, .. } => match kind {
             ActionKind::SaveDiagnostics => format!("Saved. {summary}."),
