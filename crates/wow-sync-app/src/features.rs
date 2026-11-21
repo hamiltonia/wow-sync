@@ -588,6 +588,7 @@ pub fn apply_snapshot(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot)
                 .flat_map(|r| r.rejections.iter().copied())
                 .collect(),
             held_by: h.holders.join(", "),
+            held_on: None,
         })
         .collect();
     f.older_peer = s.older_peer.clone();
