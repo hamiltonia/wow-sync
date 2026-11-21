@@ -32,6 +32,20 @@ pub fn held_on(
     dates.get(release).map(|ms| crate::world::day_text(*ms))
 }
 
+/// Whether a rollback request to `release` of `package` is finished: that release is now the
+/// installed one, or the service recorded an outcome for the add-on. (The snapshot has no
+/// separate pending-request field.)
+pub fn request_done(w: &World, package: &str, release: &Sha256) -> bool {
+    w.features
+        .history
+        .iter()
+        .any(|h| h.package.as_str() == package && h.package_hash == *release && h.current)
+        || w.features
+            .rollback_outcome
+            .as_ref()
+            .is_some_and(|o| o.package.as_str() == package)
+}
+
 /// The version installed on this computer, or `None` when it is not known.
 pub fn installed_version(w: &World, package: &str) -> Option<String> {
     w.addon(package)
@@ -141,6 +155,9 @@ pub fn button(w: &World, r: &ReleaseRow) -> HistoryButton {
 
 /// What the confirmation says before anything is queued.
 pub fn confirm_text(installed: Option<&str>, r: &ReleaseRow) -> Vec<String> {
+    if installed.is_some_and(|v| v == r.version) {
+        return same_version_text(r);
+    }
     let (replaces, blocked) = match installed {
         Some(v) => (
             format!("version {v}"),
@@ -157,6 +174,22 @@ pub fn confirm_text(installed: Option<&str>, r: &ReleaseRow) -> Vec<String> {
             r.title, r.version, r.version
         ),
         blocked,
+        "WoW Sync applies this when WoW is closed. Nothing is changed while it is running.".into(),
+    ]
+}
+
+/// The confirmation when the installed version and the earlier copy have the same version
+/// number. The one place to adjust what this says about the group.
+pub fn same_version_text(r: &ReleaseRow) -> Vec<String> {
+    let earlier = match &r.held_on {
+        Some(d) => format!("the earlier copy set aside on {d}"),
+        None => "the earlier copy".to_string(),
+    };
+    vec![
+        format!(
+            "Go back to {} {}? This replaces this computer's copy of {} with {earlier}.",
+            r.title, r.version, r.version
+        ),
         "WoW Sync applies this when WoW is closed. Nothing is changed while it is running.".into(),
     ]
 }
@@ -245,6 +278,43 @@ mod tests {
             held_by: "Den PC".into(),
             held_on: None,
         }
+    }
+
+    #[test]
+    fn a_same_version_confirmation_says_this_computers_copy_and_claims_no_group_effect() {
+        let mut r = row("1.0.0", false, false);
+        r.held_on = Some("3 Nov".into());
+        let t = confirm_text(Some("1.0.0"), &r);
+        assert!(t[0].contains(
+            "replaces this computer's copy of 1.0.0 with the earlier copy set aside on 3 Nov"
+        ));
+        assert!(!t.join(" ").contains("group"));
+        let t = confirm_text(Some("2.0.0"), &r);
+        assert!(t[0].contains("replaces version 2.0.0 with 1.0.0"), "{t:?}");
+        assert!(t[0].contains("group"));
+    }
+
+    #[test]
+    fn a_rollback_request_is_done_when_installed_or_an_outcome_is_set_and_not_before() {
+        use wow_sync_runtime::{RollbackOutcome, RollbackOutcomeKind as K};
+        let mut w = world();
+        let rel = Sha256([5; 32]);
+        let mut r = row("1.0.0", false, false);
+        r.package_hash = rel;
+        w.features.history = vec![r.clone()];
+        assert!(!request_done(&w, "details", &rel), "still waiting");
+        w.features.history[0].current = true;
+        assert!(request_done(&w, "details", &rel));
+        assert!(!request_done(&w, "other", &rel));
+        w.features.history[0].current = false;
+        w.features.rollback_outcome = Some(RollbackOutcome {
+            package: key(),
+            recovered: rel,
+            kind: K::NotApplied,
+            text: "x".into(),
+        });
+        assert!(request_done(&w, "details", &rel));
+        assert!(!request_done(&w, "other", &rel));
     }
 
     #[test]

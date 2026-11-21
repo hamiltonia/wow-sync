@@ -483,6 +483,9 @@ impl Shell {
         };
         let first = !self.loaded && setup_ready;
         self.w = w;
+        let w = &self.w;
+        self.notice
+            .settle(|key, release| crate::rollback_ui::request_done(w, key, release));
         self.message = msg;
         self.closing_quits = settings.closing_quits;
         self.first_close_done = settings.first_close_seen;
@@ -730,7 +733,13 @@ impl Shell {
             Act::DismissNotice => self.notice.dismiss(),
             Act::Group(a) => match crate::features::gate(&self.w, a.kind()) {
                 Ok(()) => {
-                    self.notice.action_started(self.page);
+                    let scope = match &a {
+                        crate::features::GroupAction::Rollback { package, recovered } => {
+                            Some((package.as_str().to_string(), *recovered))
+                        }
+                        _ => None,
+                    };
+                    self.notice.action_started(self.page, scope);
                     self.send(Cmd::Group(a))
                 }
                 Err(why) => self.notice.show(self.page, why),
@@ -1915,7 +1924,17 @@ impl Shell {
         for b in banners.drain(..) {
             col = col.child(b);
         }
-        if let Some(n) = self.notice.for_page(self.page).map(str::to_string) {
+        if let Some(n) = self
+            .notice
+            .for_page(
+                self.page,
+                match &self.detail {
+                    Detail::Addon(k) => Some(k.as_str()),
+                    _ => None,
+                },
+            )
+            .map(str::to_string)
+        {
             let dismiss = self.btn(
                 "notice-dismiss",
                 "Dismiss",

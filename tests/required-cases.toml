@@ -1387,6 +1387,9 @@ tests = [
     "notice::tests::a_result_shows_on_the_page_of_the_action_and_survives_moving_around",
     "notice::tests::it_goes_away_on_dismiss_or_the_next_action_and_not_before",
     "notice::tests::a_result_with_no_known_action_page_uses_the_current_page",
+    "notice::tests::a_rollback_notice_stays_on_its_add_on_and_settles_when_done",
+    "rollback_ui::tests::a_rollback_request_is_done_when_installed_or_an_outcome_is_set_and_not_before",
+    "rollback_ui::tests::a_same_version_confirmation_says_this_computers_copy_and_claims_no_group_effect",
 ]
 
 # <<< section: R4-app
