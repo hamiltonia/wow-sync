@@ -188,6 +188,11 @@ game's ("Lists Interface 110000; this game is 110002") as information only.
 - A local journal action is undone by restoring the matching recovery
   point.
 
+**As-built (run-005, Q-88 option (a), D-26).** With the kept copy held
+nowhere, an unconsidered copy of any order raises `NewVersionAfterDecision`;
+a newer local-only copy stays installed, is not shared, and the decision is
+asked again every cycle (see contracts §5.3).
+
 ### 1.6 UQ-2: the typed hold scope (D-23: yes)
 
 Core states how much is held, so the app never guesses.
