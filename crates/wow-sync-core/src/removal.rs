@@ -761,6 +761,102 @@ pub fn readd_for_restore(
     }
 }
 
+/// One folder of a restore: its manifest entry's tree content, and what is live now.
+#[derive(Debug, Clone)]
+pub struct RestoreFolder {
+    pub key: FolderKey,
+    pub name: String,
+    pub record: crate::records::FolderTreeRecord,
+    /// `None` when the folder is absent (the normal case), else the live tree to replace.
+    pub live: Option<ExpectedLive>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestoreError {
+    /// No folders to restore.
+    Empty,
+    /// The staged trees do not match the removal's manifest entry for a folder.
+    ManifestMismatch,
+    /// The staged package hash is not the record's `removed_hash` (§7.4 step 1).
+    HashMismatch,
+}
+
+/// The restore operation (removal.md §7.4 steps 1, 3, 5): install or replace exactly the removed
+/// folders and reserve the `user_restore` re-add, written only when the operation is verified
+/// and finalized. `folders` are the trees the source delivered; they are checked against the
+/// removal record before anything is planned.
+pub fn plan_restore(
+    l: &Ledger,
+    own: &EnrollmentRef,
+    removal: &Removal,
+    folders: Vec<RestoreFolder>,
+    op: OpId,
+    own_seq: u64,
+    now_unix_ms: u64,
+) -> Result<PackageApply, RestoreError> {
+    if folders.is_empty() {
+        return Err(RestoreError::Empty);
+    }
+    for f in &folders {
+        let ok = removal
+            .folders
+            .iter()
+            .any(|m| m.key == f.key && m.name == f.name && m.tree == f.record.tree);
+        if !ok {
+            return Err(RestoreError::ManifestMismatch);
+        }
+    }
+    let mut pairs: Vec<(FolderKey, Sha256)> = folders
+        .iter()
+        .map(|f| (f.key.clone(), f.record.tree))
+        .collect();
+    pairs.sort();
+    if package_hash(&pairs) != removal.removed_hash {
+        return Err(RestoreError::HashMismatch);
+    }
+    let readd = readd_for_restore(
+        l,
+        &removal.group_id,
+        own,
+        removal,
+        ReaddEvidence::UserRestore,
+        own_seq,
+        now_unix_ms,
+    );
+    let bytes = encode(&readd);
+    let record = PendingRecord {
+        hash: sha256(&bytes),
+        bytes: String::from_utf8(bytes).expect("records are UTF-8"),
+    };
+    let mut sorted = folders;
+    sorted.sort_by(|a, b| a.key.cmp(&b.key));
+    let package = sorted[0].key.clone();
+    let applies = sorted
+        .into_iter()
+        .map(|f| crate::plan::FolderApply {
+            name: f.name,
+            key: f.key,
+            action: if f.live.is_some() {
+                crate::plan::FolderAction::Replace
+            } else {
+                crate::plan::FolderAction::Install
+            },
+            tree: f.record,
+            expected_live: f.live.unwrap_or(ExpectedLive::Absent),
+        })
+        .collect();
+    let mut plan = PackageApply::code_apply(
+        op,
+        package,
+        removal.removed_hash,
+        applies,
+        Explanation::AppliedHere,
+    );
+    plan.kind = OpKind::Restore;
+    plan.pending_records = vec![record];
+    Ok(plan)
+}
+
 /// Installed addons that list one of the removed folders as a hard dependency: they stay, and
 /// the user is told (§5.4).
 pub fn dependency_removed(inv: &Inventory, removed: &[FolderKey]) -> Vec<(String, FolderKey)> {

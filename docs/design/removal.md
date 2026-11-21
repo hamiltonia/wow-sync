@@ -1023,6 +1023,20 @@ From the package's history or the Removed list (§9), on this computer:
 6. A group-rejected version (rollback.md) is not offered without first
    lifting the rejection, which is a separate explicit choice.
 
+*As built (run-005 R5-remove).* `Restore` on a computer that no longer has
+the folders validates the plan at once (an unreadable file list or blob, a
+rejected version or a hash mismatch is refused with the reason and nothing is
+queued) and queues a local request. The next cycle that may change game files
+(Active, WoW not running) plans one `restore` operation (core `plan_restore`,
+runtime `restore_flow`). The source is read per folder: the provider tree
+record, else a local recovery point holding exactly that tree (any kind, not
+only `remove`); blobs likewise fall back to that point. The `user_restore`
+re-add is a pending record of the operation, so it is written only after
+verification. Settings come back in the following cycle through the capture
+book (the removal no longer stands); with no captured copy the cycle's note is
+the R-10 warning. The result is queued ("Recorded"), not "Written". A computer
+that still holds the folders only writes the re-add, as before.
+
 "Keep it" for a held local observation (§1.6) does not write a re-add (no
 removal was published). **Add back to all computers** for a held
 reappearance (§1.7), or on a computer that still holds a copy while a

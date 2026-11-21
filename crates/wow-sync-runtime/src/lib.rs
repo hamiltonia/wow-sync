@@ -12,6 +12,7 @@ mod discover;
 mod effects;
 mod notices;
 mod removal_cycle;
+mod restore_flow;
 mod rollback_flow;
 mod service;
 mod settings_cycle;

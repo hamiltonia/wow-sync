@@ -1436,6 +1436,27 @@ tier = "offline"
 tests = [
     "e2e::tests::an_uninstall_after_a_group_restore_converges_on_every_computer",
 ]
+
+[[case]]
+id = "RV-04:restore-code-from-manifest"
+tier = "offline"
+tests = [
+    "e2e::tests::a_restore_without_a_recovery_point_installs_the_code_from_the_shared_folder",
+    "e2e::tests::a_restore_from_the_local_recovery_point_works_without_the_shared_files",
+    "e2e::tests::an_uninstall_removes_the_settings_with_the_code_and_a_restore_returns_both",
+    "e2e::tests::a_restore_with_no_settings_copy_warns_that_settings_were_not_restored",
+    "removal_tests::a_restore_installs_exactly_the_removed_folders_and_reserves_the_readd",
+]
+
+[[case]]
+id = "RV-04:restore-refusals"
+tier = "offline"
+tests = [
+    "e2e::tests::a_restore_with_a_missing_blob_is_unavailable_and_leaves_nothing_partial",
+    "e2e::tests::a_restore_waits_while_wow_runs_and_installs_when_it_closes",
+    "e2e::tests::a_restore_of_a_rejected_version_is_refused",
+    "removal_tests::a_restore_whose_package_hash_is_not_the_removed_hash_is_refused",
+]
 # <<< section: R5-remove
 
 # >>> section: R5-decide
