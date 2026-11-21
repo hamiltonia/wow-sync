@@ -46,8 +46,15 @@ Environment: Windows 11 x64 dev PC, Rust 1.100.0. macOS paths are CI/owner only.
 - A-38 controls (mutate, run test, exit 101, revert, full tiers PASS):
   Q-77 banner mention of size limit; Q-88 inverted NewVersionAfterDecision need-item filter;
   DataAtRisk `.take(0)` in `need_items`.
-- Incident compliance: files written only with edit/create tools. At commit time main checkout showed
-  ` M docs/runs/run-005/HANDOFF.md` (not written by me); stopped before committing as instructed.
+- Incident compliance: files written only with edit/create tools. The HANDOFF.md change seen in main was the
+  orchestrator's and is now committed; main was clean before committing.
+
+## No release yet (extra item)
+
+After `git merge main` (R5-decide `7a4df23`) no match in the app needed changing: `update_text` already
+shows `UpdateResult::text()`, which is `NO_RELEASE` for `NoRelease`, rendered muted (neutral) on About.
+Test `about_ui::tests::no_release_yet_is_a_neutral_statement_not_a_failure` (case `R5-app:no-release-neutral`).
+A-38 control: mapping `NoRelease` to "Could not check for updates." failed the test (exit 101), then reverted.
 
 ## Notes
 

@@ -1514,6 +1514,13 @@ tier = "offline"
 tests = [
     "model::tests::data_at_risk_shows_in_headline_tray_and_needs_attention_whatever_the_toggles_say",
 ]
+
+[[case]]
+id = "R5-app:no-release-neutral"
+tier = "offline"
+tests = [
+    "about_ui::tests::no_release_yet_is_a_neutral_statement_not_a_failure",
+]
 # <<< section: R5-app
 
 # >>> section: R5-release

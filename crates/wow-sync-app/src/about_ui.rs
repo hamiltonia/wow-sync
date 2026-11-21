@@ -185,6 +185,13 @@ mod tests {
     }
 
     #[test]
+    fn no_release_yet_is_a_neutral_statement_not_a_failure() {
+        let n = UpdateResult::NoRelease { checked: 5 };
+        assert_eq!(update_text(Some(&n)), wow_sync_core::update::NO_RELEASE);
+        assert!(!update_text(Some(&n)).contains("Could not check"));
+    }
+
+    #[test]
     fn a_toggle_flips_only_its_own_flag_and_unknown_keys_do_nothing() {
         let t = AppToggles::default();
         let n = toggled(t, "notify-summaries").unwrap();
