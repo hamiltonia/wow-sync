@@ -9,6 +9,24 @@ use wow_sync_runtime::RemovedRow;
 pub const RESTORE_UNAVAILABLE: &str =
     "This removal can't be named yet, so it can't be restored from here. Nothing was changed.";
 
+/// Which parts of the Add-ons page are drawn (the empty-state sentence, the active list, the
+/// Removed section). Removed and restores must not depend on the active count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AddonsLayout {
+    pub empty_state: bool,
+    pub active_list: bool,
+    pub removed_section: bool,
+}
+
+pub fn addons_layout(w: &World) -> AddonsLayout {
+    let none = w.view.packages.is_empty();
+    AddonsLayout {
+        empty_state: none,
+        active_list: !none,
+        removed_section: !none || !w.features.removed.is_empty() || !w.features.restores.is_empty(),
+    }
+}
+
 /// The restore in progress for the removed row at `index`, matched by its first folder.
 pub fn progress_for(w: &World, index: usize) -> Option<&wow_sync_runtime::RestoreProgress> {
     let first = w.features.removed.get(index)?.folders.first()?;
@@ -162,6 +180,30 @@ mod tests {
         );
         let other = ActionResult::from_outcome(Err(CommandError::Service("boom".into())));
         assert!(matches!(other, ActionResult::Failed(_)));
+    }
+
+    #[test]
+    fn with_no_active_add_ons_the_removed_row_and_its_restore_are_still_there() {
+        use crate::features::Capabilities;
+        let mut w = World::empty("0.0.0");
+        w.features.caps = Capabilities::runtime();
+        assert_eq!(
+            addons_layout(&w),
+            AddonsLayout {
+                empty_state: true,
+                active_list: false,
+                removed_section: false
+            }
+        );
+        w.features.removed = vec![row(&[])];
+        w.features.removal_hashes = vec![Sha256([1; 32])];
+        let l = addons_layout(&w);
+        assert!(l.empty_state && l.removed_section && !l.active_list);
+        assert!(matches!(
+            restore_action(&w, 0),
+            Ok(GroupAction::RestoreRemoved { .. })
+        ));
+        assert_eq!(lines(&w.features.removed).len(), 1);
     }
 
     #[test]
