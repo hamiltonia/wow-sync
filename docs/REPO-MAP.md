@@ -34,13 +34,13 @@ outside the repository.
 ## Runs, packets, evidence
 
 Run state lives under `docs/runs/<run-id>/` (D-06). Each run has the files
-below. Run-005 is the active run; the latest closed run is run-004.
+below. No run is active; the latest closed run is run-005.
 
 | What | Where (run-005) |
 |---|---|
 | Approved run plan (phases, packet table, spikes, stop conditions) | [PLAN.md](runs/run-005/PLAN.md) |
 | Current state and resume point for a fresh orchestrator | [HANDOFF.md](runs/run-005/HANDOFF.md) |
-| Run report | written at close; latest: [run-004 REPORT.md](runs/run-004/REPORT.md) |
+| Run report | [REPORT.md](runs/run-005/REPORT.md) |
 | Cumulative AI-credit and model usage ledger | [USAGE.md](runs/run-005/USAGE.md) |
 | Work packets, one per worker | [packets/](runs/run-005/packets/) |
 | Worker and verifier evidence, one file per packet | [evidence/](runs/run-005/evidence/) |

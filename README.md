@@ -1,13 +1,12 @@
 # WoW Sync: intent specification seed
 
 Status: specification approved by the owner at `7a2ccdf` on 2026-11-14.
-Runs 001 to 004 are closed; run-005 is active. Run-004 added removal,
-rollback, actionable decisions, retire, settings sync, OS notifications and
-diagnostics, on synthetic data only. Run-005 closes run-004's gaps (uninstall
+Runs 001 to 005 are closed. Run-005 closed run-004's gaps (uninstall
 recovery of code and settings, the 32 MiB settings cap, Q-88, DataAtRisk) and
-prepares a `v0.1.0` Windows pre-release. It still does not sync real WoW data
-(Q-24 gate). Last report:
-[docs/runs/run-004/REPORT.md](docs/runs/run-004/REPORT.md). Current state and
+published the `v0.1.0` Windows
+[pre-release](https://github.com/hamiltonia/wow-sync/releases/tag/v0.1.0).
+It still does not sync real WoW data (Q-24 gate). Last report:
+[docs/runs/run-005/REPORT.md](docs/runs/run-005/REPORT.md). Current state and
 open owner questions:
 [docs/runs/run-005/HANDOFF.md](docs/runs/run-005/HANDOFF.md).
 Decisions: [docs/OWNER-DECISIONS.md](docs/OWNER-DECISIONS.md).
