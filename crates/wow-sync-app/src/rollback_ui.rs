@@ -182,19 +182,20 @@ pub fn confirm_text(installed: Option<&str>, r: &ReleaseRow) -> Vec<String> {
 /// number. The one place to adjust what this says about the group.
 pub fn same_version_text(r: &ReleaseRow) -> Vec<String> {
     let earlier = match &r.held_on {
-        Some(d) => format!("the earlier copy set aside on {d}"),
-        None => "the earlier copy".to_string(),
+        Some(d) => format!("the earlier copy of {} set aside on {d}", r.version),
+        None => format!("the earlier copy of {}", r.version),
     };
     vec![
         format!(
-            "Go back to {} {}? This replaces this computer's copy of {} with {earlier}.",
-            r.title, r.version, r.version
+            "Go back to {} {}? Every computer in the group switches to {earlier}; the copy installed now is kept for recovery.",
+            r.title, r.version
         ),
         "WoW Sync applies this when WoW is closed. Nothing is changed while it is running.".into(),
     ]
 }
 
-// The service does not report a rollback outcome or recovery sizes yet; only tests build these.
+// The rollback outcome itself is reported (`rollback_outcome`, see `outcome_line`). The service
+// does not yet report how the saved settings fared or recovery sizes; only tests build these.
 #[allow(dead_code)]
 /// How the settings saved with the earlier version fared (rollback.md §4).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -281,14 +282,20 @@ mod tests {
     }
 
     #[test]
-    fn a_same_version_confirmation_says_this_computers_copy_and_claims_no_group_effect() {
+    fn a_same_version_confirmation_states_the_group_switch_and_that_the_current_copy_is_kept() {
         let mut r = row("1.0.0", false, false);
         r.held_on = Some("3 Nov".into());
         let t = confirm_text(Some("1.0.0"), &r);
         assert!(t[0].contains(
-            "replaces this computer's copy of 1.0.0 with the earlier copy set aside on 3 Nov"
+            "Every computer in the group switches to the earlier copy of 1.0.0 set aside on 3 Nov; the copy installed now is kept for recovery."
         ));
-        assert!(!t.join(" ").contains("group"));
+        r.held_on = None;
+        let t = confirm_text(Some("1.0.0"), &r);
+        assert!(
+            t[0].contains("switches to the earlier copy of 1.0.0;"),
+            "{t:?}"
+        );
+        assert!(!t[0].contains("set aside"));
         let t = confirm_text(Some("2.0.0"), &r);
         assert!(t[0].contains("replaces version 2.0.0 with 1.0.0"), "{t:?}");
         assert!(t[0].contains("group"));
