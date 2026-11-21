@@ -19,7 +19,7 @@ chat is not.
 | R5-decide | merged `1c543ce` (branch `02bda94`); follow-up `220c9b0` (update-check "no release yet" result, as-built notes) merged `7a4df23` |
 | R5-app | stage A merged `1fb0234` (`90ecfa4`); A2, Q-77 banner and no-release text merged `559cb4d` (`9261037`) |
 | R5-release | merged `4ec8104` (`22eb997`, LICENSE `74a0c38`); first dispatch run 44942657034 failed (`-Maxdepth`); fix `81ee2a3` merged `4675f08`; dispatch run 44945165878 |
-| R5-check | running (`bb375372`), worktree from `4675f08`, packet [R5-check.md](packets/R5-check.md) |
+| R5-check | evidence merged `861f2ff` (`eb87de0`). Checks 1, 2, 4, 5, 6 PASS; 3 and 7 FAIL on F1 (major: originating code survived a removal after a V-02 group restore) and F2 (minor: stale 404 text in the release notes); 8 BLOCKED by the packet's `gh` limit. The orchestrator supplies check 8: CI 44945258236 on `1324b45` passed all 6 jobs. GUI items BLOCKED: Q-77 over-32-MiB window, native tray tooltip, GUI 404 state (dev build has no update source). The artifact smoke test passed on dispatch run 44945165878. Fix round: F1 → R5-remove, F2 → R5-release |
 | R5-review | packet [R5-review.md](packets/R5-review.md) written; starts after R5-check and any fixes |
 
 The `v0.1.0` tag is not pushed until R5-check passes the artifact smoke
