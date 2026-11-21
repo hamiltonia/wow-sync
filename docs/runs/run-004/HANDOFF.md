@@ -13,17 +13,21 @@ chat is not.
   can be removed.
 - Both verify tiers pass on `main`; CI is green on Windows and macOS.
 
-## Open owner barriers
+## Owner decisions after close (D-26)
 
-1. Q-88 (newer local install after a keep).
-2. Q-77 (settings-file size cap). Real settings sync stays disabled.
-3. macOS owner run of [MAC-OWNER.md](MAC-OWNER.md).
-4. First GitHub release for the update notice.
+- Q-88: option (a), not yet implemented.
+- Q-77: 32 MiB, not yet applied; real settings sync stays disabled until
+  run-005 wires the value.
+- The owner will run [MAC-OWNER.md](MAC-OWNER.md) on a Mac; results pending.
+- A `v0.1.0` Windows pre-release is approved; publishing is a run-005 step.
+- Run-005 ceiling: 10,000 AIU (stop at 9,500). **The run-005 plan is not
+  yet approved**, so no workers may launch.
 
-## Next safe steps (need an approved run-005 plan and ceiling)
+## Next safe steps (need an approved run-005 plan)
 
 - RV-04: uninstall captures and removes settings; plan in
   [R4-integrate evidence](evidence/R4-integrate.md) "Pass 17".
 - Independent GUI recheck of the V-02 group fix (`2cc8858`) and RV-01.
 - RV-09, RV-10, RV-11 and the DataAtRisk producer.
-- Implement the Q-88 answer once given.
+- Implement Q-88 (a) and the Q-77 32 MiB cap.
+- Build and publish the `v0.1.0` Windows pre-release with known-gaps notes.
