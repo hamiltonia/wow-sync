@@ -535,3 +535,166 @@ confirmed exited at `2026-11-21T00:09:56Z`. No recycled-ID, name-based or
 child-discovery termination. Synthetic lab retained for reproduction.
 All macOS rows, V-01/Q-88, full memory/native tiers and live CI remain NOT RUN
 in this narrow recheck. Final staged offline gate: all six checks PASS, exit 0.
+
+## Recheck 2 — 2026-11-20 (Windows)
+
+Source `99e2b01e48d52f90c999bb08f88c178a5bbaed7c`, branch
+`run004/R4-recheck2`, checkout `D:\GitHub\wow-sync.worktrees\R4-recheck2`.
+Assigned scope: four prior FAIL repros, V-07/V-08 regression spot-checks.
+The named runtime/app fixes are in this source. No product changes,
+mutations, nested agents, live GitHub calls or V-01/Q-88 recheck.
+Allowance about 400 AIU; actual meter/model introspection remains unavailable
+here and must be attached by the orchestrator. Same Windows/Rust environment.
+
+### Isolation and executed commands
+
+All execution shells set neutral TEMP/TMP and offline Cargo **from the start**:
+
+```powershell
+Set-Location 'D:\GitHub\wow-sync.worktrees\R4-recheck2'
+$env:PATH="$env:USERPROFILE\.cargo\bin;$env:PATH"
+$env:TEMP='D:\WoWSyncLab\R4-recheck2\temp'
+$env:TMP=$env:TEMP
+$env:CARGO_NET_OFFLINE='true'
+cargo build --quiet --offline --release -p wow-sync-app
+rustc docs\runs\run-004\evidence\R4-check\offline-cargo.rs -o target\verify-tools\cargo.exe
+$env:PATH="$(Get-Location)\target\verify-tools;$env:PATH"
+cargo xtask verify --tier offline
+```
+
+Release build PASS, exit 0, four unchanged adapter warnings. Offline gate
+PASS, all six checks, exit 0; repeated after final evidence staging.
+No native tier, full memory, CI or macOS rerun is claimed.
+The deny forwarding proxy prevents advisory refresh; GUI is the real
+release app in synthetic `--dev` mode, without notifier/live update services.
+No real game/Dropbox data or `D:\WoWSyncDemo` accessed.
+
+Release SHA-256:
+- App: `1617CF5E381720FF659FB2EDD3B66EAF71120544A9392EB51BE5E9DAEB54B6D5`
+- Devkit: `230D46B3F3666FDD0DE11544E2F13D2ACDF7D34761C85DEDEDCAA8B304AF0132`
+
+Fresh lab `D:\WoWSyncLab\R4-recheck2`, independent `a\install`, `a\state`,
+`b\install`, `b\state`, common `provider`. Devkit uses the original Alpha
+different-content/same-version and identical Beta 1.0.0 fixture.
+Launch arguments are the original `--dev --install ... --provider ...
+--state ... --interval-ms 1000 --recent-ms 200`, with names
+`Recheck2-a` / `Recheck2-b`. USERPROFILE/HOME and APPDATA/LOCALAPPDATA
+point only to neutral `lab\home` paths. No cap or known-unit seed supplied.
+One synthetic account directory on A supports the fresh-consent repro;
+no account name/content is committed.
+
+[Recheck 2 UI driver](R4-check/recheck2/ui.ps1) adapts the retained previous
+driver **in memory**, changing execution/capture paths to this checkout.
+It never executes the helper from another worktree. `invoke` uses focused
+Enter; `dump` gives actual UIA names/focus; `scroll`/`shot` operate on the
+captured PID, with foreground-PID assertion and account-button redaction.
+B's initial Next control was not ready; a later dump showed Welcome and
+the guided join then completed. Not credited as a product failure.
+
+### Verdicts
+
+| Check | Verdict | Observation |
+|---|---|---|
+| V-02 | **FAIL (group result); local restore PASS** | A's displaced copy is reachable and restored. The confirmation promises every computer replaces its version, but B keeps the displaced copy and both ask for another Alpha decision. |
+| V-03 | **PASS** | Fresh consent, zero known units: master banner honestly states sharing is off until a size limit is approved. |
+| V-04 | **PASS (requested refusal/outcome/success cases)** | Missing files refuse at command time without queuing; files lost after queuing produce visible outcome; restoring the blob and retrying restores Beta. Stale/cross-addon requested notice is a remaining minor below. |
+| V-09 | **FAIL (peer-held date); version wording PASS** | Confirmation names installed 2.0.0 and target 1.0.0 correctly. Local recovery has a date; the original peer-held Beta row still has none. |
+| V-07 spot-check | **PASS** | Three distinct release/holder/consequence UIA choice names; intended copy selected by Enter. No actual screen-reader session. |
+| V-08 spot-check | **PASS** | Cancel is keyboard-focused by default; Enter cancels the retirement panel, without retiring B. |
+
+### Repros and observed evidence
+
+**V-02 / new major group-convergence finding (A-18/A-26).**
+Enrol A, join B, open B's ambiguous SynAlpha chooser and keep B's copy.
+B's chosen/live copy has hash
+`3C62CE1C056A56B71CD9B2FF16FCD5F5586C4CD7D23A333DD3EFE3C76E0922DE`.
+On A → Add-ons → Alpha → Recovery copies, the displaced version now has
+“Version 1.0.0, set aside here on 20 November. apply” and
+**Restore this version…**. Open it and confirm **Restore**:
+[local Restore confirmation](R4-check/recheck2/local-restore.jpg).
+No terminal command executes the recovery.
+A's live hash becomes its earlier
+`DF9EC583F6F2B725B6CE8ED7F4FF20280896391D6EBDFE3B80657DE75B5EEDB1`.
+That fixes the missing local GUI entry and restores A's actual bytes.
+
+However, B remains at the first hash and both active windows report
+“Waiting for your decision on 1 add-on”; B's Alpha page offers Choose a copy.
+This occurred **before** A was paused for the independent Beta fixture.
+After completing Beta, A was explicitly resumed and allowed further cycles:
+same mismatching hashes and decision headlines, both with Pause syncing
+(not Resume) at final capture. The local Restore confirmation says
+“Every computer in the group replaces version 1.0.0 with 1.0.0.”
+Thus local-only success does not establish the promised group restoration.
+No timing threshold or root-cause/“resurrection” assertion is inferred.
+This was a GUI intentional restore, not the forbidden Q-88 newer-local-install repro.
+
+**V-03 (A-11/A-26).** Fresh A → Settings sync → select its local account →
+Turn on settings sync → Change master → Use Recheck2-b.
+Persisted state: `consent=true`, `units=[]`; no metadata seed.
+Banner: “Recheck2-b is the settings master, but settings sharing is off until
+a size limit is approved.” [Fresh consent](R4-check/recheck2/fresh-consent.jpg).
+Q-77 transfer/settings recovery remains BLOCKED; no settings bytes were used.
+
+**V-04 (A-18/A-25/A-26).** Pause A while its Beta stays 1.0.0. On active B:
+`devkit add-addon <lab>\b\install _forever_ SynBeta beta-v2 2.0.0`.
+B → Beta → Go back to this version… (A holds 1.0.0).
+Back up, then remove only this synthetic old-code blob:
+`provider\WoWSync\groups\d640ef9aa9ce5ed04d8e56c018c3925d\blobs\57\57f17c0fcac90bb6251345052e79e4c251949898af9313058a33dd24b60a9622`.
+Click Go back. Visible refusal:
+“That release can't be installed again because its files are no longer
+available. Nothing was changed.”
+`rollback-request-d640ef9aa9ce5ed04d8e56c018c3925d.json` is absent.
+B keeps 2.0.0/hash
+`494B3062CA931F9F6198F6D7CF2DCDA4D9989AE2EE588323F628E8B1D2D7610E`.
+[Command-time refusal](R4-check/recheck2/rollback-refusal.jpg).
+
+Restore the blob; pause **B**; click Go back while files are available.
+The request exists and the notice says:
+“Requested. It will happen on the next sync, when WoW is closed. Nothing has changed yet.”
+Remove the same blob, Resume syncing on B, wait six seconds.
+The actual Beta page shows:
+“The earlier version could not be read when WoW Sync tried to go back.
+Nothing was changed; you can ask again later.”
+[Queued outcome](R4-check/recheck2/rollback-outcome.jpg).
+Restore the blob again and click Go back; Beta becomes 1.0.0/hash
+`57F17C0FCAC90BB6251345052E79E4C251949898AF9313058A33DD24B60A9622`.
+No code mutation, injected cap or live service used. The faulted blob is restored.
+
+**Remaining minor notice regression.** After the successful Beta apply and
+verified v1 bytes, the old “Requested… Nothing has changed yet” notice still
+appears. Navigate B → Add-ons → Alpha: the same Beta request notice is shown
+on Alpha's page. Actual UIA dumps confirm both observations. It should not
+be treated as current pending state or a result for Alpha.
+
+**V-09, continuing minor date gap.** The original B 2.0/A-held 1.0 confirmation
+now reads “Go back to SynBeta 1.0.0? Every computer in the group replaces
+version 2.0.0 with 1.0.0.” It correctly names the blocked version once.
+But its history row is still only “Version 1.0.0, held by Recheck2-a”:
+[date/version repro](R4-check/recheck2/rollback-versions.jpg).
+There is no held date for that peer-only release. A's local recovery date
+is present as recorded above. The keyed date is absent for peer-only copies;
+the GUI must not invent a date, but the original missing-date repro is not fixed.
+
+**V-07/V-08 spot-checks.** Initial Alpha chooser exposes
+“Keep this: Keep version 1.0.0. Held by This computer. Installs synalpha”,
+the corresponding Recheck2-a name, and “Keep this: Keep it on this computer only”.
+On A → Computers → B → Retire, Cancel has `HasKeyboardFocus=True`;
+plain Enter closes the panel, leaving B active. No retirement was performed.
+
+### Redaction, evidence budget and cleanup
+
+Dropped **only** the older, unlinked `R4-check\retire-before.png`
+(118,182 bytes), as permitted, to make room. Its historical observations
+remain in this report and the original commit. All other old images remain.
+All five new JPEGs were individually visually inspected: genuine app content,
+no personal user paths/names/SIDs or desktop pixels. Text scans check profile
+paths, SIDs and configured user identity; JPEG metadata contains only
+quantization tables. Account buttons are masked by the driver when present.
+Combined owned evidence is verified below 1,000,000 bytes before commit.
+
+Captured A PID **14712**, B **16296**: stopped only by those IDs and confirmed
+exited at `2026-11-21T00:48:42Z`. No process discovery/traversal/name-based
+termination. Lab retained under its approved synthetic root.
+Only this appendix, `recheck2\` and the documented image removal are committed.
+Final staged offline verification PASS, all six checks, exit 0. No push.
+V-01/Q-88, other GUI flows, native/memory/CI/macOS remain NOT RUN here.
