@@ -16,9 +16,25 @@ pub struct ChangeControl {
     pub action: Result<GroupAction, String>,
 }
 
-/// The reason recorded with a change made from the Add-on page. The snapshot does not yet carry
-/// the reason of the original decision, so this is the neutral one.
-const CHANGE_REASON: ChoiceReason = ChoiceReason::Ambiguous;
+/// The reason recorded with a change made from the Add-on page: that of the pending decision
+/// for the add-on (mirroring decide.rs), else the neutral `Ambiguous` when none is pending.
+pub fn change_reason(w: &World, folder: &FolderKey) -> ChoiceReason {
+    use wow_sync_core::decision::{DecisionKind as K, DecisionScope};
+    let pending = w.features.decisions.iter().find(|d| match &d.scope {
+        DecisionScope::Folders(ks) => ks.contains(folder),
+        DecisionScope::Settings(_) => false,
+    });
+    match pending.map(|d| d.reason) {
+        Some(K::PartialCandidate) => ChoiceReason::PartialCandidate,
+        Some(K::ChoicesDiffer) => ChoiceReason::ChoicesDiffer,
+        Some(K::RollbackTargetsDiffer) => ChoiceReason::RollbackTargetsDiffer,
+        Some(K::NewerAfterRollback) => ChoiceReason::NewerAfterRollback,
+        Some(K::NewVersionAfterDecision) => ChoiceReason::NewVersionAfterDecision,
+        Some(K::RecoveredUnavailable) => ChoiceReason::RecoveredUnavailable,
+        Some(K::LookalikeOfRejected) => ChoiceReason::LookalikeOfRejected,
+        _ => ChoiceReason::Ambiguous,
+    }
+}
 
 /// Keep one held release, or resume automatic updates, for `key`.
 pub fn change_controls(
@@ -59,7 +75,7 @@ fn keep_control(w: &World, folder: &FolderKey, title: &str, r: &ReleaseRow) -> C
         action: gate(w, ActionKind::Keep).map(|()| GroupAction::Keep {
             scope: vec![folder.clone()],
             copy: r.package_hash,
-            why: CHANGE_REASON,
+            why: change_reason(w, folder),
         }),
     }
 }
@@ -75,7 +91,7 @@ fn resume_control(w: &World, folder: &FolderKey, title: &str) -> ChangeControl {
         action: gate(w, ActionKind::Resume).map(|()| GroupAction::Resume {
             scope: vec![folder.clone()],
             allow_again: Vec::new(),
-            why: CHANGE_REASON,
+            why: change_reason(w, folder),
         }),
     }
 }
@@ -125,6 +141,51 @@ mod tests {
         assert_eq!(*copy, Sha256([1; 32]));
         assert!(matches!(cs[1].action, Ok(GroupAction::Resume { .. })));
         assert!(cs[1].confirm.contains("declined earlier stay excluded"));
+    }
+
+    #[test]
+    fn keep_and_resume_send_the_pending_decisions_own_reason() {
+        use wow_sync_core::decision::{
+            DecisionItem, DecisionKind as K, DecisionReach, DecisionScope, EvidenceToken,
+        };
+        let pairs = [
+            (K::PartialCandidate, ChoiceReason::PartialCandidate),
+            (K::ChoicesDiffer, ChoiceReason::ChoicesDiffer),
+            (
+                K::RollbackTargetsDiffer,
+                ChoiceReason::RollbackTargetsDiffer,
+            ),
+            (K::NewerAfterRollback, ChoiceReason::NewerAfterRollback),
+            (
+                K::NewVersionAfterDecision,
+                ChoiceReason::NewVersionAfterDecision,
+            ),
+            (K::RecoveredUnavailable, ChoiceReason::RecoveredUnavailable),
+            (K::LookalikeOfRejected, ChoiceReason::LookalikeOfRejected),
+            (K::Ambiguous, ChoiceReason::Ambiguous),
+        ];
+        for (kind, want) in pairs {
+            let mut w = world();
+            w.features.decisions = vec![DecisionItem {
+                scope: DecisionScope::Folders(vec![wow_sync_core::paths::validate_folder_name(
+                    "Details",
+                )
+                .unwrap()]),
+                reason: kind,
+                reach: DecisionReach::Group,
+                options: vec![],
+                evidence: EvidenceToken(Sha256([0; 32])),
+            }];
+            let cs = change_controls(&w, "Details", "Details", &[row("1.0", 1, false)]);
+            let Ok(GroupAction::Keep { why, .. }) = &cs[0].action else {
+                panic!("keep");
+            };
+            assert_eq!(*why, want, "{kind:?}");
+            let Ok(GroupAction::Resume { why, .. }) = &cs[1].action else {
+                panic!("resume");
+            };
+            assert_eq!(*why, want, "{kind:?}");
+        }
     }
 
     #[test]
