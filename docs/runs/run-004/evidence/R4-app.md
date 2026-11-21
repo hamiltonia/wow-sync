@@ -217,4 +217,20 @@ branch `run004/R4-app`, main not re-merged after `979b8de`):
 - `cargo xtask verify --tier native`: PASS (`native/tier`).
 - macOS: NOT RUN.
 
+## 6f. Recheck round 2 and pass 15 (merge of main `c149a30`)
+
+| Finding | Commit | A-38 control (caught) |
+|---|---|---|
+| V-04 app part: queued rollback worded "Requested. It will happen on the next sync…" | `643ce5b` | yes |
+| V-03 residual: banner from the missing global cap (`MAX_SETTINGS_FILE_BYTES`, app-side) | `b38e017` | yes |
+| V-09 app part: installed version named in the confirmation | `b124522` | yes |
+| V-02 GUI: `recovery_points` listed per add-on with Restore and confirmation | `afe940b` | yes (package filter ignored) |
+| V-04 outcome: `rollback_outcome` shown on its package's page | `d650b44` | yes (`Applied` warns) |
+| V-09 date: `held_release_dates` mapped to `held_on`, local time | `8c4de99` | yes (map lookup ignored) |
+
+Notes: a peer-only release has no held date, so none is shown. The Keep reason for a recovered
+release is `ChoiceReason::Ambiguous` with empty `allow_again` because the snapshot lacks the
+original reason; this stays a handover gap. macOS: NOT RUN.
+
+
 
