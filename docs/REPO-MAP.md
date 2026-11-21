@@ -25,6 +25,7 @@ current run state, blockers and next steps read
 | Roles, budgets, evidence, repository contract | [ENGINEERING.md](../ENGINEERING.md) | E-01..E-09 |
 | Owner decisions, model policy, run limits, data scope | [docs/OWNER-DECISIONS.md](OWNER-DECISIONS.md) | D-01.. |
 | Architecture proposal (approval status stated in the file) | [docs/ARCHITECTURE.md](ARCHITECTURE.md) | — |
+| Direct third-party dependencies: licence, maintenance, need | [docs/DEPENDENCIES.md](DEPENDENCIES.md) | E-06 |
 
 Data-access scope (Dropbox, WoW installation) is defined only in
 OWNER-DECISIONS D-08, D-09 and D-14. Read those before touching any path

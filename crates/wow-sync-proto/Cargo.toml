@@ -12,7 +12,7 @@ name = "wow-sync-proto"
 path = "src/main.rs"
 
 [dependencies]
-wow-sync-core = { version = "0.0.0", path = "../wow-sync-core" }
+wow-sync-core = { version = "0.1.0", path = "../wow-sync-core" }
 gpui = { workspace = true }
 gpui_platform = { workspace = true }
 tray-icon = { workspace = true }
