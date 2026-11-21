@@ -340,3 +340,198 @@ Owner procedure: [MAC-OWNER.md](../MAC-OWNER.md).
 Local CI definition has two offline jobs (Windows/macOS) and four build-only
 targets (Windows x64/ARM64, macOS Intel/Apple Silicon); source inspection
 does not establish their latest outcomes.
+
+## Recheck — 2026-11-20 (Windows)
+
+Narrow assignment: V-02..V-10 only, checkout
+`D:\GitHub\wow-sync.worktrees\R4-recheck`, branch `run004/R4-recheck`,
+source `af1cd3fa89968ecb2379b492533ffe034c500073`.
+The named app/integration fixes are in this source. This is an independent
+release-window execution, not adoption of their test results.
+**V-01 was NOT RUN**: Q-88 remains pending. No product fix or mutation made.
+Same Windows/Rust environment as above. No nested agents.
+Assignment allowance about 500 AIU; actual metering remains unavailable
+here and must come from the orchestrator. Scope was kept to these findings.
+
+### Isolation, build and execution
+
+Every build, verification and GUI-driving shell explicitly sets neutral
+TEMP/TMP and offline Cargo from the start:
+
+```powershell
+Set-Location 'D:\GitHub\wow-sync.worktrees\R4-recheck'
+$env:PATH="$env:USERPROFILE\.cargo\bin;$env:PATH"
+$env:TEMP='D:\WoWSyncLab\R4-recheck\temp'
+$env:TMP=$env:TEMP
+$env:CARGO_NET_OFFLINE='true'
+cargo build --offline --release -p wow-sync-app
+rustc docs\runs\run-004\evidence\R4-check\offline-cargo.rs -o target\verify-tools\cargo.exe
+$env:PATH="$(Get-Location)\target\verify-tools;$env:PATH"
+cargo xtask verify --tier offline
+```
+
+Release build PASS, exit 0, 2m29s; same four adapter warnings.
+Offline tier PASS, all six checks, exit 0; rerun after final staging.
+No native/full-memory/macOS rerun is claimed for this narrow evidence task.
+Cargo deny uses the offline-only forwarding proxy, not an advisory refresh.
+No GitHub/release request, non-dev startup, real game/provider path or
+`D:\WoWSyncDemo` used.
+
+Release SHA-256:
+- App: `9AC16BC8459C4E85E201661CF140CD57DC2657CBD37B7FE063890768412149D0`
+- Devkit: `6F57951797AF5F24A8C77AE6F44C99D58D0775E81D412B934A011576E380D148`
+
+Fresh lab `D:\WoWSyncLab\R4-recheck`: independent `a\install`, `a\state`,
+`b\install`, `b\state`, common `provider`; no Dropbox service.
+Devkit commands are the original two-addon fixture commands above, with
+this lab root and names `Recheck-a`/`Recheck-b`.
+App command is the original `--dev --install ... --provider ... --state ...`
+with `--interval-ms 1000 --recent-ms 200`.
+For app launches USERPROFILE/HOME point to `lab\home`, APPDATA/LOCALAPPDATA
+to its neutral subfolders. Diagnostic Documents is under that home.
+B's final launch points USERPROFILE/HOME to **lab\provider** solely to
+retest shared-save refusal. No settings cap was supplied or invented.
+
+Driver: [recheck/ui.ps1](R4-check/recheck/ui.ps1), `-AppPid <captured-id>`,
+`-Action invoke -Name '<UIA name>'` uses focused Enter; `dump` records names
+and focus; `scroll -Key -2400` scrolls the actual captured window.
+Screenshots assert the foreground PID, crop the app content, and redact
+account buttons. One startup tree was not ready yet; waiting recovered it.
+Current-page suffixes and an already-expanded rollback confirmation needed
+corrected selectors. These driver misses are not product-test failures.
+
+### Verdict table
+
+| Finding | Verdict | Independently observed result |
+|---|---|---|
+| V-02 | **FAIL** | Keep/Resume controls and confirmations now work. The original local-only code recovery still cannot be reached; the page falsely says no earlier version is kept here. |
+| V-03 | **FAIL** | Retired-master and known Disabled-unit banners PASS. Fresh consent with no known units still produces “shares” while Q-77 prevents sharing; see residual below. |
+| V-04 | **FAIL** | About's offline error now appears on About. Unavailable rollback still gives no refusal after six seconds; it shows “Saved on this computer” and “Nothing to do.” |
+| V-05 | **PASS** | Local account list, empty-selection guard, toggling and persisted consent work. All effective settings-transfer/recovery actions remain **BLOCKED (Q-77)**. |
+| V-06 | **PASS (fixed fields)** | GUI-generated/saved export has OS version, nonzero memory and the seeded journal. **Save picker absent**, unchanged and outside the named fixes. |
+| V-07 | **PASS** | Three real ambiguous-choice buttons expose distinct release/holder/consequence names; focused Enter selects the intended copy. Actual screen-reader session NOT RUN. |
+| V-08 | **PASS** | Cancel has UIA keyboard focus on opening Retire. Enter cancels without retiring; acknowledgment still gates retirement. |
+| V-09 | **FAIL** | Duplicated version-summary sentence is gone. Held dates still absent; confirmation falls back to “the installed version”, not the actual installed 2.0.0. |
+| V-10 | **PASS** | Settings sync navigation consistently has no “Coming later” suffix. |
+
+### Exact repros, evidence and residuals
+
+**V-02, continuing major.** Enrol A, join B, choose B's ambiguous SynAlpha
+1.0.0. Both live code hashes become
+`3C62CE1C056A56B71CD9B2FF16FCD5F5586C4CD7D23A333DD3EFE3C76E0922DE`.
+A has an actual displaced `main.lua` under
+`.wowsync\recovery\synalpha\0a2ee3f3c112ed85f71cb13f566b3491\SynAlpha`,
+hash `DF9EC583F6F2B725B6CE8ED7F4FF20280896391D6EBDFE3B80657DE75B5EEDB1`,
+plus recovery metadata and TOC. Open A → Add-ons → SynAlpha and scroll down:
+“No earlier version of this add-on is kept here. Older versions appear here
+when this computer or another holds one.” No restore/go-back action exists
+for those local bytes. [Local recovery](R4-check/recheck/local-recovery.jpg).
+Resume on active A confirms and reports “Saved and shared with the group.”
+For Keep, pause A, publish Beta 2.0.0 from B, open A's Beta: Keep 2.0.0
+confirmation Cancel works; confirming Keep and then Resume each reports
+“Saved. It is shared when you resume syncing.” These are honest **queued
+local intents**, not proof of their eventual publication while paused.
+Keep is not offered on the converged Alpha page; only Resume appears.
+
+**V-03, major residual newly reachable through consent.** Before adding any
+known-unit metadata, on fresh A: Settings sync → choose one account → Turn
+on settings sync → Change master → Use Recheck-b. `units` is empty and the
+production cap remains None, yet the banner says
+“Recheck-b shares its add-on settings with the group. Settings are never merged.”
+This is not truthful Q-77 disabling. The banner checks for a pending-size
+unit rather than representing the global missing cap.
+Then stop A and seed the original metadata-only Disabled unit, preserving
+its actual selected account/consent; restart A. Banner correctly says
+“Recheck-b is the settings master, but settings sharing is off until a size
+limit is approved.” Retire B from A. Both A and B correctly say B is no longer
+active and settings have no active master. No replacement is elected.
+Explicit B Join again works. Post-re-enrollment master banner was NOT RUN.
+
+**V-04, major residual/newly visible misleading feedback.** Pause A, update
+B's Beta with `devkit add-addon <lab>\b\install _forever_ SynBeta beta-v2 2.0.0`.
+On B → Beta → Go back to this version… (A holds 1.0.0), copy the old blob
+to `lab\fault-backups`, then remove only
+`provider\WoWSync\groups\fe8ec480368882ec5077d2279b3a630c\blobs\57\57f17c0fcac90bb6251345052e79e4c251949898af9313058a33dd24b60a9622`.
+B has no local Beta recovery. Click Go back; leave the blob missing for
+**six seconds**. B stays at 2.0.0, headline up to date, Next step “Nothing to do”,
+notice “Saved on this computer.” No unavailable/refusal message.
+[Observed feedback](R4-check/recheck/rollback-refusal.jpg).
+Restore the blob and click Go back again: GUI recovery succeeds, hash
+`57F17C0FCAC90BB6251345052E79E4C251949898AF9313058A33DD24B60A9622`.
+The earlier short-hold trial also recovered after restoration but was not
+credited as a sustained refusal check. No rollback timing claim.
+About → Check for updates now says
+“That didn't work: update checking is not available in this build. Nothing was changed.”
+No live update source was attached.
+
+**V-05/V-10.** Create two synthetic account directories under A's
+`_forever_\WTF\Account`, another under B, and one under A's other-variant
+directory. Only A's two local accounts appear on A. With neither selected:
+“Choose at least one account”; activation does not enable consent.
+Toggle first on; toggle second on/off; Turn on settings sync.
+Persisted local state has `consent=true`, one included account, exactly the
+selected one. The panel disappears and “Saved on this computer” appears.
+No account names are committed. [Consent](R4-check/recheck/consent.jpg)
+has its synthetic account button blacked out. Transfer/push/settings recovery
+not exercised or credited: Q-77. No missing nav suffix on any inspected page.
+
+**V-06.** While A is paused, use the edit tool to create synthetic
+`.wowsync\journal\aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json` containing only
+`{"schema":"wowsync.apply-journal/9"}`. App settings → Export diagnostics… →
+Preview → Save produces a real export with:
+
+```text
+os: windows 10.0.26300
+process_memory: 103 MiB
+journal: other
+```
+
+Subsequent both-on and both-off exports have memory 104 MiB and the same
+OS/journal fields, with matching option flags. Option changes remove Save
+until Preview is regenerated. No Lua/settings payload executed or exported.
+The journal remains on disk. This proves **Other**, not Pending/NeedsHelp;
+those real GUI journal rows are NOT RUN.
+[Diagnostics](R4-check/recheck/diagnostics.jpg) shows the real preview/save
+and OS version; memory/journal are also confirmed in the GUI-saved file.
+The memory field is adapter private usage, **not** an A-29 aggregate private
+resident-memory measurement; this is not a new memory-gate result.
+No file dialog appears: Save uses a fixed neutral Documents path.
+Relaunch B with the synthetic provider as USERPROFILE, Preview → Save:
+“That place is not allowed… Nothing was saved”; target file absent.
+Existing build-commit `dev` and absent populated fingerprints are not fixed
+by these commits. No fresh unrelated acceptance claim.
+
+**V-07/V-08.** In the initial unresolved Alpha chooser, UIA names are:
+“Keep this: Keep version 1.0.0. Held by This computer. Installs synalpha.”;
+same with “Recheck-a”; and “Keep this: Keep it on this computer only”.
+[Choice screen](R4-check/recheck/decision-names.jpg).
+Selecting the first by focused Enter converges hashes above.
+On A's B retirement panel, Cancel `HasKeyboardFocus=True`; plain Enter
+closes it, leaving B active. Reopen, acknowledge, Retire: B becomes retired.
+The unticked action still says “Tick the box to confirm”.
+
+**V-09, minor residual.** Same B 2.0/A-held 1.0 rollback fixture:
+row “Version 1.0.0, held by Recheck-a” has no date. Confirmation now reads
+“Go back to SynBeta 1.0.0? Every computer in the group replaces the installed
+version with 1.0.0.” It no longer duplicates the full summary, but does not
+identify 2.0.0 in that confirmation. No claim that the wrong release was blocked.
+
+### Redaction, cleanup and final gate
+
+All five retained screenshots were individually visually reviewed: only app
+content and synthetic identities/paths, no personal user path/name/SID or
+desktop contents. Synthetic account button is blacked out. Text and saved
+export scans check profile paths, SID patterns and configured user identity;
+no matches. Screenshots are lossy crops, not edited product UI.
+Only this appended section and `R4-check\recheck\` are committed.
+The original evidence remains unchanged; combined owned evidence stays
+below 1,000,000 bytes. No push.
+Size before these final notes: 997,166 bytes. JPEG metadata inspection found
+only 0x5090/0x5091 quantization tables; no personal metadata.
+
+Captured PIDs: A 8520, B 22804, A2 37396, B2 11152.
+A/B stopped by their captured IDs before relaunch; A2/B2 stopped and
+confirmed exited at `2026-11-21T00:09:56Z`. No recycled-ID, name-based or
+child-discovery termination. Synthetic lab retained for reproduction.
+All macOS rows, V-01/Q-88, full memory/native tiers and live CI remain NOT RUN
+in this narrow recheck. Final staged offline gate: all six checks PASS, exit 0.
