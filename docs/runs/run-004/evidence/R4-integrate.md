@@ -417,6 +417,8 @@ Cause: the rollback's rejection took its `known` from `removal::known_summary`, 
 
 Tests: `e2e::tests::restoring_a_copy_a_keep_displaced_converges_the_group_on_it` (the exact repro: ambiguous Amb, B keeps its copy, A restores through `Command::Rollback`; both end on A's copy and neither lists a decision) and negative `a_rollback_of_a_copy_the_group_never_displaced_is_still_refused`. A-38 control: see the table below.
 
+A-38 control (Recheck 2): `known.extra.extend(choices.extra)` dropped in `rollback_flow::plan_requested` → `restoring_a_copy_a_keep_displaced_converges_the_group_on_it` FAILED (B stays on its copy); reverted, `git diff --exit-code` clean.
+
 ## Verification
 
 Final tree: `cargo xtask verify --tier offline` PASS; `cargo xtask verify --tier native` PASS
