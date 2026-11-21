@@ -30,6 +30,7 @@ pub fn fail_kind(e: FetchError) -> UpdateFailKind {
         FetchError::Timeout => UpdateFailKind::Timeout,
         FetchError::Tls => UpdateFailKind::Tls,
         FetchError::Redirect => UpdateFailKind::Redirect,
+        FetchError::Http(404) => UpdateFailKind::NoRelease,
         FetchError::Http(_) => UpdateFailKind::Http,
         FetchError::TooLarge => UpdateFailKind::TooLarge,
         FetchError::Other => UpdateFailKind::Other,
@@ -400,6 +401,54 @@ mod tests {
             ]
         );
         assert!(s.view().available_tag.is_none());
+    }
+
+    #[test]
+    fn a_404_means_no_release_yet_and_is_neither_a_failure_nor_a_notice() {
+        let r = rig();
+        let s = r.service(Arc::new(FakeReleases::new(vec![Err(FetchError::Http(
+            404,
+        ))])));
+        s.check_now();
+        s.wait_idle();
+        assert_eq!(
+            s.last_result(),
+            Some(UpdateResult::NoRelease {
+                checked: 1_000_000_000
+            })
+        );
+        assert_eq!(
+            s.view().text.as_deref(),
+            Some("No release has been published yet.")
+        );
+        assert!(r.log.lock().unwrap().is_empty());
+        assert!(s.view().available_tag.is_none());
+        assert_eq!(s.notice_event(), (None, None));
+    }
+
+    #[test]
+    fn other_http_errors_and_a_prerelease_body_still_fail_and_are_never_offered() {
+        let r = rig();
+        let pre = br#"{"tag_name":"v9.0.0","draft":false,"prerelease":true}"#.to_vec();
+        let s = r.service(Arc::new(FakeReleases::new(vec![
+            Err(FetchError::Http(403)),
+            Ok(pre),
+        ])));
+        s.check_now();
+        s.wait_idle();
+        assert!(matches!(
+            s.last_result(),
+            Some(UpdateResult::Failed {
+                kind: UpdateFailKind::Http,
+                ..
+            })
+        ));
+        r.now.fetch_add(MANUAL_DEBOUNCE_MS, Ordering::SeqCst);
+        s.check_now();
+        s.wait_idle();
+        assert!(matches!(s.last_result(), Some(UpdateResult::Failed { .. })));
+        assert!(s.view().available_tag.is_none());
+        assert_eq!(r.log.lock().unwrap().len(), 2);
     }
 
     #[test]

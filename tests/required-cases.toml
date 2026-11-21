@@ -1458,6 +1458,15 @@ tests = [
     "diag::tests::the_build_commit_is_the_stamped_one_or_dev",
     "e2e::tests::diagnostics_preview_and_save_match_and_never_land_in_the_shared_or_install_folders",
 ]
+
+[[case]]
+id = "R5-decide:update-check-no-release-yet"
+tier = "offline"
+tests = [
+    "updates::tests::a_404_means_no_release_yet_and_is_neither_a_failure_nor_a_notice",
+    "updates::tests::other_http_errors_and_a_prerelease_body_still_fail_and_are_never_offered",
+    "update::tests::results_map_to_state_and_text",
+]
 # <<< section: R5-decide
 
 # >>> section: R5-app

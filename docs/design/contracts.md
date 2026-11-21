@@ -1129,6 +1129,14 @@ rejection or re-add naming f covers (§4.4).
   rejected content is inert; a removal removes the folder whatever the
   choice; a valid re-add ends the choices it covers for its folders.
 
+**As-built (run-005, Q-88 option (a), D-26).** When the kept version is held
+by no source (for example the owner replaced it locally with a different
+one), the kept copy is synthesized from the keep record, so the order of any
+unconsidered copy against it is unknown. Any such copy, of any order, raises
+`NewVersionAfterDecision`. A newer copy held only by this computer stays
+installed and is not published, and the decision stays open every cycle until
+answered.
+
 ### 5.4 Retracing R3D-10, R3D-16 and Q-49/Q-50
 
 No trace adds a rejection; every exclusion below is a code-choice

@@ -21,6 +21,8 @@ pub const MAX_STATE_BYTES: usize = 4096;
 pub const COULD_NOT_CHECK: &str = "Could not check for updates.";
 pub const CHECKING: &str = "Checking for updates…";
 pub const NEWEST: &str = "You have the newest version.";
+/// GitHub answers 404 for `releases/latest` while only pre-releases exist (owner D-26).
+pub const NO_RELEASE: &str = "No release has been published yet.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SemVer {
@@ -158,11 +160,15 @@ pub enum UpdateFailKind {
     TooLarge,
     BadResponse,
     Other,
+    /// Not a failure: the endpoint reported no full release (HTTP 404). Only used to carry that
+    /// outcome into `with_result`, which records `UpdateResult::NoRelease`.
+    NoRelease,
 }
 
 impl UpdateFailKind {
     pub fn label(self) -> &'static str {
         match self {
+            UpdateFailKind::NoRelease => "no release published yet",
             UpdateFailKind::Offline => "offline",
             UpdateFailKind::Timeout => "timed out",
             UpdateFailKind::Tls => "secure connection failed",
@@ -191,15 +197,28 @@ impl From<UpdateParseError> for UpdateFailKind {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UpdateResult {
-    Newest { checked: i64 },
-    Available { tag: String, checked: i64 },
-    Failed { at: i64, kind: UpdateFailKind },
+    Newest {
+        checked: i64,
+    },
+    Available {
+        tag: String,
+        checked: i64,
+    },
+    Failed {
+        at: i64,
+        kind: UpdateFailKind,
+    },
+    /// No full release has been published yet; neither a failure nor an offer.
+    NoRelease {
+        checked: i64,
+    },
 }
 
 impl UpdateResult {
     /// The About text for this result (§4.3, screens.md "About and updates").
     pub fn text(&self) -> String {
         match self {
+            UpdateResult::NoRelease { .. } => NO_RELEASE.to_string(),
             UpdateResult::Newest { .. } => NEWEST.to_string(),
             UpdateResult::Available { tag, .. } => {
                 format!(
@@ -252,6 +271,9 @@ impl UpdateCheckState {
         now_unix_ms: i64,
     ) -> UpdateCheckState {
         let result = match fetched {
+            Err(UpdateFailKind::NoRelease) => UpdateResult::NoRelease {
+                checked: now_unix_ms,
+            },
             Err(kind) => UpdateResult::Failed {
                 at: now_unix_ms,
                 kind,
@@ -443,5 +465,11 @@ mod tests {
                 kind: UpdateFailKind::BadResponse
             })
         );
+        let none = base.with_result(Err(UpdateFailKind::NoRelease), cur, 9);
+        assert_eq!(
+            none.last_result,
+            Some(UpdateResult::NoRelease { checked: 9 })
+        );
+        assert_eq!(none.last_result.as_ref().unwrap().text(), NO_RELEASE);
     }
 }
