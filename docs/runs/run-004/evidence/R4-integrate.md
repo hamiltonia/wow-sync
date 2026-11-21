@@ -384,6 +384,33 @@ target/decide/apply changes outside this packet's files.
   `process_memory_mib: None` -> the e2e test fails on Windows. The macOS branches compile only on
   macOS CI (not run here). The earlier "stay `None`" note above is superseded.
 
+## Pass 15: recheck round 2 (V-02, V-04, V-09)
+
+Handover paths (Rust, from `wow_sync_runtime`):
+
+| Need | Path |
+|---|---|
+| Local recovery points per add-on | `StatusSnapshot.recovery_points: Vec<RecoveryRow>`; `RecoveryRow { package: FolderKey, id: String (recovery point op id), release: Sha256, version: Option<String> (TOC of the held copy), set_aside_unix_ms: u64, reason: String, pinned: bool }`, newest first per add-on |
+| Restore one | `Command::Rollback { package: row.package, recovered: row.release }` (no new command). Refusals as before: `CommandError::UnknownCopy`, `CommandError::Rollback(RollbackRefusal::{SameRelease, NotInstalled, NotAvailable})` |
+| Held date | `StatusSnapshot.held_release_dates: BTreeMap<Sha256, u64>`, keyed by `HeldRelease.release` / `RecoveryRow.release`; the value is when the copy was set aside |
+| Rollback that could not run | `StatusSnapshot.rollback_outcome: Option<RollbackOutcome { package, recovered, kind: RollbackOutcomeKind::{Applied, NotAvailable, NotApplied}, text }>` |
+
+- **V-02.** Only points whose every replaced folder still hashes to its recorded tree are listed (verified, not trusted). A rollback request now resolves its release from the live copies first, then from a local recovery point (`rollback_flow::plan_requested`, `effects::local_points`). Design: rollback.md §1 step 4 ("R0 comes from the local recovery point") and §7 ("R0's recovery point becomes the current state"). The restore is the ordinary rollback: one `rollback` operation, rejection of what was installed, and the new current state published by the next publish. `Applied` is declared but never stored: success clears the outcome.
+- **V-04.** Cause: the rollback plan only required R0's tree record, not its files, so a request was accepted and the apply then found no blob. Now `plan_requested` also checks that every file is in the shared folder or a verified local recovery point. At command time this returns `CommandError::Rollback(NotAvailable)` with nothing queued. If the files vanish after queuing, the cycle stores `RollbackOutcome { kind: NotAvailable }` (`rollback-outcome-<group>.json`, local state), shown through `rollback_outcome`; a new rollback request or a successful rollback clears it. Design: rollback.md §1 step 4 and T-R4D29 (nothing installed, no automatic selection).
+- **V-09.** Only locally held releases have a date: the recovery point's `created_unix_ms`. No shared record carries a per-release date (code state has none), so a release only a peer holds has no entry; the GUI keeps its fallback text for those.
+
+Tests: `e2e::tests::a_rollback_whose_files_left_the_shared_folder_is_refused_not_silently_dropped`, `..._vanish_after_it_is_queued_reports_not_available`, `a_rollback_with_its_files_present_applies_and_leaves_no_outcome`, `a_release_only_a_local_recovery_point_holds_is_listed_and_can_be_restored` (includes negatives: B lists nothing, unknown release refused), and `tests/public_api.rs` names the new fields.
+
+A-38 controls (edit tool, reverted, `git diff --exit-code` clean):
+
+| Item | Mutation | Result |
+|---|---|---|
+| V-04 | `if false && blob_missing` in `plan_requested` | both V-04 refusal tests FAILED |
+| V-02 | local-point lookup `false && ...` | restore test FAILED |
+| V-09 | date map filled with 0 instead of `set_aside_unix_ms` | restore test FAILED |
+
+V-02 and V-09 share one commit.
+
 ## Verification
 
 Final tree: `cargo xtask verify --tier offline` PASS; `cargo xtask verify --tier native` PASS
