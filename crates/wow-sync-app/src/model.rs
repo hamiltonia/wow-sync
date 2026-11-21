@@ -199,9 +199,14 @@ pub fn headline_sub(w: &World) -> Option<String> {
     if let Some((_, sub)) = crate::computers_ui::standing_headline(&w.features.standing) {
         return Some(sub);
     }
+    if w.features.review_needed {
+        return Some("Confirm this computer's WoW folders so syncing can continue.".to_string());
+    }
     w.features
-        .review_needed
-        .then(|| "Confirm this computer's WoW folders so syncing can continue.".to_string())
+        .restores
+        .iter()
+        .find(|p| matches!(p.state, wow_sync_runtime::RestoreState::Waiting { .. }))
+        .map(|p| crate::removed_ui::plain(&p.text))
 }
 
 fn waiting_sentence(w: &World) -> String {
@@ -671,6 +676,8 @@ pub enum NeedTarget {
     Decision(String),
     Computer(usize),
     Risk,
+    /// A refused restore of a removed add-on; its Try again and Dismiss are on the Removed list.
+    Restore,
 }
 
 /// What to do about each data-at-risk condition, one sentence.
@@ -698,6 +705,18 @@ pub fn need_items(w: &World) -> Vec<NeedItem> {
             tone: Tone::Error,
             target: NeedTarget::Risk,
         });
+    }
+    for p in &w.features.restores {
+        if matches!(p.state, wow_sync_runtime::RestoreState::Unavailable { .. }) {
+            v.push(NeedItem {
+                title: crate::removed_ui::plain(&p.text),
+                reason: "Choose Try again, or Dismiss to stop showing this.".into(),
+                affects: String::new(),
+                button: "Open Removed",
+                tone: Tone::Error,
+                target: NeedTarget::Restore,
+            });
+        }
     }
     if let Some(e) = &w.provider_error {
         v.push(NeedItem {
@@ -1352,6 +1371,43 @@ mod tests {
         w.paused_since = None;
         w.pause_damaged = true;
         assert!(headline(&w).text.contains("pause setting can't be read"));
+    }
+
+    #[test]
+    fn a_refused_restore_is_a_needs_item_and_a_waiting_one_is_only_a_status_line() {
+        use wow_sync_runtime::{RestoreProgress, RestoreState, RestoreWait};
+        let mut w = enrolled();
+        let p = |state, text: &str| RestoreProgress {
+            package: wow_sync_core::paths::validate_folder_name("Alpha").unwrap(),
+            title: "alpha".into(),
+            state,
+            text: text.into(),
+        };
+        w.features.restores = vec![p(
+            RestoreState::Waiting {
+                reason: RestoreWait::WowRunning,
+            },
+            "Restoring alpha: waiting for World of Warcraft to close.",
+        )];
+        assert!(need_items(&w).is_empty(), "waiting is not a problem");
+        assert_eq!(
+            headline_sub(&w).as_deref(),
+            Some("Restoring alpha: waiting for World of Warcraft to close.")
+        );
+        w.features.restores = vec![p(
+            RestoreState::Unavailable { text: "x".into() },
+            "|cffff0000alpha|r can't be restored: a file is missing. Nothing was changed.",
+        )];
+        let items = need_items(&w);
+        assert_eq!(items.len(), 1);
+        assert_eq!(
+            items[0].title,
+            "alpha can't be restored: a file is missing. Nothing was changed."
+        );
+        assert_eq!(items[0].tone, Tone::Error);
+        assert_eq!(items[0].target, NeedTarget::Restore);
+        assert_ne!(items[0].target, NeedTarget::Risk, "not data at risk");
+        assert!(headline_sub(&w).is_none());
     }
 
     #[test]

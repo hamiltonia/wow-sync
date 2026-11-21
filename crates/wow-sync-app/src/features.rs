@@ -32,6 +32,7 @@ pub enum ActionKind {
     AllowAgain,
     Rollback,
     RestoreRemoved,
+    DismissRestoreIssue,
     RestoreRemovedSettings,
     SetSettingsPolicy,
     ShareSettings,
@@ -95,6 +96,7 @@ impl Capabilities {
             AllowAgain,
             Rollback,
             RestoreRemoved,
+            DismissRestoreIssue,
             RestoreRemovedSettings,
             SetSettingsPolicy,
             ShareSettings,
@@ -137,6 +139,9 @@ pub enum GroupAction {
     RestoreRemovedSettings {
         removal: Sha256,
         unit: SettingsUnit,
+    },
+    DismissRestoreIssue {
+        package: FolderKey,
     },
     Keep {
         scope: Vec<FolderKey>,
@@ -203,6 +208,7 @@ impl GroupAction {
             GroupAction::AllowAgain { .. } => ActionKind::AllowAgain,
             GroupAction::RestoreRemoved { .. } => ActionKind::RestoreRemoved,
             GroupAction::RestoreRemovedSettings { .. } => ActionKind::RestoreRemovedSettings,
+            GroupAction::DismissRestoreIssue { .. } => ActionKind::DismissRestoreIssue,
             GroupAction::Keep { .. } => ActionKind::Keep,
             GroupAction::Resume { .. } => ActionKind::Resume,
             GroupAction::Rollback { .. } => ActionKind::Rollback,
@@ -246,6 +252,9 @@ impl GroupAction {
             GroupAction::RestoreRemoved { removal, .. } => Command::RestoreRemoved { removal },
             GroupAction::RestoreRemovedSettings { removal, unit } => {
                 Command::RestoreRemovedSettings { removal, unit }
+            }
+            GroupAction::DismissRestoreIssue { package } => {
+                Command::DismissRestoreIssue { package }
             }
             GroupAction::Keep { scope, copy, why } => Command::Keep { scope, copy, why },
             GroupAction::Resume {
@@ -435,6 +444,9 @@ pub fn result_text_named(kind: ActionKind, r: &ActionResult, subject: Option<&st
             "{x} can't be restored: {}. Nothing was changed.",
             why.trim_end_matches('.')
         ),
+        ActionResult::Local if kind == ActionKind::DismissRestoreIssue => {
+            "Dismissed. Nothing was changed.".into()
+        }
         ActionResult::Local if kind == ActionKind::RestoreRemoved => format!(
             "{x} will be reinstalled on all computers in this group. If World of Warcraft is running, it waits until the game closes."
         ),
@@ -520,6 +532,8 @@ pub struct FeatureData {
     pub local_only: Vec<wow_sync_runtime::LocalOnlyVersion>,
     /// Conditions that threaten the user's data; shown whatever the notification toggles say.
     pub data_at_risk: Vec<wow_sync_runtime::DataAtRisk>,
+    /// Restores of removed add-ons that have not landed yet (removal.md §7.4).
+    pub restores: Vec<wow_sync_runtime::RestoreProgress>,
     /// Peer computer id (hex) to the enrollment a retirement would name.
     pub enrollments: Vec<(String, EnrollmentRef)>,
     /// This computer's own enrollment, when active: it may be the settings master.
@@ -560,6 +574,7 @@ impl Default for FeatureData {
             decisions: Vec::new(),
             local_only: Vec::new(),
             data_at_risk: Vec::new(),
+            restores: Vec::new(),
             enrollments: Vec::new(),
             this_enrollment: None,
             retired: Vec::new(),
@@ -590,6 +605,7 @@ pub fn apply_snapshot(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot)
     f.removal_hashes = s.removal_hashes.clone();
     f.local_only = s.local_only_versions.clone();
     f.data_at_risk = s.data_at_risk.clone();
+    f.restores = s.restores.clone();
     apply_peers(f, s);
     let retired_on = |enrollment: &wow_sync_core::ids::EnrollmentId| {
         s.peers

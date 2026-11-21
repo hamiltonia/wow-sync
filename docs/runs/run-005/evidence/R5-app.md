@@ -71,6 +71,20 @@ A-38 control: mapping `NoRelease` to "Could not check for updates." failed the t
 - A-38 controls (exit 101 each, reverted): queued text mapped to the Rollback arm instead; confirmation text
   changed to "on this computer".
 
+## Restore progress (item 3, after merge of debc58f)
+
+- `StatusSnapshot.restores` is kept in `FeatureData.restores`. Waiting: a muted line on the add-on's Removed row
+  (matched by first folder) and the headline sub-line (after standing and review needed). Unavailable: an
+  error-tone Needs item showing `text` (target `NeedTarget::Restore`, opens Add-ons) and, on the Removed row, the
+  text with Try again (`RestoreRemoved` again) and Dismiss (`GroupAction::DismissRestoreIssue`, result "Dismissed.
+  Nothing was changed."). It is not DataAtRisk. `title`/`text` pass through `strip_colour_codes` and are drawn as
+  plain text.
+- Tests: `model::tests::a_refused_restore_is_a_needs_item_and_a_waiting_one_is_only_a_status_line`,
+  `removed_ui::tests::progress_belongs_to_the_row_of_its_first_folder_and_dismiss_names_that_folder`
+  (case `R5-app:restore-progress`).
+- A-38 control: filtering the Needs item on `Waiting` instead of `Unavailable` failed the test (exit 101), reverted.
+- Not wired: the Needs page has only the navigate button; Try again and Dismiss live on the Removed row.
+
 ## Notes
 
 One edit to `about_ui.rs` was written with a .NET file write by mistake instead of the edit tool
