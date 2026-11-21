@@ -17,10 +17,13 @@ chat is not.
 |---|---|
 | R5-remove | merged `1c543ce` (branch `50d7ee2`) |
 | R5-decide | merged `1c543ce` (branch `02bda94`); follow-up `220c9b0` (update-check "no release yet" result, as-built notes) merged `7a4df23` |
-| R5-app | stage A merged `1fb0234` (`90ecfa4`); stage A2 + Q-77 banner built, awaiting commit and the About "no release yet" text |
-| R5-release | merged `4ec8104` (`22eb997`, LICENSE `74a0c38`); dispatch build running |
-| R5-check | not started |
-| R5-review | not started |
+| R5-app | stage A merged `1fb0234` (`90ecfa4`); A2, Q-77 banner and no-release text merged `559cb4d` (`9261037`) |
+| R5-release | merged `4ec8104` (`22eb997`, LICENSE `74a0c38`); first dispatch run 44942657034 failed (`-Maxdepth`); fix `81ee2a3` merged `4675f08`; dispatch run 44945165878 |
+| R5-check | running (`bb375372`), worktree from `4675f08`, packet [R5-check.md](packets/R5-check.md) |
+| R5-review | packet [R5-review.md](packets/R5-review.md) written; starts after R5-check and any fixes |
+
+The `v0.1.0` tag is not pushed until R5-check passes the artifact smoke
+test (PLAN §3/§5).
 
 ## Incidents
 
