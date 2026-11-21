@@ -6,19 +6,28 @@
 #![allow(dead_code)]
 
 use std::collections::BTreeSet;
+use std::path::Path;
 use wow_sync_adapters::localstate::LocalState;
+use wow_sync_adapters::settings_store::SettingsStore;
 use wow_sync_adapters::FsError;
 use wow_sync_core::decision::{AckItem, CleanupClass, CycleCx};
-use wow_sync_core::ids::{GroupId, Sha256};
+use wow_sync_core::explain::Explanation;
+use wow_sync_core::hash::sha256;
+use wow_sync_core::ids::{CheckpointRef, GroupId, OpId, SettingsUnit, Sha256};
 use wow_sync_core::inventory::{FolderState, Inventory};
 use wow_sync_core::kinds::{Ack, EnrollmentRef, Readd, ReaddEvidence, Removal, RemovalEvidence};
 use wow_sync_core::ledger::Ledger;
-use wow_sync_core::paths::FolderKey;
+use wow_sync_core::paths::{FolderKey, SettingsPath};
 use wow_sync_core::plan::PackageApply;
+use wow_sync_core::records::{Location, MissingReason, RootState, SettingsRoot};
 use wow_sync_core::removal::{
-    absent_acks, observe, plan_remove_ops, readd_for_restore, removal_record, Baseline,
-    Observation, ObserveInput, Observed, ObservedRemoval,
+    absent_acks, observe, plan_cleanup_ops, plan_remove_ops, plan_remove_ops_with,
+    readd_for_restore, removal_record, Baseline, Observation, ObserveInput, Observed,
+    ObservedRemoval,
 };
+use wow_sync_core::settings::{removal_targets, DeclaringFolder, OwnedFile, SettingsScope};
+
+use crate::settings_cycle::{capture_unit, load_local, observe_scope, plan_settings_apply};
 
 const LIMIT: u64 = 8 * 1024 * 1024;
 
@@ -226,6 +235,366 @@ pub fn step_3a(
         return Vec::new();
     }
     plan_remove_ops(cx, inv, next_seq)
+}
+
+// ---------------------------------------------------------------- settings of removed addons
+
+/// What the settings side of a removal pass needs from the service.
+pub struct SettingsEnv<'a> {
+    pub cap: Option<u64>,
+    pub variant_dir: &'a Path,
+    /// The declarations of the folders installed now.
+    pub decls: &'a [DeclaringFolder],
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct StoredDecl {
+    folder: FolderKey,
+    account: Vec<String>,
+    character: Vec<String>,
+}
+
+/// A saved file this computer captured for an uninstall and has not yet put back.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct Captured {
+    unit: SettingsUnit,
+    rel: SettingsPath,
+    checkpoint: CheckpointRef,
+    blob: Sha256,
+}
+
+/// Ownership evidence for folders that are gone (their declarations) and the captures taken for
+/// removals. Declarations are metadata read from `.toc` files; no saved-variable file is read
+/// for them.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+struct SettingsBook {
+    decls: Vec<StoredDecl>,
+    captures: Vec<Captured>,
+}
+
+const BOOK_DECLS: usize = 1024;
+const BOOK_CAPTURES: usize = 256;
+
+fn book_name(group: &GroupId) -> String {
+    format!("removal-settings-{group}.json")
+}
+
+struct Active {
+    scope: SettingsScope,
+    store: SettingsStore,
+    paused: BTreeSet<FolderKey>,
+    cap: u64,
+}
+
+#[derive(Debug, Default)]
+pub struct Gathered {
+    pub roots: Vec<SettingsRoot>,
+    pub files: Vec<OwnedFile>,
+}
+
+impl Gathered {
+    pub fn extend(&mut self, other: Gathered) {
+        for r in other.roots {
+            if !self.roots.iter().any(|x| x.unit == r.unit) {
+                self.roots.push(r);
+            }
+        }
+        for f in other.files {
+            if !self.files.iter().any(|x| x.unit == f.unit) {
+                self.files.push(f);
+            }
+        }
+    }
+}
+
+/// Owned files of removed folders cannot be taken while the game runs; the removal waits.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Deferred;
+
+/// One removal pass's view of settings. The scan of `WTF` happens only when something needs it.
+pub struct SettingsPass<'a> {
+    state: &'a LocalState,
+    group: GroupId,
+    env: &'a SettingsEnv<'a>,
+    game_blocks: bool,
+    book: SettingsBook,
+    active: Option<Option<Active>>,
+}
+
+impl<'a> SettingsPass<'a> {
+    pub fn open(
+        state: &'a LocalState,
+        group: &GroupId,
+        env: &'a SettingsEnv<'a>,
+        game_blocks: bool,
+    ) -> Self {
+        let mut book: SettingsBook = state
+            .read(&book_name(group), LIMIT)
+            .ok()
+            .flatten()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
+        let mut changed = false;
+        for d in env.decls {
+            let new = StoredDecl {
+                folder: d.folder.clone(),
+                account: d.saved_variables.clone(),
+                character: d.saved_variables_per_character.clone(),
+            };
+            match book.decls.iter_mut().find(|s| s.folder == d.folder) {
+                Some(s) if s.account == new.account && s.character == new.character => {}
+                Some(s) => {
+                    *s = new;
+                    changed = true;
+                }
+                None => {
+                    book.decls.push(new);
+                    changed = true;
+                }
+            }
+        }
+        if book.decls.len() > BOOK_DECLS {
+            book.decls
+                .retain(|s| env.decls.iter().any(|d| d.folder == s.folder));
+            changed = true;
+        }
+        let pass = Self {
+            state,
+            group: group.clone(),
+            env,
+            game_blocks,
+            book,
+            active: None,
+        };
+        if changed {
+            pass.save();
+        }
+        pass
+    }
+
+    fn save(&self) {
+        let _ = self.state.write_atomic(
+            &book_name(&self.group),
+            &serde_json::to_vec(&self.book).expect("plain data serializes"),
+        );
+    }
+
+    fn ensure(&mut self) {
+        if self.active.is_some() {
+            return;
+        }
+        self.active = Some(self.build());
+    }
+
+    fn build(&self) -> Option<Active> {
+        let cap = self.env.cap?;
+        let local = load_local(self.state, &self.group);
+        if !local.consent || local.included_accounts.is_empty() {
+            return None;
+        }
+        let included: BTreeSet<String> = local.included_accounts.iter().cloned().collect();
+        let mut decls: Vec<DeclaringFolder> = self.env.decls.to_vec();
+        for s in &self.book.decls {
+            if !decls.iter().any(|d| d.folder == s.folder) {
+                decls.push(DeclaringFolder {
+                    folder: s.folder.clone(),
+                    saved_variables: s.account.clone(),
+                    saved_variables_per_character: s.character.clone(),
+                    toc_ambiguous: false,
+                });
+            }
+        }
+        let scope = observe_scope(self.env.variant_dir, &decls, &included, Some(cap)).ok()?;
+        let store = SettingsStore::open(self.env.variant_dir).ok()?;
+        Some(Active {
+            scope,
+            store,
+            paused: local.paused_folders.iter().cloned().collect(),
+            cap,
+        })
+    }
+
+    /// The owned files of `folders` and a root for each unit seen: captured into the local store
+    /// when it is safe to move the file, otherwise missing with the reason. With the game running
+    /// and a file to take, nothing is captured and the caller waits.
+    pub fn take(&mut self, folders: &BTreeSet<FolderKey>) -> Result<Gathered, Deferred> {
+        self.ensure();
+        let Some(Some(a)) = &self.active else {
+            return Ok(Gathered::default());
+        };
+        let t = removal_targets(&a.scope, folders, &a.paused);
+        if self.game_blocks && !t.files.is_empty() {
+            return Err(Deferred);
+        }
+        let mut out = Gathered::default();
+        for (unit, reason) in t.missing {
+            out.roots.push(SettingsRoot {
+                unit,
+                state: RootState::Missing { reason },
+            });
+        }
+        let mut taken = Vec::new();
+        for f in t.files {
+            match capture_unit(self.env.variant_dir, &a.store, &f, a.cap) {
+                Ok(checkpoint) => {
+                    out.roots.push(SettingsRoot {
+                        unit: f.unit.clone(),
+                        state: RootState::Captured {
+                            checkpoint,
+                            location: Location::Local,
+                        },
+                    });
+                    taken.push(Captured {
+                        unit: f.unit.clone(),
+                        rel: f.rel.clone(),
+                        checkpoint,
+                        blob: f.sha256,
+                    });
+                    out.files.push(f);
+                }
+                Err(_) => out.roots.push(SettingsRoot {
+                    unit: f.unit,
+                    state: RootState::Missing {
+                        reason: MissingReason::Unreadable,
+                    },
+                }),
+            }
+        }
+        if !taken.is_empty() {
+            for c in taken {
+                self.book.captures.retain(|x| x.unit != c.unit);
+                self.book.captures.push(c);
+            }
+            let excess = self.book.captures.len().saturating_sub(BOOK_CAPTURES);
+            self.book.captures.drain(..excess);
+            self.save();
+        }
+        Ok(out)
+    }
+
+    /// Captures whose file is still in place unchanged: the cleanup they wait for is not done.
+    pub fn pending_cleanup(&mut self) -> Gathered {
+        let mut out = Gathered::default();
+        if self.book.captures.is_empty() {
+            return out;
+        }
+        self.ensure();
+        let Some(Some(a)) = &self.active else {
+            return out;
+        };
+        for c in &self.book.captures {
+            if let Some(f) = a
+                .scope
+                .owned
+                .iter()
+                .find(|o| o.unit == c.unit && o.sha256 == c.blob)
+            {
+                out.roots.push(SettingsRoot {
+                    unit: c.unit.clone(),
+                    state: RootState::Captured {
+                        checkpoint: c.checkpoint,
+                        location: Location::Local,
+                    },
+                });
+                out.files.push(f.clone());
+            }
+        }
+        out
+    }
+
+    /// Puts a captured file back once its addon is installed again and no removal stands: the
+    /// removal was undone. The live file is never overwritten; a newer file of the user's wins
+    /// and the capture is dropped.
+    pub fn restore_ops(
+        &mut self,
+        inv: &Inventory,
+        own: &EnrollmentRef,
+        removal_stands: &dyn Fn(&FolderKey) -> bool,
+    ) -> Vec<PackageApply> {
+        let mut out = Vec::new();
+        if self.book.captures.is_empty() || self.game_blocks || !inv.listing_stable {
+            return out;
+        }
+        if !self
+            .book
+            .captures
+            .iter()
+            .any(|c| inv.get(&c.unit.folder).is_some() && !removal_stands(&c.unit.folder))
+        {
+            return out;
+        }
+        self.ensure();
+        let Some(Some(a)) = &self.active else {
+            return out;
+        };
+        let mut keep = Vec::new();
+        let mut changed = false;
+        for c in self.book.captures.clone() {
+            let folder = &c.unit.folder;
+            if inv.get(folder).is_none() || removal_stands(folder) {
+                keep.push(c);
+                continue;
+            }
+            if a.scope.owned.iter().any(|o| o.unit == c.unit) {
+                changed = true;
+                continue;
+            }
+            let declares = self.env.decls.iter().any(|d| {
+                &d.folder == folder
+                    && if c.unit.identity.realm_character().is_none() {
+                        !d.saved_variables.is_empty()
+                    } else {
+                        !d.saved_variables_per_character.is_empty()
+                    }
+            });
+            if a.scope.blocked.contains(&c.unit) || !declares {
+                keep.push(c);
+                continue;
+            }
+            let seed = format!(
+                "wowsync-restore-settings-v1\n{}\n{}",
+                c.rel.as_str(),
+                c.blob
+            );
+            let op = OpId::parse(&sha256(seed.as_bytes()).to_string()[..32]).expect("hex");
+            out.push(plan_settings_apply(
+                op,
+                None,
+                c.unit.clone(),
+                c.rel.clone(),
+                Some(c.blob),
+                c.checkpoint,
+                Explanation::Installed {
+                    source: own.computer_id.clone(),
+                },
+            ));
+            keep.push(c);
+        }
+        if changed {
+            self.book.captures = keep;
+            self.save();
+        }
+        out
+    }
+}
+
+/// Step 3a with settings: remove operations that also move the captured settings files, and the
+/// cleanup operations for removals whose folders are already gone. Cleanup acknowledgements
+/// follow the remove operations' sequence numbers.
+pub fn step_3a_with(
+    cx: &CycleCx,
+    inv: &Inventory,
+    next_seq: u64,
+    game_blocks_changes: bool,
+    files: &[OwnedFile],
+) -> Vec<PackageApply> {
+    if game_blocks_changes {
+        return Vec::new();
+    }
+    let mut ops = plan_remove_ops_with(cx, inv, next_seq, files);
+    let cleanup = plan_cleanup_ops(cx, inv, next_seq + ops.len() as u64, files);
+    ops.extend(cleanup);
+    ops
 }
 
 // ---------------------------------------------------------------- commands

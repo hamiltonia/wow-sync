@@ -1052,13 +1052,7 @@ mod tests {
         let t = TempDir::new();
         let wtf = t.path().join("WTF");
         put(&wtf, "Account/ERIC/SavedVariables/Details.lua", b"v1");
-        let off = observe_scope(
-            t.path(),
-            &decls(),
-            &included(),
-            wow_sync_core::records::MAX_SETTINGS_FILE_BYTES,
-        )
-        .unwrap();
+        let off = observe_scope(t.path(), &decls(), &included(), None).unwrap();
         assert!(!off.sync_enabled);
         let scope = observe_scope(t.path(), &decls(), &included(), Some(64)).unwrap();
         put(

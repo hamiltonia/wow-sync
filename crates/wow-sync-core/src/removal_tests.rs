@@ -13,8 +13,10 @@ use crate::kinds::{
 use crate::ledger::{derive, Derived, Ledger, Membership};
 use crate::package::{package_version, PackageVersion};
 use crate::paths::{validate_folder_name, FolderKey};
+use crate::plan::ExpectedLive;
 use crate::records::{decode, encode, Location, MissingReason, OpKind, RootState, SettingsRoot};
 use crate::removal::*;
+use crate::settings::OwnedFile;
 use crate::testkit::{addon, addon_full, client, computer, enrollment, group_id, inventory};
 use crate::toc::IdKind;
 use std::collections::BTreeSet;
@@ -522,9 +524,33 @@ fn a_remove_op_carries_the_fixed_ack_and_skips_held_or_unreadable_folders() {
     assert!(plan_remove_ops(&cx(&g, &other, &w, &d, &held, &[]), &inv, 7).is_empty());
 }
 
+fn owned(folder: &str, bytes: &[u8]) -> OwnedFile {
+    OwnedFile {
+        unit: SettingsUnit {
+            folder: key(folder),
+            identity: Identity::account("ACC").unwrap(),
+        },
+        rel: crate::paths::account_settings_path("ACC", folder).unwrap(),
+        size: bytes.len() as u64,
+        sha256: sha256(bytes),
+    }
+}
+
+fn root_missing(folder: &str, reason: MissingReason) -> SettingsRoot {
+    SettingsRoot {
+        state: RootState::Missing { reason },
+        ..root(folder, false)
+    }
+}
+
+fn op_ack(op: &crate::plan::PackageApply) -> Ack {
+    assert_eq!(op.pending_records.len(), 1);
+    decode(op.pending_records[0].bytes.as_bytes(), usize::MAX).unwrap()
+}
+
 #[test]
-fn a_remove_op_with_owned_settings_waits_for_cleanup_and_carries_no_ack() {
-    // T-R4D5-absent-ack-waits-cleanup
+fn a_remove_op_moves_captured_settings_and_reserves_the_matching_ack() {
+    // T-R5-remove-settings-op
     let mut w = World::new(&[1, 2]);
     w.removal(&rem(2, 5, &["Alpha"], &[1, 2]));
     let d = w.derived();
@@ -532,13 +558,83 @@ fn a_remove_op_with_owned_settings_waits_for_cleanup_and_carries_no_ack() {
     let own = eref(1);
     let held = BTreeSet::new();
     let inv = inventory(vec![addon("Alpha", Some("1"), "a")]);
+    let files = [owned("alpha", b"AlphaDB = {}")];
     let roots = [root("alpha", true)];
-    let ops = plan_remove_ops(&cx(&g, &own, &w, &d, &held, &roots), &inv, 7);
+    let ops = plan_remove_ops_with(&cx(&g, &own, &w, &d, &held, &roots), &inv, 7, &files);
     assert_eq!(ops.len(), 1);
-    assert!(ops[0].pending_records.is_empty());
-    let paused = [root("alpha", false)];
-    let ops = plan_remove_ops(&cx(&g, &own, &w, &d, &held, &paused), &inv, 7);
-    assert_eq!(ops[0].pending_records.len(), 1);
+    assert_eq!(ops[0].settings_ops.len(), 1);
+    let so = &ops[0].settings_ops[0];
+    assert_eq!(
+        so.staged, None,
+        "uninstall moves the file out, nothing is staged"
+    );
+    assert_eq!(
+        so.expected_live,
+        ExpectedLive::Tree {
+            tree: files[0].sha256,
+            fingerprint: files[0].sha256
+        }
+    );
+    assert_eq!(op_ack(&ops[0]).settings, AckSettings::Paired);
+    // A paused unit stays in place and the ack says so.
+    let paused = [root_missing("alpha", MissingReason::Paused)];
+    let ops = plan_remove_ops_with(&cx(&g, &own, &w, &d, &held, &paused), &inv, 7, &files);
+    assert!(ops[0].settings_ops.is_empty());
+    assert_eq!(op_ack(&ops[0]).settings, AckSettings::KeptPaused);
+    // An uncaptured unit (unknown owner, shared, too large) is never moved: code only.
+    for reason in [
+        MissingReason::UnknownOwner,
+        MissingReason::SharedFile,
+        MissingReason::TooLarge,
+    ] {
+        let missing = [root_missing("alpha", reason)];
+        let ops = plan_remove_ops_with(&cx(&g, &own, &w, &d, &held, &missing), &inv, 7, &files);
+        assert!(ops[0].settings_ops.is_empty(), "{reason:?}");
+        assert_eq!(op_ack(&ops[0]).settings, AckSettings::CodeOnly);
+    }
+    // No roots at all: not applicable, nothing moved even if a file was passed.
+    let ops = plan_remove_ops_with(&cx(&g, &own, &w, &d, &held, &[]), &inv, 7, &files);
+    assert!(ops[0].settings_ops.is_empty());
+    assert_eq!(op_ack(&ops[0]).settings, AckSettings::NotApplicable);
+}
+
+#[test]
+fn the_ack_says_partial_when_only_some_units_were_captured() {
+    let roots = [
+        root("alpha", true),
+        root_missing("beta", MissingReason::TooLarge),
+    ];
+    assert_eq!(ack_settings_for(&roots), AckSettings::Partial);
+    assert_eq!(ack_settings_for(&[]), AckSettings::NotApplicable);
+}
+
+#[test]
+fn a_folder_already_gone_gets_a_settings_cleanup_op_with_an_absent_ack() {
+    // T-R5-remove-cleanup-op
+    let mut w = World::new(&[1, 2]);
+    let r = w.removal(&rem(1, 5, &["Alpha"], &[1, 2]));
+    let d = w.derived();
+    let g = group_id();
+    let own = eref(1);
+    let held = BTreeSet::new();
+    let inv = inventory(vec![addon("Other", Some("1"), "o")]);
+    let files = [owned("alpha", b"AlphaDB = {}")];
+    let roots = [root("alpha", true)];
+    let ops = plan_cleanup_ops(&cx(&g, &own, &w, &d, &held, &roots), &inv, 7, &files);
+    assert_eq!(ops.len(), 1);
+    assert_eq!(ops[0].kind, OpKind::SettingsCleanup);
+    assert!(ops[0].removes.is_empty() && ops[0].removals.is_empty());
+    assert_eq!(ops[0].settings_ops.len(), 1);
+    let ack = op_ack(&ops[0]);
+    assert_eq!(ack.result, AckResult::Absent);
+    assert_eq!(ack.items[0].removal, r);
+    assert_eq!(ack.settings, AckSettings::Paired);
+    // Nothing captured: the plain absent acknowledgement applies and no cleanup is planned.
+    let none = [root_missing("alpha", MissingReason::Paused)];
+    assert!(plan_cleanup_ops(&cx(&g, &own, &w, &d, &held, &none), &inv, 7, &files).is_empty());
+    // A folder still on disk is the remove operation's business.
+    let present = inventory(vec![addon("Alpha", Some("1"), "a")]);
+    assert!(plan_cleanup_ops(&cx(&g, &own, &w, &d, &held, &roots), &present, 7, &files).is_empty());
 }
 
 #[test]

@@ -15,7 +15,9 @@ use crate::detail::{
 use crate::effects::{
     load_pending, FaultPlan, Faulty, Hooks, PendingSink, RealEffects, PENDING_REPORT,
 };
-use crate::removal_cycle::{step_3a, step_3b, RemovalStore};
+use crate::removal_cycle::{
+    step_3a_with, step_3b, Gathered, RemovalStore, SettingsEnv, SettingsPass,
+};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -64,7 +66,9 @@ use wow_sync_core::records::{
 };
 use wow_sync_core::reject::{build_lift, LiftError, RejectBehaviour};
 use wow_sync_core::removal::known_summary;
-use wow_sync_core::removal::{removal_record, ObserveInput, RemovalBehaviour};
+use wow_sync_core::removal::{
+    plan_remove_ops, removal_record_with_settings, ObserveInput, RemovalBehaviour,
+};
 use wow_sync_core::report::{outstanding, record_pending, store_needs_reconcile};
 use wow_sync_core::retire::OwnStanding;
 use wow_sync_core::retire::RetireBehaviour;
@@ -2433,6 +2437,12 @@ impl SliceService {
                     journaled.extend(w.inventory.folders.iter().map(|f| f.key.clone()));
                     journaled.extend(rec.ops.iter().map(|(_, k, _)| k.clone()));
                 }
+                let svd = self.cfg.install_root.join(&self.cfg.variant_folder);
+                let senv = crate::removal_cycle::SettingsEnv {
+                    cap: self.settings_cap,
+                    variant_dir: &svd,
+                    decls: &w.decls,
+                };
                 let (extra, mut next_seq) = Self::removal_steps(
                     &self.state,
                     &mut self.plane,
@@ -2440,6 +2450,7 @@ impl SliceService {
                     &w,
                     &journaled,
                     game_blocks,
+                    &senv,
                     &mut report,
                 );
                 let settings_ops = if w.standing == OwnStanding::Active && !game_blocks {
@@ -2693,6 +2704,7 @@ impl SliceService {
     /// write `absent` acknowledgements, and plan remove operations. Ledger writes never touch
     /// game files, so only the returned operations depend on `game_blocks_changes`. A computer
     /// whose retirement is settled or unresolved writes nothing (ops.md §2, Q-60).
+    #[allow(clippy::too_many_arguments)]
     fn removal_steps(
         state: &LocalState,
         plane: &mut Plane,
@@ -2700,6 +2712,7 @@ impl SliceService {
         w: &World,
         journaled: &BTreeSet<FolderKey>,
         game_blocks_changes: bool,
+        senv: &SettingsEnv,
         report: &mut SyncReport,
     ) -> (Vec<PackageApply>, u64) {
         if w.standing != OwnStanding::Active {
@@ -2708,6 +2721,7 @@ impl SliceService {
         let gid = &w.group.group_id;
         let now = now_unix_ms() as u64;
         let mut next_seq = w.enrollment.next_seq;
+        let mut pass = SettingsPass::open(state, gid, senv, game_blocks_changes);
         let mut held: BTreeSet<FolderKey> = BTreeSet::new();
         let mut written = false;
         if w.inventory.listing_stable {
@@ -2743,7 +2757,21 @@ impl SliceService {
                 .collect();
             audience.push(w.own.clone());
             for r in &observed.removed {
-                let rec = removal_record(gid, &w.own, audience.clone(), r, next_seq, now);
+                // Owned settings are captured with the record; with the game running they
+                // cannot be taken, so the removal stays pending until it is closed.
+                let keys: BTreeSet<FolderKey> = r.folders.iter().map(|f| f.key.clone()).collect();
+                let Ok(taken) = pass.take(&keys) else {
+                    continue;
+                };
+                let rec = removal_record_with_settings(
+                    gid,
+                    &w.own,
+                    audience.clone(),
+                    r,
+                    next_seq,
+                    now,
+                    taken.roots,
+                );
                 match write_own_record(
                     plane,
                     provider,
@@ -2765,6 +2793,33 @@ impl SliceService {
         let derived = derive(&plane.ledger, gid, &plane.members);
         let behaviour = RemovalBehaviour::new(&plane.ledger, gid, &plane.members)
             .with_inventory(w.inventory.clone(), next_seq);
+        // Settings of removals owed here: what is captured now for folders about to be removed,
+        // and what an earlier cycle captured but has not yet cleaned up.
+        let mut gathered = Gathered::default();
+        if !game_blocks_changes {
+            let probe = CycleCx {
+                group_id: gid,
+                own: &w.own,
+                ledger: &plane.ledger,
+                derived: &derived,
+                members: &plane.members,
+                now_unix_ms: now,
+                held: &held,
+                roots: &[],
+            };
+            let folders: BTreeSet<FolderKey> = plan_remove_ops(&probe, &w.inventory, next_seq)
+                .iter()
+                .flat_map(|o| o.removes.iter().map(|r| r.key.clone()))
+                .collect();
+            if !folders.is_empty() {
+                if let Ok(g) = pass.take(&folders) {
+                    gathered.extend(g);
+                }
+            }
+            if !behaviour.classify_due(&probe).is_empty() {
+                gathered.extend(pass.pending_cleanup());
+            }
+        }
         let acks = {
             let cx = CycleCx {
                 group_id: gid,
@@ -2774,7 +2829,7 @@ impl SliceService {
                 members: &plane.members,
                 now_unix_ms: now,
                 held: &held,
-                roots: &[],
+                roots: &gathered.roots,
             };
             let items = behaviour.classify_due(&cx);
             step_3b(&cx, &items, next_seq)
@@ -2805,9 +2860,20 @@ impl SliceService {
             members: &plane.members,
             now_unix_ms: now,
             held: &held,
-            roots: &[],
+            roots: &gathered.roots,
         };
-        let ops = step_3a(&cx, &w.inventory, next_seq, game_blocks_changes);
+        let mut ops = step_3a_with(
+            &cx,
+            &w.inventory,
+            next_seq,
+            game_blocks_changes,
+            &gathered.files,
+        );
+        // Each planned operation reserves an acknowledgement at its own sequence number.
+        next_seq += ops.len() as u64;
+        ops.extend(pass.restore_ops(&w.inventory, &w.own, &|k| {
+            !behaviour.merged_removals(&plane.ledger, k).live.is_empty()
+        }));
         (ops, next_seq)
     }
 

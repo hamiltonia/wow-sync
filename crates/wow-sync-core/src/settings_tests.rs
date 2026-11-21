@@ -221,15 +221,91 @@ fn scope_blocks_only_the_affected_units() {
 }
 
 #[test]
-fn without_an_approved_cap_real_data_sync_is_disabled() {
+fn the_approved_cap_is_32_mib_and_a_file_at_the_cap_syncs_but_one_byte_more_does_not() {
+    // Q-77, D-26
+    const CAP32: u64 = 32 * 1024 * 1024;
+    assert_eq!(crate::records::MAX_SETTINGS_FILE_BYTES, Some(CAP32));
+    let scope = |size: u64| {
+        settings_scope(
+            &[decl("A", &["ADB"], &[])],
+            &[wtf("Account/ERIC/SavedVariables/A.lua", size)],
+            &included(&["ERIC"]),
+            crate::records::MAX_SETTINGS_FILE_BYTES,
+        )
+    };
+    let at = scope(CAP32);
+    assert!(at.sync_enabled);
+    assert_eq!(at.owned.len(), 1);
+    assert!(at.diagnoses.is_empty());
+    let over = scope(CAP32 + 1);
+    assert!(over.owned.is_empty() && over.blocked.len() == 1);
+    assert_eq!(
+        over.diagnoses,
+        vec![ScopeDiagnosis::TooLarge {
+            file: "Account/ERIC/SavedVariables/A.lua".into(),
+            size: CAP32 + 1
+        }]
+    );
+}
+
+#[test]
+fn an_uninstall_takes_only_unshared_unpaused_owned_files_of_the_removed_folders() {
+    // T-R5-remove-targets
+    let files = vec![
+        wtf("Account/ERIC/SavedVariables/Gone.lua", 10),
+        wtf("Account/ERIC/SavedVariables/Held.lua", 10),
+        wtf("Account/ERIC/SavedVariables/Mine.lua", 10),
+        wtf("Account/ERIC/SavedVariables/Big.lua", 5000),
+        wtf("Account/ERIC/SavedVariables/Keep.lua", 10),
+    ];
+    let scope = settings_scope(
+        &[
+            decl("Gone", &["GoneDB"], &[]),
+            decl("Held", &["HeldDB"], &[]),
+            // an installed addon declares the same variable as the removed "Mine"
+            decl("Mine", &["Common"], &[]),
+            decl("Installed", &["Common"], &[]),
+            decl("Big", &["BigDB"], &[]),
+            decl("Keep", &["KeepDB"], &[]),
+        ],
+        &files,
+        &included(&["ERIC"]),
+        CAP,
+    );
+    let removed: BTreeSet<_> = ["Gone", "Held", "Mine", "Big"]
+        .iter()
+        .map(|f| fk(f))
+        .collect();
+    let paused: BTreeSet<_> = [fk("Held")].into();
+    let t = removal_targets(&scope, &removed, &paused);
+    let taken: Vec<_> = t.files.iter().map(|f| f.unit.folder.clone()).collect();
+    assert_eq!(
+        taken,
+        vec![fk("Gone")],
+        "Keep is not removed, so it is never touched"
+    );
+    let why = |f: &str| {
+        t.missing
+            .iter()
+            .find(|(u, _)| u.folder == fk(f))
+            .map(|(_, r)| *r)
+    };
+    use crate::records::MissingReason as M;
+    assert_eq!(why("Held"), Some(M::Paused));
+    assert_eq!(why("Mine"), Some(M::SharedFile));
+    assert_eq!(why("Big"), Some(M::TooLarge));
+    assert_eq!(why("Keep"), None);
+}
+
+#[test]
+fn without_a_cap_value_sync_stays_disabled() {
     let s = settings_scope(
         &[decl("A", &["ADB"], &[])],
-        &[wtf("Account/ERIC/SavedVariables/A.lua", 1 << 40)],
+        &[wtf("Account/ERIC/SavedVariables/A.lua", 1)],
         &included(&["ERIC"]),
-        crate::records::MAX_SETTINGS_FILE_BYTES,
+        None,
     );
     assert!(!s.sync_enabled);
-    assert!(crate::records::MAX_SETTINGS_FILE_BYTES.is_none());
 }
 
 #[test]

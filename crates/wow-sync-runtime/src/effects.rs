@@ -583,10 +583,21 @@ impl ApplyEffects for RealEffects<'_> {
             ));
         };
         let rel = layout::settings_blob(&h);
-        let mut src = self
-            .provider
-            .open_read(&rel, SETTINGS_BLOB_LIMIT)
-            .map_err(map_err)?;
+        let Ok(mut src) = self.provider.open_read(&rel, SETTINGS_BLOB_LIMIT) else {
+            // A checkpoint captured on this computer (an undone uninstall) is in the local store.
+            let local = wow_sync_adapters::settings_store::SettingsStore::open(self.variant_dir)
+                .map_err(map_err)?
+                .get_blob(&h.0, SETTINGS_BLOB_LIMIT)
+                .map_err(map_err)?
+                .ok_or_else(|| {
+                    EffectError::new(EffectErrorKind::Io, "the settings copy is not available")
+                })?;
+            let size = local.len() as u64;
+            return self
+                .area
+                .stage_settings(op.as_str(), idx, &mut local.as_slice(), h.0, size)
+                .map_err(map_err);
+        };
         let size = src
             .metadata()
             .map_err(|e| EffectError::new(EffectErrorKind::Io, e.to_string()))?
