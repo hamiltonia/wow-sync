@@ -1037,6 +1037,13 @@ book (the removal no longer stands); with no captured copy the cycle's note is
 the R-10 warning. The result is queued ("Recorded"), not "Written". A computer
 that still holds the folders only writes the re-add, as before.
 
+*Progress (round 4).* The status snapshot lists `restores`: a queued restore
+is `Waiting` (WoW running, syncing paused, or next sync) until its re-add is
+written; a refusal found at cycle time stays as `Unavailable` ("X can't be
+restored: reason. Nothing was changed.") until the owner retries or dismisses
+it (`Command::DismissRestoreIssue`). The cycle note tells code-only, partly
+restored and fully paired settings apart.
+
 "Keep it" for a held local observation (§1.6) does not write a re-add (no
 removal was published). **Add back to all computers** for a held
 reappearance (§1.7), or on a computer that still holds a copy while a

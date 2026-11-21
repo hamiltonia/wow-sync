@@ -1457,6 +1457,17 @@ tests = [
     "e2e::tests::a_restore_of_a_rejected_version_is_refused",
     "removal_tests::a_restore_whose_package_hash_is_not_the_removed_hash_is_refused",
 ]
+
+[[case]]
+id = "RV-04:restore-progress"
+tier = "offline"
+tests = [
+    "e2e::tests::a_queued_restore_is_shown_as_waiting_for_wow_then_for_the_next_sync_then_vanishes",
+    "e2e::tests::a_queued_restore_is_shown_as_waiting_while_syncing_is_paused",
+    "e2e::tests::a_restore_refused_at_cycle_time_stays_listed_until_dismissed_or_retried",
+    "e2e::tests::a_retried_restore_replaces_the_shown_refusal",
+    "e2e::tests::the_settings_note_tells_code_only_partial_and_paired_restores_apart",
+]
 # <<< section: R5-remove
 
 # >>> section: R5-decide

@@ -41,6 +41,7 @@ fn command_name(c: &Command) -> &'static str {
         Command::Retire { .. } => "retire",
         Command::AllowAgain { .. } => "allow-again",
         Command::RestoreRemoved { .. } => "restore-removed",
+        Command::DismissRestoreIssue { .. } => "dismiss-restore-issue",
         Command::ReEnroll => "re-enroll",
         Command::Keep { .. } => "keep",
         Command::Resume { .. } => "resume",
@@ -81,6 +82,9 @@ fn every_command_can_be_built_and_every_refusal_named_from_outside_the_crate() {
             rejections: vec![hash],
         },
         Command::RestoreRemoved { removal: hash },
+        Command::DismissRestoreIssue {
+            package: folder.clone(),
+        },
         Command::ReEnroll,
         Command::Keep {
             scope: vec![folder.clone()],
@@ -147,7 +151,7 @@ fn every_command_can_be_built_and_every_refusal_named_from_outside_the_crate() {
     let mut names: Vec<_> = commands.iter().map(command_name).collect();
     names.sort_unstable();
     names.dedup();
-    assert_eq!(names.len(), 20, "one of each command");
+    assert_eq!(names.len(), 21, "one of each command");
 
     assert_eq!(outcome_name(&CommandOutcome::Written(hash)), "written");
     assert_eq!(outcome_name(&CommandOutcome::Kept), "kept");
@@ -214,6 +218,16 @@ fn every_snapshot_field_can_be_named_and_read_from_outside_the_crate() {
     let dates: &BTreeMap<wow_sync_runtime::core::ids::Sha256, u64> = &st.held_release_dates;
     let outcome: &Option<wow_sync_runtime::RollbackOutcome> = &st.rollback_outcome;
     assert!(points.is_empty() && dates.is_empty() && outcome.is_none());
+    let restores: &Vec<wow_sync_runtime::RestoreProgress> = &st.restores;
+    assert!(restores.is_empty());
+    assert_ne!(
+        wow_sync_runtime::RestoreState::Waiting {
+            reason: wow_sync_runtime::RestoreWait::WowRunning
+        },
+        wow_sync_runtime::RestoreState::Unavailable {
+            text: String::new()
+        }
+    );
     assert_ne!(
         wow_sync_runtime::RollbackOutcomeKind::Applied,
         wow_sync_runtime::RollbackOutcomeKind::NotAvailable

@@ -327,6 +327,12 @@ pub enum Command {
     /// Restore a removed addon for the whole group (explicit only, Q-55): `removal` is the hash of
     /// a valid removal record. The re-add covers it, so no later cycle removes the addon again.
     RestoreRemoved { removal: wow_sync_core::ids::Sha256 },
+    /// Dismisses the refusal shown for a restore of the add-on whose first folder is `package`
+    /// (`StatusSnapshot::restores` entry in state `Unavailable`). Retrying with
+    /// `RestoreRemoved` replaces it as well.
+    DismissRestoreIssue {
+        package: wow_sync_core::paths::FolderKey,
+    },
     /// "Join again…": explicit re-enrollment of this computer after it was retired.
     ReEnroll,
     /// Keep one release of the folders in `scope` (typed folder keys, UQ-2). `copy` is the package

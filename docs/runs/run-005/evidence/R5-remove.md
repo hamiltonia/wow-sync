@@ -60,3 +60,15 @@ No .NET file API was used. Both tiers PASS.
 **Not done / for others.** (a) The app does not show "This reinstalls X on all computers in this group" (`features.rs`/`removed_ui.rs` not mine). (b) The app's result text for `Recorded` on `RestoreRemoved` reads "Saved on this computer."; it should say the restore is queued until WoW is closed. (c) The refusal reason surfaces as `CommandError::Service(text)`; a typed error or a status field for `restore_flow::load_outcome` (refusal found at cycle time) needs `control.rs`/status changes. (d) Paired vs partial is reported only as paired-or-warning; a partial-capture warning is not separate. (e) `removal.md` §7.4 got an as-built paragraph; contracts.md unchanged.
 
 No .NET file API was used.
+
+## Round 4: restore progress in the status snapshot
+
+**API.** `wow_sync_runtime::StatusSnapshot.restores: Vec<RestoreProgress>`; `RestoreProgress { package: FolderKey, title: String, state: RestoreState, text: String }`; `RestoreState::{Waiting { reason: RestoreWait }, Unavailable { text: String }}`; `RestoreWait::{WowRunning, Paused, NextCycle}` (all exported from the crate root); `Command::DismissRestoreIssue { package: FolderKey }` (returns `Recorded`, or `NothingToDo` when nothing is shown). Title is the folder key with colour codes stripped (lowercase, as in the removed list). Texts: "Restoring X: waiting for World of Warcraft to close." / "...waiting for syncing to be resumed." / "...it will run on the next sync." / "X can't be restored: <reason>. Nothing was changed."
+
+**Behavior.** The request now persists until `restore_flow::prune` sees the removal no longer stands (re-add written), so `Waiting` stays accurate across cycles. A cycle-time refusal is saved as `restore-issue-{group}.json`, clears the request, and stays until retry (`RestoreRemoved` clears it before re-planning) or dismissal. Cycle note: `settings_note` gives the code-only R-10 warning (0 captured), "Settings were partly restored: N of M ..." or "Settings are restored with the code". `public_api.rs` updated (new variant, 21 commands). Only runtime files touched; no app files.
+
+**Tests.** `a_queued_restore_is_shown_as_waiting_for_wow_then_for_the_next_sync_then_vanishes` (WowRunning, NextCycle, disappearance), `a_queued_restore_is_shown_as_waiting_while_syncing_is_paused`, `a_restore_refused_at_cycle_time_stays_listed_until_dismissed_or_retried`, `a_retried_restore_replaces_the_shown_refusal`, `the_settings_note_tells_code_only_partial_and_paired_restores_apart`. Required case `RV-04:restore-progress`. Runtime lib 173 pass; offline and native tiers PASS.
+
+**A-38 control.** Mutating `progress` to ignore `stands` (`true || stands(..)`) made the first test fail (exit 101); reverted, diff clean. A first mutation of `prune`'s request check passed because `progress` filters independently, so `prune` has no direct test.
+
+No .NET file API was used.

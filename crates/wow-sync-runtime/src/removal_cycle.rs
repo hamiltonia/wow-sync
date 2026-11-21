@@ -372,12 +372,13 @@ impl<'a> SettingsPass<'a> {
         pass
     }
 
-    /// Whether a settings copy taken at removal is held for any of `folders`.
-    pub fn has_capture(&self, folders: &BTreeSet<FolderKey>) -> bool {
+    /// How many units of `folders` have a settings copy taken at removal on this computer.
+    pub fn captured_units(&self, folders: &BTreeSet<FolderKey>) -> usize {
         self.book
             .captures
             .iter()
-            .any(|c| folders.contains(&c.unit.folder))
+            .filter(|c| folders.contains(&c.unit.folder))
+            .count()
     }
 
     fn save(&self) {
