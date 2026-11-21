@@ -41,6 +41,8 @@ pub struct Preview {
     pub summary: String,
     /// The runtime's export; Save sends exactly this.
     pub export: wow_sync_core::diagnostics::Export,
+    /// A file name no earlier save used; Save writes here and never over an earlier export.
+    pub dest: PathBuf,
 }
 
 impl DiagState {
@@ -73,11 +75,17 @@ impl DiagState {
                     text: text.clone(),
                     summary: summary.clone(),
                     export: export.clone(),
+                    dest: default_dest(),
                 });
                 self.message = None;
             }
             (ActionKind::SaveDiagnostics, ActionResult::Exported { .. }) => {
-                self.message = Some(crate::features::result_text(kind, r));
+                let mut text = crate::features::result_text(kind, r);
+                if let Some(p) = self.preview.as_mut() {
+                    text = format!("{text} Saved as {}.", p.dest.display());
+                    p.dest = default_dest();
+                }
+                self.message = Some(text);
             }
             (ActionKind::SaveDiagnostics, ActionResult::Changed) => {
                 self.preview = None;
@@ -104,8 +112,9 @@ pub fn warnings() -> Vec<String> {
     v
 }
 
-/// Where Save puts the file: the user's Documents folder when it exists, else the home folder.
-/// The runtime still refuses the shared folder and install roots.
+/// Where Save puts the file: the user's Documents folder when it exists, else the home folder,
+/// under a name made from the current time. The runtime still refuses the shared folder and
+/// install roots.
 pub fn default_dest() -> PathBuf {
     let home = std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))
@@ -113,7 +122,45 @@ pub fn default_dest() -> PathBuf {
         .unwrap_or_default();
     let docs = home.join("Documents");
     let dir = if docs.is_dir() { docs } else { home };
-    dir.join("wow-sync-diagnostics.txt")
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    fresh_dest(&dir, now)
+}
+
+/// `wow-sync-diagnostics-YYYYMMDD-HHMMSS-mmm.txt` (UTC) in `dir`; a numbered variant if that name
+/// is somehow taken, so no existing file is ever the destination.
+pub fn fresh_dest(dir: &std::path::Path, unix_ms: u64) -> PathBuf {
+    let secs = unix_ms / 1000;
+    let (days, rem) = (secs / 86_400, secs % 86_400);
+    let (y, m, d) = civil_from_days(days as i64);
+    let stem = format!(
+        "wow-sync-diagnostics-{y:04}{m:02}{d:02}-{:02}{:02}{:02}-{:03}",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60,
+        unix_ms % 1000
+    );
+    let mut p = dir.join(format!("{stem}.txt"));
+    let mut n = 2;
+    while p.exists() {
+        p = dir.join(format!("{stem}-{n}.txt"));
+        n += 1;
+    }
+    p
+}
+
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    ((yoe + era * 400 + i64::from(m <= 2)), m, d)
 }
 
 #[cfg(test)]
@@ -228,5 +275,56 @@ mod tests {
         assert!(d.preview.is_none());
         let other = crate::features::result_text(ActionKind::Decide, &r);
         assert!(other.starts_with("Something changed while you were choosing"));
+    }
+
+    #[test]
+    fn each_save_gets_a_new_file_name_and_never_an_existing_one() {
+        let dir = std::env::temp_dir().join(format!("wowsync-diag-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let first = fresh_dest(&dir, 1_795_000_000_123);
+        assert_eq!(
+            first.file_name().unwrap().to_string_lossy(),
+            "wow-sync-diagnostics-20261118-110640-123.txt"
+        );
+        std::fs::write(&first, "first export").unwrap();
+        let again = fresh_dest(&dir, 1_795_000_000_123);
+        assert_ne!(again, first, "same millisecond still gets a new name");
+        let later = fresh_dest(&dir, 1_795_000_001_000);
+        assert_ne!(later, first);
+        std::fs::write(&again, "second export").unwrap();
+        assert_eq!(std::fs::read_to_string(&first).unwrap(), "first export");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_successful_save_moves_the_preview_to_a_new_destination() {
+        let mut d = DiagState::default();
+        let shown = sample_export("x");
+        d.absorb(
+            ActionKind::ExportDiagnostics,
+            &ActionResult::Exported {
+                text: "x".into(),
+                summary: "s".into(),
+                export: shown.clone(),
+            },
+        );
+        let before = d.preview.clone().unwrap().dest;
+        std::fs::create_dir_all(before.parent().unwrap()).ok();
+        d.preview.as_mut().unwrap().dest = std::env::temp_dir().join("wowsync-taken.txt");
+        std::fs::write(&d.preview.as_ref().unwrap().dest, "kept").unwrap();
+        d.absorb(
+            ActionKind::SaveDiagnostics,
+            &ActionResult::Exported {
+                text: "x".into(),
+                summary: "s".into(),
+                export: shown,
+            },
+        );
+        assert_ne!(
+            d.preview.as_ref().unwrap().dest,
+            std::env::temp_dir().join("wowsync-taken.txt")
+        );
+        assert!(d.message.as_deref().unwrap().contains("wowsync-taken.txt"));
+        let _ = std::fs::remove_file(std::env::temp_dir().join("wowsync-taken.txt"));
     }
 }

@@ -36,6 +36,14 @@ pub fn show_socket_path(dir: &Path, key: &str) -> PathBuf {
     dir.join(format!("wowsync-{key}.sock"))
 }
 
+/// Absolute helper paths: a `PATH` lookup could run a program the user did not install.
+#[cfg_attr(windows, allow(dead_code))]
+const MAC_SCUTIL: &str = "/usr/sbin/scutil";
+#[cfg_attr(windows, allow(dead_code))]
+const MAC_HOSTNAME: &str = "/bin/hostname";
+#[cfg_attr(windows, allow(dead_code))]
+const MAC_DATE: &str = "/bin/date";
+
 #[cfg(not(windows))]
 pub fn host_name() -> Option<String> {
     let run = |prog: &str, args: &[&str]| {
@@ -47,7 +55,7 @@ pub fn host_name() -> Option<String> {
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
             .filter(|s| !s.is_empty())
     };
-    run("scutil", &["--get", "ComputerName"]).or_else(|| run("hostname", &[]))
+    run(MAC_SCUTIL, &["--get", "ComputerName"]).or_else(|| run(MAC_HOSTNAME, &[]))
 }
 
 #[cfg(not(windows))]
@@ -59,7 +67,7 @@ pub fn home_dir() -> Option<PathBuf> {
 
 #[cfg(not(windows))]
 pub fn local_offset_minutes() -> i32 {
-    std::process::Command::new("date")
+    std::process::Command::new(MAC_DATE)
         .arg("+%z")
         .output()
         .ok()
@@ -85,6 +93,13 @@ mod tests {
         assert_eq!(parse_utc_offset("+0000"), Some(0));
         for bad in ["", "0530", "+53", "+2460", "+2500", "+05:30", "-ab12"] {
             assert_eq!(parse_utc_offset(bad), None, "{bad}");
+        }
+    }
+
+    #[test]
+    fn helper_programs_are_absolute_paths() {
+        for p in [MAC_SCUTIL, MAC_HOSTNAME, MAC_DATE] {
+            assert!(p.starts_with('/'), "{p}");
         }
     }
 

@@ -2268,7 +2268,7 @@ impl Shell {
                     .child(SharedString::from(p.text))
                     .into_any_element(),
             );
-            let dest = crate::about_ui::default_dest();
+            let dest = p.dest.clone();
             v.push(
                 self.muted(format!("It will be saved as {}", dest.display()))
                     .into_any_element(),
