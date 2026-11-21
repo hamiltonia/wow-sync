@@ -2279,7 +2279,7 @@ impl Shell {
                     "Save",
                     Bk::Primary,
                     Act::Group(GroupAction::SaveDiagnostics {
-                        options: opts,
+                        export: p.export.clone(),
                         dest,
                     }),
                     cx,
