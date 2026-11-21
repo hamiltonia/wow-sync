@@ -1432,6 +1432,32 @@ tests = [
 # <<< section: R5-remove
 
 # >>> section: R5-decide
+[[case]]
+id = "R5-decide:local-only-version-q88"
+tier = "offline"
+tests = [
+    "e2e::tests::a_newer_local_only_version_after_a_keep_stays_installed_unshared_and_is_asked_every_cycle",
+    "e2e::tests::answering_a_local_only_version_decision_either_shares_it_or_returns_to_the_kept_version",
+    "e2e::tests::a_newer_version_after_a_keep_is_offered_while_the_kept_version_stays",
+]
+
+[[case]]
+id = "R5-decide:data-at-risk-producer"
+tier = "offline"
+tests = [
+    "e2e::tests::unreadable_local_state_is_a_data_at_risk_condition_in_the_snapshot_and_a_notice",
+    "e2e::tests::a_recovery_copy_that_cannot_be_written_is_a_data_at_risk_condition",
+    "notices::tests::producer_risks_are_classified_and_delivered_while_playing_with_the_producer_event",
+]
+
+[[case]]
+id = "R5-decide:diagnostics-fingerprints-and-commit"
+tier = "offline"
+tests = [
+    "e2e::tests::diagnostics_carry_real_file_fingerprints_only_when_asked",
+    "diag::tests::the_build_commit_is_the_stamped_one_or_dev",
+    "e2e::tests::diagnostics_preview_and_save_match_and_never_land_in_the_shared_or_install_folders",
+]
 # <<< section: R5-decide
 
 # >>> section: R5-app

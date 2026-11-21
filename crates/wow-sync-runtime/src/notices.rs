@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 use wow_sync_adapters::localstate::LocalState;
 use wow_sync_adapters::notify::{Notifier, RenderedNotice};
 use wow_sync_core::notice::{
-    plan_notices, GameActivity, Notice, NoticeEvent, NoticeKey, NoticeKind, NoticeLedger,
-    NoticePolicy, NoticePrefs,
+    fingerprint, plan_notices, GameActivity, Notice, NoticeEvent, NoticeKey, NoticeKind,
+    NoticeLedger, NoticePolicy, NoticePrefs, NoticeScope,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,6 +118,109 @@ impl NoticeRunner {
         out.notices = notices;
         out
     }
+}
+
+/// Why the user's data may be at risk (ops.md §3, ui/interaction.md). `text` is the one
+/// sentence shown in the app and used as the notice subject.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RiskKind {
+    LocalStateUnreadable,
+    RecoveryCopyFailed,
+    StorageFull,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataAtRisk {
+    pub kind: RiskKind,
+    pub text: String,
+}
+
+impl DataAtRisk {
+    pub fn new(kind: RiskKind) -> DataAtRisk {
+        let text = match kind {
+            RiskKind::LocalStateUnreadable => "WoW Sync can't read its saved state",
+            RiskKind::RecoveryCopyFailed => "WoW Sync can't write a recovery copy",
+            RiskKind::StorageFull => "WoW Sync can't keep recovery copies: the disk is full",
+        };
+        DataAtRisk {
+            kind,
+            text: text.to_string(),
+        }
+    }
+
+    /// The notice key: one per kind, so a repeat is the same condition (Q-85 never mutes it).
+    pub fn key(&self) -> NoticeKey {
+        NoticeKey {
+            kind: NoticeKind::DataAtRisk,
+            scope: NoticeScope::Computer(format!("{:?}", self.kind)),
+        }
+    }
+
+    pub fn event(&self) -> NoticeEvent {
+        NoticeEvent {
+            key: self.key(),
+            fingerprint: fingerprint(format!("{:?}", self.kind).as_bytes()),
+            name: self.text.clone(),
+        }
+    }
+}
+
+fn storage_full(detail: &str) -> bool {
+    let d = detail.to_ascii_lowercase();
+    [
+        "os error 112",
+        "os error 28",
+        "no space left",
+        "not enough space",
+        "disk is full",
+    ]
+    .iter()
+    .any(|p| d.contains(p))
+}
+
+/// Risks shown by a failed package: a full disk, or a write failure of a recovery copy.
+pub fn risk_from_failure(detail: &str) -> Option<DataAtRisk> {
+    if storage_full(detail) {
+        Some(DataAtRisk::new(RiskKind::StorageFull))
+    } else if detail.replace('\\', "/").contains("/recovery/") {
+        Some(DataAtRisk::new(RiskKind::RecoveryCopyFailed))
+    } else {
+        None
+    }
+}
+
+pub fn risks_from_outcome(outcome: &wow_sync_core::exec::ApplyOutcome) -> Vec<DataAtRisk> {
+    use wow_sync_core::exec::PackageResult;
+    let mut out: Vec<DataAtRisk> = Vec::new();
+    for (_, r) in &outcome.packages {
+        let detail = match r {
+            PackageResult::Failed(wow_sync_core::explain::Explanation::StagingFailed {
+                detail,
+                ..
+            }) => detail,
+            _ => continue,
+        };
+        if let Some(risk) = risk_from_failure(detail) {
+            if !out.iter().any(|o| o.kind == risk.kind) {
+                out.push(risk);
+            }
+        }
+    }
+    out
+}
+
+/// A local state store that cannot be read, or whose stored report no longer decodes, puts
+/// recovery history at risk. An absent file is normal.
+pub fn local_state_risk(state: &LocalState) -> Option<DataAtRisk> {
+    let unreadable = match state.read(crate::effects::PENDING_REPORT, 1024 * 1024) {
+        Err(_) => true,
+        Ok(None) => false,
+        Ok(Some(b)) => {
+            wow_sync_core::records::decode::<wow_sync_core::records::PendingReport>(&b, 1024 * 1024)
+                .is_err()
+        }
+    };
+    unreadable.then(|| DataAtRisk::new(RiskKind::LocalStateUnreadable))
 }
 
 #[cfg(test)]
@@ -337,6 +440,37 @@ mod tests {
         let last = r.rec.sent().pop().unwrap();
         assert!(!last.urgent);
         assert_eq!(last.body, "While you played: Bagnon was updated.");
+    }
+
+    #[test]
+    fn producer_risks_are_classified_and_delivered_while_playing_with_the_producer_event() {
+        let full = risk_from_failure("Io at C:\\x: There is not enough space (os error 112)");
+        assert_eq!(full.unwrap().kind, RiskKind::StorageFull);
+        let rec = risk_from_failure("Io at C:\\WoW\\.wowsync\\recovery\\alpha\\op: denied");
+        assert_eq!(rec.unwrap().kind, RiskKind::RecoveryCopyFailed);
+        assert!(risk_from_failure("Io at C:\\WoW\\AddOns\\Alpha: denied").is_none());
+
+        let r = rig();
+        let run = r.runner();
+        let ev = [DataAtRisk::new(RiskKind::StorageFull).event()];
+        let o = run.after_cycle(
+            &ev,
+            &open(&ev),
+            GameActivity::Running,
+            NoticePrefs::default(),
+            T0,
+        );
+        assert_eq!(o.delivered, 1);
+        assert!(r.rec.sent()[0].urgent);
+        // The same condition later is the same notice, not a new one (never muted: Q-85).
+        let later = run.after_cycle(
+            &ev,
+            &open(&ev),
+            GameActivity::NotRunning,
+            NoticePrefs::default(),
+            T0 + 1,
+        );
+        assert_eq!(later.delivered, 0);
     }
 
     #[test]

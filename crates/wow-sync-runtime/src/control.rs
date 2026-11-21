@@ -422,13 +422,6 @@ pub enum Command {
         export: wow_sync_core::diagnostics::Export,
         dest: std::path::PathBuf,
     },
-    /// Builds a fresh export and saves that text to `dest`. It can differ from what was
-    /// previewed; prefer `SavePreviewedDiagnostics`. The shared folder and the install roots are
-    /// refused.
-    SaveDiagnostics {
-        options: wow_sync_core::diagnostics::ExportOptions,
-        dest: std::path::PathBuf,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -449,7 +442,7 @@ pub enum CommandOutcome {
     /// What `CheckUpdates` did: started a check, joined one in flight, or was debounced.
     UpdateCheck(crate::updates::Started),
     /// The export text for the preview (`ExportDiagnostics`) or the text that was saved
-    /// (`SaveDiagnostics`).
+    /// (`SavePreviewedDiagnostics`).
     Exported(wow_sync_core::diagnostics::Export),
 }
 
@@ -489,6 +482,95 @@ pub enum CommandError {
     Service(String),
 }
 
+/// A newer copy of an add-on that exists only on this computer after a keep (Q-88, D-26). It
+/// stays installed and unshared, and the `NewVersionAfterDecision` item stays open each cycle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalOnlyVersion {
+    pub package: wow_sync_core::paths::FolderKey,
+    /// The add-on's display title.
+    pub title: String,
+    /// The folders the keep covers.
+    pub scope: Vec<wow_sync_core::paths::FolderKey>,
+    /// The version label of the local copy, when its metadata has one.
+    pub version_label: Option<String>,
+    /// The decision that is open for it.
+    pub decision: wow_sync_core::decision::DecisionId,
+}
+
+/// The folders to hold back and the local-only versions behind them (Q-88).
+pub(crate) fn withheld_local_versions(
+    view: &wow_sync_core::choice::ChoiceView,
+    packages: &[wow_sync_core::target::PackageCopies],
+    own: &wow_sync_core::ids::ComputerId,
+    titles: &std::collections::BTreeMap<String, String>,
+) -> (
+    std::collections::BTreeSet<wow_sync_core::paths::FolderKey>,
+    Vec<LocalOnlyVersion>,
+) {
+    let mut withheld = std::collections::BTreeSet::new();
+    let mut rows = Vec::new();
+    for pc in packages {
+        for nv in view.new_versions(&pc.package, &pc.copies) {
+            let Some(&first) = nv.local_only(&pc.copies, own).first() else {
+                continue;
+            };
+            let copy = &pc.copies[first];
+            let name = copy
+                .version
+                .folders
+                .iter()
+                .find(|f| f.key == pc.package.display)
+                .map_or_else(
+                    || pc.package.display.as_str().to_string(),
+                    |f| f.name.clone(),
+                );
+            rows.push(LocalOnlyVersion {
+                package: pc.package.key.clone(),
+                title: titles.get(&name).cloned().unwrap_or(name),
+                scope: nv.scope.clone(),
+                version_label: copy
+                    .version
+                    .folders
+                    .iter()
+                    .find_map(|f| f.toc.version.clone()),
+                decision: wow_sync_core::decision::DecisionId(
+                    wow_sync_core::decision::DecisionScope::Folders(nv.scope.clone()),
+                ),
+            });
+            withheld.extend(nv.scope.iter().cloned());
+        }
+    }
+    (withheld, rows)
+}
+
+/// The group target without the packages whose newer local copy must not be replaced.
+pub(crate) fn target_without(
+    target: &wow_sync_core::target::GroupTarget,
+    withheld: &std::collections::BTreeSet<wow_sync_core::paths::FolderKey>,
+) -> wow_sync_core::target::GroupTarget {
+    use wow_sync_core::target::PackageTarget;
+    let mut t = target.clone();
+    t.packages.retain(|k, p| {
+        let touches = match p {
+            PackageTarget::Chosen { version, .. } => {
+                version.folders.iter().any(|f| withheld.contains(&f.key))
+            }
+            _ => false,
+        };
+        !withheld.contains(k) && !touches
+    });
+    t
+}
+
+/// The local inventory without the withheld folders: what may be published.
+pub(crate) fn inventory_without(
+    inv: &wow_sync_core::inventory::Inventory,
+    withheld: &std::collections::BTreeSet<wow_sync_core::paths::FolderKey>,
+) -> wow_sync_core::inventory::Inventory {
+    let mut i = inv.clone();
+    i.folders.retain(|f| !withheld.contains(&f.key));
+    i
+}
 #[cfg(test)]
 mod tests {
     use super::*;

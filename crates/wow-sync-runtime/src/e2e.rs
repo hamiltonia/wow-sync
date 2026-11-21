@@ -3962,6 +3962,201 @@ mod tests {
         }
     }
 
+    // >>> R5-decide: Q-88 (a) and the DataAtRisk producer
+    /// A, B and C hold alpha-v1; A keeps v1 and then edits it into a newer local-only copy.
+    fn kept_then_edited_locally(lab: &Lab) -> (Pc, Pc, GroupId, Sha256, Sha256) {
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        synced(&mut a);
+        let published = alpha_folder(lab, &g, &a).tree.unwrap();
+        let kh = put_keep_of_alpha(lab, &g, &a);
+        a.addon("Alpha", "alpha-v3");
+        (a, b, g, kh, published)
+    }
+
+    fn alpha_tree_published_by(lab: &Lab, g: &GroupId, pc: &Pc) -> Sha256 {
+        alpha_folder(lab, g, pc).tree.unwrap()
+    }
+
+    #[test]
+    fn a_newer_local_only_version_after_a_keep_stays_installed_unshared_and_is_asked_every_cycle() {
+        use wow_sync_core::decision::DecisionKind;
+        let lab = Lab::new();
+        let (mut a, mut b, g, kh, v1_tree) = kept_then_edited_locally(&lab);
+        for _ in 0..3 {
+            synced(&mut a);
+            assert_eq!(status(&a, &g, &kh), Some(Status::Valid));
+            assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v3"));
+            assert_eq!(
+                offered_kinds(&a),
+                vec![DecisionKind::NewVersionAfterDecision]
+            );
+            let snap = a.svc.status();
+            assert_eq!(snap.local_only_versions.len(), 1, "{snap:?}");
+            assert_eq!(snap.local_only_versions[0].package.as_str(), "alpha");
+            let published = latest_state(&lab, &g, &a)
+                .folders
+                .into_iter()
+                .find(|f| f.key.as_str() == "alpha")
+                .and_then(|f| f.tree);
+            assert!(
+                published.is_none() || published == Some(v1_tree),
+                "{published:?}"
+            );
+            synced(&mut b);
+            assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        }
+    }
+
+    #[test]
+    fn answering_a_local_only_version_decision_either_shares_it_or_returns_to_the_kept_version() {
+        use wow_sync_core::decision::{OptionId, OptionLabel};
+        let lab = Lab::new();
+        let (mut a, mut b, g, _kh, v1_tree) = kept_then_edited_locally(&lab);
+        synced(&mut a);
+        let item = a.svc.offered_decisions()[0].clone();
+        let pick = |want: fn(&OptionLabel) -> bool| -> OptionId {
+            item.options.iter().find(|o| want(&o.label)).unwrap().id
+        };
+        let release = pick(|l| matches!(l, OptionLabel::Release { .. }));
+        let own = item.options.iter().find(|o| o.id == release).unwrap();
+        assert_eq!(own.holders.len(), 1, "{own:?}");
+        a.svc
+            .command(Command::Decide {
+                item: wow_sync_core::decision::DecisionId(item.scope.clone()),
+                option: release,
+                shown: item.evidence,
+            })
+            .unwrap();
+        for _ in 0..2 {
+            synced(&mut a);
+        }
+        assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v3"));
+        assert!(a.svc.status().local_only_versions.is_empty());
+        assert_ne!(alpha_tree_published_by(&lab, &g, &a), v1_tree);
+        synced(&mut b);
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v3"));
+
+        let lab = Lab::new();
+        let (mut a, _b, g, _kh, v1_tree) = kept_then_edited_locally(&lab);
+        synced(&mut a);
+        let item = a.svc.offered_decisions()[0].clone();
+        let keep = item
+            .options
+            .iter()
+            .find(|o| o.label == OptionLabel::KeepCurrent)
+            .unwrap()
+            .id;
+        a.svc
+            .command(Command::Decide {
+                item: wow_sync_core::decision::DecisionId(item.scope.clone()),
+                option: keep,
+                shown: item.evidence,
+            })
+            .unwrap();
+        for _ in 0..2 {
+            synced(&mut a);
+        }
+        assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        assert!(a.svc.offered_decisions().is_empty());
+        assert_eq!(alpha_tree_published_by(&lab, &g, &a), v1_tree);
+    }
+
+    #[test]
+    fn unreadable_local_state_is_a_data_at_risk_condition_in_the_snapshot_and_a_notice() {
+        use wow_sync_adapters::notify::RecordingNotifier;
+        use wow_sync_core::notice::NoticePolicy;
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        a.addon("Alpha", "alpha-v1");
+        a.create();
+        let rec = std::sync::Arc::new(RecordingNotifier::default());
+        a.svc
+            .attach_notifier(rec.clone(), NoticePolicy::default())
+            .unwrap();
+        synced(&mut a);
+        assert!(a.svc.status().data_at_risk.is_empty());
+        std::fs::write(
+            a.cfg.state_dir.join("pending-report.json"),
+            b"{ not a report",
+        )
+        .unwrap();
+        for _ in 0..3 {
+            synced(&mut a);
+            let risks = a.svc.status().data_at_risk;
+            assert_eq!(risks.len(), 1, "{risks:?}");
+            assert_eq!(risks[0].kind, crate::RiskKind::LocalStateUnreadable);
+        }
+        let sent = rec.sent();
+        assert!(
+            sent.iter().any(|n| n.urgent),
+            "an urgent data-at-risk notice was sent: {sent:?}"
+        );
+    }
+
+    #[test]
+    fn a_recovery_copy_that_cannot_be_written_is_a_data_at_risk_condition() {
+        let lab = Lab::new();
+        let (mut a, _b, _c, _g) = alpha_v2_published(&lab);
+        // A file stands where the recovery folder of alpha must be created.
+        let recovery = a.install.variant_dir.join(".wowsync").join("recovery");
+        std::fs::create_dir_all(&recovery).unwrap();
+        std::fs::write(recovery.join("alpha"), b"in the way").unwrap();
+        let r = synced(&mut a);
+        let risks = a.svc.status().data_at_risk;
+        assert!(
+            risks
+                .iter()
+                .any(|x| x.kind == crate::RiskKind::RecoveryCopyFailed),
+            "{risks:?} {r:?}"
+        );
+        assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+    }
+    #[test]
+    fn diagnostics_carry_real_file_fingerprints_only_when_asked() {
+        use wow_sync_core::diagnostics::ExportOptions;
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        a.addon("Alpha", "alpha-v1");
+        a.create();
+        synced(&mut a);
+        fn export(a: &mut Pc, include_fingerprints: bool) -> String {
+            match a
+                .svc
+                .command(Command::ExportDiagnostics {
+                    options: ExportOptions {
+                        include_fingerprints,
+                        ..ExportOptions::default()
+                    },
+                })
+                .unwrap()
+            {
+                CommandOutcome::Exported(e) => e.text,
+                other => panic!("{other:?}"),
+            }
+        }
+        assert!(!export(&mut a, false).contains("fingerprint="));
+        let on = export(&mut a, true);
+        let fp = on
+            .split("fingerprint=")
+            .nth(1)
+            .expect("a fingerprint line")
+            .split(|c: char| !c.is_ascii_hexdigit())
+            .next()
+            .unwrap();
+        assert_eq!(fp.len(), 12, "{on}");
+        a.addon("Alpha", "alpha-v2");
+        synced(&mut a);
+        assert_ne!(export(&mut a, true), on);
+    }
+
+    // <<< R5-decide
+
     #[test]
     fn keep_and_resume_commands_pin_and_release_a_typed_scope() {
         use wow_sync_core::choice::WriteError;
@@ -4517,19 +4712,22 @@ mod tests {
         let out = lab.tmp.join("elsewhere");
         std::fs::create_dir(&out).unwrap();
         let dest = out.join("diagnostics.txt");
-        let Ok(CommandOutcome::Exported(saved)) = a.svc.command(Command::SaveDiagnostics {
-            options,
-            dest: dest.clone(),
-        }) else {
+        let Ok(CommandOutcome::Exported(saved)) =
+            a.svc.command(Command::SavePreviewedDiagnostics {
+                export: preview.clone(),
+                dest: dest.clone(),
+            })
+        else {
             panic!("save refused");
         };
+        assert_eq!(saved.text, preview.text);
         assert_eq!(std::fs::read_to_string(&dest).unwrap(), saved.text);
 
         for forbidden in [lab.shared.clone(), a.install.root.clone()] {
             let bad = forbidden.join("diagnostics.txt");
             assert_eq!(
-                a.svc.command(Command::SaveDiagnostics {
-                    options,
+                a.svc.command(Command::SavePreviewedDiagnostics {
+                    export: preview.clone(),
                     dest: bad.clone()
                 }),
                 Err(CommandError::Export(ExportError::Save(

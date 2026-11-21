@@ -357,13 +357,20 @@ fn unconsidered_newer_copy_raises_a_decision_and_never_replaces_the_keep() {
                 keep: kh,
                 scope: both(),
                 kept: 0,
+                absent_kept: None,
                 copies: vec![2]
             }]
         );
         // The keep still pins.
         assert_eq!(v.constraints(&key("alpha")).len(), 1);
-        // Without the kept copy present nothing can be compared.
-        assert!(v.new_versions(&p, &all[1..]).is_empty());
+        // Q-88: with the kept copy held by nobody its version cannot be read, so an
+        // unconsidered copy is unordered against it and raises the decision; a considered one
+        // (v2) never does.
+        let absent = v.new_versions(&p, &all[1..]);
+        assert_eq!(absent.len(), 1);
+        assert!(absent[0].absent_kept.is_some());
+        assert_eq!(absent[0].copies, vec![1, 2], "v3 and the older v0");
+        assert!(v.new_versions(&p, &all[1..2]).is_empty());
         // An unadmitted copy is unknown, not different: it waits.
         let st = member_state(&computer(3), 1, &i3);
         let mut waiting = all.clone();

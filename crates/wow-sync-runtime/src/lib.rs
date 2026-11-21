@@ -23,7 +23,8 @@ mod e2e;
 pub use activity::{ActivityHandle, ActivitySource, ScriptedActivity, WinprocActivity};
 pub use control::{
     log_activity, pause_state, paused_since, read_activity, set_paused, ActivityEntry, AppSettings,
-    AppToggles, Command, CommandError, CommandOutcome, PauseState, QuitGate, StopState,
+    AppToggles, Command, CommandError, CommandOutcome, LocalOnlyVersion, PauseState, QuitGate,
+    StopState,
 };
 pub use detail::{
     strip_colour_codes, CandidateRow, FolderRow, HeldRelease, MemberRow, PackageRow, PeerRow,
@@ -35,7 +36,7 @@ pub use discover::{
     wow_candidates, DetectedInstall,
 };
 pub use effects::{FaultPlan, Faulty, Hooks, RealEffects};
-pub use notices::{CycleOutcome, NoticeRunner};
+pub use notices::{CycleOutcome, DataAtRisk, NoticeRunner, RiskKind};
 pub use rollback_flow::{RollbackOutcome, RollbackOutcomeKind, RollbackRefusal};
 pub use service::{
     AppliedLine, EnrollPreview, EnrollRequest, GroupInfo, JoinChoice, PackageLine, PreviewKind,
