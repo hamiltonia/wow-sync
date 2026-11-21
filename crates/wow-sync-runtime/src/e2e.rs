@@ -2234,17 +2234,33 @@ mod tests {
         );
         let (bc, _) = pc_ids(&b);
         assert!(authority_files(&lab, &g, &bc).iter().all(|f| !f.is_empty()));
-        let before = authority_files(&lab, &g, &bc).len();
+        let before_files = authority_files(&lab, &g, &bc);
         let out = b.svc.command(Command::RestoreRemoved { removal }).unwrap();
-        let CommandOutcome::Written(readd) = out else {
-            panic!("{out:?}")
-        };
-        assert_eq!(authority_files(&lab, &g, &bc).len(), before + 1);
+        assert!(matches!(out, CommandOutcome::Recorded), "{out:?}");
+        assert_eq!(
+            authority_files(&lab, &g, &bc),
+            before_files,
+            "the re-add is written only after the code is back"
+        );
         for _ in 0..3 {
             synced(&mut b);
             synced(&mut c);
             synced(&mut a);
         }
+        let after_files = authority_files(&lab, &g, &bc);
+        let new: Vec<&String> = after_files
+            .iter()
+            .filter(|f| !before_files.contains(f))
+            .filter(|f| {
+                let h = Sha256::parse(f.trim_end_matches(".json")).unwrap();
+                let bytes =
+                    std::fs::read(provider_file(&lab, &layout::authority_record(&g, &bc, &h)))
+                        .unwrap();
+                matches!(decode_authority(&bytes, &h), Ok(AuthorityRecord::Readd(_)))
+            })
+            .collect();
+        assert_eq!(new.len(), 1, "{new:?}");
+        let readd = Sha256::parse(new[0].trim_end_matches(".json")).unwrap();
         assert_eq!(status(&b, &g, &readd), Some(Status::Valid));
         let rc = synced(&mut c);
         assert!(!rc.crashed);
@@ -2595,16 +2611,12 @@ mod tests {
         assert_eq!(read_wtf(&b, "Alpha"), None, "the peer's settings left too");
 
         let out = a.svc.command(Command::RestoreRemoved { removal }).unwrap();
-        assert!(matches!(out, CommandOutcome::Written(_)));
-        // The code's own return needs a holder or the removal's manifest; this slice has neither,
-        // so the code is put back by hand and only the settings half is judged here.
-        for pc in [&mut a, &mut b] {
-            pc.addon_with("Alpha", "alpha-v1", SV_TOC);
-        }
-        for _ in 0..6 {
+        assert!(matches!(out, CommandOutcome::Recorded), "{out:?}");
+        for _ in 0..8 {
             synced(&mut a);
             synced(&mut b);
         }
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
         assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
         assert_eq!(
             read_wtf(&a, "Alpha").as_deref(),
@@ -2639,6 +2651,199 @@ mod tests {
         let (_lab, mut a, _b, g) = settings_removal_ready(text.len() as u64);
         uninstall_alpha_on(&mut a, &g);
         assert_eq!(read_wtf(&a, "Alpha"), None);
+    }
+    fn removed_manifest(pc: &Pc, removal: &Sha256) -> Vec<wow_sync_core::kinds::ManifestFolder> {
+        match pc.svc.plane().ledger.record(removal) {
+            Some(AuthorityRecord::Removal(r)) => r.folders.clone(),
+            other => panic!("not a removal: {other:?}"),
+        }
+    }
+
+    fn delete_removed_blobs(lab: &Lab, g: &GroupId, m: &[wow_sync_core::kinds::ManifestFolder]) {
+        for f in m {
+            let p = provider_file(lab, &layout::tree_record(g, &f.tree));
+            let rec =
+                wow_sync_core::records::decode_tree(&std::fs::read(p).unwrap(), &f.tree).unwrap();
+            for file in rec.files {
+                let _ = std::fs::remove_file(provider_file(lab, &layout::blob(g, &file.sha256)));
+            }
+        }
+    }
+
+    /// An uninstalled Alpha on both peers with no computer holding the code any more.
+    fn uninstalled_everywhere() -> (Lab, Pc, Pc, GroupId, Sha256) {
+        let (lab, mut a, mut b, g) = settings_removal_ready(1 << 20);
+        write_wtf(&b, "Alpha", "AlphaDB = { peer = true }\n");
+        synced(&mut b);
+        uninstall_alpha_on(&mut a, &g);
+        let (ac, _) = pc_ids(&a);
+        let removal = removal_hash(&lab, &g, &ac);
+        for _ in 0..3 {
+            synced(&mut b);
+            synced(&mut a);
+        }
+        assert_eq!(b.read("Alpha/main.lua"), None);
+        (lab, a, b, g, removal)
+    }
+
+    #[test]
+    fn a_restore_without_a_recovery_point_installs_the_code_from_the_shared_folder() {
+        let (_lab, mut a, _b, _g, removal) = uninstalled_everywhere();
+        // a deleted the folder by hand: nothing local holds the removed release
+        assert!(
+            crate::effects::local_points(&a.cfg.install_root.join(&a.cfg.variant_folder))
+                .is_empty(),
+            "no recovery point on the originating computer"
+        );
+        a.svc.command(Command::RestoreRemoved { removal }).unwrap();
+        synced(&mut a);
+        assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+    }
+
+    #[test]
+    fn a_restore_with_a_missing_blob_is_unavailable_and_leaves_nothing_partial() {
+        let (lab, mut a, _b, g, removal) = uninstalled_everywhere();
+        delete_removed_blobs(&lab, &g, &removed_manifest(&a, &removal));
+        let err = a
+            .svc
+            .command(Command::RestoreRemoved { removal })
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Service(t) if t.contains("unavailable")),
+            "{err:?}"
+        );
+        for _ in 0..3 {
+            synced(&mut a);
+        }
+        assert_eq!(a.read("Alpha/main.lua"), None);
+        assert!(!a.install.addons.join("Alpha").exists(), "nothing partial");
+        assert_eq!(a.journals(), 0);
+    }
+
+    #[test]
+    fn a_restore_waits_while_wow_runs_and_installs_when_it_closes() {
+        let (_lab, mut a, _b, _g, removal) = uninstalled_everywhere();
+        a.act.set(Activity::Running { pids: vec![4242] });
+        a.svc.command(Command::RestoreRemoved { removal }).unwrap();
+        for _ in 0..2 {
+            synced(&mut a);
+        }
+        assert!(!a.install.addons.join("Alpha").exists(), "blocked by WoW");
+        a.act.set(Activity::NotRunning);
+        synced(&mut a);
+        assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+    }
+
+    #[test]
+    fn a_restore_of_a_rejected_version_is_refused() {
+        use wow_sync_core::choice::ChoiceView;
+        use wow_sync_core::hash::package_hash;
+        use wow_sync_core::kinds::{
+            RecoveredEntry, RejectedEntry, Rejection, RejectionSettings, TreeEntry,
+        };
+        use wow_sync_core::ledger::Ledger;
+        let (lab, mut a, _b, g, removal) = uninstalled_everywhere();
+        let manifest = removed_manifest(&a, &removal);
+        let entries: Vec<TreeEntry> = manifest
+            .iter()
+            .map(|m| TreeEntry {
+                key: m.key.clone(),
+                tree: m.tree,
+            })
+            .collect();
+        let other = vec![TreeEntry {
+            key: manifest[0].key.clone(),
+            tree: sha256(b"another release"),
+        }];
+        let pairs =
+            |e: &[TreeEntry]| -> Vec<_> { e.iter().map(|t| (t.key.clone(), t.tree)).collect() };
+        let ledger = Ledger::new();
+        let view = ChoiceView::new(&ledger, &Default::default());
+        let (ac, ae) = pc_ids(&a);
+        let rej = Rejection {
+            group_id: g.clone(),
+            issuer: issuer_of(&a),
+            folders: vec![manifest[0].key.clone()],
+            rejected: RejectedEntry {
+                package_hash: package_hash(&pairs(&entries)),
+                version_label: "1.0".into(),
+                folders: entries.clone(),
+            },
+            recovered: RecoveredEntry {
+                package_hash: package_hash(&pairs(&other)),
+                folders: other.clone(),
+            },
+            considered: {
+                let mut v = vec![
+                    wow_sync_core::kinds::Considered {
+                        package_hash: package_hash(&pairs(&entries)),
+                        folders: entries.clone(),
+                        holders: vec![ae.clone()],
+                    },
+                    wow_sync_core::kinds::Considered {
+                        package_hash: package_hash(&pairs(&other)),
+                        folders: other,
+                        holders: vec![ae],
+                    },
+                ];
+                v.sort();
+                v
+            },
+            settings: RejectionSettings::NotApplicable,
+            known: view.known_for(std::slice::from_ref(&manifest[0].key)),
+            considered_parts: vec![],
+            written_unix_ms: 5,
+        };
+        let rh = put_authority(&lab, &g, &ac, &AuthorityRecord::Rejection(rej));
+        synced(&mut a);
+        assert_eq!(status(&a, &g, &rh), Some(Status::Valid));
+        let err = a
+            .svc
+            .command(Command::RestoreRemoved { removal })
+            .unwrap_err();
+        assert!(
+            matches!(&err, CommandError::Service(t) if t.contains("rejected")),
+            "{err:?}"
+        );
+        synced(&mut a);
+        assert_eq!(a.read("Alpha/main.lua"), None);
+    }
+
+    #[test]
+    fn a_restore_with_no_settings_copy_warns_that_settings_were_not_restored() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        synced(&mut a);
+        uninstall_alpha_on(&mut a, &g);
+        let (ac, _) = pc_ids(&a);
+        let removal = removal_hash(&lab, &g, &ac);
+        for _ in 0..3 {
+            synced(&mut b);
+            synced(&mut a);
+        }
+        a.svc.command(Command::RestoreRemoved { removal }).unwrap();
+        let r = synced(&mut a);
+        assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        assert_eq!(
+            r.apply_note.as_deref(),
+            Some("Settings were not restored: no saved copy from before the removal")
+        );
+    }
+
+    #[test]
+    fn a_restore_from_the_local_recovery_point_works_without_the_shared_files() {
+        let (lab, mut a, mut b, g, removal) = uninstalled_everywhere();
+        delete_removed_blobs(&lab, &g, &removed_manifest(&b, &removal));
+        b.svc.command(Command::RestoreRemoved { removal }).unwrap();
+        synced(&mut b);
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        let _ = &mut a;
     }
     // <<< R5-remove
 

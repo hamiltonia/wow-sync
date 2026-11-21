@@ -885,6 +885,44 @@ impl SliceService {
             return Ok(CommandOutcome::Recorded);
         }
         let seq = w.enrollment.next_seq;
+        if let Command::RestoreRemoved { removal } = &cmd {
+            let derived = derive(&self.plane.ledger, &gid, &self.plane.members);
+            let valid = derived.status.get(removal) == Some(&LedgerStatus::Valid);
+            if let Some(AuthorityRecord::Removal(rm)) =
+                self.plane.ledger.record(removal).filter(|_| valid)
+            {
+                // Code still installed here only needs the re-add; otherwise the code is put back
+                // by a queued restore operation (removal.md §7.4).
+                if rm.folders.iter().any(|m| w.inventory.get(&m.key).is_none()) {
+                    crate::restore_flow::plan_requested(&crate::restore_flow::PlanArgs {
+                        removal: *removal,
+                        group: &gid,
+                        own: &w.own,
+                        inventory: &w.inventory,
+                        plane: &self.plane,
+                        provider: &provider,
+                        variant_dir: &self.variant_dir(),
+                        op: OpId::parse(&random_id_hex()).expect("random id"),
+                        seq,
+                        now_unix_ms: now,
+                    })
+                    .map_err(|why| match why {
+                        crate::restore_flow::RestoreRefusal::UnknownRemoval => {
+                            CommandError::UnknownRemoval(*removal)
+                        }
+                        other => CommandError::Service(other.text()),
+                    })?;
+                    crate::restore_flow::clear_outcome(&self.state, &gid);
+                    crate::restore_flow::save_request(
+                        &self.state,
+                        &gid,
+                        &crate::restore_flow::RestoreRequest { removal: *removal },
+                    )
+                    .map_err(|e| CommandError::Service(e.to_string()))?;
+                    return Ok(CommandOutcome::Recorded);
+                }
+            }
+        }
         let derived = derive(&self.plane.ledger, &gid, &self.plane.members);
         let held = BTreeSet::new();
         let mut policy_parts: Vec<(wow_sync_core::ids::Sha256, Vec<u8>)> = Vec::new();
@@ -2552,6 +2590,51 @@ impl SliceService {
                 } else {
                     None
                 };
+                let restore = if w.standing == OwnStanding::Active
+                    && !game_blocks
+                    && rollback.is_none()
+                    && crate::restore_flow::load_request(&self.state, &group_id).is_some()
+                {
+                    let request = crate::restore_flow::load_request(&self.state, &group_id)
+                        .expect("checked above");
+                    let args = crate::restore_flow::PlanArgs {
+                        removal: request.removal,
+                        group: &group_id,
+                        own: &w.own,
+                        inventory: &w.inventory,
+                        plane: &self.plane,
+                        provider: &provider,
+                        variant_dir: &variant_dir,
+                        op: gen(),
+                        seq: next_seq,
+                        now_unix_ms: now_unix_ms() as u64,
+                    };
+                    match crate::restore_flow::step(&self.state, &args, &w.enrollment) {
+                        Ok(p) => {
+                            let keys: BTreeSet<FolderKey> =
+                                p.folders.iter().map(|f| f.key.clone()).collect();
+                            if !crate::removal_cycle::SettingsPass::open(
+                                &self.state,
+                                &group_id,
+                                &senv,
+                                game_blocks,
+                            )
+                            .has_capture(&keys)
+                            {
+                                report.apply_note =
+                                    Some(crate::restore_flow::CODE_ONLY_WARNING.to_string());
+                            }
+                            Some(p)
+                        }
+                        Err(why) => {
+                            report.apply_note = Some(why.text());
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+                let rollback = rollback.or(restore);
                 let apply_target = target_without(&w.target, &w.withheld);
                 let mut planned = match plan_apply(&apply_target, &w.inventory, &mut gen, &gate) {
                     Ok(p) => Some(p),

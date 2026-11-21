@@ -372,6 +372,14 @@ impl<'a> SettingsPass<'a> {
         pass
     }
 
+    /// Whether a settings copy taken at removal is held for any of `folders`.
+    pub fn has_capture(&self, folders: &BTreeSet<FolderKey>) -> bool {
+        self.book
+            .captures
+            .iter()
+            .any(|c| folders.contains(&c.unit.folder))
+    }
+
     fn save(&self) {
         let _ = self.state.write_atomic(
             &book_name(&self.group),

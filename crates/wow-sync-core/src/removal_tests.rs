@@ -407,6 +407,71 @@ fn restore_readd_covers_exactly_what_was_seen_and_a_later_removal_still_wins() {
     assert_eq!(w.live("Alpha"), vec![h2]);
 }
 
+// ---------------------------------------------------------------- restore operation (§7.4)
+
+fn restore_folders(r: &Removal) -> Vec<RestoreFolder> {
+    r.folders
+        .iter()
+        .map(|m| RestoreFolder {
+            key: m.key.clone(),
+            name: m.name.clone(),
+            record: crate::records::FolderTreeRecord {
+                tree: m.tree,
+                files: vec![],
+            },
+            live: None,
+        })
+        .collect()
+}
+
+fn restorable(names: &[&str]) -> Removal {
+    let mut r = rem(2, 5, names, &[1, 2]);
+    r.removed_hash = crate::hash::package_hash(
+        &r.folders
+            .iter()
+            .map(|f| (f.key.clone(), f.tree))
+            .collect::<Vec<_>>(),
+    );
+    r
+}
+
+#[test]
+fn a_restore_installs_exactly_the_removed_folders_and_reserves_the_readd() {
+    let w = World::new(&[1, 2]);
+    let r = restorable(&["Alpha", "Beta"]);
+    let op = crate::ids::OpId::parse(&"ab".repeat(16)).unwrap();
+    let plan = plan_restore(&w.ledger, &eref(1), &r, restore_folders(&r), op, 6, 10).unwrap();
+    assert_eq!(plan.kind, OpKind::Restore);
+    assert_eq!(plan.target_hash, r.removed_hash);
+    assert_eq!(plan.folders.len(), 2);
+    assert!(plan.removes.is_empty() && plan.removals.is_empty());
+    assert_eq!(plan.pending_records.len(), 1, "only the user_restore readd");
+}
+
+#[test]
+fn a_restore_whose_package_hash_is_not_the_removed_hash_is_refused() {
+    let w = World::new(&[1, 2]);
+    let mut r = restorable(&["Alpha"]);
+    r.removed_hash = sha256(b"some other release");
+    let op = crate::ids::OpId::parse(&"cd".repeat(16)).unwrap();
+    let err = plan_restore(
+        &w.ledger,
+        &eref(1),
+        &r,
+        restore_folders(&r),
+        op.clone(),
+        6,
+        10,
+    )
+    .unwrap_err();
+    assert_eq!(err, RestoreError::HashMismatch);
+    let good = restorable(&["Alpha"]);
+    let mut swapped = restore_folders(&good);
+    swapped[0].record.tree = sha256(b"substituted tree");
+    let err = plan_restore(&w.ledger, &eref(1), &good, swapped, op, 6, 10).unwrap_err();
+    assert_eq!(err, RestoreError::ManifestMismatch);
+}
+
 // ---------------------------------------------------------------- acknowledgement and planning
 
 #[test]
