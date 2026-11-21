@@ -339,6 +339,44 @@ pub fn available_accounts(variant_dir: &std::path::Path) -> Vec<String> {
     names
 }
 
+/// Account, realm and character folder names under `<variant>\WTF\Account`, each sorted and
+/// deduplicated, for the diagnostics second-defence scan (ops.md §5.3). `SavedVariables` is
+/// not a realm. Unreadable or linked folders are skipped.
+pub fn wtf_names(variant_dir: &std::path::Path) -> (Vec<String>, Vec<String>, Vec<String>) {
+    use wow_sync_adapters::fs_safe::{ReparseKind, WtfScope};
+    let accounts = available_accounts(variant_dir);
+    let Ok(Some(scope)) = WtfScope::open(variant_dir, false) else {
+        return (accounts, Vec::new(), Vec::new());
+    };
+    let dirs = |rel: &str| -> Vec<String> {
+        scope
+            .root()
+            .list(rel)
+            .map(|v| {
+                v.into_iter()
+                    .filter(|e| e.is_dir && e.reparse == ReparseKind::None)
+                    .map(|e| e.name)
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let (mut realms, mut chars) = (Vec::new(), Vec::new());
+    for a in &accounts {
+        for r in dirs(&format!("Account/{a}"))
+            .into_iter()
+            .filter(|r| !r.eq_ignore_ascii_case("SavedVariables"))
+        {
+            chars.extend(dirs(&format!("Account/{a}/{r}")));
+            realms.push(r);
+        }
+    }
+    for v in [&mut realms, &mut chars] {
+        v.sort();
+        v.dedup();
+    }
+    (accounts, realms, chars)
+}
+
 pub fn settings_snapshot(
     local: &SettingsLocal,
     ledger: &wow_sync_core::ledger::Ledger,

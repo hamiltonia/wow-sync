@@ -419,6 +419,24 @@ Tests: `e2e::tests::restoring_a_copy_a_keep_displaced_converges_the_group_on_it`
 
 A-38 control (Recheck 2): `known.extra.extend(choices.extra)` dropped in `rollback_flow::plan_requested` → `restoring_a_copy_a_keep_displaced_converges_the_group_on_it` FAILED (B stays on its copy); reverted, `git diff --exit-code` clean.
 
+## Pass 17: R4-review (RV-01, RV-02, RV-08 built; RV-04 planned, not built)
+
+- **RV-01.** New `Command::SavePreviewedDiagnostics { export: Export, dest: PathBuf }` writes exactly `export.text` (no rebuild). The service remembers the text of the latest `ExportDiagnostics` preview; any other text (older preview, edited text) is refused as `CommandError::Decide(DecideError::Changed)` and nothing is written. The shared folder and install roots stay forbidden (`CommandError::Export(ExportError::Save(ForbiddenLocation))`). No new error variant, so the app's exhaustive matches still compile. **R4-app:** send `SavePreviewedDiagnostics{export: <the Export the preview returned>, dest}` instead of `SaveDiagnostics`; map `Decide(Changed)` on this action to "the preview changed; preview again". `SaveDiagnostics` (rebuild) still exists for compatibility and can be dropped once the app switches.
+- **RV-02.** `redaction_context` now fills `wtf_account_names`, `wtf_realm_names`, `wtf_character_names` from `settings_cycle::wtf_names` (folder names under `WTF\Account`, links skipped, `SavedVariables` not a realm), `computer_names` from `COMPUTERNAME`/`HOSTNAME`, and `dropbox_root` from the shared folder (the runtime has no separate Dropbox discovery, so the provider root is used). The context is `pub(crate)` for tests.
+- **RV-08.** The refusal test now asks to roll Amb back to a real held release of another add-on (Other), expects `UnknownCopy`, and asserts the authority folder is unchanged after more cycles and Amb is untouched.
+- Tests: `e2e::tests::a_previewed_save_writes_the_previewed_bytes_even_after_the_state_changed`, `the_redaction_context_knows_wtf_names_and_the_provider_root`, `a_rollback_of_a_copy_the_group_never_displaced_is_still_refused`; `tests/public_api.rs` builds the new command. Required case `R4-integrate:diagnostics-save-is-the-previewed-text`.
+- A-38: RV-01 (previewed-text check bypassed with `false &&`) and RV-02 (account names left out) each FAILED their named test (exit 101), both reverted, `git diff --exit-code` clean. RV-08: no mutation control; it is a test-honesty fix and the old ghost hash cannot distinguish the widened path, so the new test's own assertions (real hash, no rejection file) are the check.
+
+### RV-04 plan (not built: it needs files outside my list)
+
+Stopped at the boundary: the change is in core `removal.rs` and `settings.rs`, which are not in my file set. Settings capture on uninstall is not gated by Q-77 (that only gates sharing between computers). Design: removal.md §1.6 step 6, §6 and the contract table at removal.md L867-871. Plan:
+1. Core `settings.rs`: implement `owned_scope(variant, declarations, identities)` (pure; ownership from the folder's `SavedVariables` declarations, live `.toc` or the presence-baseline entry; no Lua executed) and `checkpoint(scope)`.
+2. Core `removal.rs` L969: build the removal record with `RemovalSettings::Checkpoints { roots }` from the checkpoint when settings are applicable, instead of `RemovalSettings::None` (kinds.rs:160). Plan a `SettingsCleanup` op (journal ops exist in `records.rs`/`exec.rs`) after the code move: same-volume moves to `.wowsync\recovery\…\settings\…`, `G` before each move, ack `settings: paired|partial|code_only|kept_paused|not_applicable` after verification.
+3. Runtime `service.rs` removal step 6: gather `settings_ops` for removed folders (WoW not running), consent/paused rules (`kept_paused`).
+4. Recovery: `Command::RestoreRemovedSettings` already dispatches `settings::restore`; add the code+settings paired restore to `RestoreRemoved`.
+5. Tests: uninstall on A removes code and settings and records the checkpoint; restore returns both; the next cycle does not remove again; negatives: paused settings kept, WoW running blocks, unknown ownership not moved.
+Estimate: well over 400 AIU (new core planner, journal ops, GUI-recoverable restore).
+
 ## Verification
 
 Final tree: `cargo xtask verify --tier offline` PASS; `cargo xtask verify --tier native` PASS

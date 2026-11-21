@@ -414,8 +414,17 @@ pub enum Command {
     ExportDiagnostics {
         options: wow_sync_core::diagnostics::ExportOptions,
     },
-    /// Builds the same export and saves exactly that text to `dest`. The shared folder and the
-    /// install roots are refused.
+    /// Saves exactly the previewed `export` text to `dest` (ops.md §5.1 step 3, T-33-10); nothing
+    /// is rebuilt from live state. `export` must be the text the latest `ExportDiagnostics`
+    /// returned, otherwise it is refused as `Decide(Changed)` ("look again"). The shared folder
+    /// and the install roots are refused.
+    SavePreviewedDiagnostics {
+        export: wow_sync_core::diagnostics::Export,
+        dest: std::path::PathBuf,
+    },
+    /// Builds a fresh export and saves that text to `dest`. It can differ from what was
+    /// previewed; prefer `SavePreviewedDiagnostics`. The shared folder and the install roots are
+    /// refused.
     SaveDiagnostics {
         options: wow_sync_core::diagnostics::ExportOptions,
         dest: std::path::PathBuf,

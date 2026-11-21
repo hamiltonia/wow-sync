@@ -2,7 +2,7 @@
 //! This compiles from outside the crate, so a type that is not exported fails the build.
 
 use wow_sync_runtime::core::decision::{DecisionId, DecisionScope, EvidenceToken, OptionId};
-use wow_sync_runtime::core::diagnostics::ExportOptions;
+use wow_sync_runtime::core::diagnostics::{Export, ExportOptions, Replaced};
 use wow_sync_runtime::core::hash::sha256;
 use wow_sync_runtime::core::ids::{ComputerId, EnrollmentId, Identity, SettingsUnit};
 use wow_sync_runtime::core::kinds::{ChoiceReason, EnrollmentRef};
@@ -57,6 +57,7 @@ fn command_name(c: &Command) -> &'static str {
         Command::CheckUpdates => "check-updates",
         Command::ExportDiagnostics { .. } => "export-diagnostics",
         Command::SaveDiagnostics { .. } => "save-diagnostics",
+        Command::SavePreviewedDiagnostics { .. } => "save-previewed-diagnostics",
     }
 }
 
@@ -136,11 +137,22 @@ fn every_command_can_be_built_and_every_refusal_named_from_outside_the_crate() {
             options: ExportOptions::default(),
             dest: std::path::PathBuf::from("diagnostics.txt"),
         },
+        Command::SavePreviewedDiagnostics {
+            export: Export {
+                text: "previewed".into(),
+                replaced: Replaced {
+                    folder_paths: 0,
+                    computer_names: 0,
+                    addon_names: 0,
+                },
+            },
+            dest: std::path::PathBuf::from("diagnostics.txt"),
+        },
     ];
     let mut names: Vec<_> = commands.iter().map(command_name).collect();
     names.sort_unstable();
     names.dedup();
-    assert_eq!(names.len(), 20, "one of each command");
+    assert_eq!(names.len(), 21, "one of each command");
 
     assert_eq!(outcome_name(&CommandOutcome::Written(hash)), "written");
     assert_eq!(outcome_name(&CommandOutcome::Kept), "kept");
