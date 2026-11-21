@@ -1,0 +1,21 @@
+Diagnostic saves=2
+
+Name                                         Length
+----                                         ------
+wow-sync-diagnostics-20261121-203529-874.txt   1627
+wow-sync-diagnostics-20261121-203543-795.txt   1627
+wow-sync-diagnostics-20261121-203529-874.txt: SHA256=A815AEA1EA0CDAD63F4AC090843864A26D51E3D9A705EE5784E20A66092972A1
+build_commit: 4675f08ee7125c84c3e4c18b869bb3f92ad4fbb0
+notify_summaries: off
+notify_needs_me: off
+include_fingerprints: on
+synalpha: status=ok candidates=0 version=none reason=none hold=none fingerprint=0562f0d1d6fa
+synbeta: status=ok candidates=0 version=none reason=none hold=none fingerprint=949d385890be
+wow-sync-diagnostics-20261121-203543-795.txt: SHA256=A815AEA1EA0CDAD63F4AC090843864A26D51E3D9A705EE5784E20A66092972A1
+build_commit: 4675f08ee7125c84c3e4c18b869bb3f92ad4fbb0
+notify_summaries: off
+notify_needs_me: off
+include_fingerprints: on
+synalpha: status=ok candidates=0 version=none reason=none hold=none fingerprint=0562f0d1d6fa
+synbeta: status=ok candidates=0 version=none reason=none hold=none fingerprint=949d385890be
+

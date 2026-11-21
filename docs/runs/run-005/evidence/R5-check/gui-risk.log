@@ -1,0 +1,17 @@
+ControlType.Group | enabled=True offscreen=False focus=False | Status
+ControlType.StatusBar | enabled=True offscreen=False focus=False | WoW Sync can't read its saved state. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Check-B
+ControlType.ProgressBar | enabled=True offscreen=False focus=False | Syncing
+ControlType.Button | enabled=True offscreen=False focus=False | Syncing…, unavailable while syncing
+ControlType.Button | enabled=True offscreen=False focus=False | Pause syncing
+ControlType.Group | enabled=True offscreen=False focus=False | Sections
+ControlType.Button | enabled=True offscreen=False focus=False | Overview
+ControlType.Button | enabled=True offscreen=False focus=False | Computers
+ControlType.Button | enabled=True offscreen=False focus=False | Add-ons
+ControlType.Button | enabled=True offscreen=False focus=False | Needs attention, 1 items, current page
+ControlType.Button | enabled=True offscreen=False focus=False | Activity
+ControlType.Button | enabled=True offscreen=False focus=False | Settings sync
+ControlType.Button | enabled=True offscreen=False focus=False | App settings
+ControlType.Button | enabled=True offscreen=False focus=False | About
+ControlType.Text | enabled=True offscreen=False focus=False | Needs attention
+ControlType.List | enabled=True offscreen=False focus=False | Needs attention, 1 items
+ControlType.ListItem | enabled=True offscreen=False focus=True | WoW Sync can't read its saved state, Restart WoW Sync. If this stays, the saved state on this computer may be damaged., affects Your add-ons and settings may not be recoverable, See what to do

@@ -1,0 +1,8 @@
+OS=Microsoft Windows 11 Pro build=26300 architecture=64-bit
+CPU=13th Gen Intel(R) Core(TM) i7-13700HX
+RAM_GiB=63.68
+Artifact signature=NotSigned
+Artifact member=LICENSE bytes=1088
+Artifact member=README.md bytes=6288
+Artifact member=RELEASE-NOTES.md bytes=3065
+Artifact member=wow-sync.exe bytes=19428352

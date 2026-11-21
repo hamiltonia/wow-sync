@@ -1,0 +1,39 @@
+warning: unused import: `inventory_without`
+ --> crates\wow-sync-runtime\src\service.rs:7:5
+  |
+7 |     inventory_without, target_without, withheld_local_versions, Command, CommandError,
+  |     ^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `inventory_without` is never used
+   --> crates\wow-sync-runtime\src\control.rs:566:15
+    |
+566 | pub(crate) fn inventory_without(
+    |               ^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `wow-sync-runtime` (lib) generated 2 warnings (run `cargo fix --lib -p wow-sync-runtime` to apply 1 suggestion)
+warning: `wow-sync-runtime` (lib test) generated 2 warnings (2 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.53s
+     Running unittests src\lib.rs (target\debug\build\wow-sync-runtime/04dea99d7e2a5545\out\wow_sync_runtime-04dea99d7e2a5545.exe)
+
+running 1 test
+test e2e::tests::a_newer_local_only_version_after_a_keep_stays_installed_unshared_and_is_asked_every_cycle ... FAILED
+
+failures:
+
+---- e2e::tests::a_newer_local_only_version_after_a_keep_stays_installed_unshared_and_is_asked_every_cycle stdout ----
+
+thread 'e2e::tests::a_newer_local_only_version_after_a_keep_stays_installed_unshared_and_is_asked_every_cycle' (14036) panicked at crates\wow-sync-runtime\src\e2e.rs:4007:13:
+Some(Sha256([188, 147, 26, 127, 142, 175, 50, 2, 144, 7, 10, 129, 179, 49, 75, 251, 84, 171, 218, 99, 60, 28, 252, 56, 78, 19, 182, 53, 70, 187, 32, 196]))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    e2e::tests::a_newer_local_only_version_after_a_keep_stays_installed_unshared_and_is_asked_every_cycle
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 160 filtered out; finished in 0.39s
+
+error: test failed, to rerun pass `-p wow-sync-runtime --lib`

@@ -1,0 +1,21 @@
+[PASS   ] native/tier
+overall: PASS (allow-blocked: false) -> exit 0
+{
+  "git_sha": "4675f08ee7125c84c3e4c18b869bb3f92ad4fbb0",
+  "git_dirty": true,
+  "generated_at": "2026-11-21T20:25:44Z",
+  "tiers": [
+    "native"
+  ],
+  "allow_blocked": false,
+  "overall": "PASS",
+  "exit_ok": true,
+  "checks": [
+    {
+      "tier": "native",
+      "name": "tier",
+      "status": "PASS",
+      "detail": "7 native case(s) verified against 739 test result(s)"
+    }
+  ]
+}

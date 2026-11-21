@@ -1,0 +1,30 @@
+ControlType.Group | enabled=True offscreen=False focus=False | Status
+ControlType.StatusBar | enabled=True offscreen=False focus=False | This computer is up to date. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Check-A
+ControlType.Button | enabled=True offscreen=False focus=False | Sync now
+ControlType.Button | enabled=True offscreen=False focus=False | Pause syncing
+ControlType.Group | enabled=True offscreen=False focus=False | Sections
+ControlType.Button | enabled=True offscreen=False focus=False | Overview
+ControlType.Button | enabled=True offscreen=False focus=False | Computers
+ControlType.Button | enabled=True offscreen=False focus=False | Add-ons
+ControlType.Button | enabled=True offscreen=False focus=False | Needs attention
+ControlType.Button | enabled=True offscreen=False focus=False | Activity
+ControlType.Button | enabled=True offscreen=False focus=False | Settings sync, current page
+ControlType.Button | enabled=True offscreen=False focus=False | App settings
+ControlType.Button | enabled=True offscreen=False focus=False | About
+ControlType.StatusBar | enabled=True offscreen=False focus=False | Saved and shared with the group.
+ControlType.Button | enabled=True offscreen=False focus=False | Dismiss
+ControlType.Text | enabled=True offscreen=False focus=False | Settings sync
+ControlType.StatusBar | enabled=True offscreen=False focus=False | Check-A shares its add-on settings with the group. Settings are never merged.
+ControlType.Text | enabled=True offscreen=False focus=False | Settings master
+ControlType.Button | enabled=True offscreen=False focus=False | Change master…
+ControlType.Text | enabled=True offscreen=False focus=False | Exceptions
+ControlType.Button | enabled=True offscreen=False focus=False | Add an exception…
+ControlType.Button | enabled=True offscreen=False focus=False | Add an exception…
+ControlType.Text | enabled=True offscreen=False focus=False | Settings choices and sharing
+ControlType.Button | enabled=True offscreen=False focus=False | Share my settings
+ControlType.Button | enabled=True offscreen=False focus=True | Restore
+ControlType.Button | enabled=True offscreen=False focus=False | Cancel
+ControlType.Button | enabled=True offscreen=False focus=False | Restore the copy from 21 November…
+ControlType.Button | enabled=True offscreen=False focus=False | Restore the copy from 21 November…
+ControlType.Text | enabled=True offscreen=False focus=False | Pause settings
+ControlType.Button | enabled=True offscreen=False focus=False | Pause settings
