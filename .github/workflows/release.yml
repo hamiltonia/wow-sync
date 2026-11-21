@@ -72,7 +72,6 @@ jobs:
           [IO.File]::WriteAllText((Join-Path (Resolve-Path dist) "$name.zip.sha256"), "$hash  $name.zip`n")
           Get-ChildItem dist | Format-Table Name, Length
       - name: Upload artifact
-        # SHA for v4.6.2; verify against the action's release page before the first tag.
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: wow-sync-${{ steps.meta.outputs.version }}-windows-x64
@@ -109,7 +108,6 @@ jobs:
           fi
           test -f "docs/release/$TAG.md"
       - name: Download artifact
-        # SHA for v4.3.0; verify against the action's release page before the first tag.
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: wow-sync-${{ needs.build.outputs.version }}-windows-x64
