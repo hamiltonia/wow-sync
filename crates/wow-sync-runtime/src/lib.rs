@@ -27,7 +27,7 @@ pub use control::{
 };
 pub use detail::{
     strip_colour_codes, CandidateRow, FolderRow, HeldRelease, MemberRow, PackageRow, PeerRow,
-    PeerStanding, RejectedRelease, RemovedRow, RetirementRow, StatusDetail,
+    PeerStanding, RecoveryRow, RejectedRelease, RemovedRow, RetirementRow, StatusDetail,
 };
 pub use diag::{ExportError, SaveError};
 pub use discover::{

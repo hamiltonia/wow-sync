@@ -174,11 +174,30 @@ pub(crate) fn plan_requested(a: &PlanArgs) -> Result<PackageApply, RollbackRefus
         .iter()
         .find(|p| p.package.key == a.request.package)
         .ok_or(unknown.clone())?;
-    let chosen = pc
+    // A release nobody publishes any more may still lie in a local recovery point (rollback.md §1
+    // step 4, §7: R0 comes from the local recovery point).
+    let r0_folders: Vec<(FolderKey, String, Option<Sha256>)> = match pc
         .copies
         .iter()
         .find(|c| c.version.hash == a.request.recovered)
-        .ok_or(unknown)?;
+    {
+        Some(c) => c
+            .version
+            .folders
+            .iter()
+            .map(|f| (f.key.clone(), f.name.clone(), f.tree))
+            .collect(),
+        None => crate::effects::local_points(a.variant_dir)
+            .into_iter()
+            .find(|p| p.package == a.request.package && p.release == a.request.recovered)
+            .map(|p| {
+                p.folders
+                    .into_iter()
+                    .map(|(k, n, t)| (k, n, Some(t)))
+                    .collect()
+            })
+            .ok_or(unknown)?,
+    };
     let mut r1 = Vec::new();
     for k in &pc.package.members {
         let Some(f) = a.inventory.get(k) else {
@@ -195,8 +214,8 @@ pub(crate) fn plan_requested(a: &PlanArgs) -> Result<PackageApply, RollbackRefus
         }
     }
     let mut r0 = Vec::new();
-    for f in &chosen.version.folders {
-        let Some(tree) = f.tree else {
+    for (key, name, tree) in &r0_folders {
+        let Some(tree) = *tree else {
             return Err(RollbackRefusal::NotAvailable);
         };
         let record = a
@@ -205,7 +224,7 @@ pub(crate) fn plan_requested(a: &PlanArgs) -> Result<PackageApply, RollbackRefus
             .ok()
             .and_then(|b| decode_tree(&b, &tree).ok())
             .or_else(|| {
-                crate::effects::local_release(a.variant_dir, &f.name, &tree).map(|l| {
+                crate::effects::local_release(a.variant_dir, name, &tree).map(|l| {
                     FolderTreeRecord {
                         tree,
                         files: l.files,
@@ -221,12 +240,12 @@ pub(crate) fn plan_requested(a: &PlanArgs) -> Result<PackageApply, RollbackRefus
                 Err(e) if e.kind == FsErrorKind::NotFound
             )
         });
-        if blob_missing && crate::effects::local_release(a.variant_dir, &f.name, &tree).is_none() {
+        if blob_missing && crate::effects::local_release(a.variant_dir, name, &tree).is_none() {
             return Err(RollbackRefusal::NotAvailable);
         }
         r0.push(TargetFolder {
-            key: f.key.clone(),
-            name: f.name.clone(),
+            key: key.clone(),
+            name: name.clone(),
             record,
         });
     }

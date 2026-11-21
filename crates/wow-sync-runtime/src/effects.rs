@@ -264,6 +264,106 @@ pub(crate) fn local_release(
     None
 }
 
+/// One retained recovery point and the release it holds (rollback.md §7). Only points whose
+/// every replaced folder still hashes to its recorded tree are listed: the scan is verified,
+/// never trusted from the metadata.
+pub(crate) struct LocalPoint {
+    pub package: FolderKey,
+    pub op: String,
+    pub created_unix_ms: u64,
+    pub reason: String,
+    pub pinned: bool,
+    pub folders: Vec<(FolderKey, String, Sha256)>,
+    /// The package hash of the held release; what a rollback request names it by.
+    pub release: Sha256,
+    pub version: Option<String>,
+}
+
+pub(crate) fn local_points(variant_dir: &std::path::Path) -> Vec<LocalPoint> {
+    let mut out = Vec::new();
+    let Ok(area) = InstallArea::open(variant_dir) else {
+        return out;
+    };
+    let Ok(work) = Root::open(&variant_dir.join(".wowsync"), ReparsePolicy::RejectAll) else {
+        return out;
+    };
+    let Ok(pkgs) = work.list("recovery") else {
+        return out;
+    };
+    for pkg in pkgs.into_iter().filter(|e| e.is_dir) {
+        let Ok(package) = wow_sync_core::paths::validate_folder_name(&pkg.name) else {
+            continue;
+        };
+        let Ok(points) = area.list_recovery(&pkg.name) else {
+            continue;
+        };
+        for (op, bytes) in points {
+            let (replaced, created_unix_ms, reason, pinned) = match decode_point(&bytes) {
+                Ok(AnyPoint::V1(p)) => (p.replaced, p.created_unix_ms, p.reason, p.pinned),
+                Ok(AnyPoint::V2(p)) => (p.replaced, p.created_unix_ms, p.reason, p.pinned),
+                Err(_) => continue,
+            };
+            let mut folders = Vec::new();
+            for t in &replaced {
+                let Ok(key) = wow_sync_core::paths::validate_folder_name(&t.name) else {
+                    break;
+                };
+                let slot = AdSlot::Recovery {
+                    pkg: &pkg.name,
+                    op: &op,
+                    folder: &t.name,
+                };
+                let held = match area.hash_slot(slot) {
+                    Ok(Some(files)) => entries(files).ok(),
+                    _ => None,
+                };
+                let Some(mut files) = held else { break };
+                files.sort_by(|a, b| a.path.as_str().as_bytes().cmp(b.path.as_str().as_bytes()));
+                if tree_hash(&files) != t.tree {
+                    break;
+                }
+                folders.push((key, t.name.clone(), t.tree));
+            }
+            if folders.is_empty() || folders.len() != replaced.len() {
+                continue;
+            }
+            let release = wow_sync_core::hash::package_hash(
+                &folders
+                    .iter()
+                    .map(|(k, _, t)| (k.clone(), *t))
+                    .collect::<Vec<_>>(),
+            );
+            let version = folders
+                .iter()
+                .find(|(k, _, _)| *k == package)
+                .and_then(|(_, n, _)| {
+                    use std::io::Read;
+                    let mut f = work
+                        .open_read(
+                            &format!("recovery/{}/{op}/{n}/{n}.toc", pkg.name),
+                            256 * 1024,
+                        )
+                        .ok()?;
+                    let mut b = Vec::new();
+                    f.read_to_end(&mut b).ok()?;
+                    wow_sync_core::toc::parse_toc(&b).ok()?.version
+                })
+                .map(|v| v.chars().take(100).collect());
+            out.push(LocalPoint {
+                package: package.clone(),
+                op,
+                created_unix_ms,
+                reason,
+                pinned,
+                folders,
+                release,
+                version,
+            });
+        }
+    }
+    out
+}
+
 impl PublishEffects for RealEffects<'_> {
     fn stat_object(&mut self, rel: &str) -> Result<ObjectStat, EffectError> {
         self.just_hashed = None;

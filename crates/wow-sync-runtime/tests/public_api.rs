@@ -203,6 +203,14 @@ fn every_snapshot_field_can_be_named_and_read_from_outside_the_crate() {
     let update: &Option<UpdateResult> = &st.update;
     assert!(rows.is_empty() && held.is_empty() && removed.is_empty() && names.is_empty());
     assert!(!st.review_needed && update.is_none());
+    let points: &Vec<wow_sync_runtime::RecoveryRow> = &st.recovery_points;
+    let dates: &BTreeMap<wow_sync_runtime::core::ids::Sha256, u64> = &st.held_release_dates;
+    let outcome: &Option<wow_sync_runtime::RollbackOutcome> = &st.rollback_outcome;
+    assert!(points.is_empty() && dates.is_empty() && outcome.is_none());
+    assert_ne!(
+        wow_sync_runtime::RollbackOutcomeKind::Applied,
+        wow_sync_runtime::RollbackOutcomeKind::NotAvailable
+    );
     assert_ne!(
         HoldScope::AllApplies(AllHoldCause::Retired),
         HoldScope::AllApplies(AllHoldCause::Paused)
