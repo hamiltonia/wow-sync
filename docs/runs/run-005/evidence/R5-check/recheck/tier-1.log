@@ -1,0 +1,56 @@
+[PASS   ] offline/fmt
+[PASS   ] offline/clippy
+[PASS   ] offline/test
+[PASS   ] offline/required-cases
+[PASS   ] offline/deny
+[PASS   ] offline/markdown-links
+overall: PASS (allow-blocked: false) -> exit 0
+{
+  "git_sha": "f478fca0c9f0ab41e39855c1d8a3347c7956db36",
+  "git_dirty": true,
+  "generated_at": "2026-11-21T21:42:39Z",
+  "tiers": [
+    "offline"
+  ],
+  "allow_blocked": false,
+  "overall": "PASS",
+  "exit_ok": true,
+  "checks": [
+    {
+      "tier": "offline",
+      "name": "fmt",
+      "status": "PASS",
+      "detail": "`cargo fmt --all --check` exit 0"
+    },
+    {
+      "tier": "offline",
+      "name": "clippy",
+      "status": "PASS",
+      "detail": "`cargo clippy --locked --workspace --all-targets -- -D warnings` exit 0"
+    },
+    {
+      "tier": "offline",
+      "name": "test",
+      "status": "PASS",
+      "detail": "`cargo test --locked --workspace` exit 0"
+    },
+    {
+      "tier": "offline",
+      "name": "required-cases",
+      "status": "PASS",
+      "detail": "133 listed offline case(s) verified against 757 test result(s)"
+    },
+    {
+      "tier": "offline",
+      "name": "deny",
+      "status": "PASS",
+      "detail": "`cargo deny check` exit 0"
+    },
+    {
+      "tier": "offline",
+      "name": "markdown-links",
+      "status": "PASS",
+      "detail": "209 Markdown file(s), no broken relative links"
+    }
+  ]
+}

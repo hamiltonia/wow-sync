@@ -1,4 +1,4 @@
-param([int]$AppPid, [string]$Action='dump', [string]$Name='', [int]$Key=13)
+param([int]$AppPid, [string]$Action='dump', [string]$Name='', [int]$Key=13, [int]$MatchIndex=0)
 $ErrorActionPreference='Stop'
 . 'D:\GitHub\wow-sync.worktrees\R5-check\tools\mem\MemLib.ps1'
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
@@ -10,8 +10,12 @@ function Elements {
 }
 function Activate([string]$pattern) {
     $found=$null
+    $seen=0
     foreach($e in (Elements)){
-        if($e.Current.ControlType.ProgrammaticName -match 'Button|CheckBox|RadioButton|ListItem' -and $e.Current.Name -like $pattern){$found=$e;break}
+        if($e.Current.ControlType.ProgrammaticName -match 'Button|CheckBox|RadioButton|ListItem' -and $e.Current.Name -like $pattern){
+            if($seen -eq $MatchIndex){$found=$e;break}
+            $seen++
+        }
     }
     if(-not $found){throw "No actionable control '$pattern'"}
     if(-not $found.Current.IsEnabled){throw "Disabled control '$pattern'"}
