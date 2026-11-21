@@ -411,6 +411,14 @@ A-38 controls (edit tool, reverted, `git diff --exit-code` clean):
 
 V-02 and V-09 share one commit.
 
+## Recheck 2: restoring a copy a code choice displaced (V-02 group finding)
+
+Cause: the rollback's rejection took its `known` from `removal::known_summary`, which only counts removals, re-adds and acks. It did not cover the live keep, so the keep and the recovered target were concurrent and the group got `ChoicesDiffer` while B kept its copy. Rule followed: rollback.md §3.2 / T-R4D9-choice-vs-rollback ("a rollback that covers a keep replaces it") with contracts.md §1.8 coverage and §4.4 liveness. `rollback_flow::plan_requested` now adds every valid record naming the release's folders (via `ChoiceView::known_for`) to the rejection's `known.extra`. No GUI change: the confirmation text "every computer replaces X with Y" is now true. No new command or snapshot field.
+
+Tests: `e2e::tests::restoring_a_copy_a_keep_displaced_converges_the_group_on_it` (the exact repro: ambiguous Amb, B keeps its copy, A restores through `Command::Rollback`; both end on A's copy and neither lists a decision) and negative `a_rollback_of_a_copy_the_group_never_displaced_is_still_refused`. A-38 control: see the table below.
+
+A-38 control (Recheck 2): `known.extra.extend(choices.extra)` dropped in `rollback_flow::plan_requested` → `restoring_a_copy_a_keep_displaced_converges_the_group_on_it` FAILED (B stays on its copy); reverted, `git diff --exit-code` clean.
+
 ## Verification
 
 Final tree: `cargo xtask verify --tier offline` PASS; `cargo xtask verify --tier native` PASS

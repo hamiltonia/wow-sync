@@ -261,6 +261,28 @@ pub(crate) fn plan_requested(a: &PlanArgs) -> Result<PackageApply, RollbackRefus
         .filter(|k| !r1.iter().any(|f| &f.key == *k))
         .collect();
     let derived = derive(&a.plane.ledger, a.group, &a.plane.members);
+    // The rejection covers every valid record naming these folders, code choices included, so a
+    // live keep is replaced by the recovered target rather than competing with it
+    // (rollback.md §3.2, contracts.md §4.4 liveness; T-R4D9-choice-vs-rollback).
+    let mut known = known_summary(&a.plane.ledger, a.group);
+    {
+        let valid: BTreeSet<Sha256> = derived
+            .status
+            .iter()
+            .filter(|(_, s)| s.is_valid())
+            .map(|(h, _)| *h)
+            .collect();
+        let scope: Vec<FolderKey> = r1
+            .iter()
+            .map(|f| f.key.clone())
+            .chain(r0.iter().map(|t| t.key.clone()))
+            .collect();
+        let choices =
+            wow_sync_core::choice::ChoiceView::new(&a.plane.ledger, &valid).known_for(&scope);
+        known.extra.extend(choices.extra);
+        known.extra.sort();
+        known.extra.dedup();
+    }
     let mut readd_covers = Vec::new();
     for e in a.plane.ledger.entries() {
         if let Some(AuthorityRecord::Removal(r)) = a.plane.ledger.record(&e.hash) {
@@ -286,7 +308,7 @@ pub(crate) fn plan_requested(a: &PlanArgs) -> Result<PackageApply, RollbackRefus
         r0,
         considered: Vec::new(),
         settings: RejectionSettings::NotApplicable,
-        known: known_summary(&a.plane.ledger, a.group),
+        known,
         audience: a.audience.clone(),
         readd_covers,
         now_unix_ms: a.now_unix_ms,
