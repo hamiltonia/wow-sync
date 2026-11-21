@@ -65,7 +65,7 @@ jobs:
           Copy-Item target/release/wow-sync.exe $stage
           Copy-Item README.md $stage
           Copy-Item "docs/release/v$env:VERSION.md" (Join-Path $stage 'RELEASE-NOTES.md')
-          Get-ChildItem -Path . -Maxdepth 1 -File -Filter 'LICENSE*' | Copy-Item -Destination $stage
+          Get-ChildItem -Path . -File -Filter 'LICENSE*' | Copy-Item -Destination $stage
           New-Item -ItemType Directory -Path dist | Out-Null
           Compress-Archive -Path "$stage/*" -DestinationPath "dist/$name.zip"
           $hash = (Get-FileHash "dist/$name.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
