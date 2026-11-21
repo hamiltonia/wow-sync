@@ -1549,6 +1549,14 @@ tier = "offline"
 tests = [
     "about_ui::tests::no_release_yet_is_a_neutral_statement_not_a_failure",
 ]
+
+[[case]]
+id = "R5-app:restore-confirm-result"
+tier = "offline"
+tests = [
+    "removed_ui::tests::the_confirmation_says_it_reinstalls_the_plain_title_on_all_computers",
+    "removed_ui::tests::a_queued_restore_says_it_installs_everywhere_and_waits_for_the_game",
+]
 # <<< section: R5-app
 
 # >>> section: R5-release

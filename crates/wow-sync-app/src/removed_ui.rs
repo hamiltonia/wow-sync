@@ -9,13 +9,22 @@ use wow_sync_runtime::RemovedRow;
 pub const RESTORE_UNAVAILABLE: &str =
     "This removal can't be named yet, so it can't be restored from here. Nothing was changed.";
 
+/// What the confirmation says before a restore is sent (removal.md §7.4 step 2).
+pub fn confirm_text(title: &str) -> String {
+    format!(
+        "This reinstalls {} on all computers in this group. If World of Warcraft is running, it waits until the game closes.",
+        wow_sync_runtime::strip_colour_codes(title)
+    )
+}
+
 /// Restore for the row at `index`: the removal record the snapshot lists for the same row.
 pub fn restore_action(w: &World, index: usize) -> Result<GroupAction, String> {
     gate(w, ActionKind::RestoreRemoved)?;
     match w.features.removal_hashes.get(index) {
-        Some(removal) if index < w.features.removed.len() => {
-            Ok(GroupAction::RestoreRemoved { removal: *removal })
-        }
+        Some(removal) if index < w.features.removed.len() => Ok(GroupAction::RestoreRemoved {
+            removal: *removal,
+            title: wow_sync_runtime::strip_colour_codes(&w.features.removed[index].title),
+        }),
         _ => Err(RESTORE_UNAVAILABLE.into()),
     }
 }
@@ -86,7 +95,8 @@ mod tests {
         assert_eq!(
             restore_action(&w, 1),
             Ok(GroupAction::RestoreRemoved {
-                removal: Sha256([2; 32])
+                removal: Sha256([2; 32]),
+                title: "Demo".into(),
             })
         );
         assert_eq!(restore_action(&w, 2), Err(RESTORE_UNAVAILABLE.into()));
@@ -101,6 +111,35 @@ mod tests {
             by: "Den".into(),
         };
         assert_eq!(restore_action(&w, 0), Err(RETIRED_REASON.into()));
+    }
+
+    #[test]
+    fn the_confirmation_says_it_reinstalls_the_plain_title_on_all_computers() {
+        let t = confirm_text("|cff33ff99Demo|r");
+        assert!(t.starts_with("This reinstalls Demo on all computers in this group"));
+        assert!(!t.contains("cff") && !t.contains('|'));
+    }
+
+    #[test]
+    fn a_queued_restore_says_it_installs_everywhere_and_waits_for_the_game() {
+        use crate::features::{result_text_named, ActionResult};
+        use wow_sync_runtime::CommandError;
+        let q = result_text_named(
+            ActionKind::RestoreRemoved,
+            &ActionResult::Local,
+            Some("Demo"),
+        );
+        assert!(q.starts_with("Demo will be reinstalled on all computers"));
+        assert!(q.contains("running") && !q.contains("Saved on this computer"));
+        let r = ActionResult::from_outcome(Err(CommandError::Service(
+            "restore unavailable: a file is missing".into(),
+        )));
+        assert_eq!(
+            result_text_named(ActionKind::RestoreRemoved, &r, Some("Demo")),
+            "Demo can't be restored: a file is missing. Nothing was changed."
+        );
+        let other = ActionResult::from_outcome(Err(CommandError::Service("boom".into())));
+        assert!(matches!(other, ActionResult::Failed(_)));
     }
 
     #[test]

@@ -834,20 +834,52 @@ impl Shell {
             if let Some(a) = &r.awaiting {
                 body.push(self.muted(a).into_any_element());
             }
-            body.push(match crate::removed_ui::restore_action(&self.w, i) {
-                Ok(a) => self
-                    .btn(
+            let open = format!("removed-restore-{i}-open");
+            match crate::removed_ui::restore_action(&self.w, i) {
+                Ok(a) if self.expanded.contains(&open) => {
+                    body.push(
+                        div()
+                            .child(SharedString::from(crate::removed_ui::confirm_text(
+                                &r.title,
+                            )))
+                            .into_any_element(),
+                    );
+                    body.push(
+                        self.btn(
+                            &format!("removed-restore-{i}-go"),
+                            "Restore",
+                            Bk::Primary,
+                            Act::Group(a),
+                            cx,
+                        )
+                        .into_any_element(),
+                    );
+                    body.push(
+                        self.btn(
+                            &format!("removed-restore-{i}-no"),
+                            "Cancel",
+                            Bk::Secondary,
+                            Act::ToggleExpand(open),
+                            cx,
+                        )
+                        .into_any_element(),
+                    );
+                }
+                Ok(_) => body.push(
+                    self.btn(
                         &format!("removed-restore-{i}"),
                         "Restore",
                         Bk::Secondary,
-                        Act::Group(a),
+                        Act::ToggleExpand(open),
                         cx,
                     )
                     .into_any_element(),
-                Err(why) => self
-                    .btn_off(&format!("removed-restore-{i}"), "Restore", &why, cx)
-                    .into_any_element(),
-            });
+                ),
+                Err(why) => body.push(
+                    self.btn_off(&format!("removed-restore-{i}"), "Restore", &why, cx)
+                        .into_any_element(),
+                ),
+            }
             col = col.child(self.panel(&r.title, body));
         }
         col.into_any_element()

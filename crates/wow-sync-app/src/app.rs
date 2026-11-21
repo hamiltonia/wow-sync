@@ -479,7 +479,8 @@ impl Shell {
                 if r.seq != self.seen_group_result {
                     self.seen_group_result = r.seq;
                     self.diag.absorb(r.kind, &r.result);
-                    let text = crate::features::result_text(r.kind, &r.result);
+                    let text =
+                        crate::features::result_text_named(r.kind, &r.result, r.subject.as_deref());
                     self.notice.result(self.page, text);
                 }
             }

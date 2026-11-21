@@ -56,6 +56,21 @@ shows `UpdateResult::text()`, which is `NO_RELEASE` for `NoRelease`, rendered mu
 Test `about_ui::tests::no_release_yet_is_a_neutral_statement_not_a_failure` (case `R5-app:no-release-neutral`).
 A-38 control: mapping `NoRelease` to "Could not check for updates." failed the test (exit 101), then reverted.
 
+## Restore from Removed (removal.md §7.4, after merge of 9d3a144)
+
+- Confirmation: the Removed list's Restore now expands to "This reinstalls X on all computers in this group.
+  If World of Warcraft is running, it waits until the game closes." (X plain title, colour codes stripped)
+  with Restore / Cancel. The add-on history restore (recovery points) sends a `Rollback`, not
+  `RestoreRemoved`; its confirmation already says every computer, so it was left unchanged.
+- Result: `Recorded` for RestoreRemoved reads "X will be reinstalled on all computers in this group. If World of
+  Warcraft is running, it waits until the game closes." `CommandError::Service("restore unavailable: …")` reads
+  "X can't be restored: <reason>. Nothing was changed." (`ActionResult::RestoreUnavailable`). The title travels
+  as display-only `GroupAction::RestoreRemoved.title` and `GroupResult.subject`; it is never sent.
+- Tests: `removed_ui::tests::the_confirmation_says_it_reinstalls_the_plain_title_on_all_computers`,
+  `a_queued_restore_says_it_installs_everywhere_and_waits_for_the_game` (case `R5-app:restore-confirm-result`).
+- A-38 controls (exit 101 each, reverted): queued text mapped to the Rollback arm instead; confirmation text
+  changed to "on this computer".
+
 ## Notes
 
 One edit to `about_ui.rs` was written with a .NET file write by mistake instead of the edit tool
