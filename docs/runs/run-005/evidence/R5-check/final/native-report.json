@@ -1,0 +1,19 @@
+{
+  "git_sha": "8ecb62160ed070a456f1cea5abf2126ef082ce86",
+  "git_dirty": true,
+  "generated_at": "2026-11-21T22:13:59Z",
+  "tiers": [
+    "native"
+  ],
+  "allow_blocked": false,
+  "overall": "PASS",
+  "exit_ok": true,
+  "checks": [
+    {
+      "tier": "native",
+      "name": "tier",
+      "status": "PASS",
+      "detail": "7 native case(s) verified against 762 test result(s)"
+    }
+  ]
+}
