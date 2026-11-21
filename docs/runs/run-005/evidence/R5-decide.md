@@ -47,3 +47,17 @@ Requirements: A-27, A-38, Q-88 (a) / D-26, RV-09, RV-11, V-01 (R4-check).
   I redid the edit with the edit tool. All later writes used edit/create only. I cannot rule out
   that this call is the stray write the orchestrator found in main; main was clean on my checks.
 - Did not add core unit tests for `NewVersion::local_only` / `Source::from_release`; covered by e2e.
+
+## Follow-up: update check with no full release (D-26 pre-release)
+
+- HTTP 404 from `releases/latest` now yields `UpdateResult::NoRelease { checked }` (core `update.rs`;
+  `runtime/updates.rs::fail_kind` maps `FetchError::Http(404)` to the internal carrier
+  `UpdateFailKind::NoRelease`). No activity line, no notice. Other failures and pre-/draft bodies are
+  unchanged (still `Failed`, never offered). Adapter unchanged.
+- Text: `wow_sync_core::update::NO_RELEASE` = "No release has been published yet."
+  (`UpdateResult::text()`, `UpdateView.text`).
+- Tests: `updates::tests::a_404_means_no_release_yet_and_is_neither_a_failure_nor_a_notice`,
+  `updates::tests::other_http_errors_and_a_prerelease_body_still_fail_and_are_never_offered`,
+  core `update::tests::results_map_to_state_and_text`.
+- As-built notes added to contracts §5.3 and ops §1.5 (Q-88/D-26).
+- .NET file write: none in the follow-up (edit/create tools only).
