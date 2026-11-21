@@ -17,8 +17,6 @@ pub enum UnitStatus {
     Off,
     /// This computer is retired and records no settings intent.
     Retired,
-    /// Consent is given but no size limit is approved (Q-77), so nothing is read or applied.
-    SizeLimitPending,
     /// Syncing here right now.
     Active,
     InSync {
@@ -118,9 +116,6 @@ pub fn status_text(s: &UnitStatus) -> String {
     match s {
         UnitStatus::Off => "Settings not shared".into(),
         UnitStatus::Retired => "This computer is retired; its settings are not shared".into(),
-        UnitStatus::SizeLimitPending => {
-            "Settings sharing is off until a size limit is approved".into()
-        }
         UnitStatus::Active => "Settings are syncing here".into(),
         UnitStatus::InSync { from } => format!("Settings up to date (from {from})"),
         UnitStatus::Waiting { from } => {
@@ -367,18 +362,9 @@ pub fn active_master(w: &World) -> Option<&EnrollmentRef> {
     active.then_some(m)
 }
 
-/// Whether a production size limit for settings files has been approved. None is approved yet
-/// (Q-77), so settings are never transferred; this mirrors the service's own limit.
-pub fn settings_cap_approved() -> bool {
-    wow_sync_core::records::MAX_SETTINGS_FILE_BYTES.is_some()
-}
-
-/// The sentence at the top of the Settings sync page.
+/// The sentence at the top of the Settings sync page. The settings size limit is approved
+/// (Q-77, 32 MiB), so it never says sharing waits for one.
 pub fn banner_text(w: &World) -> String {
-    banner_text_with(w, settings_cap_approved())
-}
-
-pub fn banner_text_with(w: &World, cap_approved: bool) -> String {
     let d = &w.features.settings;
     if d.policy_conflict {
         return "The settings master was changed on two computers. Nothing is chosen for you; choose a master to share settings again.".into();
@@ -394,18 +380,6 @@ pub fn banner_text_with(w: &World, cap_approved: bool) -> String {
         );
     }
     if d.master.is_some() {
-        if d.enabled
-            && (!cap_approved
-                || w.features
-                    .settings
-                    .units
-                    .iter()
-                    .any(|u| u.status == UnitStatus::SizeLimitPending))
-        {
-            return format!(
-                "{name} is the settings master, but settings sharing is off until a size limit is approved."
-            );
-        }
         if !d.enabled {
             return format!(
                 "{name} is the settings master, but settings sync is off on this computer."
@@ -862,7 +836,7 @@ mod tests {
         use wow_sync_runtime::PeerStanding;
         let w = snapshot_world();
         assert_eq!(
-            banner_text_with(&w, true),
+            banner_text(&w),
             "Den PC shares its add-on settings with the group. Settings are never merged."
         );
         assert!(active_master(&w).is_some());
@@ -874,7 +848,7 @@ mod tests {
             }
         });
         assert!(active_master(&w).is_none());
-        let t = banner_text_with(&w, true);
+        let t = banner_text(&w);
         assert!(t.contains("no active master") && !t.contains("shares its add-on settings"));
         let c = exception_controls(&w, &folder("Details"));
         assert_eq!(c.len(), 1);
@@ -892,37 +866,28 @@ mod tests {
     }
 
     #[test]
-    fn the_banner_does_not_claim_sharing_without_consent_or_a_size_limit() {
+    fn the_banner_never_waits_for_a_size_limit_and_names_a_missing_consent() {
         use wow_sync_runtime::SettingsUnitStatus as S;
         let (w, _) = controls_for(|_| {}, S::Disabled, true);
-        assert_eq!(
-            banner_text_with(&w, true),
-            "Den PC is the settings master, but settings sharing is off until a size limit is approved."
-        );
+        let t = banner_text(&w);
+        assert!(!t.contains("size limit"), "{t}");
+        assert!(t.contains("shares its add-on settings"), "{t}");
         let (w, _) = controls_for(|_| {}, S::Disabled, false);
-        assert!(banner_text_with(&w, true).contains("settings sync is off on this computer"));
+        assert!(banner_text(&w).contains("settings sync is off on this computer"));
     }
 
     #[test]
-    fn a_fresh_consent_with_no_units_and_no_approved_cap_does_not_claim_sharing() {
+    fn a_fresh_consent_with_no_units_says_the_master_shares_and_no_limit_is_awaited() {
         let w = snapshot_world_with(|s| {
             s.settings.enabled = true;
             s.settings_units.clear();
         });
         assert!(w.features.settings.units.is_empty());
-        let t = banner_text_with(&w, false);
-        assert_eq!(
-            t,
-            "Den PC is the settings master, but settings sharing is off until a size limit is approved."
-        );
-        assert!(banner_text_with(&w, true).contains("shares its add-on settings"));
+        let t = banner_text(&w);
+        assert!(t.contains("shares its add-on settings"), "{t}");
+        assert!(!t.contains("size limit"), "{t}");
         let off = snapshot_world_with(|s| s.settings.enabled = false);
-        assert!(banner_text_with(&off, false).contains("settings sync is off on this computer"));
-        assert_eq!(
-            banner_text(&w),
-            banner_text_with(&w, settings_cap_approved()),
-            "the page uses the real production limit"
-        );
+        assert!(banner_text(&off).contains("settings sync is off on this computer"));
     }
 
     fn runtime_row(
@@ -1020,7 +985,7 @@ mod tests {
     }
 
     #[test]
-    fn units_that_cannot_share_or_restore_say_why_and_a_missing_cap_is_not_invented() {
+    fn units_that_cannot_share_or_restore_say_why() {
         use wow_sync_runtime::SettingsUnitStatus as S;
         let (w, row) = controls_for(
             |r| {
@@ -1033,14 +998,9 @@ mod tests {
         assert!(unit_controls(&w, &row)[0].action.is_err());
         assert!(restore_controls(&w, &row)[0].0.action.is_err());
         let (w, row) = controls_for(|r| r.restore_possible = false, S::Disabled, true);
-        assert_eq!(row.status, UnitStatus::SizeLimitPending);
-        assert_eq!(
-            status_text(&row.status),
-            "Settings sharing is off until a size limit is approved"
-        );
+        assert_eq!(row.status, UnitStatus::Off);
+        assert_eq!(status_text(&row.status), "Settings not shared");
         assert!(unit_controls(&w, &row).is_empty());
-        let (_, off_row) = controls_for(|_| {}, S::Disabled, false);
-        assert_eq!(off_row.status, UnitStatus::Off);
         let (_, retired) = controls_for(|_| {}, S::Retired, true);
         assert_eq!(retired.status, UnitStatus::Retired);
     }

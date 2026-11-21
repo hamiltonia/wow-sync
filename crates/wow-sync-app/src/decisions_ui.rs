@@ -14,6 +14,8 @@ use wow_sync_core::kinds::EnrollmentRef;
 pub struct OptionRow {
     pub id: OptionId,
     pub label: String,
+    /// The verb on the button: "Keep this", or what the choice does when it is not a keep.
+    pub button: String,
     /// "Held by Den PC and This computer"; empty when no one holds it.
     pub holders: String,
     /// What would happen, one plain sentence per effect.
@@ -27,7 +29,11 @@ impl OptionRow {
     /// Name for assistive technology: the release, who holds it and what choosing it does, so the
     /// identical "Keep this" buttons on one page are told apart.
     pub fn choose_name(&self) -> String {
-        let mut parts = vec![format!("Keep this: {}", self.label)];
+        let mut parts = vec![if self.button == self.label {
+            self.label.clone()
+        } else {
+            format!("{}: {}", self.button, self.label)
+        }];
         if !self.holders.is_empty() {
             parts.push(self.holders.clone());
         }
@@ -97,6 +103,20 @@ pub fn scope_title(w: &World, s: &DecisionScope) -> String {
     }
 }
 
+/// The sentence for a newer version that exists only on this computer (Q-88, D-26).
+pub fn local_only_sentence(lo: &wow_sync_runtime::LocalOnlyVersion) -> String {
+    match &lo.version_label {
+        Some(v) => format!(
+            "Version {v} of {} is installed only on this computer and is not shared with the group.",
+            lo.title
+        ),
+        None => format!(
+            "A newer version of {} is installed only on this computer and is not shared with the group.",
+            lo.title
+        ),
+    }
+}
+
 fn why_text(w: &World, item: &DecisionItem) -> String {
     let who = scope_title(w, &item.scope);
     match item.reason {
@@ -121,7 +141,14 @@ fn why_text(w: &World, item: &DecisionItem) -> String {
             )
         }
         DecisionKind::NewVersionAfterDecision => {
-            format!("A new version of {who} appeared after you made a choice about it.")
+            let id = DecisionId(item.scope.clone());
+            match w.features.local_only.iter().find(|l| l.decision == id) {
+                Some(lo) => format!(
+                    "{} It stays installed here. Keep the version you chose, use the new one for the whole group, follow the newest again, or decide later.",
+                    local_only_sentence(lo)
+                ),
+                None => format!("A new version of {who} appeared after you made a choice about it."),
+            }
         }
         DecisionKind::ChoicesDiffer => {
             format!("Two computers made different choices for {who} at the same time.")
@@ -148,7 +175,17 @@ pub fn reach_text(r: DecisionReach) -> &'static str {
     }
 }
 
-fn label_text(w: &World, l: &OptionLabel) -> String {
+fn label_text(w: &World, l: &OptionLabel, kind: DecisionKind) -> String {
+    if kind == DecisionKind::NewVersionAfterDecision {
+        match l {
+            OptionLabel::Release { version_label } => {
+                return format!("Use version {version_label}")
+            }
+            OptionLabel::KeepCurrent => return "Keep the version you chose".into(),
+            OptionLabel::ChangeDecision => return "Follow newest again".into(),
+            _ => {}
+        }
+    }
     match l {
         OptionLabel::Release { version_label } => format!("Keep version {version_label}"),
         OptionLabel::KeepCurrent => "Keep what is installed now".into(),
@@ -203,11 +240,18 @@ fn effects(c: &Consequence) -> Vec<String> {
     v
 }
 
-fn row(w: &World, o: &DecisionOption) -> OptionRow {
+fn row(w: &World, o: &DecisionOption, kind: DecisionKind) -> OptionRow {
     let holders: Vec<String> = o.holders.iter().map(|h| name_of(w, h)).collect();
+    let label = label_text(w, &o.label, kind);
+    let button = match (kind, &o.label) {
+        (DecisionKind::NewVersionAfterDecision, OptionLabel::Release { .. }) => "Use this".into(),
+        (DecisionKind::NewVersionAfterDecision, OptionLabel::ChangeDecision) => label.clone(),
+        _ => "Keep this".into(),
+    };
     OptionRow {
         id: o.id,
-        label: label_text(w, &o.label),
+        label,
+        button,
         holders: if holders.is_empty() {
             String::new()
         } else {
@@ -237,7 +281,11 @@ pub fn card(w: &World, item: &DecisionItem) -> DecisionCard {
         title: scope_title(w, &item.scope),
         why: why_text(w, item),
         reach: reach_text(item.reach).into(),
-        options: item.options.iter().map(|o| row(w, o)).collect(),
+        options: item
+            .options
+            .iter()
+            .map(|o| row(w, o, item.reason))
+            .collect(),
         evidence: item.evidence,
         no_options_note,
         hold_line: hold_sentence(w),
@@ -356,6 +404,44 @@ mod tests {
             holder,
             None,
         )
+    }
+
+    #[test]
+    fn a_new_version_after_keep_says_it_is_only_here_and_offers_the_four_answers() {
+        let id = DecisionId(DecisionScope::Folders(vec![validate_folder_name(
+            "WeakAuras",
+        )
+        .unwrap()]));
+        let mut w = world(vec![item(
+            vec![
+                opt(0, OptionLabel::KeepCurrent, DEN, None),
+                release(1, "9.1", THIS),
+                opt(2, OptionLabel::ChangeDecision, THIS, None),
+            ],
+            DecisionKind::NewVersionAfterDecision,
+        )]);
+        w.features.local_only = vec![wow_sync_runtime::LocalOnlyVersion {
+            package: validate_folder_name("WeakAuras").unwrap(),
+            title: "WeakAuras".into(),
+            scope: vec![validate_folder_name("WeakAuras").unwrap()],
+            version_label: Some("9.1".into()),
+            decision: id,
+        }];
+        let c = cards(&w).remove(0);
+        assert!(c.why.starts_with(
+            "Version 9.1 of WeakAuras is installed only on this computer and is not shared with the group."
+        ));
+        let labels: Vec<_> = c.options.iter().map(|o| o.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            [
+                "Keep the version you chose",
+                "Use version 9.1",
+                "Follow newest again"
+            ]
+        );
+        let buttons: Vec<_> = c.options.iter().map(|o| o.button.as_str()).collect();
+        assert_eq!(buttons, ["Keep this", "Use this", "Follow newest again"]);
     }
 
     #[test]

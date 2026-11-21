@@ -1346,10 +1346,10 @@ impl Shell {
             let name = o.choose_name();
             let btn = match crate::decisions_ui::choose(&self.w, &card, o.id, acked) {
                 Ok(a) => self
-                    .btn(&key, "Keep this", Bk::Primary, Act::Group(a), cx)
+                    .btn(&key, &o.button, Bk::Primary, Act::Group(a), cx)
                     .aria_label(SharedString::from(name)),
                 Err(why) => self
-                    .btn_off(&key, "Keep this", &why, cx)
+                    .btn_off(&key, &o.button, &why, cx)
                     .aria_label(SharedString::from(format!("{name}, unavailable: {why}"))),
             };
             inner.push(btn.into_any_element());
