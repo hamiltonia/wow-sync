@@ -132,6 +132,7 @@ fn offline(root: &Path) -> Vec<Check> {
             "cargo",
             &[
                 "clippy",
+                "--locked",
                 "--workspace",
                 "--all-targets",
                 "--",
@@ -146,7 +147,7 @@ fn offline(root: &Path) -> Vec<Check> {
         "test",
         "rustup toolchain install",
         "cargo",
-        &["test", "--workspace"],
+        &["test", "--locked", "--workspace"],
     );
     let tests_ran = test_check.status == Status::Pass;
     checks.push(test_check);
@@ -184,7 +185,7 @@ fn native(root: &Path) -> Vec<Check> {
     if !cfg!(windows) {
         return blocked_tier(root, "native", "native cases need a Windows host");
     }
-    match run(root, "cargo", &["test", "--workspace"]) {
+    match run(root, "cargo", &["test", "--locked", "--workspace"]) {
         Err(why) => vec![Check::new(
             "native",
             "tier",
