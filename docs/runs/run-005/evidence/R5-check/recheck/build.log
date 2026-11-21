@@ -1,0 +1,35 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling wow-sync-core v0.1.0 (D:\GitHub\wow-sync.worktrees\R5-check\crates\wow-sync-core)
+warning: unused import: `std::collections::VecDeque`
+ --> crates\wow-sync-adapters\src\update_http.rs:5:5
+  |
+5 | use std::collections::VecDeque;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `AtomicU32` and `Ordering`
+ --> crates\wow-sync-adapters\src\update_http.rs:7:25
+  |
+7 | use std::sync::atomic::{AtomicU32, Ordering};
+  |                         ^^^^^^^^^  ^^^^^^^^
+
+warning: unused import: `Mutex`
+ --> crates\wow-sync-adapters\src\update_http.rs:8:22
+  |
+8 | use std::sync::{Arc, Mutex};
+  |                      ^^^^^
+
+warning: type alias `Hook` is never used
+   --> crates\wow-sync-adapters\src\update_http.rs:217:6
+    |
+217 | type Hook = Box<dyn Fn(u32) + Send + Sync>;
+    |      ^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `wow-sync-adapters` (lib) generated 4 warnings (run `cargo fix --lib -p wow-sync-adapters` to apply 3 suggestions)
+   Compiling wow-sync-runtime v0.1.0 (D:\GitHub\wow-sync.worktrees\R5-check\crates\wow-sync-runtime)
+   Compiling wow-sync-app v0.1.0 (D:\GitHub\wow-sync.worktrees\R5-check\crates\wow-sync-app)
+    Finished `release` profile [optimized] target(s) in 34.81s

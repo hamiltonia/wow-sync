@@ -329,3 +329,198 @@ returned zero. Main cleanliness is checked again immediately before commit.
 No workers were launched and no
 budget counters were reset; billing/remaining run budget is maintained by
 the orchestrator, not inferred from token or tool counts here.
+
+## Recheck
+
+Recheck source: `f478fca0c9f0ab41e39855c1d8a3347c7956db36`, after
+`git merge main` in `D:\GitHub\wow-sync.worktrees\R5-check`, branch
+`run005/R5-check`. Executed on 2026-11-21 in a **fresh** synthetic lab:
+`D:\WoWSyncLab\R5-check\recheck`. No previous installation, provider or
+recovery data was reused. This section supersedes the initial restore
+interpretation: its PASS relied on F1 leaving originating code installed.
+It did **not** prove that a genuine uninstall could restore originating
+code. The new checks below require both peers' code and settings to be
+absent before every SynPlain restore.
+
+The orchestrator authorized read-only main-CI queries for this recheck.
+The release app was rebuilt with
+`WOWSYNC_BUILD_COMMIT=f478fca0c9f0ab41e39855c1d8a3347c7956db36`;
+[build](R5-check/recheck/build.log). Every shell prepended Cargo's bin
+directory to PATH. Test TEMP/TMP were scoped to the fresh lab's `temp`.
+Apps used `--dev`, explicit A/B lab installation, provider and state paths,
+`--name Recheck-A|Recheck-B --interval-ms 1000 --recent-ms 100`, and lab
+home/log overrides. No live update source, real game or real Dropbox was used.
+
+### Recheck verdicts
+
+| Requested check | Verdict | Observation |
+|---|---|---|
+| 1. F1 sequence | PASS | V-02 group restore, settings consent/master, paused deletion and resume: Alpha code/settings absent on both peers; Removed row present. |
+| 2. Plain uninstall and origin restore | FAIL | Genuine uninstall removes both code and settings. Removing the last addon hides all Removed/Restore controls (F3). After adding unrelated SynAnchor, origin restore succeeds and all six pre-uninstall hashes match. |
+| 3. Other-peer restore | PASS | B has no recoverable local SynPlain code bytes; provider-based GUI restore returns both peers' code/settings with all six hashes matching. |
+| 4. Restore while WoW runs | PASS | Benign devkit fake-client blocks restore, visible Waiting text appears, neither peer receives partial files, and stopping the captured stand-in permits complete matching restoration. |
+| 5. Unavailable / retry / dismiss | FAIL | Missing bytes are safely refused. Queued Unavailable and Dismiss work, but immediate refusal has no Needs attention item; Try again loses a persisted issue when it fails again (F4). |
+| 6. Two additional native runs | PASS | Both native runs exit 0; seven native cases verified against 757 results each. No reproduced flake. |
+
+### Removal and full restoration evidence
+
+- F1 fresh sequence: [setup](R5-check/recheck/F1-setup.log),
+  [result](R5-check/recheck/F1-result.log). The original F1 is closed on
+  this tested source; no abandoned active-deletion attempt was needed.
+- SynPlain baseline records A/B code, TOC and settings SHA-256 values:
+  [baseline](R5-check/recheck/baseline.log). The two local settings copies
+  differ, so matching each peer's own before/after hash is required.
+- Plain uninstall: [both peers absent](R5-check/recheck/plain-absent.log).
+  With no active addons, [UIA](R5-check/recheck/last-addon-removed.log) and
+  [OCR](R5-check/recheck/last-addon-removed-ocr.log) show only the empty state.
+  An unrelated, newly created SynAnchor exposes Removed; no removed
+  code/settings were manually put back.
+- Origin A confirmation, observed through the actual rendered window:
+  “This reinstalls synplain on all computers in this group. If World of
+  Warcraft is running, it waits until the game closes.”
+  [OCR](R5-check/recheck/plain-confirm-ocr.log).
+  Confirming in the GUI restores all six matching hashes:
+  [result](R5-check/recheck/plain-restored.log).
+- Other peer B: [absent](R5-check/recheck/peer-absent.log),
+  [local code payload removed](R5-check/recheck/peer-no-code-copy.log),
+  [restored hashes](R5-check/recheck/peer-restored.log).
+  Its synthetic recovery metadata remained, but the recoverable local
+  SynPlain `.toc` and `main.lua` were deleted before requesting Restore on B.
+  This proves provider-only code restoration, not absence of all metadata.
+- Simulated WoW: [absent before restore](R5-check/recheck/game-absent.log),
+  [Waiting UIA](R5-check/recheck/game-waiting.log),
+  [Waiting OCR](R5-check/recheck/game-waiting-ocr.log),
+  [complete matching restoration](R5-check/recheck/game-restored.log).
+  Observed: “Restoring synplain: waiting for World of Warcraft to close.”
+  `target\release\devkit.exe fake-client <lab-variant-dir>` launches a
+  benign Windows ping stand-in at the lab's `Wow.exe` path; no addon Lua
+  or real game ran. Captured PID 39248, creation
+  `2026-11-21T21:48:25.4898011Z`, was identity-checked and stopped.
+  Restore completed in the subsequent five-second observation.
+
+Every uninstall was performed by GUI pause, synthetic code-file deletion,
+removal of only the empty directory, GUI resume and a 36-second observation.
+The 30-second removal gap was not changed. File inspection/hash checks
+establish outcomes; all recovery actions themselves used the real GUI.
+
+### Unavailable, Try again and Dismiss
+
+1. Uninstall SynPlain again, verify both peers absent, delete its synthetic
+   provider main-code blob `ab000ca8...35f79a5`, then confirm Restore on A,
+   which has no matching local code fallback.
+   [Absent](R5-check/recheck/unavailable-absent.log),
+   [refusal](R5-check/recheck/preflight-refusal.log).
+   The GUI says the file is not in the shared folder or a local copy and
+   “Nothing was changed.” However, Needs attention is empty:
+   [UIA](R5-check/recheck/unavailable-needs.log),
+   [OCR](R5-check/recheck/unavailable-needs-ocr.log).
+   The Removed row has Restore, not the promised persistent Unavailable
+   state and Try again.
+2. To exercise the journaled path independently, pause A, queue Alpha's
+   Restore while its provider blob is intact, then delete that blob
+   `a5bebc47...319b6c` before resuming.
+   [Paused Waiting](R5-check/recheck/alpha-queued-ocr.log).
+   Now Needs attention correctly reports one Unavailable item:
+   [UIA](R5-check/recheck/queued-unavailable.log),
+   [OCR](R5-check/recheck/queued-unavailable-ocr.log).
+   Removed shows Try again and Dismiss:
+   [controls](R5-check/recheck/queued-unavailable-controls.log).
+   Neither peer has Alpha code/settings:
+   [absence](R5-check/recheck/queued-unavailable-absent.log).
+3. Activate Try again without repairing the missing blob. It refuses again,
+   but the persisted Unavailable item disappears; Needs attention loses
+   its count and the row loses Try again/Dismiss:
+   [result](R5-check/recheck/queued-unavailable-retry.log).
+   Both peers remain absent:
+   [absence](R5-check/recheck/queued-unavailable-retry-absent.log).
+4. Independently test Dismiss with an additional, disposable SynZed fixture.
+   It has code only and first propagates to B. Uninstall it, queue its
+   Restore while paused and delete its provider code blob
+   `0883b849...b2b3034` before resuming.
+   [Queued](R5-check/recheck/dismiss-queued.log),
+   [Unavailable](R5-check/recheck/dismiss-unavailable.log).
+   Activate the Removed row's Dismiss: the Needs attention item disappears
+   without installing code/settings on either peer:
+   [result](R5-check/recheck/dismiss-result.log),
+   [absence](R5-check/recheck/dismiss-absent.log).
+   An initial automation attempt selected nonexistent Dismiss index 1 and
+   took no action; selecting the actual sole Dismiss control completed
+   this observation. No missing provider blobs were repaired by hand.
+
+### New findings and exact reproduction
+
+#### F3 — major: final uninstall hides the supported GUI recovery entry
+
+On `f478fca`, enroll A/B and complete settings-enabled Alpha and Plain
+uninstalls in that order, leaving zero active addons. Open Add-ons.
+Expected: Removed entries and Restore remain available.
+Observed: “No add-ons found in this installation yet.” with no Removed
+section or Restore controls, confirmed by UIA and OCR linked above.
+Creating unrelated SynAnchor makes both Removed rows appear again.
+The early return at `crates\wow-sync-app\src\pages.rs:727-730` precedes
+Removed rendering at line 825. This blocks RV-04 / GUI-only recovery
+precisely when the last addon is removed; the anchor is a test workaround,
+not a supported recovery path or a product fix.
+
+#### F4 — major: failed restore preflight loses the actionable issue
+
+On `f478fca`, with at least one unrelated active addon, uninstall an addon
+whose originating computer has no local code fallback.
+Delete one required provider blob and confirm Restore. Expected:
+Unavailable remains in Needs attention with Try again/Dismiss until
+successful recovery or deliberate Dismiss. Observed: only transient result
+text; no persistent item or retry controls.
+
+For the stronger retry reproduction, queue a valid restore while paused,
+delete a required provider blob, and resume. Unavailable appears correctly.
+Press Try again while the blob remains missing. It fails, yet clears the
+existing issue and removes the actionable Needs attention item without any
+successful recovery or Dismiss. No partial code/settings is installed.
+`crates\wow-sync-runtime\src\service.rs:926` clears the issue before
+`plan_requested`; its error mapping returns immediately without persisting
+the refusal. The linked immediate-refusal and queued-retry logs demonstrate
+both paths independently.
+
+### Tiers, release notes, CI and hygiene
+
+Additional offline PASS:
+[log and report](R5-check/recheck/tier-1.log), generated 21:42:39 UTC.
+After writing the recheck report, the
+[final offline tier](R5-check/recheck/offline-final.log) also passed all
+six checks, including Markdown links.
+Two additional native PASS:
+[first](R5-check/recheck/tier-2.log),
+[second](R5-check/recheck/tier-3.log).
+Reports identify `f478fca`; dirty state comprises only owned evidence.
+F2's known-gap wording is corrected to “No release has been published yet.”
+in `docs\release\v0.1.0.md`; no new GUI fake-404 claim is made.
+
+Assigned-source main CI
+[44952684441](https://github.com/hamiltonia/wow-sync/actions/runs/44952684441)
+was **CANCELLED**, with all six jobs cancelled:
+[metadata](R5-check/recheck/main-ci.json).
+Subsequent main CI
+[44952756402](https://github.com/hamiltonia/wow-sync/actions/runs/44952756402),
+source `8f17099820ec4f7152d37b84dd374d963e39e9b6`, also completed
+**CANCELLED**:
+[metadata](R5-check/recheck/latest-main-ci.json).
+Latest main CI at the final query,
+[44954027850](https://github.com/hamiltonia/wow-sync/actions/runs/44954027850),
+source `0df1a8e17e5a02646de7032b990adcfcb0f65250`, remained **IN PROGRESS**:
+[current metadata](R5-check/recheck/current-main-ci.json).
+The tested source was not silently changed to that newer main.
+CI verification therefore remains BLOCKED; recheck does not claim a release
+gate PASS. Memory, release artifact and earlier blocked GUI observations
+were not repeated by this bounded recheck.
+
+Captured GUI roots A1700 (`2026-11-21T21:41:31.0872240Z`) and B33692
+(`2026-11-21T21:41:53.6590710Z`) were creation-time checked and stopped:
+[cleanup](R5-check/recheck/cleanup.log).
+No unrelated process was stopped. Before final report edits, evidence
+directory size was 383,231 bytes across 89 files, below 1 MB.
+Logs contain labelled fingerprints/absence results, not settings contents;
+synthetic account labels are redacted from retained GUI logs.
+The read-only observation helper names only its scoped synthetic fixture.
+Main status was empty during final inspection and is checked again before commit.
+Only owned evidence is staged. No product/test edits, push, tag, nested
+workers or budget-counter resets were made.

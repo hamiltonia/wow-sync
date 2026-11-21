@@ -1,0 +1,27 @@
+F1 A code=False settings=False
+F1 B code=False settings=False
+ACTIVATE Add-ons -> Add-ons
+ControlType.Group | enabled=True offscreen=False focus=False | Status
+ControlType.StatusBar | enabled=True offscreen=False focus=False | This computer is up to date. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Recheck-A
+ControlType.Button | enabled=True offscreen=False focus=False | Sync now
+ControlType.Button | enabled=True offscreen=False focus=False | Pause syncing
+ControlType.Group | enabled=True offscreen=False focus=False | Sections
+ControlType.Button | enabled=True offscreen=False focus=False | Overview
+ControlType.Button | enabled=True offscreen=False focus=False | Computers
+ControlType.Button | enabled=True offscreen=False focus=False | Add-ons, current page
+ControlType.Button | enabled=True offscreen=False focus=False | Needs attention
+ControlType.Button | enabled=True offscreen=False focus=False | Activity
+ControlType.Button | enabled=True offscreen=False focus=False | Settings sync
+ControlType.Button | enabled=True offscreen=False focus=False | App settings
+ControlType.Button | enabled=True offscreen=False focus=False | About
+ControlType.Text | enabled=True offscreen=False focus=False | Add-ons
+ControlType.Group | enabled=True offscreen=False focus=False | Filter add-ons
+ControlType.Button | enabled=True offscreen=False focus=True | All, 1 add-ons, selected
+ControlType.Button | enabled=True offscreen=False focus=False | Not up to date, 0 add-ons
+ControlType.Button | enabled=True offscreen=False focus=False | Needs you, 0 add-ons
+ControlType.Button | enabled=True offscreen=False focus=False | Not synced here, 0 add-ons
+ControlType.List | enabled=True offscreen=False focus=False | Add-ons, 1 items, filter All
+ControlType.ListItem | enabled=True offscreen=False focus=False | SynPlain, up to date, version 1.0.0, not confirmed yet
+ControlType.Text | enabled=True offscreen=False focus=False | Removed
+ControlType.Text | enabled=True offscreen=False focus=False | synalpha
+ControlType.Button | enabled=True offscreen=False focus=False | Restore

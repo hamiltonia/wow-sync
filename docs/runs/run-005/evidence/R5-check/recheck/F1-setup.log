@@ -1,0 +1,18 @@
+ACTIVATE Choose a copy: SynAlpha* -> Choose a copy: SynAlpha: can't tell which copy is newer
+ACTIVATE Keep this: Keep version 1.0.0. Held by This computer.* -> Keep this: Keep version 1.0.0. Held by This computer. Installs synalpha.
+ACTIVATE Add-ons -> Add-ons
+ACTIVATE SynAlpha,* -> SynAlpha, updated here, version 1.0.0, not confirmed yet
+ACTIVATE Restore this version* -> Restore this version…
+ACTIVATE Restore -> Restore
+A Alpha code=A5BEBC47B4CFA441B62FD5715FC4CBA817D3169E603A2BA6D421CF3FCC319B6C
+B Alpha code=A5BEBC47B4CFA441B62FD5715FC4CBA817D3169E603A2BA6D421CF3FCC319B6C
+ACTIVATE Settings sync -> Settings sync
+ACTIVATE Account [synthetic account]* -> Account [account]: not included
+ACTIVATE Turn on settings sync -> Turn on settings sync
+ACTIVATE Settings sync -> Settings sync
+ACTIVATE Account [synthetic account]* -> Account [account]: not included
+ACTIVATE Turn on settings sync -> Turn on settings sync
+ACTIVATE Change master* -> Change master…
+ACTIVATE Use this computer as* -> Use this computer as the settings master
+ACTIVATE Close -> Close
+ACTIVATE Pause syncing -> Pause syncing
