@@ -187,7 +187,7 @@ pub fn same_version_text(r: &ReleaseRow) -> Vec<String> {
     };
     vec![
         format!(
-            "Go back to {} {}? Every computer in the group switches to {earlier}; the copy installed now is kept for recovery.",
+            "Go back to {} {}? Every computer in the group switches to {earlier}; the copy installed now is kept for recovery and becomes blocked for the group.",
             r.title, r.version
         ),
         "WoW Sync applies this when WoW is closed. Nothing is changed while it is running.".into(),
@@ -287,7 +287,7 @@ mod tests {
         r.held_on = Some("3 Nov".into());
         let t = confirm_text(Some("1.0.0"), &r);
         assert!(t[0].contains(
-            "Every computer in the group switches to the earlier copy of 1.0.0 set aside on 3 Nov; the copy installed now is kept for recovery."
+            "Every computer in the group switches to the earlier copy of 1.0.0 set aside on 3 Nov; the copy installed now is kept for recovery and becomes blocked for the group."
         ));
         r.held_on = None;
         let t = confirm_text(Some("1.0.0"), &r);

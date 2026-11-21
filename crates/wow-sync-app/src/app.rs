@@ -232,6 +232,18 @@ pub struct Shell {
     pub window_h: f32,
 }
 
+/// What the log may say about an action: its kind only, never the names, keys or paths in it.
+pub fn act_label(act: &Act) -> String {
+    if let Act::Group(a) = act {
+        return format!("Group {:?}", a.kind());
+    }
+    let d = format!("{act:?}");
+    d.split(['(', ' ', '{'])
+        .next()
+        .unwrap_or_default()
+        .to_string()
+}
+
 pub fn log(msg: &str) {
     if let Ok(path) = std::env::var("WOWSYNC_LOG") {
         use std::io::Write;
@@ -635,7 +647,7 @@ impl Shell {
         {
             return;
         }
-        log(&format!("act {act:?}"));
+        log(&format!("act {}", act_label(&act)));
         let moves = matches!(
             act,
             Act::Nav(_)
@@ -2016,5 +2028,38 @@ impl Shell {
             NeedTarget::Decision(k) => Act::OpenDecision(k.clone()),
             NeedTarget::Computer(i) => Act::OpenComputer(*i),
         }
+    }
+}
+
+#[cfg(test)]
+mod log_tests {
+    use super::*;
+    use crate::features::GroupAction;
+    use wow_sync_core::ids::Sha256;
+
+    #[test]
+    fn the_action_log_names_only_the_kind_and_never_a_name_or_path() {
+        let secret = "Account#Secret";
+        let acts = [
+            Act::OpenAddon(secret.into()),
+            Act::OpenDecision(secret.into()),
+            Act::ToggleExpand(secret.into()),
+            Act::Toggle(secret.into()),
+            Act::OpenNeedsHelp("C:\\Users\\Someone\\save.zip".into()),
+            Act::Setup(SetupAct::JoinGroup(3)),
+        ];
+        for a in &acts {
+            let l = act_label(a);
+            assert!(!l.contains(secret) && !l.contains("Someone"), "{l}");
+            assert!(!l.contains('(') && !l.contains('3'), "{l}");
+        }
+        assert_eq!(act_label(&acts[0]), "OpenAddon");
+        let g = Act::Group(GroupAction::Rollback {
+            package: wow_sync_core::paths::validate_folder_name("SecretAddon").unwrap(),
+            recovered: Sha256([7; 32]),
+        });
+        let l = act_label(&g);
+        assert_eq!(l, "Group Rollback");
+        assert!(!l.contains("SecretAddon"));
     }
 }
