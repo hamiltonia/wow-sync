@@ -30,9 +30,9 @@ workflow sets `WOWSYNC_BUILD_COMMIT`).
    written from memory because there was no network. Confirm both against the
    release pages before pushing a tag; a wrong SHA fails the workflow. Run a
    `workflow_dispatch` first. The checkout SHA is copied from `ci.yml`.
-2. **No LICENSE file exists in the repo** (only `license = "MIT"` in
-   Cargo.toml). The zip step includes `LICENSE*` only if present, so the zip
-   currently has none. Owner decision/file needed; not mine to add.
+2. **LICENSE:** a root MIT `LICENSE` ("Copyright (c) 2026 hamiltonia") was
+   added in a follow-up commit at owner request. The zip step copies
+   `LICENSE*`, so it is now included.
 3. **Version extraction** uses `sed` over `Cargo.toml` (tolerates CRLF from
    Windows checkout). It could not be run locally (no sed on this PC); confirm
    on the first `workflow_dispatch`.
