@@ -40,7 +40,7 @@ impl Notices {
     pub fn for_page(&self, page: Page, addon: Option<&str>) -> Option<&str> {
         match &self.current {
             Some((p, t, scope)) if *p == page => match scope {
-                Some((key, _)) if false && addon != Some(key.as_str()) => None,
+                Some((key, _)) if addon != Some(key.as_str()) => None,
                 _ => Some(t),
             },
             _ => None,
