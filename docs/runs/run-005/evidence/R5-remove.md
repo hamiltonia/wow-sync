@@ -33,3 +33,16 @@ Branch `run005/R5-remove` (from main fe13e3d). Environment: Windows, local cargo
 ## File-write disclosure
 
 No .NET file API was used. Once early on I used `Set-Content` on `removal_tests.rs` (content verified intact afterwards); all other writes used edit/create. `git -C D:\GitHub\wow-sync status --short` was empty before commit.
+
+## Fix round: R5-check F1 (originating code survives an uninstall)
+
+**Root cause.** In the cycle where A's own matured removal is recorded, `service.rs` composes the apply target before that record exists (`compose` at the `held` block, ~1930-1990). A's folder is absent, so `plan_apply` installs it again from the group's copy in the same cycle. The next cycle sees a live removal on a present folder that A has already acknowledged as absent, and `reinstall_held` (`removal.rs`, ~260) treats it as a deliberate reinstall, so it is never removed. A's list stays at "removing, not confirmed yet". Reproduced deterministically in `e2e::tests::an_uninstall_after_a_group_restore_converges_on_every_computer` (V-02 fixture: differing same-version copies, B keeps its own, A restores its displaced copy, then A's folder is deleted and the gap matures). It failed with A's code present before the fix. The earlier-recreated-tree history was not needed.
+
+**Fix.** `removal_steps` returns the folder keys whose removal record it just wrote; `sync_once` drops any apply package for those keys from that cycle's plan (`service.rs`, next to `plan_apply`). Safety rules are untouched: remove ops, WoW-running block and offline-peer handling are not changed.
+
+**Test:** `e2e::tests::an_uninstall_after_a_group_restore_converges_on_every_computer` (required case `R5-check-F1:uninstall-converges`). Asserts A and B code absent and one entry in Removed.
+**A-38 control:** disabled the new filter (`true ||`): the test failed (exit 101); reverted, diff clean.
+
+**Consequence for my earlier restore test.** It had passed only because the bug left A's code in place. A real uninstall leaves no computer holding the code, and the runtime's `RestoreRemoved` only writes the re-add; the design's §7.4 source (recovery point or manifest trees and blobs, `kind: restore` operation) is not implemented in the runtime. The test now puts the code back by hand and judges the settings half only. This gap needs an owner decision or a follow-up item: Restore from Removed cannot bring the code back when nobody holds it.
+
+No .NET file API was used. Both tiers PASS.

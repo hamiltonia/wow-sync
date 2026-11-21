@@ -2480,7 +2480,7 @@ impl SliceService {
                     variant_dir: &svd,
                     decls: &w.decls,
                 };
-                let (extra, mut next_seq) = Self::removal_steps(
+                let (extra, mut next_seq, just_removed) = Self::removal_steps(
                     &self.state,
                     &mut self.plane,
                     &provider,
@@ -2562,6 +2562,18 @@ impl SliceService {
                         None
                     }
                 };
+                // The target was composed before this cycle's removal record existed: it must not
+                // put back the folder whose removal was just recorded, or the uninstall is
+                // mistaken for a deliberate reinstall and never completes.
+                if let Some(p) = planned.as_mut() {
+                    p.packages.retain(|q| {
+                        !just_removed.contains(&q.package)
+                            && !q.folders.iter().any(|f| just_removed.contains(&f.key))
+                    });
+                    if p.packages.is_empty() && p.skipped.is_empty() {
+                        planned = None;
+                    }
+                }
                 if !extra.is_empty() {
                     let p = planned.get_or_insert_with(|| ApplyPlan {
                         group_id: group_id.clone(),
@@ -2753,15 +2765,16 @@ impl SliceService {
         game_blocks_changes: bool,
         senv: &SettingsEnv,
         report: &mut SyncReport,
-    ) -> (Vec<PackageApply>, u64) {
+    ) -> (Vec<PackageApply>, u64, BTreeSet<FolderKey>) {
         if w.standing != OwnStanding::Active {
-            return (Vec::new(), w.enrollment.next_seq);
+            return (Vec::new(), w.enrollment.next_seq, BTreeSet::new());
         }
         let gid = &w.group.group_id;
         let now = now_unix_ms() as u64;
         let mut next_seq = w.enrollment.next_seq;
         let mut pass = SettingsPass::open(state, gid, senv, game_blocks_changes);
         let mut held: BTreeSet<FolderKey> = BTreeSet::new();
+        let mut recorded: BTreeSet<FolderKey> = BTreeSet::new();
         let mut written = false;
         if w.inventory.listing_stable {
             let identity = format!(
@@ -2778,7 +2791,7 @@ impl SliceService {
                 Ok(o) => o,
                 Err(e) => {
                     report.apply_note = Some(format!("removal state could not be saved: {e}"));
-                    return (Vec::new(), next_seq);
+                    return (Vec::new(), next_seq, BTreeSet::new());
                 }
             };
             for (name, _) in &observed.held {
@@ -2822,6 +2835,7 @@ impl SliceService {
                         RemovalStore::new(state, gid.clone()).clear_pending(&r.package);
                         next_seq += 1;
                         written = true;
+                        recorded.extend(keys.iter().cloned());
                     }
                     Err(e) => {
                         report.apply_note = Some(format!("removal record not written: {e}"));
@@ -2913,7 +2927,7 @@ impl SliceService {
         ops.extend(pass.restore_ops(&w.inventory, &w.own, &|k| {
             !behaviour.merged_removals(&plane.ledger, k).live.is_empty()
         }));
-        (ops, next_seq)
+        (ops, next_seq, recorded)
     }
 
     #[allow(clippy::too_many_arguments)]
