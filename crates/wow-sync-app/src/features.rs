@@ -485,6 +485,8 @@ pub struct FeatureData {
     pub allow_again: Vec<crate::computers_ui::AllowAgainRow>,
     /// Held releases per add-on for the history list. Pending snapshot field (R4-integrate).
     pub history: Vec<crate::rollback_ui::ReleaseRow>,
+    /// Earlier versions this computer set aside, per add-on (local recovery points).
+    pub recovery: Vec<crate::recovery_ui::RecoveryEntry>,
     /// Removals the group has recorded, for the Removed section.
     pub removed: Vec<wow_sync_runtime::RemovedRow>,
     /// The removal record of each `removed` row (same index), which Restore names.
@@ -515,6 +517,7 @@ impl Default for FeatureData {
             retired: Vec::new(),
             allow_again: Vec::new(),
             history: Vec::new(),
+            recovery: Vec::new(),
             removed: Vec::new(),
             removal_hashes: Vec::new(),
             older_peer: None,
@@ -591,6 +594,7 @@ pub fn apply_snapshot(f: &mut FeatureData, s: &wow_sync_runtime::StatusSnapshot)
             held_on: None,
         })
         .collect();
+    f.recovery = crate::recovery_ui::entries(&s.recovery_points);
     f.older_peer = s.older_peer.clone();
     f.allow_again = s
         .rejected_releases

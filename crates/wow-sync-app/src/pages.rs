@@ -923,8 +923,69 @@ impl Shell {
             .cloned()
             .collect();
         let installed = crate::rollback_ui::installed_version(&self.w, key);
-        if rows.iter().all(|r| r.current) {
+        let kept: Vec<crate::recovery_ui::RecoveryEntry> =
+            crate::recovery_ui::entries_for(&self.w, key, &rows)
+                .into_iter()
+                .cloned()
+                .collect();
+        if rows.iter().all(|r| r.current) && kept.is_empty() {
             rec.push(self.muted(crate::change_ui::NO_EARLIER).into_any_element());
+        }
+        for (j, e) in kept.iter().enumerate() {
+            rec.push(
+                div()
+                    .child(SharedString::from(crate::recovery_ui::line(e)))
+                    .into_any_element(),
+            );
+            let k = format!("rp-{j}");
+            let open = format!("{k}-open");
+            match crate::recovery_ui::restore(&self.w, e, &s.title) {
+                Err(reason) => {
+                    rec.push(
+                        self.btn_off(&k, crate::recovery_ui::RESTORE, &reason, cx)
+                            .into_any_element(),
+                    );
+                    rec.push(self.muted(reason).into_any_element());
+                }
+                Ok(a) if self.expanded.contains(&open) => {
+                    let r = crate::recovery_ui::as_release(e, &s.title);
+                    for t in crate::rollback_ui::confirm_text(installed.as_deref(), &r) {
+                        rec.push(div().child(SharedString::from(t)).into_any_element());
+                    }
+                    rec.push(
+                        self.btn(
+                            &format!("{k}-go"),
+                            "Restore",
+                            Bk::Primary,
+                            Act::Group(a),
+                            cx,
+                        )
+                        .into_any_element(),
+                    );
+                    rec.push(
+                        self.btn(
+                            &format!("{k}-no"),
+                            "Cancel",
+                            Bk::Secondary,
+                            Act::ToggleExpand(open),
+                            cx,
+                        )
+                        .into_any_element(),
+                    );
+                }
+                Ok(_) => {
+                    rec.push(
+                        self.btn(
+                            &k,
+                            crate::recovery_ui::RESTORE,
+                            Bk::Secondary,
+                            Act::ToggleExpand(open),
+                            cx,
+                        )
+                        .into_any_element(),
+                    );
+                }
+            }
         }
         for (j, r) in rows.iter().cloned().enumerate() {
             let line = crate::rollback_ui::release_line(&r);

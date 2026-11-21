@@ -1362,6 +1362,15 @@ tests = [
 ]
 
 [[case]]
+id = "R4-app:local-recovery"
+tier = "offline"
+tests = [
+    "recovery_ui::tests::entries_list_the_add_ons_recovery_points_and_restore_is_a_group_rollback",
+    "recovery_ui::tests::nothing_listed_for_other_add_ons_duplicates_or_when_none_are_kept",
+    "recovery_ui::tests::a_retired_computer_cannot_restore_and_is_told_why",
+]
+
+[[case]]
 id = "R4-app:change-decision"
 tier = "offline"
 tests = [
