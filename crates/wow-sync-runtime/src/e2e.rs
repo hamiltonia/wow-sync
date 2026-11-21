@@ -1553,6 +1553,19 @@ mod tests {
 
     // ------------------------------------------------ composed target (R4-integrate B3b)
 
+    fn folder_of(
+        lab: &Lab,
+        g: &GroupId,
+        pc: &Pc,
+        key: &str,
+    ) -> wow_sync_core::inventory::FolderState {
+        latest_state(lab, g, pc)
+            .folders
+            .into_iter()
+            .find(|f| f.key.as_str() == key)
+            .expect("the folder is published")
+    }
+
     fn alpha_folder(lab: &Lab, g: &GroupId, pc: &Pc) -> wow_sync_core::inventory::FolderState {
         latest_state(lab, g, pc)
             .folders
@@ -3583,6 +3596,87 @@ mod tests {
                 rejections: vec![rh]
             }),
             Err(CommandError::UnknownRejection(rh))
+        );
+    }
+
+    #[test]
+    fn restoring_a_copy_a_keep_displaced_converges_the_group_on_it() {
+        use wow_sync_core::hash::package_hash;
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Amb", "from-a");
+        b.addon("Amb", "from-b");
+        let g = a.create();
+        b.join(&g);
+        for _ in 0..3 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        let hash_of = |pc: &Pc| {
+            let f = folder_of(&lab, &g, pc, "amb");
+            (f.key.clone(), package_hash(&[(f.key, f.tree.unwrap())]))
+        };
+        let (key, a_rel) = hash_of(&a);
+        let (_, b_rel) = hash_of(&b);
+        assert_ne!(a_rel, b_rel);
+        assert!(b
+            .svc
+            .command(Command::Keep {
+                scope: vec![key.clone()],
+                copy: b_rel,
+                why: wow_sync_core::kinds::ChoiceReason::Ambiguous,
+            })
+            .is_ok());
+        for _ in 0..4 {
+            synced(&mut b);
+            synced(&mut a);
+        }
+        assert_eq!(a.read("Amb/main.lua").as_deref(), Some("from-b"));
+        assert!(offered_kinds(&a).is_empty() && offered_kinds(&b).is_empty());
+
+        let go = Command::Rollback {
+            package: key.clone(),
+            recovered: a_rel,
+        };
+        assert_eq!(a.svc.command(go), Ok(CommandOutcome::Recorded));
+        let mut lb = SyncReport::default();
+        for _ in 0..5 {
+            synced(&mut a);
+            lb = synced(&mut b);
+        }
+        let (ac, _) = pc_ids(&a);
+        assert!(
+            !authority_files(&lab, &g, &ac).is_empty(),
+            "rejection written"
+        );
+        assert_eq!(a.read("Amb/main.lua").as_deref(), Some("from-a"));
+        assert_eq!(
+            b.read("Amb/main.lua").as_deref(),
+            Some("from-a"),
+            "the group converges on the restored copy: {:?} {:?} {}",
+            offered_kinds(&a),
+            offered_kinds(&b),
+            texts(&lb)
+        );
+        assert!(offered_kinds(&a).is_empty() && offered_kinds(&b).is_empty());
+    }
+
+    #[test]
+    fn a_rollback_of_a_copy_the_group_never_displaced_is_still_refused() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        a.addon("Amb", "from-a");
+        let g = a.create();
+        synced(&mut a);
+        let f = folder_of(&lab, &g, &a, "amb");
+        let ghost = wow_sync_core::ids::Sha256([7; 32]);
+        assert_eq!(
+            a.svc.command(Command::Rollback {
+                package: f.key,
+                recovered: ghost
+            }),
+            Err(CommandError::UnknownCopy(ghost))
         );
     }
 
