@@ -52,7 +52,7 @@ impl RestoreRefusal {
         }
     }
 
-    fn reason(&self) -> String {
+    pub(crate) fn reason(&self) -> String {
         match self {
             Self::UnknownRemoval => "this removal is no longer current".into(),
             Self::Rejected => "the group rejected this version".into(),
@@ -135,7 +135,7 @@ pub fn load_issue(state: &LocalState, group: &GroupId) -> Option<RestoreIssue> {
     serde_json::from_slice(&b).ok()
 }
 
-fn save_issue(state: &LocalState, group: &GroupId, i: &RestoreIssue) {
+pub(crate) fn save_issue(state: &LocalState, group: &GroupId, i: &RestoreIssue) {
     let _ = state.write_atomic(
         &issue_name(group),
         &serde_json::to_vec(i).expect("plain data serializes"),
@@ -185,6 +185,36 @@ pub(crate) fn settings_note(expected: usize, captured: usize) -> String {
         )
     } else {
         "Settings are restored with the code".to_string()
+    }
+}
+
+/// Records how a planned restore ended: the settings note appears only after the code applied; a
+/// failure (for example content that does not verify) becomes a refusal that stays until the
+/// owner retries or dismisses it, instead of being planned again every cycle. Interrupted or
+/// replanned operations stay queued.
+pub(crate) fn settle(
+    state: &LocalState,
+    group: &GroupId,
+    removal: &Sha256,
+    result: Option<&wow_sync_core::exec::PackageResult>,
+    note: String,
+    apply_note: &mut Option<String>,
+) {
+    use wow_sync_core::exec::PackageResult as R;
+    match result {
+        Some(R::Applied { .. }) => *apply_note = Some(note),
+        Some(R::Failed(e) | R::NeedsHelp(e)) => {
+            clear_request(state, group);
+            save_issue(
+                state,
+                group,
+                &RestoreIssue {
+                    removal: *removal,
+                    reason: wow_sync_core::explain::render(e),
+                },
+            );
+        }
+        _ => {}
     }
 }
 

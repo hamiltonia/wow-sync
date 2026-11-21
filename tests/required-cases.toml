@@ -1466,7 +1466,23 @@ tests = [
     "e2e::tests::a_queued_restore_is_shown_as_waiting_while_syncing_is_paused",
     "e2e::tests::a_restore_refused_at_cycle_time_stays_listed_until_dismissed_or_retried",
     "e2e::tests::a_retried_restore_replaces_the_shown_refusal",
+    "e2e::tests::a_restore_refused_when_asked_for_is_kept_as_unavailable_and_a_good_retry_clears_it",
     "e2e::tests::the_settings_note_tells_code_only_partial_and_paired_restores_apart",
+]
+
+[[case]]
+id = "RV5-01:failed-restore-is-unavailable"
+tier = "offline"
+tests = [
+    "e2e::tests::a_restore_whose_shared_copy_is_corrupt_installs_nothing_and_says_so_without_retrying",
+    "e2e::tests::a_corrupt_shared_copy_is_replaced_by_the_intact_local_recovery_copy",
+]
+
+[[case]]
+id = "RV5-07:uninstall-restore-identity-boundary"
+tier = "offline"
+tests = [
+    "e2e::tests::an_uninstall_and_restore_keep_each_account_and_character_file_to_its_own_identity",
 ]
 # <<< section: R5-remove
 

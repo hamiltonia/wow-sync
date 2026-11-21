@@ -101,16 +101,15 @@ settings sync **for the affected units only**; other units continue
 | A file `<Folder>.lua` exists but no installed folder declares saved variables for that shape | `Unowned { file }` | Not synced, not moved, not deleted. Listed in Details only, as information |
 | A folder declares saved variables but the `.toc` selection for the folder is ambiguous ([domain.md](domain.md) `.toc` rule) | `AmbiguousToc { folder }` | Unit not synced |
 | A path component is a reparse point, link, junction, or names differ only in case on a case-sensitive volume | `UnsafePath { path }` | Unit not synced; nothing under that path is written |
-| A file exceeds the saved-file size cap `MAX_SETTINGS_FILE_BYTES` (Q-77 **PENDING OWNER**) | `TooLarge { file, size }` | Unit not synced |
+| A file exceeds the saved-file size cap `MAX_SETTINGS_FILE_BYTES` (Q-77, D-26: 32 MiB) | `TooLarge { file, size }` | Unit not synced |
 | An identity folder name fails the safe-name rules of [domain.md](domain.md) (control characters, reserved names, trailing dot or space) | `UnsafeIdentity { name }` | Identity not synced |
 | Two local identity paths with equal NFC forms but different bytes | `IdentityNormalizationCollision { paths }` ([contracts.md](contracts.md) §3.3) | Neither identity synced on this computer |
 | A peer's identity differs from a local one only by letter case | `IdentityCaseMismatch` (contracts.md §3.3) | Not matched; neither applied to the other |
 
-**Q-77 (PENDING OWNER).** The size cap is a product gate (contracts.md
-§8). It is a named parameter with no approved value. Until the owner sets
-it, phase C may implement and test the diagnosis with a test-only value,
-but settings sync on real data stays disabled. The run-004 draft's 64 MiB
-is a proposal only.
+**Q-77 (decided, D-26).** The size cap is a product gate (contracts.md
+§8). The owner approved **32 MiB (33,554,432 bytes)**, as built in
+`MAX_SETTINGS_FILE_BYTES = Some(33_554_432)`: a file at the cap syncs and one
+byte more is `TooLarge`. Tests may still pass a smaller test-only value.
 
 There is **no fallback** to copying `WTF`, a whole account folder or a whole
 `SavedVariables` folder. Settings sync never splits one file into parts and
@@ -989,7 +988,7 @@ deliberate break that makes it fail).
 | T-S-paired-selection | restore code X with: an exact `/2` pairing; only local history with X's hash; two unordered remote revisions with X's hash; none | exact pairing; newest local; code-only with both offered explicitly; code-only with the A-19 warning. Never by comparing peers' `local_seq` or clocks | A-18, A-19 |
 | T-S-retention-roots | paired recovery roots, unresolved-choice heads, live removal roots and provider-location roots across prune and restart; a 16 MiB+ ledger (contracts.md T-C09) | no root pruned; unrooted checkpoints become collector candidates only; nothing claims provider recovery for them | A-16, A-17 |
 | T-S-capture-failures | read error, disk full while storing blobs, crash between blob and manifest | no partial state recorded; previous three states intact; `CaptureFailed` shown | A-17, A-22 |
-| T-S-size-cap-pending | a file above the test-only cap | `TooLarge` diagnosis; with no approved cap, real-data settings sync is disabled (Q-77 PENDING OWNER) | A-23 |
+| T-S-size-cap-pending | a file above the test-only cap | `TooLarge` diagnosis; the approved cap is 32 MiB (Q-77, D-26); with no cap value, settings sync stays disabled | A-23 |
 
 A-38 controls to include, at minimum: publish non-master captures
 automatically (T-S06 must fail); pick the newer timestamp for a choice
