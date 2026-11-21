@@ -719,15 +719,17 @@ impl Shell {
 
     fn addons(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let pal = self.pal();
-        let total = self.w.view.packages.len();
         let mut col = self.body_col().child(self.heading("Add-ons", 1));
         if let Some(s) = self.w.stale_secs {
             col = col.child(self.muted(format!("Last known add-on data, as of {}", rel(s))));
         }
-        if total == 0 {
-            return col
-                .child(self.muted("No add-ons found in this installation yet."))
-                .into_any_element();
+        let layout = crate::removed_ui::addons_layout(&self.w);
+        if layout.empty_state {
+            col = col.child(self.muted("No add-ons found in this installation yet."));
+            if !layout.removed_section {
+                return col.into_any_element();
+            }
+            return col.children(self.removed_section(cx)).into_any_element();
         }
         let filter = self.filter;
         col = col.child(self.filter_group(cx));
@@ -822,9 +824,19 @@ impl Shell {
             col = col.child(self.muted("No add-ons match this filter."));
         }
         col = col.child(list);
+        col.children(self.removed_section(cx)).into_any_element()
+    }
+
+    /// The Removed list and the restores in progress; shown whatever the active add-on count,
+    /// because Restore is the only way back once every add-on has been removed.
+    fn removed_section(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let mut out: Vec<AnyElement> = Vec::new();
         let removed = crate::removed_ui::lines(&self.w.features.removed);
-        col = col.child(self.heading("Removed", 2));
-        col = col.child(self.muted(crate::removed_ui::intro(removed.len())));
+        out.push(self.heading("Removed", 2).into_any_element());
+        out.push(
+            self.muted(crate::removed_ui::intro(removed.len()))
+                .into_any_element(),
+        );
         for (i, r) in removed.into_iter().enumerate() {
             let mut body: Vec<AnyElement> = vec![
                 self.muted(format!("{} ({})", r.title, r.folders))
@@ -928,9 +940,38 @@ impl Shell {
                         .into_any_element(),
                 ),
             }
-            col = col.child(self.panel(&r.title, body));
+            out.push(self.panel(&r.title, body).into_any_element());
         }
-        col.into_any_element()
+        let rows = self.w.features.removed.len();
+        let orphans: Vec<wow_sync_runtime::RestoreProgress> = self
+            .w
+            .features
+            .restores
+            .iter()
+            .filter(|p| !(0..rows).any(|i| crate::removed_ui::progress_for(&self.w, i) == Some(*p)))
+            .cloned()
+            .collect();
+        for (j, p) in orphans.into_iter().enumerate() {
+            let text = crate::removed_ui::plain(&p.text);
+            let mut body: Vec<AnyElement> = vec![self.muted(text).into_any_element()];
+            if matches!(p.state, wow_sync_runtime::RestoreState::Unavailable { .. }) {
+                body.push(
+                    self.btn(
+                        &format!("restore-issue-dismiss-{j}"),
+                        "Dismiss",
+                        Bk::Secondary,
+                        Act::Group(crate::removed_ui::dismiss_action(&p)),
+                        cx,
+                    )
+                    .into_any_element(),
+                );
+            }
+            out.push(
+                self.panel(&crate::removed_ui::plain(&p.title), body)
+                    .into_any_element(),
+            );
+        }
+        out
     }
 
     fn addon_detail(&mut self, key: &str, cx: &mut Context<Self>) -> AnyElement {

@@ -1592,6 +1592,13 @@ tests = [
     "model::tests::a_refused_restore_is_a_needs_item_and_a_waiting_one_is_only_a_status_line",
     "removed_ui::tests::progress_belongs_to_the_row_of_its_first_folder_and_dismiss_names_that_folder",
 ]
+
+[[case]]
+id = "R5-app:removed-without-active"
+tier = "offline"
+tests = [
+    "removed_ui::tests::with_no_active_add_ons_the_removed_row_and_its_restore_are_still_there",
+]
 # <<< section: R5-app
 
 # >>> section: R5-release

@@ -85,6 +85,18 @@ A-38 control: mapping `NoRelease` to "Could not check for updates." failed the t
 - A-38 control: filtering the Needs item on `Waiting` instead of `Unavailable` failed the test (exit 101), reverted.
 - Not wired: the Needs page has only the navigate button; Try again and Dismiss live on the Removed row.
 
+## Removed section without active add-ons (R5-check F3, after merge of 1a76cf8)
+
+- The Add-ons page returned early on zero active add-ons, hiding Removed and Restore. The Removed section
+  (`removed_section`: rows, Restore, Waiting/Unavailable lines, Try again, Dismiss) is now drawn whenever
+  removed entries or restores exist; the empty-state sentence shows only when there are no active add-ons.
+  Restores with no matching removed row are listed too, with Dismiss when refused, so a stale issue can be cleared.
+  Pure decision: `removed_ui::addons_layout`. Needs "Open Removed" navigates to Add-ons, which now works.
+  No other page hides content behind an empty active list (`counts_sentence` is only a sentence).
+- Test `removed_ui::tests::with_no_active_add_ons_the_removed_row_and_its_restore_are_still_there`
+  (case `R5-app:removed-without-active`).
+- A-38 control: `removed_section: !none` (the old behaviour) failed it (exit 101); reverted.
+
 ## Notes
 
 One edit to `about_ui.rs` was written with a .NET file write by mistake instead of the edit tool
