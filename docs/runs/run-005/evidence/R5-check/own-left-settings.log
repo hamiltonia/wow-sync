@@ -1,0 +1,25 @@
+   Compiling wow-sync-core v0.1.0 (D:\GitHub\wow-sync.worktrees\R5-check\crates\wow-sync-core)
+   Compiling wow-sync-runtime v0.1.0 (D:\GitHub\wow-sync.worktrees\R5-check\crates\wow-sync-runtime)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.10s
+     Running unittests src\lib.rs (target\debug\build\wow-sync-runtime/04dea99d7e2a5545\out\wow_sync_runtime-04dea99d7e2a5545.exe)
+
+running 1 test
+test e2e::tests::an_uninstall_removes_the_settings_with_the_code_and_a_restore_returns_both ... FAILED
+
+failures:
+
+---- e2e::tests::an_uninstall_removes_the_settings_with_the_code_and_a_restore_returns_both stdout ----
+
+thread 'e2e::tests::an_uninstall_removes_the_settings_with_the_code_and_a_restore_returns_both' (29088) panicked at crates\wow-sync-runtime\src\e2e.rs:2586:9:
+assertion `left == right` failed: the settings left with the code
+  left: Some("[synthetic settings bytes omitted]")
+ right: None
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    e2e::tests::an_uninstall_removes_the_settings_with_the_code_and_a_restore_returns_both
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 160 filtered out; finished in 0.63s
+
+error: test failed, to rerun pass `-p wow-sync-runtime --lib`

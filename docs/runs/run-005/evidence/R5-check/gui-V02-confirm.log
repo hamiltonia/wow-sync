@@ -1,0 +1,29 @@
+ControlType.Group | enabled=True offscreen=False focus=False | Status
+ControlType.StatusBar | enabled=True offscreen=False focus=False | This computer is up to date. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Check-A
+ControlType.Button | enabled=True offscreen=False focus=False | Sync now
+ControlType.Button | enabled=True offscreen=False focus=False | Pause syncing
+ControlType.Group | enabled=True offscreen=False focus=False | Sections
+ControlType.Button | enabled=True offscreen=False focus=False | Overview
+ControlType.Button | enabled=True offscreen=False focus=False | Computers
+ControlType.Button | enabled=True offscreen=False focus=False | Add-ons, current page
+ControlType.Button | enabled=True offscreen=False focus=False | Needs attention
+ControlType.Button | enabled=True offscreen=False focus=False | Activity
+ControlType.Button | enabled=True offscreen=False focus=False | Settings sync
+ControlType.Button | enabled=True offscreen=False focus=False | App settings
+ControlType.Button | enabled=True offscreen=False focus=False | About
+ControlType.Button | enabled=True offscreen=False focus=False | Back to Add-ons
+ControlType.Text | enabled=True offscreen=False focus=False | SynAlpha
+ControlType.Text | enabled=True offscreen=False focus=False | Versions
+ControlType.Text | enabled=True offscreen=False focus=False | What happened
+ControlType.Text | enabled=True offscreen=False focus=False | Why this version
+ControlType.Text | enabled=True offscreen=False focus=False | Next step
+ControlType.Text | enabled=True offscreen=False focus=False | Change decision
+ControlType.Button | enabled=True offscreen=False focus=False | Resume automatic updates for SynAlpha. Resume automatic updates for SynAlpha? Versions you declined earlier stay excluded, so they are never installed automatically.
+ControlType.Text | enabled=True offscreen=False focus=False | On each computer
+ControlType.Button | enabled=True offscreen=False focus=False | Check-B
+ControlType.Text | enabled=True offscreen=False focus=False | Folders
+ControlType.Text | enabled=True offscreen=False focus=False | Recovery copies
+ControlType.Button | enabled=True offscreen=False focus=False | Restore
+ControlType.Button | enabled=True offscreen=False focus=False | Cancel
+ControlType.Text | enabled=True offscreen=False focus=False | Details
+ControlType.Button | enabled=True offscreen=False focus=False | Details, collapsed

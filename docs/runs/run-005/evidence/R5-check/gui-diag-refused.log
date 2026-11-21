@@ -1,0 +1,45 @@
+ControlType.Group | enabled=True offscreen=False focus=False | Status
+ControlType.StatusBar | enabled=True offscreen=False focus=False | This computer is up to date. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Check-B
+ControlType.Button | enabled=True offscreen=False focus=False | Sync now
+ControlType.Button | enabled=True offscreen=False focus=False | Pause syncing
+ControlType.Group | enabled=True offscreen=False focus=False | Sections
+ControlType.Button | enabled=True offscreen=False focus=False | Overview
+ControlType.Button | enabled=True offscreen=False focus=False | Computers
+ControlType.Button | enabled=True offscreen=False focus=False | Add-ons
+ControlType.Button | enabled=True offscreen=False focus=False | Needs attention
+ControlType.Button | enabled=True offscreen=False focus=False | Activity
+ControlType.Button | enabled=True offscreen=False focus=False | Settings sync
+ControlType.Button | enabled=True offscreen=False focus=False | App settings, current page
+ControlType.Button | enabled=True offscreen=False focus=False | About
+ControlType.StatusBar | enabled=True offscreen=False focus=False | That place is not allowed. Anyone you send this to can read it. Do not save it in your shared Dropbox folder: everyone in the group can read that folder. Nothing was saved.
+ControlType.Button | enabled=True offscreen=False focus=False | Dismiss
+ControlType.Text | enabled=True offscreen=False focus=False | App settings
+ControlType.Text | enabled=True offscreen=False focus=False | Startup
+ControlType.Button | enabled=True offscreen=False focus=False | Start WoW Sync when I sign in, not available yet
+ControlType.Text | enabled=True offscreen=False focus=False | Syncing
+ControlType.Button | enabled=True offscreen=False focus=False | Pause syncing
+ControlType.Button | enabled=True offscreen=False focus=False | Sync now
+ControlType.Text | enabled=True offscreen=False focus=False | Appearance
+ControlType.Group | enabled=True offscreen=False focus=False | Theme
+ControlType.RadioButton | enabled=True offscreen=False focus=False | Theme: Follow system, selected
+ControlType.RadioButton | enabled=True offscreen=False focus=False | Theme: Light
+ControlType.RadioButton | enabled=True offscreen=False focus=False | Theme: Dark
+ControlType.Text | enabled=True offscreen=False focus=False | Notifications
+ControlType.Button | enabled=True offscreen=False focus=False | Tell me when changes were applied
+ControlType.Button | enabled=True offscreen=False focus=False | Tell me when something needs me
+ControlType.Text | enabled=True offscreen=False focus=False | Window
+ControlType.Button | enabled=True offscreen=False focus=False | Closing the window quits WoW Sync
+ControlType.Button | enabled=True offscreen=False focus=False | Explain close-to-tray again next time
+ControlType.Text | enabled=True offscreen=False focus=False | Privacy
+ControlType.Button | enabled=True offscreen=False focus=False | Send anonymous crash reports, coming later
+ControlType.Button | enabled=True offscreen=False focus=False | What is sent?, coming later
+ControlType.Text | enabled=True offscreen=False focus=False | Data
+ControlType.Button | enabled=True offscreen=False focus=False | Open shared folder, not available yet
+ControlType.Button | enabled=True offscreen=False focus=False | Open data folder, not available yet
+ControlType.Button | enabled=True offscreen=False focus=False | Export diagnostics…
+ControlType.CheckBox | enabled=True offscreen=False focus=False | Include add-on folder names
+ControlType.CheckBox | enabled=True offscreen=False focus=False | Include file fingerprints
+ControlType.Button | enabled=True offscreen=False focus=False | Preview
+ControlType.Button | enabled=True offscreen=False focus=False | Save
+ControlType.Text | enabled=True offscreen=False focus=False | Quit
+ControlType.Button | enabled=True offscreen=False focus=False | Quit WoW Sync

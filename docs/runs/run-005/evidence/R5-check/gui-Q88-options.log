@@ -1,0 +1,21 @@
+ControlType.Group | enabled=True offscreen=False focus=False | Status
+ControlType.StatusBar | enabled=True offscreen=False focus=False | Waiting. World of Warcraft: Forever (wowf) / _forever_, My add-ons group, this computer: Check-B
+ControlType.Button | enabled=True offscreen=False focus=False | Sync now
+ControlType.Button | enabled=True offscreen=False focus=False | Pause syncing
+ControlType.Group | enabled=True offscreen=False focus=False | Sections
+ControlType.Button | enabled=True offscreen=False focus=False | Overview
+ControlType.Button | enabled=True offscreen=False focus=False | Computers
+ControlType.Button | enabled=True offscreen=False focus=False | Add-ons
+ControlType.Button | enabled=True offscreen=False focus=False | Needs attention, 1 items, current page
+ControlType.Button | enabled=True offscreen=False focus=False | Activity
+ControlType.Button | enabled=True offscreen=False focus=False | Settings sync
+ControlType.Button | enabled=True offscreen=False focus=False | App settings
+ControlType.Button | enabled=True offscreen=False focus=False | About
+ControlType.StatusBar | enabled=True offscreen=False focus=False | Saved and shared with the group.
+ControlType.Button | enabled=True offscreen=False focus=False | Dismiss
+ControlType.Button | enabled=True offscreen=False focus=True | Back to Needs attention
+ControlType.Text | enabled=True offscreen=False focus=False | SynBeta: choose what to keep
+ControlType.Button | enabled=True offscreen=False focus=False | Keep this: Keep the version you chose. Held by Check-A
+ControlType.Button | enabled=True offscreen=False focus=False | Use this: Use version 3.0.0. Held by This computer. Installs synbeta.
+ControlType.Button | enabled=True offscreen=False focus=False | Follow newest again
+ControlType.Button | enabled=True offscreen=False focus=False | Decide later

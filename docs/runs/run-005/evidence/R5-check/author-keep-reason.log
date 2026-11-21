@@ -1,0 +1,79 @@
+   Compiling wow-sync-core v0.1.0 (D:\GitHub\wow-sync.worktrees\R5-check\crates\wow-sync-core)
+   Compiling wow-sync-adapters v0.1.0 (D:\GitHub\wow-sync.worktrees\R5-check\crates\wow-sync-adapters)
+warning: unused import: `std::collections::VecDeque`
+ --> crates\wow-sync-adapters\src\update_http.rs:5:5
+  |
+5 | use std::collections::VecDeque;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `AtomicU32` and `Ordering`
+ --> crates\wow-sync-adapters\src\update_http.rs:7:25
+  |
+7 | use std::sync::atomic::{AtomicU32, Ordering};
+  |                         ^^^^^^^^^  ^^^^^^^^
+
+warning: unused import: `Mutex`
+ --> crates\wow-sync-adapters\src\update_http.rs:8:22
+  |
+8 | use std::sync::{Arc, Mutex};
+  |                      ^^^^^
+
+warning: type alias `Hook` is never used
+   --> crates\wow-sync-adapters\src\update_http.rs:217:6
+    |
+217 | type Hook = Box<dyn Fn(u32) + Send + Sync>;
+    |      ^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling wow-sync-runtime v0.1.0 (D:\GitHub\wow-sync.worktrees\R5-check\crates\wow-sync-runtime)
+warning: unused import: `inventory_without`
+ --> crates\wow-sync-runtime\src\service.rs:7:5
+  |
+7 |     inventory_without, target_without, withheld_local_versions, Command, CommandError,
+  |     ^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `inventory_without` is never used
+   --> crates\wow-sync-runtime\src\control.rs:566:15
+    |
+566 | pub(crate) fn inventory_without(
+    |               ^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `wow-sync-adapters` (lib) generated 4 warnings (run `cargo fix --lib -p wow-sync-adapters` to apply 3 suggestions)
+warning: `wow-sync-runtime` (lib) generated 2 warnings (run `cargo fix --lib -p wow-sync-runtime` to apply 1 suggestion)
+   Compiling wow-sync-app v0.1.0 (D:\GitHub\wow-sync.worktrees\R5-check\crates\wow-sync-app)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 14.11s
+     Running unittests src\bin\devkit.rs (target\debug\build\wow-sync-app/be355dd6a6fa42e0\out\devkit-be355dd6a6fa42e0.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src\main.rs (target\debug\build\wow-sync-app/1a1b24d2bad5de15\out\wow_sync-1a1b24d2bad5de15.exe)
+
+running 1 test
+test change_ui::tests::keep_and_resume_send_the_pending_decisions_own_reason ... FAILED
+
+failures:
+
+---- change_ui::tests::keep_and_resume_send_the_pending_decisions_own_reason stdout ----
+
+thread 'change_ui::tests::keep_and_resume_send_the_pending_decisions_own_reason' (15204) panicked at crates\wow-sync-app\src\change_ui.rs:183:13:
+assertion `left == right` failed: PartialCandidate
+  left: Ambiguous
+ right: PartialCandidate
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    change_ui::tests::keep_and_resume_send_the_pending_decisions_own_reason
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 107 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p wow-sync-app --bin wow-sync`

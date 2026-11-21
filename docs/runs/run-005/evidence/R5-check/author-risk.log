@@ -1,0 +1,41 @@
+warning: unused import: `inventory_without`
+ --> crates\wow-sync-runtime\src\service.rs:7:5
+  |
+7 |     inventory_without, target_without, withheld_local_versions, Command, CommandError,
+  |     ^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `inventory_without` is never used
+   --> crates\wow-sync-runtime\src\control.rs:566:15
+    |
+566 | pub(crate) fn inventory_without(
+    |               ^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `wow-sync-runtime` (lib) generated 2 warnings (run `cargo fix --lib -p wow-sync-runtime` to apply 1 suggestion)
+warning: `wow-sync-runtime` (lib test) generated 2 warnings (2 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.51s
+     Running unittests src\lib.rs (target\debug\build\wow-sync-runtime/04dea99d7e2a5545\out\wow_sync_runtime-04dea99d7e2a5545.exe)
+
+running 1 test
+test e2e::tests::unreadable_local_state_is_a_data_at_risk_condition_in_the_snapshot_and_a_notice ... FAILED
+
+failures:
+
+---- e2e::tests::unreadable_local_state_is_a_data_at_risk_condition_in_the_snapshot_and_a_notice stdout ----
+
+thread 'e2e::tests::unreadable_local_state_is_a_data_at_risk_condition_in_the_snapshot_and_a_notice' (30584) panicked at crates\wow-sync-runtime\src\e2e.rs:4092:13:
+assertion `left == right` failed: []
+  left: 0
+ right: 1
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    e2e::tests::unreadable_local_state_is_a_data_at_risk_condition_in_the_snapshot_and_a_notice
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 160 filtered out; finished in 0.14s
+
+error: test failed, to rerun pass `-p wow-sync-runtime --lib`

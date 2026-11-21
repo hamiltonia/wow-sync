@@ -1,0 +1,24 @@
+   Compiling wow-sync-core v0.1.0 (D:\GitHub\wow-sync.worktrees\R5-check\crates\wow-sync-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 16.23s
+     Running unittests src\lib.rs (target\debug\build\wow-sync-core/ceb30ee6fad2ac6f\out\wow_sync_core-ceb30ee6fad2ac6f.exe)
+
+running 1 test
+test settings_tests::the_approved_cap_is_32_mib_and_a_file_at_the_cap_syncs_but_one_byte_more_does_not ... FAILED
+
+failures:
+
+---- settings_tests::the_approved_cap_is_32_mib_and_a_file_at_the_cap_syncs_but_one_byte_more_does_not stdout ----
+
+thread 'settings_tests::the_approved_cap_is_32_mib_and_a_file_at_the_cap_syncs_but_one_byte_more_does_not' (14796) panicked at crates\wow-sync-core\src\settings_tests.rs:227:5:
+assertion `left == right` failed
+  left: Some(33554431)
+ right: Some(33554432)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    settings_tests::the_approved_cap_is_32_mib_and_a_file_at_the_cap_syncs_but_one_byte_more_does_not
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 349 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p wow-sync-core --lib`
