@@ -285,6 +285,10 @@ pub struct StatusSnapshot {
     /// How the latest rollback request ended when it did not complete (rollback.md §1: "not
     /// available, try later"); cleared when a new rollback is requested or one applies.
     pub rollback_outcome: Option<crate::rollback_flow::RollbackOutcome>,
+    /// Restores of removed add-ons that have not finished: waiting, or refused with a reason
+    /// that stays until the owner retries (`Command::RestoreRemoved`) or dismisses it
+    /// (`Command::DismissRestoreIssue`).
+    pub restores: Vec<crate::restore_flow::RestoreProgress>,
     /// Releases held in local recovery points, newest first per add-on (rollback.md §7).
     /// Restore one with `Command::Rollback { package, recovered: row.release }`.
     pub recovery_points: Vec<crate::detail::RecoveryRow>,
@@ -773,6 +777,31 @@ impl SliceService {
             return Err(CommandError::NotAllowed);
         }
         let gid = w.group.group_id.clone();
+        if let Command::DismissRestoreIssue { package } = &cmd {
+            let derived = derive(&self.plane.ledger, &gid, &self.plane.members);
+            let shown = crate::restore_flow::progress(
+                &self.state,
+                &gid,
+                &self.plane.ledger,
+                &derived,
+                false,
+                false,
+            );
+            return Ok(
+                if shown.iter().any(|p| {
+                    &p.package == package
+                        && matches!(
+                            p.state,
+                            crate::restore_flow::RestoreState::Unavailable { .. }
+                        )
+                }) {
+                    crate::restore_flow::clear_issue(&self.state, &gid);
+                    CommandOutcome::Recorded
+                } else {
+                    CommandOutcome::NothingToDo
+                },
+            );
+        }
         if let Command::EnableSettings { included_accounts } = &cmd {
             if included_accounts.is_empty() {
                 return Err(CommandError::EmptySelection);
@@ -894,6 +923,7 @@ impl SliceService {
                 // Code still installed here only needs the re-add; otherwise the code is put back
                 // by a queued restore operation (removal.md §7.4).
                 if rm.folders.iter().any(|m| w.inventory.get(&m.key).is_none()) {
+                    crate::restore_flow::clear_issue(&self.state, &gid);
                     crate::restore_flow::plan_requested(&crate::restore_flow::PlanArgs {
                         removal: *removal,
                         group: &gid,
@@ -912,7 +942,7 @@ impl SliceService {
                         }
                         other => CommandError::Service(other.text()),
                     })?;
-                    crate::restore_flow::clear_outcome(&self.state, &gid);
+                    crate::restore_flow::clear_issue(&self.state, &gid);
                     crate::restore_flow::save_request(
                         &self.state,
                         &gid,
@@ -1018,7 +1048,8 @@ impl SliceService {
                 | Command::PauseSettings { .. }
                 | Command::ResumeSettings { .. }
                 | Command::UseSharedSettings { .. }
-                | Command::Rollback { .. } => return Err(CommandError::NotAllowed),
+                | Command::Rollback { .. }
+                | Command::DismissRestoreIssue { .. } => return Err(CommandError::NotAllowed),
                 Command::SetSettingsPolicy { master, exceptions } => {
                     let (rec, parts) = wow_sync_core::settings::build_policy(
                         &self.plane.ledger,
@@ -2341,6 +2372,14 @@ impl SliceService {
                     .collect()
             },
             rollback_outcome: crate::rollback_flow::load_outcome(&self.state, &w.group.group_id),
+            restores: crate::restore_flow::progress(
+                &self.state,
+                &w.group.group_id,
+                &self.plane.ledger,
+                &derived,
+                matches!(observed, wow_sync_core::plan::Activity::Running { .. }),
+                crate::control::pause_state(&self.state).holds_sync(),
+            ),
             held_release_dates: recovery_points
                 .iter()
                 .map(|r| (r.release, r.set_aside_unix_ms))
@@ -2590,6 +2629,12 @@ impl SliceService {
                 } else {
                     None
                 };
+                crate::restore_flow::prune(
+                    &self.state,
+                    &group_id,
+                    &self.plane.ledger,
+                    &derive(&self.plane.ledger, &group_id, &self.plane.members),
+                );
                 let restore = if w.standing == OwnStanding::Active
                     && !game_blocks
                     && rollback.is_none()
@@ -2613,17 +2658,20 @@ impl SliceService {
                         Ok(p) => {
                             let keys: BTreeSet<FolderKey> =
                                 p.folders.iter().map(|f| f.key.clone()).collect();
-                            if !crate::removal_cycle::SettingsPass::open(
+                            let captured = crate::removal_cycle::SettingsPass::open(
                                 &self.state,
                                 &group_id,
                                 &senv,
                                 game_blocks,
                             )
-                            .has_capture(&keys)
-                            {
-                                report.apply_note =
-                                    Some(crate::restore_flow::CODE_ONLY_WARNING.to_string());
-                            }
+                            .captured_units(&keys);
+                            report.apply_note = Some(crate::restore_flow::settings_note(
+                                crate::restore_flow::expected_units(
+                                    &self.plane.ledger,
+                                    &request.removal,
+                                ),
+                                captured,
+                            ));
                             Some(p)
                         }
                         Err(why) => {

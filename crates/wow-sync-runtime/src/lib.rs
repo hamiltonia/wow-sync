@@ -38,6 +38,7 @@ pub use discover::{
 };
 pub use effects::{FaultPlan, Faulty, Hooks, RealEffects};
 pub use notices::{CycleOutcome, DataAtRisk, NoticeRunner, RiskKind};
+pub use restore_flow::{RestoreProgress, RestoreState, RestoreWait};
 pub use rollback_flow::{RollbackOutcome, RollbackOutcomeKind, RollbackRefusal};
 pub use service::{
     AppliedLine, EnrollPreview, EnrollRequest, GroupInfo, JoinChoice, PackageLine, PreviewKind,

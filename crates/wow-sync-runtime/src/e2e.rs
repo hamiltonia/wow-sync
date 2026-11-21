@@ -2845,6 +2845,139 @@ mod tests {
         assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
         let _ = &mut a;
     }
+
+    fn restores_of(pc: &mut Pc) -> Vec<crate::restore_flow::RestoreProgress> {
+        pc.svc.status().restores
+    }
+
+    #[test]
+    fn a_queued_restore_is_shown_as_waiting_for_wow_then_for_the_next_sync_then_vanishes() {
+        use crate::restore_flow::{RestoreState, RestoreWait};
+        let (_lab, mut a, _b, _g, removal) = uninstalled_everywhere();
+        assert!(restores_of(&mut a).is_empty());
+        a.act.set(Activity::Running { pids: vec![4242] });
+        a.svc.command(Command::RestoreRemoved { removal }).unwrap();
+        let shown = restores_of(&mut a);
+        assert_eq!(shown.len(), 1);
+        assert_eq!(
+            shown[0].state,
+            RestoreState::Waiting {
+                reason: RestoreWait::WowRunning
+            }
+        );
+        assert_eq!(
+            shown[0].text,
+            "Restoring alpha: waiting for World of Warcraft to close."
+        );
+        a.act.set(Activity::NotRunning);
+        assert_eq!(
+            restores_of(&mut a)[0].state,
+            RestoreState::Waiting {
+                reason: RestoreWait::NextCycle
+            }
+        );
+        synced(&mut a);
+        assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        assert!(
+            restores_of(&mut a).is_empty(),
+            "gone once the re-add is written"
+        );
+    }
+
+    #[test]
+    fn a_queued_restore_is_shown_as_waiting_while_syncing_is_paused() {
+        use crate::restore_flow::{RestoreState, RestoreWait};
+        let (_lab, mut a, _b, _g, removal) = uninstalled_everywhere();
+        a.act.set(Activity::Running { pids: vec![4242] });
+        a.svc.command(Command::RestoreRemoved { removal }).unwrap();
+        a.act.set(Activity::NotRunning);
+        a.svc.set_paused(true).unwrap();
+        let shown = restores_of(&mut a);
+        assert_eq!(
+            shown[0].state,
+            RestoreState::Waiting {
+                reason: RestoreWait::Paused
+            }
+        );
+        assert_eq!(
+            shown[0].text,
+            "Restoring alpha: waiting for syncing to be resumed."
+        );
+    }
+
+    #[test]
+    fn a_restore_refused_at_cycle_time_stays_listed_until_dismissed_or_retried() {
+        use crate::restore_flow::RestoreState;
+        let (lab, mut a, _b, g, removal) = uninstalled_everywhere();
+        a.act.set(Activity::Running { pids: vec![4242] });
+        a.svc.command(Command::RestoreRemoved { removal }).unwrap();
+        delete_removed_blobs(&lab, &g, &removed_manifest(&a, &removal));
+        a.act.set(Activity::NotRunning);
+        synced(&mut a);
+        let shown = restores_of(&mut a);
+        assert_eq!(shown.len(), 1);
+        assert!(matches!(shown[0].state, RestoreState::Unavailable { .. }));
+        assert!(
+            shown[0].text.starts_with("alpha can't be restored: ")
+                && shown[0].text.ends_with(". Nothing was changed."),
+            "{}",
+            shown[0].text
+        );
+        synced(&mut a);
+        assert_eq!(restores_of(&mut a).len(), 1, "stays across cycles");
+        assert!(!a.install.addons.join("Alpha").exists());
+        let package = shown[0].package.clone();
+        assert_eq!(
+            a.svc
+                .command(Command::DismissRestoreIssue {
+                    package: package.clone()
+                })
+                .unwrap(),
+            CommandOutcome::Recorded
+        );
+        assert!(restores_of(&mut a).is_empty());
+        assert_eq!(
+            a.svc
+                .command(Command::DismissRestoreIssue { package })
+                .unwrap(),
+            CommandOutcome::NothingToDo
+        );
+    }
+
+    #[test]
+    fn a_retried_restore_replaces_the_shown_refusal() {
+        let (lab, mut a, _b, g, removal) = uninstalled_everywhere();
+        a.act.set(Activity::Running { pids: vec![4242] });
+        a.svc.command(Command::RestoreRemoved { removal }).unwrap();
+        delete_removed_blobs(&lab, &g, &removed_manifest(&a, &removal));
+        a.act.set(Activity::NotRunning);
+        synced(&mut a);
+        assert_eq!(restores_of(&mut a).len(), 1);
+        let _ = a.svc.command(Command::RestoreRemoved { removal });
+        assert!(
+            !restores_of(&mut a).iter().any(|p| matches!(
+                p.state,
+                crate::restore_flow::RestoreState::Unavailable { .. }
+            )),
+            "the old refusal is replaced by the new attempt"
+        );
+    }
+
+    #[test]
+    fn the_settings_note_tells_code_only_partial_and_paired_restores_apart() {
+        let code_only = crate::restore_flow::settings_note(2, 0);
+        assert_eq!(code_only, crate::restore_flow::CODE_ONLY_WARNING);
+        let partial = crate::restore_flow::settings_note(2, 1);
+        assert!(
+            partial.contains("partly") && partial.contains("1 of 2"),
+            "{partial}"
+        );
+        let paired = crate::restore_flow::settings_note(2, 2);
+        assert!(
+            !paired.contains("partly") && paired != code_only,
+            "{paired}"
+        );
+    }
     // <<< R5-remove
 
     #[test]
