@@ -738,7 +738,6 @@ tests = [
     "removal_tests::due_items_include_the_origin_and_split_by_cleanup_class",
     "removal_tests::more_than_256_absent_items_split_into_batches",
     "removal_tests::a_remove_op_carries_the_fixed_ack_and_skips_held_or_unreadable_folders",
-    "removal_tests::a_remove_op_with_owned_settings_waits_for_cleanup_and_carries_no_ack",
     "removal_tests::the_hooks_plan_through_behaviour_state",
     "removal_tests::dependents_are_warned_about_and_stay",
     "removal_cycle::tests::game_running_blocks_remove_ops_but_not_absent_acks_and_waiting_items_get_none",
@@ -794,7 +793,6 @@ tests = [
     "settings_tests::the_authority_epoch_holds_an_experiment_and_needs_a_strictly_later_capture",
     "settings_tests::three_states_survive_and_pins_extend_then_prune_back",
     "settings_tests::undo_then_next_session_keeps_one_head_state",
-    "settings_tests::without_an_approved_cap_real_data_sync_is_disabled",
     "settings_tests::zero_nodes_with_a_policy_is_no_shared_copy_and_every_revision_invalid_too",
 ]
 [[case]]
@@ -1411,6 +1409,26 @@ tests = [
 # <<< section: R4-mac-kit
 
 # >>> section: R5-remove
+[[case]]
+id = "Q-77:cap"
+tier = "offline"
+tests = [
+    "settings_tests::the_approved_cap_is_32_mib_and_a_file_at_the_cap_syncs_but_one_byte_more_does_not",
+    "settings_tests::without_a_cap_value_sync_stays_disabled",
+]
+
+[[case]]
+id = "RV-04:uninstall-restore"
+tier = "offline"
+tests = [
+    "settings_tests::an_uninstall_takes_only_unshared_unpaused_owned_files_of_the_removed_folders",
+    "removal_tests::a_remove_op_moves_captured_settings_and_reserves_the_matching_ack",
+    "removal_tests::the_ack_says_partial_when_only_some_units_were_captured",
+    "removal_tests::a_folder_already_gone_gets_a_settings_cleanup_op_with_an_absent_ack",
+    "e2e::tests::an_uninstall_removes_the_settings_with_the_code_and_a_restore_returns_both",
+    "e2e::tests::a_settings_file_over_the_cap_is_not_moved_by_an_uninstall",
+    "e2e::tests::a_file_exactly_at_the_cap_is_captured_by_an_uninstall",
+]
 # <<< section: R5-remove
 
 # >>> section: R5-decide

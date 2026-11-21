@@ -896,9 +896,9 @@ record!(SettingsLocal, "wowsync.settings-local", 16 * MIB, |self| {
     Ok(())
 });
 
-/// The saved-file size cap (settings.md §1.2, Q-77 PENDING OWNER). No value is approved, so this
-/// gate is `None` and settings sync on real data stays disabled; tests pass their own value.
-pub const MAX_SETTINGS_FILE_BYTES: Option<u64> = None;
+/// The saved-file size cap (settings.md §1.2): 32 MiB, owner decision D-26 (Q-77). A file above
+/// it is a `TooLarge` diagnosis for its unit and is not synced, captured or moved.
+pub const MAX_SETTINGS_FILE_BYTES: Option<u64> = Some(33_554_432);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LocalComputer {

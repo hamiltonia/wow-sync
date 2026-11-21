@@ -264,6 +264,60 @@ pub fn settings_scope(
     out
 }
 
+/// What an uninstall may take from `WTF` for the removed folders (removal.md §1.6 step 6).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RemovalTargets {
+    /// Files to capture and then move into recovery.
+    pub files: Vec<OwnedFile>,
+    /// Units seen but left in place, with the reason.
+    pub missing: Vec<(SettingsUnit, MissingReason)>,
+}
+
+/// Select the removed folders' units from a scope computed over the installed declarations
+/// plus the removed folders' own. A shared or ambiguous owner, an oversized or unsafe file and
+/// a paused folder stay where they are; the planner then records them as not captured.
+pub fn removal_targets(
+    scope: &SettingsScope,
+    folders: &BTreeSet<FolderKey>,
+    paused: &BTreeSet<FolderKey>,
+) -> RemovalTargets {
+    let mut out = RemovalTargets::default();
+    for o in &scope.owned {
+        if !folders.contains(&o.unit.folder) {
+            continue;
+        }
+        if paused.contains(&o.unit.folder) {
+            out.missing.push((o.unit.clone(), MissingReason::Paused));
+        } else {
+            out.files.push(o.clone());
+        }
+    }
+    for u in scope.blocked.iter().filter(|u| folders.contains(&u.folder)) {
+        let stem = format!("/{}.lua", u.folder.as_str()).to_lowercase();
+        let reason = scope
+            .diagnoses
+            .iter()
+            .find_map(|d| match d {
+                ScopeDiagnosis::SharedVariable { folders: f, .. } if f.contains(&u.folder) => {
+                    Some(MissingReason::SharedFile)
+                }
+                ScopeDiagnosis::AmbiguousToc { folder } if folder == &u.folder => {
+                    Some(MissingReason::UnknownOwner)
+                }
+                ScopeDiagnosis::TooLarge { file, .. } if file.to_lowercase().ends_with(&stem) => {
+                    Some(MissingReason::TooLarge)
+                }
+                ScopeDiagnosis::UnsafePath { path } if path.to_lowercase().ends_with(&stem) => {
+                    Some(MissingReason::Unreadable)
+                }
+                _ => None,
+            })
+            .unwrap_or(MissingReason::IdentityCollision);
+        out.missing.push((u.clone(), reason));
+    }
+    out
+}
+
 // ------------------------------------------------------------------------- capture (§2)
 
 /// A unit's file as one scan saw it: `None` when absent.

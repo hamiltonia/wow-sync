@@ -2556,6 +2556,87 @@ mod tests {
         }
     }
 
+    // >>> R5-remove: uninstall and restore of settings
+    fn uninstall_alpha_on(a: &mut Pc, g: &GroupId) {
+        std::fs::remove_dir_all(a.install.addons.join("Alpha")).unwrap();
+        let st = LocalState::open_at(&a.cfg.state_dir).unwrap();
+        let store = RemovalStore::new(&st, g.clone());
+        let (base, mut obs) = store.load();
+        let key = base.packages.keys().next().expect("a baseline").clone();
+        obs.gone.insert(key, (1, 1));
+        store.save(&base, &obs).unwrap();
+        let r = synced(a);
+        assert!(!r.crashed, "{r:?}");
+    }
+
+    fn settings_removal_ready(cap: u64) -> (Lab, Pc, Pc, GroupId) {
+        let lab = Lab::new();
+        let (mut a, b, g) = settings_pair(&lab, true, Some(cap));
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        (lab, a, b, g)
+    }
+
+    #[test]
+    fn an_uninstall_removes_the_settings_with_the_code_and_a_restore_returns_both() {
+        let (lab, mut a, mut b, g) = settings_removal_ready(1 << 20);
+        write_wtf(&b, "Alpha", "AlphaDB = { peer = true }\n");
+        synced(&mut b);
+        uninstall_alpha_on(&mut a, &g);
+        assert_eq!(
+            read_wtf(&a, "Alpha"),
+            None,
+            "the settings left with the code"
+        );
+        let (ac, _) = pc_ids(&a);
+        let removal = removal_hash(&lab, &g, &ac);
+        synced(&mut b);
+        assert_eq!(b.read("Alpha/main.lua"), None);
+        assert_eq!(read_wtf(&b, "Alpha"), None, "the peer's settings left too");
+
+        let out = a.svc.command(Command::RestoreRemoved { removal }).unwrap();
+        assert!(matches!(out, CommandOutcome::Written(_)));
+        for _ in 0..3 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        assert_eq!(
+            read_wtf(&a, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 1 }\n"),
+            "the captured settings came back byte for byte"
+        );
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { peer = true }\n"),
+            "the peer restores its own capture"
+        );
+        synced(&mut a);
+        assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        assert!(read_wtf(&a, "Alpha").is_some(), "not removed again");
+    }
+
+    #[test]
+    fn a_settings_file_over_the_cap_is_not_moved_by_an_uninstall() {
+        let big = "AlphaDB = { v = 1 }\n";
+        let (_lab, mut a, _b, g) = settings_removal_ready(big.len() as u64 - 1);
+        uninstall_alpha_on(&mut a, &g);
+        assert_eq!(
+            read_wtf(&a, "Alpha").as_deref(),
+            Some(big),
+            "a file the cap refuses stays where it is"
+        );
+    }
+
+    #[test]
+    fn a_file_exactly_at_the_cap_is_captured_by_an_uninstall() {
+        let text = "AlphaDB = { v = 1 }\n";
+        let (_lab, mut a, _b, g) = settings_removal_ready(text.len() as u64);
+        uninstall_alpha_on(&mut a, &g);
+        assert_eq!(read_wtf(&a, "Alpha"), None);
+    }
+    // <<< R5-remove
+
     #[test]
     fn a_non_master_routine_write_yields_to_the_master_and_keeps_a_recovery_copy() {
         let lab = Lab::new();

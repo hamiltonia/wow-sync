@@ -19,7 +19,11 @@ use crate::package::{
 };
 use crate::paths::{validate_folder_name, FolderKey};
 use crate::plan::{ExpectedLive, PackageApply, RemoveApply};
-use crate::records::{encode, OpKind, PendingRecord, SettingsRoot};
+use crate::records::{
+    encode, MissingReason, OpKind, PendingRecord, RecoverySlot, RootState, SettingsFileOp,
+    SettingsRoot,
+};
+use crate::settings::OwnedFile;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -414,6 +418,79 @@ fn hex_prefix(h: &Sha256) -> String {
 /// that is held, unreadable, or without a stable listing is never touched. The acknowledgement is
 /// fixed here (journal-time bytes) unless owned settings must be cleaned first.
 pub fn plan_remove_ops(cx: &CycleCx, inv: &Inventory, next_seq: u64) -> Vec<PackageApply> {
+    plan_remove_ops_with(cx, inv, next_seq, &[])
+}
+
+/// What an acknowledgement says about settings, from the roots of its folders (removal.md §5.6).
+pub fn ack_settings_for(roots: &[SettingsRoot]) -> AckSettings {
+    let captured = roots.iter().filter(|r| r.captured()).count();
+    if roots.is_empty() {
+        AckSettings::NotApplicable
+    } else if captured == roots.len() {
+        AckSettings::Paired
+    } else if captured > 0 {
+        AckSettings::Partial
+    } else if roots.iter().all(|r| {
+        matches!(
+            r.state,
+            RootState::Missing {
+                reason: MissingReason::Paused
+            }
+        )
+    }) {
+        AckSettings::KeptPaused
+    } else {
+        AckSettings::CodeOnly
+    }
+}
+
+/// The settings files of `files` whose folder is in `keys`, as move-to-recovery operations
+/// (nothing staged), each expecting exactly the scanned bytes.
+fn cleanup_ops(
+    files: &[OwnedFile],
+    roots: &[SettingsRoot],
+    keys: &BTreeSet<FolderKey>,
+) -> Vec<SettingsFileOp> {
+    let captured: BTreeSet<&crate::ids::SettingsUnit> = roots
+        .iter()
+        .filter(|r| r.captured())
+        .map(|r| &r.unit)
+        .collect();
+    files
+        .iter()
+        .filter(|f| keys.contains(&f.unit.folder) && captured.contains(&f.unit))
+        .enumerate()
+        .map(|(idx, f)| SettingsFileOp {
+            unit: f.unit.clone(),
+            live_rel: f.rel.clone(),
+            expected_live: ExpectedLive::Tree {
+                tree: f.sha256,
+                fingerprint: f.sha256,
+            },
+            staged: None,
+            recovery_slot: RecoverySlot::new(&format!("settings/{idx}")).expect("fixed slot name"),
+        })
+        .collect()
+}
+
+fn pending_ack(ack: &Ack) -> PendingRecord {
+    let bytes = encode(ack);
+    PendingRecord {
+        hash: sha256(&bytes),
+        bytes: String::from_utf8(bytes).expect("records are UTF-8"),
+    }
+}
+
+/// `plan_remove_ops` that also moves the captured settings files of the removed folders into
+/// recovery in the same operation (removal.md §1.6 step 6). `files` are the scanned owned files;
+/// only a unit whose root in `cx.roots` is captured is moved. The acknowledgement is reserved in
+/// the journal and says what happened to settings.
+pub fn plan_remove_ops_with(
+    cx: &CycleCx,
+    inv: &Inventory,
+    next_seq: u64,
+    files: &[OwnedFile],
+) -> Vec<PackageApply> {
     if !inv.listing_stable {
         return Vec::new();
     }
@@ -451,8 +528,74 @@ pub fn plan_remove_ops(cx: &CycleCx, inv: &Inventory, next_seq: u64) -> Vec<Pack
     }
     groups
         .into_iter()
-        .filter_map(|(hs, keys)| remove_op(cx, inv, &hs, &keys, next_seq))
+        .filter_map(|(hs, keys)| remove_op(cx, inv, &hs, &keys, next_seq, files))
         .collect()
+}
+
+/// One `SettingsCleanup` operation per owed removal whose folders are already gone from disk
+/// but whose captured settings are still in place (this computer was the one that uninstalled).
+pub fn plan_cleanup_ops(
+    cx: &CycleCx,
+    inv: &Inventory,
+    next_seq: u64,
+    files: &[OwnedFile],
+) -> Vec<PackageApply> {
+    if !inv.listing_stable {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for (item, class) in due_items(cx, Some(inv)) {
+        if class != CleanupClass::WaitForCleanup {
+            continue;
+        }
+        let keys: BTreeSet<FolderKey> = item.folders.iter().cloned().collect();
+        let roots: Vec<SettingsRoot> = cx
+            .roots
+            .iter()
+            .filter(|r| keys.contains(&r.unit.folder))
+            .cloned()
+            .collect();
+        let settings_ops = cleanup_ops(files, &roots, &keys);
+        if settings_ops.is_empty() {
+            continue;
+        }
+        let ack = Ack {
+            group_id: cx.group_id.clone(),
+            issuer: own_issuer(cx, next_seq + out.len() as u64),
+            items: vec![item.clone()],
+            result: AckResult::Absent,
+            removed: Vec::new(),
+            settings: ack_settings_for(&roots),
+            written_unix_ms: cx.now_unix_ms,
+        };
+        let seed = format!(
+            "wowsync-cleanup-op-v1\n{}\n{}",
+            hex_prefix(&item.removal),
+            keys.iter()
+                .map(|k| k.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        let op = OpId::parse(&sha256(seed.as_bytes()).to_string()[..32]).expect("hex");
+        let Some(package) = keys.iter().next().cloned() else {
+            continue;
+        };
+        let mut p = PackageApply::code_apply(
+            op,
+            package,
+            sha256(b""),
+            Vec::new(),
+            Explanation::Installed {
+                source: cx.own.computer_id.clone(),
+            },
+        );
+        p.kind = OpKind::SettingsCleanup;
+        p.settings_ops = settings_ops;
+        p.pending_records = vec![pending_ack(&ack)];
+        p.settings_roots = roots;
+        out.push(p);
+    }
+    out
 }
 
 fn remove_op(
@@ -461,6 +604,7 @@ fn remove_op(
     hs: &BTreeSet<Sha256>,
     keys: &BTreeSet<FolderKey>,
     next_seq: u64,
+    files: &[OwnedFile],
 ) -> Option<PackageApply> {
     let mut states: Vec<&FolderState> = Vec::new();
     for k in keys {
@@ -507,9 +651,7 @@ fn remove_op(
         .iter()
         .map(|s| (s.key.clone(), s.tree.expect("checked")))
         .collect();
-    let pending_records = if roots.iter().any(SettingsRoot::captured) {
-        Vec::new()
-    } else {
+    let pending_records = {
         let ack = Ack {
             group_id: cx.group_id.clone(),
             issuer: own_issuer(cx, next_seq),
@@ -523,18 +665,10 @@ fn remove_op(
                     tree: s.tree.expect("checked"),
                 })
                 .collect(),
-            settings: if roots.is_empty() {
-                AckSettings::NotApplicable
-            } else {
-                AckSettings::CodeOnly
-            },
+            settings: ack_settings_for(&roots),
             written_unix_ms: cx.now_unix_ms,
         };
-        let bytes = encode(&ack);
-        vec![PendingRecord {
-            hash: sha256(&bytes),
-            bytes: String::from_utf8(bytes).expect("records are UTF-8"),
-        }]
+        vec![pending_ack(&ack)]
     };
     let mut seed = String::from("wowsync-remove-op-v1\n");
     for h in hs {
@@ -559,7 +693,7 @@ fn remove_op(
         kind: OpKind::Remove,
         removes,
         removals: hs.iter().copied().collect(),
-        settings_ops: Vec::new(),
+        settings_ops: cleanup_ops(files, &roots, keys),
         pending_records,
         settings_roots: roots,
     })
@@ -934,11 +1068,35 @@ fn upgraded(pkg: &FolderKey, before: &[FolderState], after: &[FolderState]) -> b
 pub fn removal_record(
     group: &GroupId,
     own: &EnrollmentRef,
-    mut audience: Vec<EnrollmentRef>,
+    audience: Vec<EnrollmentRef>,
     removed: &ObservedRemoval,
     own_seq: u64,
     now_unix_ms: u64,
 ) -> Removal {
+    removal_record_with_settings(
+        group,
+        own,
+        audience,
+        removed,
+        own_seq,
+        now_unix_ms,
+        Vec::new(),
+    )
+}
+
+/// `removal_record` carrying the settings roots captured for the removed folders. Roots are
+/// sorted by unit; none means `RemovalSettings::None`.
+pub fn removal_record_with_settings(
+    group: &GroupId,
+    own: &EnrollmentRef,
+    mut audience: Vec<EnrollmentRef>,
+    removed: &ObservedRemoval,
+    own_seq: u64,
+    now_unix_ms: u64,
+    mut roots: Vec<SettingsRoot>,
+) -> Removal {
+    roots.sort_by(|a, b| a.unit.cmp(&b.unit));
+    roots.dedup_by(|a, b| a.unit == b.unit);
     audience.sort();
     audience.dedup();
     let mut folders: Vec<ManifestFolder> = removed
@@ -966,7 +1124,11 @@ pub fn removal_record(
         folders,
         removed_hash: package_hash(&pairs),
         audience,
-        settings: RemovalSettings::None,
+        settings: if roots.is_empty() {
+            RemovalSettings::None
+        } else {
+            RemovalSettings::Checkpoints { roots }
+        },
         written_unix_ms: now_unix_ms,
     }
 }
