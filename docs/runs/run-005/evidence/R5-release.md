@@ -47,6 +47,10 @@ workflow sets `WOWSYNC_BUILD_COMMIT`).
 
 ## What the update notice shows with only a pre-release
 
+Superseded: main now maps 404 to `UpdateResult::NoRelease` (About: "No release
+has been published yet.", neutral, no failure activity); the release notes were
+updated to match. The analysis below describes the code at `fe13e3d`.
+
 Analysis only; no product code changed.
 
 - `adapters/src/update_http.rs` requests
