@@ -130,7 +130,10 @@ fn save_target(state_dir: &Path, t: &Target) {
 
 /// Plain-language text for a refused setup or reconfirmation; never the internal reason name.
 fn humane(e: &wow_sync_runtime::ServiceError) -> String {
-    let raw = e.to_string();
+    let raw = match e {
+        wow_sync_runtime::ServiceError::Refused(s) => s.clone(),
+        _ => e.to_string(),
+    };
     if raw.contains("ConfirmationRequired") {
         "Confirm both the game version and the add-on list to continue. Nothing has been changed."
             .into()

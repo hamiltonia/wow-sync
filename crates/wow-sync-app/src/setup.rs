@@ -180,7 +180,7 @@ impl Shell {
                         .child(match &ins.refused {
                             Some(r) => div()
                                 .text_color(rgb(pal.fg(Tone::Help)))
-                                .child(SharedString::from(format!("Can't be synced: {r}"))),
+                                .child(SharedString::from(format!("Can't be synced. {r}"))),
                             None if !ins.inspected => div()
                                 .text_color(rgb(pal.muted))
                                 .child("Checking this installation…"),
@@ -193,21 +193,28 @@ impl Shell {
                         });
                     body.push(row.into_any_element());
                 }
-                if d.installs
+                if let Some(ins) = d
+                    .installs
                     .get(self.setup.install)
-                    .is_some_and(|i| i.refused.is_some())
+                    .filter(|i| i.refused.is_some())
                 {
-                    body.push(self.muted("This installation was refused. You can go Back and choose another, or Try again after fixing it.").into_any_element());
-                    body.push(
-                        self.btn(
-                            "try-again",
-                            "Try again",
-                            Bk::Secondary,
-                            Act::Setup(SetupAct::TryAgain),
-                            cx,
-                        )
-                        .into_any_element(),
-                    );
+                    if ins.can_retry {
+                        body.push(
+                            self.btn(
+                                "try-again",
+                                "Try again",
+                                Bk::Secondary,
+                                Act::Setup(SetupAct::TryAgain),
+                                cx,
+                            )
+                            .into_any_element(),
+                        );
+                    } else {
+                        body.push(
+                            self.muted("Trying again will not change this. Choose Back to pick another installation.")
+                                .into_any_element(),
+                        );
+                    }
                 }
             }
             4 => {
@@ -241,11 +248,24 @@ impl Shell {
                             .into_any_element(),
                     );
                     body.push(
-                        self.muted(format!("{} add-ons are eligible.", ins.eligible.len()))
-                            .into_any_element(),
+                        self.muted(format!(
+                            "{} add-ons are eligible. {} cannot be synced.",
+                            ins.eligible.len(),
+                            ins.blocked.len()
+                        ))
+                        .into_any_element(),
                     );
                     for n in ins.blocked.iter().take(4) {
                         body.push(self.muted(format!("Not synced: {n}")).into_any_element());
+                    }
+                    if ins.blocked.len() > 4 {
+                        body.push(
+                            self.muted(format!(
+                                "and {} more that cannot be synced",
+                                ins.blocked.len() - 4
+                            ))
+                            .into_any_element(),
+                        );
                     }
                     let b = self.toggle(
                         "consent-scope",
@@ -449,9 +469,19 @@ impl Shell {
             cx,
         );
         col = col.child(a);
-        col = col.child(self.muted(format!("{} add-ons are eligible.", r.eligible.len())));
+        col = col.child(self.muted(format!(
+            "{} add-ons are eligible. {} cannot be synced.",
+            r.eligible.len(),
+            r.blocked.len()
+        )));
         for n in r.blocked.iter().take(4) {
             col = col.child(self.muted(format!("Not synced: {n}")));
+        }
+        if r.blocked.len() > 4 {
+            col = col.child(self.muted(format!(
+                "and {} more that cannot be synced",
+                r.blocked.len() - 4
+            )));
         }
         let b = self.toggle(
             "rc-scope",

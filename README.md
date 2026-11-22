@@ -4,11 +4,14 @@ Status: specification approved by the owner at `7a2ccdf` on 2026-11-14.
 Runs 001 to 005 are closed. Run-005 closed run-004's gaps (uninstall
 recovery of code and settings, the 32 MiB settings cap, Q-88, DataAtRisk) and
 published the `v0.1.0` Windows
-[pre-release](https://github.com/hamiltonia/wow-sync/releases/tag/v0.1.0).
-It still does not sync real WoW data (Q-24 gate). Last report:
+[pre-release](https://github.com/hamiltonia/wow-sync/releases/tag/v0.1.0),
+which only worked on synthetic, marker-gated data. Run-006 is active: it lets
+the app work on real installs without an opt-in marker (the marker now only
+selects test mode), targeting `v0.2.0`. Back up your `Interface\AddOns` and
+`WTF` folders first; that is advice, not a gate. Run-005 report:
 [docs/runs/run-005/REPORT.md](docs/runs/run-005/REPORT.md). Current state and
 open owner questions:
-[docs/runs/run-005/HANDOFF.md](docs/runs/run-005/HANDOFF.md).
+[docs/runs/run-006/HANDOFF.md](docs/runs/run-006/HANDOFF.md).
 Decisions: [docs/OWNER-DECISIONS.md](docs/OWNER-DECISIONS.md).
 Repository layout: [docs/REPO-MAP.md](docs/REPO-MAP.md).
 

@@ -1645,6 +1645,13 @@ tests = [
 # <<< section: R6-gate
 
 # >>> section: R6-app
+[[case]]
+id = "R6-app:plain-refusals"
+tier = "offline"
+tests = [
+    "service::reason_text_tests::every_refusal_reads_as_a_sentence_that_says_what_to_do",
+    "service::reason_text_tests::every_block_reason_reads_plainly",
+]
 # <<< section: R6-app
 
 # >>> section: R6-release
