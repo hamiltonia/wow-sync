@@ -95,6 +95,21 @@ clicked; `test-mode.txt` appeared in the state dir), `setup-test-mode-blocked.pn
 | A-38 control: snapshot `test_mode_blocked: true` -> `false` makes the e2e test fail (e2e.rs:704); reverted, passes | PASS |
 | Failure path of `SetTestMode` through a real unwritable state dir | NOT RUN (only the notice mapping is unit tested) |
 | `cargo xtask verify --tier offline` / `--tier native` | PASS / PASS |
+## Setup finish (R6-check G1) and G3 investigation
+
+- G1 cause: after enrollment the shared status stayed at its empty default (`enrolled: false`)
+  until the first sync finished, so Finish setup reset the UI into the not-enrolled Welcome.
+  Fix: the backend refreshes the status right after a successful enroll, and the app treats the
+  install as enrolled once the enroll was acknowledged (`World::confirm_enrolled`). Finish goes to
+  Overview showing the status (first sync in progress). Case `R6-app:setup-finish`:
+  `world::tests::a_just_enrolled_install_is_never_shown_as_not_set_up` PASS.
+- G3: tried on the synthetic lab (`st10`, enrolled, debug build): hide the window with
+  `ShowWindow(SW_HIDE)`, then `SW_RESTORE` + `SetForegroundWindow`, then a physical click on
+  Pause syncing. Result: PASS, `paused.txt` was written, so hiding and re-showing does not stop
+  dispatch. The single-instance wake path uses the same `set_visible` code. No defect found; the
+  verifier's failure is likely tooling (focus/injection, the 1x1 IPC window it mentioned). NOT RUN:
+  the UIA Invoke pattern, and the release build with a real tray.
+- Checks: `cargo xtask verify --tier offline` / `--tier native`: PASS / PASS.
 ## Observations for others
 
 - (Fixed in the review-fix section above: the blocked header now shows the names.) The Settings toggle sits below the fold at the default window size; screenshots were taken after

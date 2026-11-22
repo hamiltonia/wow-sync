@@ -316,6 +316,7 @@ fn run(
                             save_target(&opts.state_dir, &t);
                         }
                         s.inject_crash_after(opts.crash_after);
+                        refresh(&mut s, &shared, &wake, false);
                         svc = Some(s);
                         publish(&shared, &wake, |g| {
                             g.message.clear();

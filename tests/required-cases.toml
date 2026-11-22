@@ -1667,6 +1667,13 @@ tests = [
     "backend::tests::a_failed_test_mode_change_is_reported_and_never_claims_a_state",
     "e2e::tests::test_mode_persists_and_blocks_unmarked_installs_both_ways",
 ]
+
+[[case]]
+id = "R6-app:setup-finish"
+tier = "offline"
+tests = [
+    "world::tests::a_just_enrolled_install_is_never_shown_as_not_set_up",
+]
 # <<< section: R6-app
 
 # >>> section: R6-release

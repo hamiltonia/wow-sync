@@ -470,6 +470,7 @@ impl Shell {
                 setup,
                 app_version: &self.app_version,
             });
+            w.confirm_enrolled(g.enrolled_now);
             w.shared_label = g
                 .shared_root
                 .as_ref()
