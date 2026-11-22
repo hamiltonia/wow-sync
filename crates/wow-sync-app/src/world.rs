@@ -172,6 +172,8 @@ pub struct Install {
     /// False until the read-only check of this installation has come back.
     pub inspected: bool,
     pub refused: Option<String>,
+    /// True when an outside fix (files, folders) could change a refusal.
+    pub can_retry: bool,
     pub eligible: Vec<String>,
     pub blocked: Vec<String>,
 }
