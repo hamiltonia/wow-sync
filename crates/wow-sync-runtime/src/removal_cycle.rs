@@ -398,10 +398,19 @@ impl<'a> SettingsPass<'a> {
     fn build(&self) -> Option<Active> {
         let cap = self.env.cap?;
         let local = load_local(self.state, &self.group);
-        if !local.consent || local.included_accounts.is_empty() {
+        // An uninstall removes the add-on's owned saved files whether or not settings sync was
+        // ever turned on (R-04). Accounts the owner chose for sharing bound the scope; with no
+        // choice made, every account on this computer is searched, by ownership declarations only.
+        let included: BTreeSet<String> = if local.consent && !local.included_accounts.is_empty() {
+            local.included_accounts.iter().cloned().collect()
+        } else {
+            crate::settings_cycle::available_accounts(self.env.variant_dir)
+                .into_iter()
+                .collect()
+        };
+        if included.is_empty() {
             return None;
         }
-        let included: BTreeSet<String> = local.included_accounts.iter().cloned().collect();
         let mut decls: Vec<DeclaringFolder> = self.env.decls.to_vec();
         for s in &self.book.decls {
             if !decls.iter().any(|d| d.folder == s.folder) {
