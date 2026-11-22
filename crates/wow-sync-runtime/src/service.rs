@@ -1387,7 +1387,15 @@ impl SliceService {
         );
         match routed {
             Routed::Refused(why) => Err(CommandError::Decide(why)),
-            Routed::Local(l) => Ok(CommandOutcome::Local(l)),
+            Routed::Local(l) => {
+                if let wow_sync_core::decision::LocalResolution::Dismiss(h) = &l {
+                    self.plane.ledger.dismiss(*h);
+                    self.plane
+                        .save(&self.state)
+                        .map_err(|e| CommandError::Service(e.to_string()))?;
+                }
+                Ok(CommandOutcome::Local(l))
+            }
             Routed::WriteNow(rec) => {
                 // Parts first: a policy whose parts are missing stays pending for every reader.
                 for (_, bytes) in &policy_parts {
@@ -2266,22 +2274,33 @@ impl SliceService {
         let (offers, withheld, local_only) = {
             let valid = wow_sync_core::choice::valid_hashes(&derived);
             let view = wow_sync_core::choice::ChoiceView::new(&self.plane.ledger, &valid);
-            let (withheld, local_only) =
-                withheld_local_versions(&view, &copies, &computer.computer_id, &titles);
-            let offers = decision_items(
+            let rejects = wow_sync_core::reject::RejectBehaviour::new(&derived);
+            let (withheld, local_only) = withheld_local_versions(
                 &view,
-                &wow_sync_core::choice::WriteCx {
-                    group: &group.group_id,
-                    issuer: Issuer {
-                        computer_id: computer.computer_id.clone(),
-                        enrollment_id: enrollment.enrollment_id.clone(),
-                        issued_at_seq: enrollment.next_seq,
-                    },
-                    now_unix_ms: now_unix_ms() as u64,
-                },
-                &target,
+                &rejects,
+                &self.plane.ledger,
                 &copies,
+                &computer.computer_id,
+                &titles,
             );
+            let cx = wow_sync_core::choice::WriteCx {
+                group: &group.group_id,
+                issuer: Issuer {
+                    computer_id: computer.computer_id.clone(),
+                    enrollment_id: enrollment.enrollment_id.clone(),
+                    issued_at_seq: enrollment.next_seq,
+                },
+                now_unix_ms: now_unix_ms() as u64,
+            };
+            let mut offers = decision_items(&view, &cx, &target, &copies);
+            offers.extend(wow_sync_core::decide::rollback_items(
+                &view,
+                &cx,
+                &rejects,
+                &self.plane.ledger,
+                self.plane.ledger.dismissed(),
+                &copies,
+            ));
             (offers, withheld, local_only)
         };
         let own_states =

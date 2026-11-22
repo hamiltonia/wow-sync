@@ -163,7 +163,16 @@ fn why_text(w: &World, item: &DecisionItem) -> String {
             format!("A version of {who} looks like one the group rejected.")
         }
         DecisionKind::NewerAfterRollback => {
-            format!("A newer version of {who} appeared after going back.")
+            let id = DecisionId(item.scope.clone());
+            match w.features.local_only.iter().find(|l| l.decision == id) {
+                Some(lo) => format!(
+                    "{} The group went back to an older version, so it is not shared yet. It stays installed here until you choose: use the newer version for the whole group, or stay on the version you went back to.",
+                    local_only_sentence(lo)
+                ),
+                None => format!(
+                    "A newer version of {who} appeared after the group went back. Nothing changes until you choose: use the newer version, or stay on the version you went back to."
+                ),
+            }
         }
     }
 }
@@ -183,6 +192,15 @@ fn label_text(w: &World, l: &OptionLabel, kind: DecisionKind) -> String {
             }
             OptionLabel::KeepCurrent => return "Keep the version you chose".into(),
             OptionLabel::ChangeDecision => return "Follow newest again".into(),
+            _ => {}
+        }
+    }
+    if kind == DecisionKind::NewerAfterRollback {
+        match l {
+            OptionLabel::Release { version_label } => {
+                return format!("Use version {version_label}")
+            }
+            OptionLabel::KeepCurrent => return "Stay on the version you went back to".into(),
             _ => {}
         }
     }
@@ -244,7 +262,11 @@ fn row(w: &World, o: &DecisionOption, kind: DecisionKind) -> OptionRow {
     let holders: Vec<String> = o.holders.iter().map(|h| name_of(w, h)).collect();
     let label = label_text(w, &o.label, kind);
     let button = match (kind, &o.label) {
-        (DecisionKind::NewVersionAfterDecision, OptionLabel::Release { .. }) => "Use this".into(),
+        (
+            DecisionKind::NewVersionAfterDecision | DecisionKind::NewerAfterRollback,
+            OptionLabel::Release { .. },
+        ) => "Use this".into(),
+        (DecisionKind::NewerAfterRollback, OptionLabel::KeepCurrent) => "Stay".into(),
         (DecisionKind::NewVersionAfterDecision, OptionLabel::ChangeDecision) => label.clone(),
         _ => "Keep this".into(),
     };

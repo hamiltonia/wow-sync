@@ -407,7 +407,7 @@ fn absent_copy(p: &Package, keep: &KeepEntry, rel: &Release) -> Copy {
     }
 }
 
-fn project(pv: &PackageVersion, scope: &[FolderKey]) -> PackageVersion {
+pub(crate) fn project(pv: &PackageVersion, scope: &[FolderKey]) -> PackageVersion {
     let mut p = pv.clone();
     p.folders.retain(|f| scope.contains(&f.key));
     p
