@@ -1,0 +1,29 @@
+Source 57dbe1ffcc61e9c2f3e71fca38d3592aa6c2c694
+Windows 11 Pro x64 10.0.26300; Rust 1.100.0; cargo-deny 0.20.2
+
+cargo xtask verify --tier offline
+[PASS   ] offline/fmt
+[PASS   ] offline/clippy
+[PASS   ] offline/test
+[PASS   ] offline/required-cases
+[PASS   ] offline/deny
+[PASS   ] offline/markdown-links
+overall: PASS (allow-blocked: false) -> exit 0
+
+cargo xtask verify --tier native
+[PASS   ] native/tier
+overall: PASS (allow-blocked: false) -> exit 0
+
+cargo build --locked --release -p wow-sync-app
+release-build exit 0
+
+Actual removal oracle failure:
+  File "scenario.py", line 143, in <module>
+    wait(lambda: all(not addon(v, "ForeverFishing").exists()
+        and all(not (v / "WTF" / rel).exists() for rel, _, _ in rows) for v in (A, B)))
+  File "scenario.py", line 35, in wait
+    assert time.monotonic() < deadline, "Expected convergence not observed within 600 seconds"
+AssertionError: Expected convergence not observed within 600 seconds
+
+The following GUI inspection succeeded, so the outer PowerShell wrapper's final
+exit was 0. The Python removal oracle failed; it is not reported as PASS.
