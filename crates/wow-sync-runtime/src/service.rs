@@ -145,7 +145,7 @@ pub fn refuse_text(r: &RefuseReason) -> (String, bool) {
             true,
         ),
         RefuseReason::NotSyntheticInstall => (
-            format!("This folder is not a test folder, and this copy of WoW Sync only works with test folders. {BACK}"),
+            "Test mode is on, and this folder is not marked as a test folder, so WoW Sync will not use it. Turn off test mode to use this folder, or go Back and choose a test folder.".to_string(),
             false,
         ),
         RefuseReason::Layout(l) => return layout_text(l),
@@ -187,7 +187,7 @@ pub fn layout_text(r: &LayoutReason) -> (String, bool) {
             false,
         ),
         LayoutReason::NotSyntheticInstall => (
-            "This folder is not a test folder, and this copy of WoW Sync only works with test folders. Go Back and choose another folder."
+            "Test mode is on, and this folder is not marked as a test folder, so WoW Sync will not use it. Turn off test mode to use this folder, or go Back and choose a test folder."
                 .into(),
             false,
         ),
@@ -318,6 +318,8 @@ pub struct EnrollPreview {
     pub problem: Option<String>,
     /// True only when fixing something outside WoW Sync can change `problem`.
     pub retryable: bool,
+    /// True when test mode is what refuses this folder, so turning it off changes the result.
+    pub test_mode_blocked: bool,
     /// Consent text shown before anything is written (domain.md §1 step 5, §2.1).
     pub disclosures: Vec<String>,
 }
@@ -1751,6 +1753,7 @@ impl SliceService {
                     groups: vec![],
                     problem: Some(e.to_string()),
                     retryable: true,
+                    test_mode_blocked: false,
                     disclosures: vec![],
                 }
             }
@@ -1766,6 +1769,7 @@ impl SliceService {
             groups: self.existing_groups(),
             problem: None,
             retryable: false,
+            test_mode_blocked: false,
             disclosures: vec![],
         };
         let (id, kind) = match &verdict {
@@ -1775,6 +1779,7 @@ impl SliceService {
                 let (text, retry) = refuse_text(r);
                 p.problem = Some(text);
                 p.retryable = retry;
+                p.test_mode_blocked = matches!(r, RefuseReason::NotSyntheticInstall);
                 return p;
             }
         };
@@ -1816,6 +1821,7 @@ impl SliceService {
                 let (text, retry) = layout_text(&r);
                 p.problem = Some(text);
                 p.retryable = retry;
+                p.test_mode_blocked = matches!(r, LayoutReason::NotSyntheticInstall);
             }
         }
         p
@@ -3491,6 +3497,19 @@ fn dummy_identity() -> wow_sync_core::variant::VariantIdentity {
 #[cfg(test)]
 mod reason_text_tests {
     use super::*;
+
+    #[test]
+    fn test_mode_refusal_is_flagged_so_the_offer_can_be_shown() {
+        for r in [
+            RefuseReason::NotSyntheticInstall,
+            RefuseReason::Layout(LayoutReason::NotSyntheticInstall),
+        ] {
+            let (text, retry) = refuse_text(&r);
+            assert!(!retry);
+            assert!(text.contains("Turn off test mode"), "{text}");
+            assert!(text.contains("Back"), "{text}");
+        }
+    }
 
     fn all_refusals() -> Vec<RefuseReason> {
         let s = || "RAW_INTERNAL".to_string();

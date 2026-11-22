@@ -95,6 +95,7 @@ pub enum Act {
     TryAgainShared,
     ToggleExpand(String),
     Toggle(String),
+    TurnOffTestMode,
     Theme(ThemeChoice),
     SheetHide,
     SheetCancel,
@@ -117,6 +118,7 @@ pub enum SetupAct {
     Back,
     ChooseFolder,
     TryAgain,
+    TurnOffTestMode,
     SelectInstall(usize),
     IdentityToggle,
     ScopeToggle,
@@ -560,6 +562,7 @@ impl Shell {
                 ins.refused = (p.kind == PreviewKind::Refused)
                     .then(|| p.problem.clone().unwrap_or_else(|| p.identity_line.clone()));
                 ins.can_retry = p.retryable;
+                ins.test_mode_blocked = p.test_mode_blocked;
                 ins.eligible = p.eligible.clone();
                 ins.blocked = p.blocked.clone();
             }
@@ -697,8 +700,17 @@ impl Shell {
                     self.expanded.insert(k);
                 }
             }
+            Act::TurnOffTestMode => {
+                self.w.test_mode = false;
+                self.send(Cmd::SetTestMode(false, None));
+                self.notice.show(self.page, "Test mode is off");
+            }
             Act::Toggle(k) => {
-                if k == "closing-quits" {
+                if k == "test-mode" {
+                    self.w.test_mode = !self.w.test_mode;
+                    self.send(Cmd::SetTestMode(self.w.test_mode, None));
+                    self.notice.show(self.page, "Saved");
+                } else if k == "closing-quits" {
                     self.closing_quits = !self.closing_quits;
                     self.save_settings();
                     self.notice.show(self.page, "Saved");
@@ -905,6 +917,11 @@ impl Shell {
             }
             SetupAct::ChooseFolder => self.setup.folder_chosen = true,
             SetupAct::TryAgain => self.inspect_selected(),
+            SetupAct::TurnOffTestMode => {
+                let t = self.setup_target();
+                self.send(Cmd::SetTestMode(false, t));
+                self.inspect_selected();
+            }
             SetupAct::SelectInstall(i) => {
                 self.setup.install = i;
                 self.setup.consent.clear();
@@ -1884,6 +1901,7 @@ impl Shell {
                 let act = match b.action {
                     BannerAction::Resume => Act::TogglePause,
                     BannerAction::TryAgain => Act::TryAgainShared,
+                    BannerAction::TurnOffTestMode => Act::TurnOffTestMode,
                     _ => Act::OpenReconfirm,
                 };
                 let btn = self.btn(
@@ -2031,6 +2049,7 @@ impl Shell {
             NeedTarget::Error | NeedTarget::Risk => Act::Nav(Page::Needs),
             NeedTarget::Restore => Act::Nav(Page::Addons),
             NeedTarget::Reconfirm => Act::OpenReconfirm,
+            NeedTarget::TestMode => Act::TurnOffTestMode,
             NeedTarget::NeedsHelp(k) => Act::OpenNeedsHelp(k.clone()),
             NeedTarget::Decision(k) => Act::OpenDecision(k.clone()),
             NeedTarget::Computer(i) => Act::OpenComputer(*i),
