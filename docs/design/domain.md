@@ -94,19 +94,16 @@ LayoutAssessment` (core, pure). Checks, all required:
 | AddOns is a plain directory at exactly `<variant>\Interface\AddOns` | `Unsupported(AddOnsLayout)` |
 | no other folder under the same install root reports the same product code | `Unsupported(DuplicateProductFolder)` |
 | this variant folder is not enrolled in another group on this computer | `Unsupported(AlreadyEnrolled)` |
-| **slice only:** the install root contains the marker file `.wowsync-synthetic` (first line `wowsync-synthetic/1`), written by `testkit::SyntheticInstall` and never present in a real WoW install | `Unsupported(NotSyntheticInstall)` (Q-24) |
-| `.toc` mapping: `validated-plain/1` for **every** client in the slice, recognized or not (retry 2, R-M03; below) | — |
+| the install root carries the synthetic marker `.wowsync-synthetic` (first line `wowsync-synthetic/1`) **only when test mode is on** (D-28, `MarkerPolicy::Required`); by default (`NotRequired`) the marker is neither required nor consulted, and a real install has none | test mode only: `Unsupported(NotSyntheticInstall)` |
+| `.toc` mapping: `profile:wowf/2` for the recognized `wowf` client (the Forever rule, §3); `validated-plain/1` for every unfamiliar client (below) | — |
 
-For `validated-plain/1` a folder is **eligible** for transfer only if it
+For `validated-plain/1` (unfamiliar clients) a folder is **eligible** for transfer only if it
 has a plain `F.toc` and **no** suffixed candidate (`F_<S>.toc` /
-`F-<S>.toc`) at all. No client's suffix order has been validated (Q-3 for
-`wowf`), so every folder with suffixed tocs is `Blocked
+`F-<S>.toc`) at all. No such client's suffix order is known, so every folder with suffixed tocs is `Blocked
 (UnvalidatedTocMapping)` — an addon-scoped decision, never installed or
 replaced automatically (Q-20). With a single plain toc there is exactly one
 file list the client can load, so equal summary fields cannot hide
-different loaded content (R-M03). The assumption that a client loads `F.toc`
-when no flavor toc exists is standard WoW behavior but unverified for
-Forever; the slice applies it only to synthetic installs (Q-24). The result is
+different loaded content (R-M03). The result is
 `Supported { mapping, eligible: Vec<FolderKey>, blocked: Vec<(FolderKey, reason)>, digest: Sha256 }`
 where `digest` hashes the identity, mapping and both lists.
 
@@ -127,12 +124,11 @@ mapping rule, not a frozen folder list: folders that appear later are
 evaluated by the same rule each scan; the digest only rejects consent given
 for a different assessment at confirmation time.
 
-Known profiles (the only one in the slice; everything else is unfamiliar,
-Q-12):
+Known profiles (the only one; everything else is unfamiliar, Q-12):
 
-| product | folder | label | `.toc` suffixes, in order | evidence |
-|---|---|---|---|---|
-| `wowf` | `_forever_` | Forever | `Forever`, `Camelot` | S-forever (dev PC, owner review pending); toc order **unverified** |
+| product | folder | label | `.toc` suffixes, in order | family suffixes | evidence |
+|---|---|---|---|---|---|
+| `wowf` | `_forever_` | Forever | `Forever`, `Camelot` | `Mainline` | S-forever (dev PC); TOC-format documentation (warcraft.wiki.gg "TOC format", read 2026-11-22); an owner client check is optional (Q-3) |
 
 Never label `wowf` as Classic Era (AGENTS.md). Interface numbers (e.g. 16001)
 are **not** used for identity (S-addon: plain tocs carry unions).
@@ -168,25 +164,30 @@ in the slice. A candidate that cannot be read or parsed makes the selection an
 `Error` (not empty).
 
 **Select** `select_toc(folder, candidates, mapping) -> TocSelection`.
-In the slice the mapping is always `validated-plain/1`: if any suffixed
+`validated-plain/1` (unfamiliar clients): if any suffixed
 candidate exists → `Unvalidated { files }`; else the plain `F.toc` →
-`Selected`; else `None`. The profile rule below is **specified for a
-later run** (after Q-3 is validated) and is not reachable in the slice;
-R2-core implements only the plain rule:
+`Selected`; else `None`. `profile:wowf/2` (the Forever rule, D-28) is as built:
 
-1. For each suffix in `profile.toc_suffixes` order, collect candidates with
-   that suffix (either separator, case-insensitive).
-2. If candidates exist for one or more listed suffixes: parse them all. If
-   every parsed one has identical `version`, `hard_deps` (as sets) and `ids`,
-   select the one with the first listed suffix. If they differ →
-   `Ambiguous { files }`.
-3. Else, if `F.toc` exists → select it.
-4. Else (only other suffixes, e.g. only `_Vanilla`) → `None { reason:
-   "no toc for this variant" }`.
+1. Tiers, in order: the profile's game-type suffixes (`Forever`, then
+   `Camelot`), then its family suffixes (`Mainline`), then the plain `F.toc`.
+   Candidates match either separator, case-insensitively. Other suffixes
+   (`Vanilla`, `Classic`, `Wrath`, …) are ignored.
+2. The first tier that has candidates decides. Its candidates are all parsed
+   (any parse or read error → `Error`). If every one has the same `version`,
+   `hard_deps` (as sets) and `ids`, the first listed suffix is selected;
+   otherwise → `Ambiguous { files }`.
+3. No candidate in any tier (only other suffixes, e.g. only `_Vanilla`) →
+   `None { reason: "no toc for this variant" }`.
 
-The `wowf` order and the treatment of `_Camelot` are the stated
-uncertainty (Q-3): owner-run client check needed before the profile rule is
-enabled.
+`mapping_id` is `profile:wowf/2`. An already enrolled `wowf` whose stored
+validation says `validated-plain/1` gets `StaleConfirmation`: syncing stops
+until the guided reconfirmation (Reconfirm, `NeedsReconfirmation`); nothing is
+deleted. A peer that still publishes `validated-plain/1` is a
+`DifferentTocMapping` holder until it upgrades and republishes.
+
+The `wowf` order comes from the TOC-format documentation (warcraft.wiki.gg
+"TOC format", read 2026-11-22) and the dev-PC folder survey; an owner client
+check stays optional (Q-3).
 
 **Compatibility gate (M-03).** Only `Selected` is evidence that the client
 would load the folder. A folder whose selection is `None`, `Ambiguous`,
@@ -226,9 +227,9 @@ come from other predicates in §6 (same variant group, same client build,
 keep the label but change content show up as equal labels with different
 content → `Ambiguous`; a manual edit that also changes the label to a larger
 one is indistinguishable from a release. The slice therefore does **not**
-claim release provenance: it runs only on synthetic installs whose fixtures
-are releases by construction (§2.1 marker gate, Q-24), and real-data use
-waits for a validated provenance rule (Q-22). Real
+claim release provenance: same label with different content is `Ambiguous`
+and never replaced (Q-22). The synthetic-marker gate is test mode only
+(§2.1, D-28). Real
 release-pair ordering has not been measured (S-addon: recognition only);
 tests use real labels for recognition and synthetic pairs for ordering,
 and the pairs are labeled as such.

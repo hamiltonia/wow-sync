@@ -254,7 +254,7 @@ on a scratch branch, records the failing names, and reverts:
 | cleanup discards staging of all ops / removes another op's journal | `exec::tests::settling_one_op_keeps_other_ops_evidence` |
 | `check_object` trusts size/mtime | `exec::tests::same_size_mtime_corrupt_object_rehashed_and_replaced` |
 | `is_unavailable` ignores RECALL_ON_OPEN on files | `fs_safe::tests::unavailable_attribute_combinations` |
-| synthetic marker gate removed | `variant::tests::install_without_synthetic_marker_refused` |
+| synthetic marker required by default (D-28 removes that) | `variant::tests::unmarked_install_is_accepted_by_default`; test mode keeps it: `variant::tests::required_policy_refuses_missing_wrong_or_bom_prefixed_markers` |
 | `confirm_variant` accepts consent without a Supported assessment | `variant::tests::consent_alone_does_not_confirm` |
 | `classify_tag` accepts mount points as cloud files | `fs_safe::tests::classify_tag_cloud_vs_link_vs_other` |
 | `winproc::classify` ignores inaccessible `Wow.exe` | `winproc::tests::inaccessible_possible_client_is_unknown` |
