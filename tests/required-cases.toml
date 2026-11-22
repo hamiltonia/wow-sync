@@ -1678,6 +1678,16 @@ tests = [
 ]
 # <<< section: R6-app
 
+# >>> section: R6-settings
+[[case]]
+id = "R6-settings:uninstall-removes-and-restores-settings"
+tier = "offline"
+tests = [
+    "e2e::tests::uninstall_removes_and_restores_settings_without_settings_sync",
+    "e2e::tests::an_uninstall_removes_the_settings_with_the_code_and_a_restore_returns_both",
+]
+# <<< section: R6-settings
+
 # >>> section: R6-release
 # <<< section: R6-release
 

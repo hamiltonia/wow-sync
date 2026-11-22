@@ -3017,6 +3017,54 @@ mod tests {
         assert!(read_wtf(&a, "Alpha").is_some(), "not removed again");
     }
 
+    /// H2: the add-on's file was created by the add-on, not by this app, and settings sync was
+    /// never turned on. The uninstall still removes the owned file everywhere and a restore
+    /// returns code and settings together.
+    #[test]
+    fn uninstall_removes_and_restores_settings_without_settings_sync() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon_with("Alpha", "alpha-v1", SV_TOC);
+        b.addon_with("Alpha", "alpha-v1", SV_TOC);
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        synced(&mut a);
+        let (a_text, b_text) = ("AlphaDB = { a = 1 }\n", "AlphaDB = { b = 2 }\n");
+        write_wtf(&a, "Alpha", a_text);
+        write_wtf(&b, "Alpha", b_text);
+        let own_other = wtf_file(&a, "Unrelated");
+        std::fs::write(&own_other, "UnrelatedDB = {}\n").unwrap();
+        synced(&mut a);
+        synced(&mut b);
+        assert_eq!(read_wtf(&a, "Alpha").as_deref(), Some(a_text));
+
+        uninstall_alpha_on(&mut a, &g);
+        assert_eq!(read_wtf(&a, "Alpha"), None, "the originating computer");
+        let (ac, _) = pc_ids(&a);
+        let removal = removal_hash(&lab, &g, &ac);
+        for _ in 0..3 {
+            synced(&mut b);
+            synced(&mut a);
+        }
+        assert_eq!(b.read("Alpha/main.lua"), None);
+        assert_eq!(read_wtf(&b, "Alpha"), None, "the receiving computer");
+        assert!(own_other.exists(), "an unowned file is never removed");
+
+        let out = a.svc.command(Command::RestoreRemoved { removal }).unwrap();
+        assert!(matches!(out, CommandOutcome::Recorded), "{out:?}");
+        for _ in 0..8 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        assert_eq!(read_wtf(&a, "Alpha").as_deref(), Some(a_text));
+        assert_eq!(read_wtf(&b, "Alpha").as_deref(), Some(b_text));
+    }
+
     #[test]
     fn a_settings_file_over_the_cap_is_not_moved_by_an_uninstall() {
         let big = "AlphaDB = { v = 1 }\n";
