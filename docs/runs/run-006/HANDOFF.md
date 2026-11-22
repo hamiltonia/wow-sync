@@ -18,8 +18,8 @@ chat is not.
 | R6-gate | merged `37d489b` (both tiers green) |
 | R6-app | stage A merged `34ef8e5`; stage A2 merged `6e87a35` |
 | R6-release | `url` 2.5.9 merged `d4fad8f`; 0.2.0 bump merged `58151ba`; notes fixes merged `e4dadcd` |
-| R6-check | launched on `6e87a35` (agent `3820f9e4`); dispatch run 45067079956 |
-| R6-review | launched in parallel on `6e87a35` (agent `c843f88e`) |
+| R6-check | done `820869b` (merged `b00d86d`): G1 minor, G2 major, G3 blocked; real data restored and proven equal. Fixes G1 `078fe45`, G2 `57dbe1f`; R6-recheck launched on `57dbe1f` (agent `c99ee87f`), dispatch 45076737602 |
+| R6-review | merged `6336525`: 0 critical/major; RV6-01..09 fixed (`dbfc7bc`, `ca929fc`, `57dbe1f`) |
 
 Run-006 usage: about 1,070 AIU of 10,000 (combined total 38,687.9 against a baseline of 37,617.3).
 
