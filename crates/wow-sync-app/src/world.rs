@@ -399,6 +399,12 @@ impl World {
         }
     }
 
+    /// Enrollment was saved but the first status has not been read yet; the install is enrolled,
+    /// so setup must never be shown for it.
+    pub fn confirm_enrolled(&mut self, enrolled_now: bool) {
+        self.enrolled |= enrolled_now;
+    }
+
     pub fn from_snapshot(i: Inputs) -> World {
         let now = now_ms();
         let mut w = World::empty(i.app_version);
@@ -530,6 +536,16 @@ mod tests {
             package: None,
             text: text.into(),
         }
+    }
+
+    #[test]
+    fn a_just_enrolled_install_is_never_shown_as_not_set_up() {
+        let mut w = World::empty("0.0.0");
+        w.confirm_enrolled(false);
+        assert!(!w.enrolled);
+        w.confirm_enrolled(true);
+        assert!(w.enrolled);
+        assert_ne!(crate::model::headline(&w).text, "Set up this computer");
     }
 
     #[test]
