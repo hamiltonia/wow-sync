@@ -801,6 +801,62 @@ mod tests {
     }
 
     #[test]
+    fn first_run_join_holding_a_group_rejected_release_does_not_resurrect_it() {
+        use wow_sync_core::hash::package_hash;
+        let lab = Lab::new();
+        let (mut a, mut b, mut c, g) = alpha_v2_published(&lab);
+        let v1 = alpha_folder(&lab, &g, &a);
+        let v1_hash = package_hash(&[(v1.key.clone(), v1.tree.unwrap())]);
+        synced(&mut b);
+        assert_eq!(
+            b.svc.command(Command::Rollback {
+                package: v1.key.clone(),
+                recovered: v1_hash,
+            }),
+            Ok(CommandOutcome::Recorded)
+        );
+        synced(&mut b);
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+
+        let mut d = lab.pc("d");
+        d.addon("Alpha", "alpha-v2");
+        d.addon("Delta", "delta-v1");
+        d.join(&g);
+        for _ in 0..3 {
+            synced(&mut d);
+            synced(&mut a);
+            synced(&mut b);
+            synced(&mut c);
+        }
+        for pc in [&a, &b, &c, &d] {
+            assert_eq!(pc.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        }
+        assert_eq!(a.read("Delta/main.lua").as_deref(), Some("delta-v1"));
+        let rec = d.install.variant_dir.join(".wowsync").join("recovery");
+        let kept = std::fs::read_dir(&rec)
+            .map(|r| r.flatten().map(|e| e.path()).collect::<Vec<_>>())
+            .unwrap_or_default();
+        assert!(
+            kept.iter().any(|p| has_file(p, "main.lua", b"alpha-v2")),
+            "the joiner's rejected copy is kept for recovery: {kept:?}"
+        );
+    }
+
+    fn has_file(dir: &Path, name: &str, content: &[u8]) -> bool {
+        std::fs::read_dir(dir).is_ok_and(|r| {
+            r.flatten().any(|e| {
+                let p = e.path();
+                if p.is_dir() {
+                    has_file(&p, name, content)
+                } else {
+                    p.file_name().is_some_and(|n| n == name)
+                        && std::fs::read(&p).is_ok_and(|b| b == content)
+                }
+            })
+        })
+    }
+
+    #[test]
     fn first_run_create_from_a_populated_install_changes_nothing_locally() {
         let lab = Lab::new();
         let mut a = lab.pc("a");

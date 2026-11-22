@@ -41,8 +41,8 @@ Revised in design retry 2 (N-01, N-03): **one package per operation**
 per-folder progress field. This removes all multi-package journal,
 staging and cleanup coupling and makes every step re-entrant.
 
-Preconditions checked by `plan_apply`: `ConfirmedVariant` (synthetic install
-in the slice, [domain.md](domain.md) §2.1), the package's folders stable in
+Preconditions checked by `plan_apply`: `ConfirmedVariant` (a validated install;
+the synthetic marker only in test mode, [domain.md](domain.md) §2.1), the package's folders stable in
 the current scan, every plan precondition derivable (§2.1),
 `Activity::NotRunning`, **no journal of any operation present** (Q-25).
 Then `fx.lock()` (app install lock; it excludes other WoW Sync instances

@@ -642,15 +642,11 @@ pub fn consent_disclosures(c: &ConsentContext) -> Vec<String> {
                 .copied()
                 .collect();
             format!(
-                "Folder rule {}: an add-on folder is synced only if this game version would load it, using its <Name>_{}.toc in that order, else its plain <Name>.toc. Other client-specific .toc files are ignored; folders with no usable .toc are listed as blocked and are never changed.",
-                c.mapping_id,
+                "Which add-on folders sync: a folder is synced only if this game version would load it, using its <Name>_{}.toc in that order, else its plain <Name>.toc. Other client-specific .toc files are ignored; folders with no usable .toc are listed as blocked and are never changed.",
                 order.join(".toc, then <Name>_")
             )
         }
-        None => format!(
-            "Folder rule {}: an add-on folder is synced only if it has a plain <Name>.toc and no client-specific variants of it. Other folders are listed as blocked and are never changed.",
-            c.mapping_id
-        ),
+        None => "Which add-on folders sync: a folder is synced only if it has a plain <Name>.toc and no client-specific variants of it. Other folders are listed as blocked and are never changed.".to_string(),
     };
     vec![
         format!(
@@ -1271,7 +1267,8 @@ mod tests {
         .join("\n");
         for needle in [
             "C:\\Synthetic\\Root\\_test_\\Interface\\AddOns",
-            "validated-plain/1",
+            "Which add-on folders sync",
+            "no client-specific variants",
             "install newer versions",
             "replacing the folder here, automatically",
             "never treated as removed",
@@ -1332,7 +1329,10 @@ mod tests {
             addons_path: "C:\\Synthetic\\Root\\_forever_\\Interface\\AddOns",
         })
         .join("\n");
-        assert!(text.contains("profile:wowf/2"), "{text}");
+        assert!(
+            !text.contains("profile:wowf") && !text.contains("validated-plain"),
+            "{text}"
+        );
         assert!(
             text.contains("<Name>_Forever.toc, then <Name>_Camelot.toc, then <Name>_Mainline.toc")
         );
