@@ -98,6 +98,29 @@ impl AppSettings {
     }
 }
 
+const TEST_MODE_FILE: &str = "test-mode.txt";
+
+/// Whether test mode is on for this computer (D-28). Off by default. When on, only install
+/// roots carrying the synthetic marker validate. A file that exists but cannot be read counts as
+/// on, the stricter reading.
+pub fn test_mode(state: &LocalState) -> bool {
+    match state.read(TEST_MODE_FILE, SMALL) {
+        Ok(None) => false,
+        Ok(Some(b)) => String::from_utf8_lossy(&b).trim() != "0",
+        Err(_) => true,
+    }
+}
+
+pub fn set_test_mode(state: &LocalState, on: bool) -> Result<(), String> {
+    if on {
+        state
+            .write_atomic(TEST_MODE_FILE, b"1\n")
+            .map_err(|e| e.to_string())
+    } else {
+        state.remove(TEST_MODE_FILE).map_err(|e| e.to_string())
+    }
+}
+
 const TOGGLES_FILE: &str = "toggles.txt";
 
 /// The three automatic behaviours the owner can switch off (ops.md §3.2, §4.2). Kept apart from
@@ -428,6 +451,11 @@ pub enum Command {
         export: wow_sync_core::diagnostics::Export,
         dest: std::path::PathBuf,
     },
+    /// Test mode on or off for this computer (D-28), persisted locally and off by default. On,
+    /// only install roots carrying the synthetic marker validate: an enrolled install without it
+    /// stops syncing with a visible reason (nothing is un-enrolled or changed); off resumes.
+    /// Works before enrollment and while the install is blocked.
+    SetTestMode(bool),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

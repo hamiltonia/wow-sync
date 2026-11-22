@@ -277,7 +277,7 @@ mod tests {
         assert_eq!(b.file_entries[0].path.as_str(), "a.lua");
         assert_eq!(b.toc.kind, TocKind::Selected);
         assert_eq!(inv.folders[1].status, FolderStatus::Unsupported);
-        assert_eq!(inv.folders[2].toc.kind, TocKind::Unvalidated);
+        assert_eq!(inv.folders[2].toc.kind, TocKind::Selected);
         assert_eq!(inv.folders[3].status, FolderStatus::Unsafe);
         assert!(inv.folders[3].tree.is_none());
     }

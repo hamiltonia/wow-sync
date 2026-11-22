@@ -58,17 +58,22 @@ pub struct Profile {
     pub product: &'static str,
     pub folder: &'static str,
     pub label: &'static str,
+    /// Game-type suffixes, in selection order.
     pub toc_suffixes: &'static [&'static str],
+    /// Family suffixes, tried after every game-type suffix and before the plain `.toc`.
+    pub family_suffixes: &'static [&'static str],
     pub mapping_id: &'static str,
 }
 
-/// Only `wowf` (Forever) is known in the slice. It is not Classic Era.
+/// Only `wowf` (Forever) is known. It is not Classic Era. Order from warcraft.wiki.gg "TOC
+/// format" (read 2026-11-22), D-28: `Forever`/`Camelot`, then `Mainline`, then the plain `.toc`.
 pub const KNOWN_PROFILES: &[Profile] = &[Profile {
     product: "wowf",
     folder: "_forever_",
     label: "Forever",
     toc_suffixes: &["Forever", "Camelot"],
-    mapping_id: "profile:wowf/1",
+    family_suffixes: &["Mainline"],
+    mapping_id: "profile:wowf/2",
 }];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,9 +138,29 @@ fn marker_ok(obs: &FileObs) -> bool {
     }
 }
 
-/// Validates metadata (domain.md §2 table) and then the synthetic marker. The marker is
-/// consumed here, after metadata errors, so no usable verdict exists without it (F-01).
-pub fn validate_variant(obs: &VariantObservation) -> VariantVerdict {
+/// Whether an install must carry the synthetic marker (D-28). Real installs need none by default;
+/// the per-computer test mode switches to `Required` so only marker-carrying test folders enroll.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MarkerPolicy {
+    #[default]
+    NotRequired,
+    Required,
+}
+
+impl MarkerPolicy {
+    pub fn from_test_mode(test_mode: bool) -> Self {
+        if test_mode {
+            MarkerPolicy::Required
+        } else {
+            MarkerPolicy::NotRequired
+        }
+    }
+}
+
+/// Validates metadata (domain.md §2 table) and then, under `MarkerPolicy::Required`, the synthetic
+/// marker. The marker is consumed here, after metadata errors, so no usable verdict exists
+/// without it in test mode (F-01, D-28).
+pub fn validate_variant(obs: &VariantObservation, policy: MarkerPolicy) -> VariantVerdict {
     use RefuseReason as R;
     use VariantVerdict::Refused;
     let flavor = match &obs.flavor_info {
@@ -186,7 +211,7 @@ pub fn validate_variant(obs: &VariantObservation) -> VariantVerdict {
     if obs.addons_dir != DirObs::PlainDir {
         return Refused(R::AddOnsMissing);
     }
-    if !marker_ok(&obs.synthetic_marker) {
+    if policy == MarkerPolicy::Required && !marker_ok(&obs.synthetic_marker) {
         return Refused(R::NotSyntheticInstall);
     }
     let build_version = vc
@@ -284,7 +309,9 @@ pub fn assess_layout(
     if others.enrolled_elsewhere {
         return LayoutAssessment::Unsupported(LayoutReason::AlreadyEnrolled);
     }
-    let mapping = TocMapping::ValidatedPlain;
+    let mapping = id
+        .profile
+        .map_or(TocMapping::ValidatedPlain, TocMapping::Profile);
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for f in addons {
         *counts.entry(f.name.to_lowercase()).or_default() += 1;
@@ -606,6 +633,25 @@ pub struct ConsentContext<'a> {
 /// Disclosures shown before any enrollment write (domain.md §1 step 5 and §2.1).
 pub fn consent_disclosures(c: &ConsentContext) -> Vec<String> {
     let label = c.identity.display_label();
+    let folder_rule = match c.identity.profile {
+        Some(p) => {
+            let order: Vec<&str> = p
+                .toc_suffixes
+                .iter()
+                .chain(p.family_suffixes)
+                .copied()
+                .collect();
+            format!(
+                "Folder rule {}: an add-on folder is synced only if this game version would load it, using its <Name>_{}.toc in that order, else its plain <Name>.toc. Other client-specific .toc files are ignored; folders with no usable .toc are listed as blocked and are never changed.",
+                c.mapping_id,
+                order.join(".toc, then <Name>_")
+            )
+        }
+        None => format!(
+            "Folder rule {}: an add-on folder is synced only if it has a plain <Name>.toc and no client-specific variants of it. Other folders are listed as blocked and are never changed.",
+            c.mapping_id
+        ),
+    };
     vec![
         format!(
             "This computer will share its installed add-ons for {label} with other computers in this group, and will install newer versions found on them."
@@ -614,10 +660,7 @@ pub fn consent_disclosures(c: &ConsentContext) -> Vec<String> {
             "Chosen install location: {}. Add-ons are read from and changed only in {}.",
             c.install_root, c.addons_path
         ),
-        format!(
-            "Folder rule {}: an add-on folder is synced only if it has a plain <Name>.toc and no client-specific variants of it. Other folders are listed as blocked and are never changed.",
-            c.mapping_id
-        ),
+        folder_rule,
         "Newer add-on versions found on other computers are installed, replacing the folder here, automatically.".to_string(),
         "Add-ons missing on this computer are installed, never treated as removed; an add-on missing elsewhere is never deleted here.".to_string(),
         format!(
@@ -632,6 +675,11 @@ pub fn consent_disclosures(c: &ConsentContext) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::testkit;
+
+    /// Most tests run under the default policy; the marker test names `Required` explicitly.
+    fn validate_variant(o: &VariantObservation) -> VariantVerdict {
+        super::validate_variant(o, MarkerPolicy::NotRequired)
+    }
 
     fn obs(product: &str, folder: &str) -> VariantObservation {
         testkit::variant_obs(product, folder)
@@ -929,19 +977,28 @@ mod tests {
             reason("bad name."),
             Some(BlockReason::UnsupportedName(_))
         ));
-        // The recognized client uses the same plain mapping: its suffixed folders are blocked too.
+        // The recognized client uses its profile rule: other suffixes are ignored, so the mixed
+        // folder is eligible there and only the plain-rule client blocks it.
         let known = validate_variant(&testkit::variant_obs_forever());
         let VariantVerdict::Recognized(kid) = &known else {
             panic!()
         };
+        let mut forever_addons = addons[..2].to_vec();
+        forever_addons.push(scan("OnlyVanilla", &["OnlyVanilla_Vanilla.toc"]));
         let LayoutAssessment::Supported {
-            mapping, eligible, ..
-        } = assess_layout(kid, false, &addons[..2], &OtherVariants::default())
+            mapping,
+            eligible,
+            blocked,
+            ..
+        } = assess_layout(kid, false, &forever_addons, &OtherVariants::default())
         else {
             panic!()
         };
-        assert_eq!(mapping, TocMapping::ValidatedPlain);
-        assert_eq!(eligible.len(), 1);
+        assert_eq!(mapping, TocMapping::Profile(&KNOWN_PROFILES[0]));
+        assert_eq!(mapping.id(), "profile:wowf/2");
+        assert_eq!(eligible.len(), 2);
+        assert_eq!(blocked.len(), 1);
+        assert_eq!(blocked[0].1, BlockReason::NoToc);
     }
 
     #[test]
@@ -976,9 +1033,34 @@ mod tests {
         );
     }
 
+    fn required(o: &VariantObservation) -> VariantVerdict {
+        super::validate_variant(o, MarkerPolicy::Required)
+    }
+
     #[test]
-    fn install_without_synthetic_marker_refused() {
-        // F-01: both recognized and unfamiliar clients, every bad marker shape, and removal after enrollment.
+    fn unmarked_install_is_accepted_by_default() {
+        // D-28: a real install carries no marker and enrolls through normal confirmation.
+        for mut base in [testkit::variant_obs_forever(), obs("wow_test", "_test_")] {
+            base.synthetic_marker = FileObs::Missing;
+            assert!(!matches!(
+                validate_variant(&base),
+                VariantVerdict::Refused(_)
+            ));
+            assert_eq!(
+                super::validate_variant(&base, MarkerPolicy::default()),
+                validate_variant(&base)
+            );
+        }
+        assert_eq!(
+            MarkerPolicy::from_test_mode(false),
+            MarkerPolicy::NotRequired
+        );
+        assert_eq!(MarkerPolicy::from_test_mode(true), MarkerPolicy::Required);
+    }
+
+    #[test]
+    fn required_policy_refuses_missing_wrong_or_bom_prefixed_markers() {
+        // F-01 kept for test mode: both client classes and every bad marker shape.
         let bad_markers = [
             FileObs::Missing,
             FileObs::Unreadable("denied".into()),
@@ -987,36 +1069,37 @@ mod tests {
             FileObs::Bytes(b"real install".to_vec()),
             FileObs::Bytes(Vec::new()),
         ];
+        let refused_req = |o: &VariantObservation| match required(o) {
+            VariantVerdict::Refused(r) => r,
+            other => panic!("expected refusal, got {other:?}"),
+        };
         for base in [testkit::variant_obs_forever(), obs("wow_test", "_test_")] {
-            assert!(!matches!(
-                validate_variant(&base),
-                VariantVerdict::Refused(_)
-            ));
+            assert!(!matches!(required(&base), VariantVerdict::Refused(_)));
             for m in &bad_markers {
                 let mut o = base.clone();
                 o.synthetic_marker = m.clone();
-                assert_eq!(refused(&o), RefuseReason::NotSyntheticInstall, "{m:?}");
+                assert_eq!(refused_req(&o), RefuseReason::NotSyntheticInstall, "{m:?}");
             }
             for ok in [
                 b"wowsync-synthetic/1".to_vec(),
                 b"wowsync-synthetic/1\r\nextra\n".to_vec(),
+                b"\xEF\xBB\xBFwowsync-synthetic/1\n".to_vec(),
             ] {
                 let mut o = base.clone();
                 o.synthetic_marker = FileObs::Bytes(ok);
-                assert!(!matches!(validate_variant(&o), VariantVerdict::Refused(_)));
+                assert!(!matches!(required(&o), VariantVerdict::Refused(_)));
             }
         }
         // Metadata errors keep priority over the marker.
         let mut o = testkit::variant_obs_forever();
         o.synthetic_marker = FileObs::Missing;
         o.flavor_info = FileObs::Missing;
-        assert_eq!(refused(&o), RefuseReason::FlavorMissing);
-        // Enrolled, then the marker is removed: re-validation each cycle refuses it.
+        assert_eq!(refused_req(&o), RefuseReason::FlavorMissing);
+        // Enrolled, then the marker is removed: test mode refuses it on re-validation.
         let mut o = testkit::variant_obs_forever();
-        let enrolled = testkit::confirmed_forever();
-        assert_eq!(enrolled.product(), "wowf");
+        assert_eq!(testkit::confirmed_forever().product(), "wowf");
         o.synthetic_marker = FileObs::Missing;
-        assert_eq!(refused(&o), RefuseReason::NotSyntheticInstall);
+        assert_eq!(refused_req(&o), RefuseReason::NotSyntheticInstall);
     }
 
     fn guided_unfamiliar(addons: &[FolderScan]) -> (VariantVerdict, LayoutAssessment) {
@@ -1198,6 +1281,62 @@ mod tests {
         ] {
             assert!(text.contains(needle), "missing {needle:?} in:\n{text}");
         }
+    }
+
+    #[test]
+    fn enrolled_forever_with_the_old_plain_mapping_is_reconfirmed_not_dropped() {
+        let known = validate_variant(&testkit::variant_obs_forever());
+        let VariantVerdict::Recognized(kid) = &known else {
+            panic!()
+        };
+        let a = assess_layout(
+            kid,
+            false,
+            &[scan("Good", &["Good.toc"])],
+            &OtherVariants::default(),
+        );
+        let mut stored = confirm_variant(&known, &a, None)
+            .unwrap()
+            .validation()
+            .clone();
+        assert_eq!(stored.mapping_id, "profile:wowf/2");
+        // Enrolled by an earlier build under the plain rule: the layout digest rule changed.
+        stored.mapping_id = PLAIN_MAPPING_ID.into();
+        assert_eq!(
+            confirm_enrolled(&known, &a, &stored),
+            Err(RefuseReason::StaleConfirmation)
+        );
+        let LayoutAssessment::Supported { digest, .. } = &a else {
+            panic!()
+        };
+        let c = GuidedConfirmation {
+            identity: true,
+            scope: true,
+            digest: *digest,
+        };
+        let again = reconfirm_variant(&known, &a, &c, &stored).unwrap();
+        assert_eq!(again.validation().mapping_id, "profile:wowf/2");
+        assert!(confirm_enrolled(&known, &a, again.validation()).is_ok());
+    }
+
+    #[test]
+    fn profile_disclosure_names_the_suffix_order() {
+        let VariantVerdict::Recognized(id) = validate_variant(&testkit::variant_obs_forever())
+        else {
+            panic!()
+        };
+        let text = consent_disclosures(&ConsentContext {
+            identity: &id,
+            mapping_id: "profile:wowf/2",
+            install_root: "C:\\Synthetic\\Root",
+            addons_path: "C:\\Synthetic\\Root\\_forever_\\Interface\\AddOns",
+        })
+        .join("\n");
+        assert!(text.contains("profile:wowf/2"), "{text}");
+        assert!(
+            text.contains("<Name>_Forever.toc, then <Name>_Camelot.toc, then <Name>_Mainline.toc")
+        );
+        assert!(!text.contains("no client-specific variants"));
     }
 
     #[test]

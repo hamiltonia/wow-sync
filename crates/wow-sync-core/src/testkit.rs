@@ -25,7 +25,7 @@ use crate::target::{compute_target, GroupTarget, TargetInput, TreeAvail};
 use crate::toc::{IdKind, TocCandidate};
 use crate::variant::{
     assess_layout, confirm_variant, validate_variant, ConfirmedVariant, DirObs, FileObs,
-    OtherVariants, VariantObservation, VariantVerdict, SYNTHETIC_MARKER_LINE,
+    MarkerPolicy, OtherVariants, VariantObservation, VariantVerdict, SYNTHETIC_MARKER_LINE,
 };
 use std::collections::{BTreeMap, VecDeque};
 
@@ -80,7 +80,7 @@ pub fn variant_obs_forever() -> VariantObservation {
 }
 
 pub fn confirmed_forever() -> ConfirmedVariant {
-    let v = validate_variant(&variant_obs_forever());
+    let v = validate_variant(&variant_obs_forever(), MarkerPolicy::NotRequired);
     let VariantVerdict::Recognized(id) = &v else {
         panic!("{v:?}")
     };
@@ -91,7 +91,7 @@ pub fn confirmed_forever() -> ConfirmedVariant {
 pub fn client(build: &str) -> ClientInfo {
     ClientInfo {
         build_version: Some(build.to_string()),
-        toc_mapping: "validated-plain/1".into(),
+        toc_mapping: "profile:wowf/2".into(),
     }
 }
 
