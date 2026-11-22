@@ -701,12 +701,19 @@ mod tests {
         ));
         let st = a.svc.status();
         assert!(st.provider_error.is_some() && st.test_mode, "{st:?}");
+        assert!(st.test_mode_blocked, "typed flag, not error text: {st:?}");
+        assert!(st.enrolled && !st.computer_name.is_empty(), "{st:?}");
+        assert!(
+            !st.group_name.is_empty() && !st.identity_line.is_empty(),
+            "{st:?}"
+        );
 
         assert_eq!(
             a.svc.command(Command::SetTestMode(false)),
             Ok(CommandOutcome::Recorded)
         );
         assert!(!a.svc.status().test_mode);
+        assert!(!a.svc.status().test_mode_blocked);
         a.restart();
         synced(&mut a);
         assert_eq!(a.read("Beta/main.lua").as_deref(), Some("beta-v1"));

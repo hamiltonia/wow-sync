@@ -77,9 +77,25 @@ clicked; `test-mode.txt` appeared in the state dir), `setup-test-mode-blocked.pn
 `needs-attention-test-mode.png`, `overview-test-mode-banner.png`,
 `overview-test-mode-turned-off.png` (banner action: status recovered, "Test mode is off").
 
+## Review fixes (RV6-06, RV6-07, RV6-04)
+
+- RV6-06: `StatusSnapshot.test_mode_blocked` (typed) is set by core's blocked snapshot, which now
+  also carries group name, computer name and identity (best effort, blank on read errors). The app
+  reads `World.test_mode_blocked` instead of matching error text; the header reads "Paused by test
+  mode" with the group and computer names. Screenshot: `header-test-mode.png` (synthetic lab,
+  `st10`, unmarked install).
+- RV6-07: the backend reports whether `SetTestMode` was applied; the notice ("Test mode is off/on")
+  appears only after success, a failure shows "WoW Sync could not change test mode, so nothing
+  was changed..." and the status is re-read. No optimistic flip of the shown state.
+- RV6-04 (app part): the stale "synthetic installs only" comment in `main.rs` is reworded.
+
+| Check | Result |
+|---|---|
+| New tests: `the_header_says_test_mode_paused_sync_and_keeps_the_names`, `error_text_alone_never_means_test_mode`, `a_failed_test_mode_change_is_reported_and_never_claims_a_state`, extended `test_mode_persists_and_blocks_unmarked_installs_both_ways`; all in `R6-app:test-mode-gui` | PASS |
+| A-38 control: snapshot `test_mode_blocked: true` -> `false` makes the e2e test fail (e2e.rs:704); reverted, passes | PASS |
+| Failure path of `SetTestMode` through a real unwritable state dir | NOT RUN (only the notice mapping is unit tested) |
+| `cargo xtask verify --tier offline` / `--tier native` | PASS / PASS |
 ## Observations for others
 
-- While blocked, the status header reads "Waiting" with an empty group and computer name (the
-  gate's blocked snapshot carries no group/computer text). Not changed here; R6-gate owns it.
-- The Settings toggle sits below the fold at the default window size; screenshots were taken after
+- (Fixed in the review-fix section above: the blocked header now shows the names.) The Settings toggle sits below the fold at the default window size; screenshots were taken after
   scrolling.

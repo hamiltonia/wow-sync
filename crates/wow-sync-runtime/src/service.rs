@@ -430,6 +430,9 @@ pub struct StatusSnapshot {
     /// Test mode is on for this computer (D-28): only install roots with the synthetic marker
     /// sync. Off by default; `Command::SetTestMode` changes it.
     pub test_mode: bool,
+    /// Test mode is what stops this enrolled install from syncing: it is on and the install does
+    /// not carry the marker. Turning test mode off clears it.
+    pub test_mode_blocked: bool,
 }
 
 impl StatusSnapshot {
@@ -2062,6 +2065,28 @@ impl SliceService {
         Ok(out)
     }
 
+    /// Names for a snapshot that cannot read the install: from local records and, when it can be
+    /// read, the group record. Anything unreadable stays blank.
+    fn blocked_names(&self) -> (String, String, String) {
+        let Ok(Some(e)) = self.read_enrollment() else {
+            return Default::default();
+        };
+        let computer = self
+            .read_computer()
+            .ok()
+            .flatten()
+            .map(|c| c.display_name)
+            .unwrap_or_default();
+        let group = self
+            .open_provider()
+            .ok()
+            .and_then(|p| p.read(&layout::group_record(&e.group_id), SMALL).ok())
+            .and_then(|b| decode::<GroupRecord>(&b, SMALL as usize).ok())
+            .map(|g| g.display_name)
+            .unwrap_or_default();
+        (group, computer, e.variant_folder)
+    }
+
     fn observe_world(&mut self, persist: bool) -> Result<World, ServiceError> {
         let enrollment = self.read_enrollment()?.ok_or(ServiceError::NotEnrolled)?;
         let computer = self.read_computer()?.ok_or(ServiceError::NotEnrolled)?;
@@ -2495,6 +2520,7 @@ impl SliceService {
         };
         StatusSnapshot {
             test_mode: false,
+            test_mode_blocked: false,
             enrolled: true,
             headline: render_headline(&sv),
             group_name: w.group.display_name.clone(),
@@ -2612,10 +2638,15 @@ impl SliceService {
             }
             Err(ServiceError::TestModeBlocked) => {
                 self.provider_error = None;
+                let (group_name, computer_name, identity_line) = self.blocked_names();
                 return StatusSnapshot {
                     enrolled: true,
                     headline: headline_sentence(Headline::NeedsHelp),
+                    group_name,
+                    computer_name,
+                    identity_line,
                     provider_error: Some(ServiceError::TestModeBlocked.to_string()),
+                    test_mode_blocked: true,
                     ..Default::default()
                 };
             }

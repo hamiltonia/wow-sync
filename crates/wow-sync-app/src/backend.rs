@@ -80,6 +80,20 @@ pub struct Shared {
     /// What core currently offers the owner to decide (typed; the app renders the words).
     pub decisions: Vec<wow_sync_core::decision::DecisionItem>,
     pub group_result: Option<GroupResult>,
+    /// The last test-mode change: a counter so a result shows once, the mode asked for, and
+    /// whether it was applied.
+    pub test_mode_result: Option<(u64, bool, bool)>,
+}
+
+pub const TEST_MODE_FAILED: &str = "WoW Sync could not change test mode, so nothing was changed. Check that its data folder can be written to, then try again.";
+
+/// What to tell the owner after a test-mode change; never claims a state that was not saved.
+pub fn test_mode_notice(on: bool, applied: bool) -> &'static str {
+    match (applied, on) {
+        (false, _) => TEST_MODE_FAILED,
+        (true, true) => "Test mode is on",
+        (true, false) => "Test mode is off",
+    }
 }
 
 pub type SharedState = Arc<Mutex<Shared>>;
@@ -336,14 +350,30 @@ fn run(
             }
             Some(Cmd::SetTestMode(on, t)) => {
                 let cmd = wow_sync_runtime::Command::SetTestMode(on);
+                let mut failed = false;
                 if let Some(s) = svc.as_mut() {
-                    let _ = s.command(cmd);
+                    failed = s.command(cmd).is_err();
                     refresh(s, &shared, &wake, false);
                 } else if let Some(t) = t {
-                    if let Ok(mut s) = SliceService::new(config_for(&opts, &t)) {
-                        let _ = s.command(cmd);
-                    }
+                    failed = match SliceService::new(config_for(&opts, &t)) {
+                        Ok(mut s) => s.command(cmd).is_err(),
+                        Err(_) => true,
+                    };
+                    // The folder is judged again, so setup shows the real state either way.
+                    let p = SliceService::new(config_for(&opts, &t)).map(|s| s.inspect());
+                    publish(&shared, &wake, |g| {
+                        g.preview = p.ok();
+                        g.message = if failed {
+                            TEST_MODE_FAILED.into()
+                        } else {
+                            String::new()
+                        };
+                    });
                 }
+                publish(&shared, &wake, |g| {
+                    let seq = g.test_mode_result.as_ref().map_or(1, |r| r.0 + 1);
+                    g.test_mode_result = Some((seq, on, !failed));
+                });
                 continue;
             }
             Some(Cmd::SaveToggles(t)) => {
@@ -439,6 +469,16 @@ fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_test_mode_change_is_reported_and_never_claims_a_state() {
+        let failed = test_mode_notice(false, false);
+        assert_eq!(failed, TEST_MODE_FAILED);
+        assert_eq!(test_mode_notice(true, false), TEST_MODE_FAILED);
+        assert!(!failed.contains("Test mode is off"));
+        assert_eq!(test_mode_notice(false, true), "Test mode is off");
+        assert_eq!(test_mode_notice(true, true), "Test mode is on");
+    }
 
     #[test]
     fn refusals_read_as_plain_language() {

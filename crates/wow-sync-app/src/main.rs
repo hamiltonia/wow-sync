@@ -1,7 +1,7 @@
 //! WoW Sync. Normal start reads the remembered setup, or detects the game and Dropbox
 //! read-only and shows the setup guide.
 //!
-//! Developer mode works on synthetic installs only:
+//! Developer mode runs on the install you point it at (use a copy or a synthetic one):
 //!   wow-sync --dev --install <root> [--provider <dir>] [--state <dir>] [--name N]
 //!            [--folder _forever_] [--start-hidden] [--interval-ms N] [--recent-ms N]
 //!            [--crash-after N] [--hide-after-secs N]

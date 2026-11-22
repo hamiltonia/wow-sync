@@ -1662,6 +1662,10 @@ tests = [
     "service::reason_text_tests::test_mode_refusal_is_flagged_so_the_offer_can_be_shown",
     "model::tests::test_mode_blocking_offers_to_turn_it_off_and_never_blames_dropbox",
     "model::tests::a_real_shared_folder_error_is_not_mistaken_for_test_mode",
+    "model::tests::the_header_says_test_mode_paused_sync_and_keeps_the_names",
+    "model::tests::error_text_alone_never_means_test_mode",
+    "backend::tests::a_failed_test_mode_change_is_reported_and_never_claims_a_state",
+    "e2e::tests::test_mode_persists_and_blocks_unmarked_installs_both_ways",
 ]
 # <<< section: R6-app
 
