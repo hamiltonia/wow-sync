@@ -289,6 +289,14 @@ removed by the rollback removal (§1) instead.
   "Use 2.2" (a keep whose `known` covers X) or "Stay on 2.0" (a local
   dismissal of that candidate only). A source that is `Same` (contracts.md
   §4.2) as a `considered` entry never raises the notice.
+  *As built (run-006 H1):* a newer copy that exists only on this computer
+  (a local edit made after the rollback) stays installed here and is
+  withheld from publishing until the owner answers (the Q-88 local-only
+  mechanism, `local_only_versions` in the snapshot); it is not replaced by
+  the recovered release. "Use" shares it with the group; "Stay" is
+  persisted as a local dismissal keyed by the rejection and the raised
+  copies, after which the recovered release is applied here and the newer
+  copy is kept for recovery. A different newer copy raises a new notice.
 
 ### 3.2 Concurrent, late and conflicting records (R4D-9)
 

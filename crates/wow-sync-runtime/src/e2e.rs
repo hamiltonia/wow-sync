@@ -807,6 +807,122 @@ mod tests {
         }
     }
 
+    /// A and B converge on alpha-v1 after B rolled back the group-rejected alpha-v2; then A's
+    /// owner edits Alpha into a newer, never-considered copy.
+    fn rolled_back_then_edited_newer(lab: &Lab) -> (Pc, Pc) {
+        let mut a = lab.pc("a");
+        a.addon("Alpha", "alpha-v2");
+        let g = a.create();
+        synced(&mut a);
+        let mut b = lab.pc("b");
+        b.addon("Alpha", "alpha-v1");
+        b.join(&g);
+        for _ in 0..2 {
+            synced(&mut b);
+            synced(&mut a);
+        }
+        let row = b
+            .svc
+            .status()
+            .recovery_points
+            .into_iter()
+            .find(|r| r.package.as_str() == "alpha")
+            .expect("the replaced older Alpha is kept");
+        assert_eq!(
+            b.svc.command(Command::Rollback {
+                package: row.package.clone(),
+                recovered: row.release,
+            }),
+            Ok(CommandOutcome::Recorded)
+        );
+        for _ in 0..3 {
+            synced(&mut b);
+            synced(&mut a);
+        }
+        for pc in [&a, &b] {
+            assert_eq!(pc.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        }
+        a.addon("Alpha", "alpha-newer-v3");
+        (a, b)
+    }
+
+    fn answer_rollback_notice(a: &mut Pc, use_newer: bool) {
+        use wow_sync_core::decision::{DecisionId, OptionLabel};
+        let item = a
+            .svc
+            .offered_decisions()
+            .iter()
+            .find(|i| i.reason == wow_sync_core::decision::DecisionKind::NewerAfterRollback)
+            .expect("the newer-after-rollback notice is offered")
+            .clone();
+        let option = item
+            .options
+            .iter()
+            .find(|o| matches!(o.label, OptionLabel::Release { .. }) == use_newer)
+            .unwrap()
+            .id;
+        a.svc
+            .command(Command::Decide {
+                item: DecisionId(item.scope.clone()),
+                option,
+                shown: item.evidence,
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn a_newer_local_edit_after_a_rollback_is_held_and_offered_not_replaced() {
+        use wow_sync_core::decision::DecisionKind;
+        let lab = Lab::new();
+        let (mut a, mut b) = rolled_back_then_edited_newer(&lab);
+        for _ in 0..3 {
+            synced(&mut a);
+            assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-newer-v3"));
+            assert_eq!(offered_kinds(&a), vec![DecisionKind::NewerAfterRollback]);
+            assert_eq!(a.svc.status().local_only_versions.len(), 1);
+            synced(&mut b);
+            assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        }
+    }
+
+    #[test]
+    fn using_the_newer_version_after_a_rollback_ends_it_and_converges_the_group() {
+        let lab = Lab::new();
+        let (mut a, mut b) = rolled_back_then_edited_newer(&lab);
+        synced(&mut a);
+        answer_rollback_notice(&mut a, true);
+        for _ in 0..3 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        for pc in [&a, &b] {
+            assert_eq!(pc.read("Alpha/main.lua").as_deref(), Some("alpha-newer-v3"));
+        }
+        assert!(offered_kinds(&a).is_empty(), "{:?}", offered_kinds(&a));
+        assert!(a.svc.status().local_only_versions.is_empty());
+    }
+
+    #[test]
+    fn staying_after_a_rollback_keeps_the_rollback_and_recovers_the_newer_copy() {
+        let lab = Lab::new();
+        let (mut a, mut b) = rolled_back_then_edited_newer(&lab);
+        synced(&mut a);
+        answer_rollback_notice(&mut a, false);
+        for _ in 0..3 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        for pc in [&a, &b] {
+            assert_eq!(pc.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        }
+        assert!(offered_kinds(&a).is_empty(), "{:?}", offered_kinds(&a));
+        let rec = a.install.variant_dir.join(".wowsync").join("recovery");
+        assert!(
+            has_file(&rec, "main.lua", b"alpha-newer-v3"),
+            "the newer copy is kept for recovery"
+        );
+    }
+
     #[test]
     fn first_run_join_holding_a_group_rejected_release_does_not_resurrect_it() {
         use wow_sync_core::hash::package_hash;

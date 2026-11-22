@@ -17,10 +17,12 @@ use crate::hash::sha256;
 use crate::hooks::DecisionHooks;
 use crate::ids::Sha256;
 use crate::kinds::{ChoiceReason, CodeChoice, EnrollmentRef};
+use crate::ledger::Ledger;
 use crate::paths::FolderKey;
 use crate::records::encode;
+use crate::reject::{NewerAfterRollback, RejectBehaviour};
 use crate::target::{DecisionReason, GroupTarget, PackageCopies, PackageTarget};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The wire bytes of any authority record.
 pub fn encode_authority(r: &AuthorityRecord) -> Vec<u8> {
@@ -173,6 +175,101 @@ pub fn new_version_item(
     Ok(build_item(
         DecisionScope::Folders(nv.scope.clone()),
         DecisionKind::NewVersionAfterDecision,
+        DecisionReach::Group,
+        planned,
+        &basis,
+    ))
+}
+
+/// The `NewerAfterRollback` items (rollback.md §3.1, Q-81): for each live rollback, one item per
+/// package offering "Use <version>" for each raised copy (a keep that covers the rollback) and
+/// "Stay" on the recovered version (a local dismissal of exactly these copies).
+pub fn rollback_items(
+    view: &ChoiceView,
+    cx: &WriteCx,
+    rejects: &RejectBehaviour,
+    ledger: &Ledger,
+    dismissed: &BTreeSet<Sha256>,
+    packages: &[PackageCopies],
+) -> Vec<(DecisionItem, Plans)> {
+    let mut out = Vec::new();
+    for pc in packages {
+        for n in rejects.newer_after_rollbacks(ledger, &pc.package, &pc.copies) {
+            let key = n.dismissal_key(&pc.copies);
+            if dismissed.contains(&key) {
+                continue;
+            }
+            if let Some(item) = rollback_item(view, cx, pc, &n, key) {
+                out.push(item);
+            }
+        }
+    }
+    out
+}
+
+fn rollback_item(
+    view: &ChoiceView,
+    cx: &WriteCx,
+    pc: &PackageCopies,
+    n: &NewerAfterRollback,
+    key: Sha256,
+) -> Option<(DecisionItem, Plans)> {
+    let shown: Vec<CopyEntry> = pc
+        .copies
+        .iter()
+        .map(|c| CopyEntry::from_copy(c, &n.scope))
+        .collect::<Result<_, _>>()
+        .ok()?;
+    let mut planned = Vec::new();
+    for i in &n.copies {
+        let c = &pc.copies[*i];
+        let choice = build_keep(
+            view,
+            cx,
+            ChoiceReason::NewerAfterRollback,
+            &n.scope,
+            &shown[*i],
+            &shown,
+            &c.source,
+        )
+        .ok()?;
+        let label = c
+            .version
+            .folders
+            .iter()
+            .find_map(|f| f.toc.version.clone())
+            .unwrap_or_default();
+        planned.push(PlannedOption {
+            option: DecisionOption {
+                id: OptionId(planned.len() as u32),
+                label: OptionLabel::Release {
+                    version_label: label,
+                },
+                holders: c.holders.clone(),
+                consequence: Consequence {
+                    installs: n.scope.clone(),
+                    ..Consequence::default()
+                },
+                warning: None,
+            },
+            effect: DecisionEffect::Write(Box::new(AuthorityRecord::CodeChoice(choice))),
+        });
+    }
+    planned.push(PlannedOption {
+        option: DecisionOption {
+            id: OptionId(planned.len() as u32),
+            label: OptionLabel::KeepCurrent,
+            holders: pc.copies[n.recovered].holders.clone(),
+            consequence: Consequence::default(),
+            warning: None,
+        },
+        effect: DecisionEffect::Local(LocalResolution::Dismiss(key)),
+    });
+    let mut basis: Vec<Sha256> = pc.copies.iter().map(|c| c.version.hash).collect();
+    basis.push(n.rejection);
+    Some(build_item(
+        DecisionScope::Folders(n.scope.clone()),
+        DecisionKind::NewerAfterRollback,
         DecisionReach::Group,
         planned,
         &basis,

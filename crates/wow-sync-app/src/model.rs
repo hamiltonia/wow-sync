@@ -797,10 +797,14 @@ pub fn need_items(w: &World) -> Vec<NeedItem> {
             continue;
         };
         let Some(first) = ks.first() else { continue };
-        if item.reason != wow_sync_core::decision::DecisionKind::NewVersionAfterDecision
-            || w.addons.iter().any(|a| {
-                a.key.as_str() == first.as_str() && matches!(a.kind, Kind::NeedsDecision(_))
-            })
+        if !matches!(
+            item.reason,
+            wow_sync_core::decision::DecisionKind::NewVersionAfterDecision
+                | wow_sync_core::decision::DecisionKind::NewerAfterRollback
+        ) || w
+            .addons
+            .iter()
+            .any(|a| a.key.as_str() == first.as_str() && matches!(a.kind, Kind::NeedsDecision(_)))
         {
             continue;
         }

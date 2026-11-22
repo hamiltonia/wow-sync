@@ -117,3 +117,22 @@ mutation; it was reverted and redone in separate calls. No commit was involved.
 - RV6-03: settings.md and Q-68/Q-77 updated to D-28 and R6-check's observations; no real-client
   confirmation claimed.
 - Verify: `--tier offline` pass, `--tier native` pass.
+
+## H1 fix (NewerAfterRollback producer)
+
+- Cause: no code produced `NewerAfterRollback`; A's newer local copy was replaced by the recovered
+  release (old copy to recovery).
+- Choice: follow rollback.md §3.1 and reuse the Q-88 local-only mechanism. A local-only newer copy
+  stays installed and unpublished; a non-blocking `NewerAfterRollback` item offers "Use <version>"
+  (a keep covering the rejection; ends the constraint, group converges) and "Stay" (local dismissal
+  persisted in `authority-dismissed.json`; then the recovered release is applied and the newer copy
+  goes to recovery). Core: `RejectBehaviour::newer_after_rollbacks`, `decide::rollback_items`;
+  runtime: `withheld_local_versions`, Stay persistence in `service.rs`.
+- Tests (in `R6-gate:first-run-loses-nothing`): `a_newer_local_edit_after_a_rollback_is_held_and_offered_not_replaced`,
+  `using_the_newer_version_after_a_rollback_ends_it_and_converges_the_group`,
+  `staying_after_a_rollback_keeps_the_rollback_and_recovers_the_newer_copy`.
+- Controls (each reverted, diff clean): producer returns empty → all 3 fail (equals the pre-fix
+  behaviour); Stay dismissal not persisted → the Stay test fails.
+- App files touched: `crates/wow-sync-app/src/decisions_ui.rs` (text/labels), `model.rs` (Needs
+  attention includes the kind). Actions already go through `Command::Decide`.
+- Verify: `--tier offline` pass, `--tier native` pass.

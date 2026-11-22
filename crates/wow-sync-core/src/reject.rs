@@ -3,18 +3,19 @@
 //! the lift and the Q-84 gate. Pure: ledger and sources in, decisions out.
 
 use crate::authority::{covered, AuthorityRecord};
+use crate::choice::{project, Copy};
 use crate::decision::{Constraint, ConstraintKind};
 use crate::explain::Explanation;
 use crate::hash::{package_hash, sha256};
 use crate::hooks::{ConstraintHooks, Neutral};
-use crate::ids::{GroupId, OpId, Sha256};
+use crate::ids::{ComputerId, GroupId, OpId, Sha256};
 use crate::kinds::{
     Ack, AckItem, AckResult, AckSettings, Considered, EnrollmentRef, Issuer, Known, Lift,
     ManifestFolder, Readd, ReaddEvidence, RecoveredEntry, RejectedEntry, Rejection,
     RejectionSettings, Removal, RemovalEvidence, RemovalSettings, TreeEntry,
 };
 use crate::ledger::{resolve_known, Derived, Ledger};
-use crate::package::Package;
+use crate::package::{compare_package, Package, PackageOrder};
 use crate::paths::FolderKey;
 use crate::plan::{ExpectedLive, FolderAction, FolderApply, PackageApply, RemoveApply};
 use crate::records::{encode, FolderTreeRecord, OpKind, PendingRecord, Record};
@@ -289,6 +290,103 @@ impl RejectBehaviour {
                 same_release(source, &Release::new(&r.folders, &trees(&c.folders)))
                     == ScopeMatch::Same
             })
+    }
+
+    /// Q-81 over a package's non-rejected copies: for each live rollback whose recovered release
+    /// is held in `copies`, the other copies that are demonstrably newer and not among what the
+    /// rejection considered. They raise `NewerAfterRollback` and never install.
+    pub fn newer_after_rollbacks(
+        &self,
+        l: &Ledger,
+        p: &Package,
+        copies: &[Copy],
+    ) -> Vec<NewerAfterRollback> {
+        let mut live = BTreeSet::new();
+        for f in &p.members {
+            for c in self.live_constraints(l, f) {
+                if c.kind == ConstraintKind::Rejection {
+                    live.insert(c.record);
+                }
+            }
+        }
+        let active = self.active(l);
+        let mut out = Vec::new();
+        for h in live {
+            let Some((_, r)) = active.iter().find(|(x, _)| *x == h) else {
+                continue;
+            };
+            let rel = recovered_release(r);
+            let Some(recovered) = copies
+                .iter()
+                .position(|c| same_release(&c.source, &rel) == ScopeMatch::Same)
+            else {
+                continue;
+            };
+            let base = project(&copies[recovered].version, &r.folders);
+            let raised: Vec<usize> = copies
+                .iter()
+                .enumerate()
+                .filter(|(i, c)| {
+                    let newer = matches!(
+                        compare_package(&project(&c.version, &r.folders), &base),
+                        PackageOrder::Greater { .. }
+                    );
+                    *i != recovered && self.newer_after_rollback(l, &h, &c.source, newer)
+                })
+                .map(|(i, _)| i)
+                .collect();
+            if !raised.is_empty() {
+                let mut scope = r.folders.clone();
+                scope.sort();
+                out.push(NewerAfterRollback {
+                    rejection: h,
+                    scope,
+                    recovered,
+                    copies: raised,
+                });
+            }
+        }
+        out
+    }
+}
+
+/// A live rollback and the copies (indexes into the copies passed in) that raise the notice.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewerAfterRollback {
+    pub rejection: Sha256,
+    pub scope: Vec<FolderKey>,
+    pub recovered: usize,
+    pub copies: Vec<usize>,
+}
+
+impl NewerAfterRollback {
+    /// The raised copies that only `own` holds: they stay installed and unpublished until the
+    /// owner answers (Q-88, D-26).
+    pub fn local_only(&self, copies: &[Copy], own: &ComputerId) -> Vec<usize> {
+        self.copies
+            .iter()
+            .copied()
+            .filter(|i| {
+                let h = &copies[*i].holders;
+                !h.is_empty() && h.iter().all(|e| &e.computer_id == own)
+            })
+            .collect()
+    }
+
+    /// What "Stay on the recovered version" dismisses: these exact raised copies.
+    pub fn dismissal_key(&self, copies: &[Copy]) -> Sha256 {
+        let mut hashes: Vec<Sha256> = self
+            .copies
+            .iter()
+            .map(|i| copies[*i].version.hash)
+            .collect();
+        hashes.sort();
+        let mut bytes = b"newer-after-rollback".to_vec();
+        bytes.extend(self.rejection.0);
+        for h in hashes {
+            bytes.extend(h.0);
+        }
+        sha256(&bytes)
     }
 }
 

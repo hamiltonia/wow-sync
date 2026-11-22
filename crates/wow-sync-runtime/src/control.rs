@@ -534,6 +534,8 @@ pub struct LocalOnlyVersion {
 /// The folders to hold back and the local-only versions behind them (Q-88).
 pub(crate) fn withheld_local_versions(
     view: &wow_sync_core::choice::ChoiceView,
+    rejects: &wow_sync_core::reject::RejectBehaviour,
+    ledger: &wow_sync_core::ledger::Ledger,
     packages: &[wow_sync_core::target::PackageCopies],
     own: &wow_sync_core::ids::ComputerId,
     titles: &std::collections::BTreeMap<String, String>,
@@ -544,10 +546,21 @@ pub(crate) fn withheld_local_versions(
     let mut withheld = std::collections::BTreeSet::new();
     let mut rows = Vec::new();
     for pc in packages {
+        let mut raised: Vec<(Vec<wow_sync_core::paths::FolderKey>, usize)> = Vec::new();
         for nv in view.new_versions(&pc.package, &pc.copies) {
-            let Some(&first) = nv.local_only(&pc.copies, own).first() else {
+            if let Some(&first) = nv.local_only(&pc.copies, own).first() {
+                raised.push((nv.scope.clone(), first));
+            }
+        }
+        for n in rejects.newer_after_rollbacks(ledger, &pc.package, &pc.copies) {
+            if ledger.dismissed().contains(&n.dismissal_key(&pc.copies)) {
                 continue;
-            };
+            }
+            if let Some(&first) = n.local_only(&pc.copies, own).first() {
+                raised.push((n.scope.clone(), first));
+            }
+        }
+        for (scope, first) in raised {
             let copy = &pc.copies[first];
             let name = copy
                 .version
@@ -561,17 +574,17 @@ pub(crate) fn withheld_local_versions(
             rows.push(LocalOnlyVersion {
                 package: pc.package.key.clone(),
                 title: titles.get(&name).cloned().unwrap_or(name),
-                scope: nv.scope.clone(),
+                scope: scope.clone(),
                 version_label: copy
                     .version
                     .folders
                     .iter()
                     .find_map(|f| f.toc.version.clone()),
                 decision: wow_sync_core::decision::DecisionId(
-                    wow_sync_core::decision::DecisionScope::Folders(nv.scope.clone()),
+                    wow_sync_core::decision::DecisionScope::Folders(scope.clone()),
                 ),
             });
-            withheld.extend(nv.scope.iter().cloned());
+            withheld.extend(scope);
         }
     }
     (withheld, rows)
