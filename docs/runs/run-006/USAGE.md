@@ -8,9 +8,9 @@ planning count against run-006. Run-006 usage = cumulative − 37,617.3.
 
 | # | Packet | Role / model | Agent | AIU | Result |
 |---|---|---|---|---|---|
-| 1 | R6-gate | Implementation / claude-sonnet-5.5 | | | |
-| 2 | R6-app | Implementation / claude-sonnet-5.5 | | | |
-| 3 | R6-release | Implementation / claude-sonnet-5.5 | | | |
+| 1 | R6-gate | Implementation / claude-sonnet-5.5 | `113ec187` | | launched from `c77d050` |
+| 2 | R6-app | Implementation / claude-sonnet-5.5 | `5655a956` | | launched from `c77d050` (stage A) |
+| 3 | R6-release | Implementation / claude-sonnet-5.5 | `e075f3c8` | | launched from `c77d050` |
 
 ## Checkpoints
 
