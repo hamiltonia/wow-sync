@@ -13,3 +13,19 @@
   points to the existing `docs/runs/run-006/HANDOFF.md`.
 - Goal 5: `devkit.rs` wording updated; marker writer kept. No other docs or
   scripts say the marker is required.
+
+## Verification (E-08)
+
+Environment: Windows 11 (NT 10.0.26300), x64 dev PC, rustc 1.100.0, run from
+`D:\GitHub\wow-sync.worktrees\R6-release` after `git merge main` (`6336525`),
+with the 0.2.0 bump, the notes and the RV6-01/RV6-02 wording fixes in the
+tree. Prefix: `$env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"`.
+
+| Command | Result |
+|---|---|
+| `cargo xtask verify --tier offline` | PASS (fmt, clippy, test, required-cases, deny, markdown-links) |
+| `cargo xtask verify --tier native` | PASS |
+
+The same two commands also passed after the 0.2.0 bump (before the notes
+were written) and after the first notes commit (offline only).
+
