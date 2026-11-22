@@ -234,6 +234,8 @@ pub struct World {
     pub game_running: bool,
     pub provider_error: Option<String>,
     pub test_mode: bool,
+    /// Test mode is what blocks this install (typed signal from the status snapshot).
+    pub test_mode_blocked: bool,
     pub stale_secs: Option<i64>,
     pub reconfirm: Option<Reconfirm>,
     pub features: crate::features::FeatureData,
@@ -377,6 +379,7 @@ impl World {
             game_running: false,
             provider_error: None,
             test_mode: false,
+            test_mode_blocked: false,
             stale_secs: None,
             reconfirm: None,
             features: Default::default(),
@@ -407,6 +410,7 @@ impl World {
         w.identity_label = s.identity_line.clone();
         w.provider_error = s.provider_error.clone();
         w.test_mode = s.test_mode;
+        w.test_mode_blocked = s.test_mode_blocked;
         w.recovery_extra = s.retained_extra_recovery;
         w.reconfirm = s.reconfirm.as_ref().map(reconfirm_of);
         w.paused_since = i.paused_since_ms.map(|ms| {

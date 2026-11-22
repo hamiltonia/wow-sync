@@ -136,6 +136,8 @@ pub fn headline(w: &World) -> Head {
         ("Set up this computer".to_string(), Tone::Unknown)
     } else if let Some(r) = w.features.data_at_risk.first() {
         (r.text.clone(), Tone::Error)
+    } else if blocked_by_test_mode(w) {
+        ("Paused by test mode".to_string(), Tone::Help)
     } else if let (false, Some((h, _))) = (core_blocks_pause, &standing) {
         let held = matches!(w.features.standing, crate::features::Standing::Held);
         (h.clone(), if held { Tone::Waiting } else { Tone::Help })
@@ -191,6 +193,7 @@ fn removing(w: &World) -> usize {
 /// The line under the headline when the headline alone is not enough (ops.md §1.6-§1.7).
 pub fn headline_sub(w: &World) -> Option<String> {
     if !w.enrolled
+        || blocked_by_test_mode(w)
         || !w.features.data_at_risk.is_empty()
         || matches!(w.view.headline, Headline::Error | Headline::NeedsHelp)
     {
@@ -598,10 +601,7 @@ pub struct Banner {
 }
 
 pub fn blocked_by_test_mode(w: &World) -> bool {
-    w.test_mode
-        && w.provider_error
-            .as_deref()
-            .is_some_and(|e| e.starts_with("Test mode is on"))
+    w.test_mode && w.test_mode_blocked
 }
 
 pub const TEST_MODE_HELP: &str = "Test mode is on, and this installation is not marked as a test folder, so syncing is paused. Nothing was changed.";
@@ -1387,8 +1387,30 @@ mod tests {
     fn blocked() -> World {
         let mut w = enrolled();
         w.test_mode = true;
+        w.test_mode_blocked = true;
         w.provider_error = Some(wow_sync_runtime::ServiceError::TestModeBlocked.to_string());
         w
+    }
+
+    #[test]
+    fn the_header_says_test_mode_paused_sync_and_keeps_the_names() {
+        let w = blocked();
+        let h = headline(&w);
+        assert_eq!(h.text, "Paused by test mode");
+        assert_eq!(h.tone, Tone::Help);
+        assert!(context_line(&w).contains("My add-ons"));
+        assert!(context_line(&w).contains("Desk"));
+    }
+
+    #[test]
+    fn error_text_alone_never_means_test_mode() {
+        let mut w = enrolled();
+        w.test_mode = true;
+        w.provider_error = Some(wow_sync_runtime::ServiceError::TestModeBlocked.to_string());
+        assert!(!blocked_by_test_mode(&w));
+        w.test_mode_blocked = true;
+        w.test_mode = false;
+        assert!(!blocked_by_test_mode(&w));
     }
 
     #[test]

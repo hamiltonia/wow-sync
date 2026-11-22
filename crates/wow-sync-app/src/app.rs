@@ -193,6 +193,7 @@ pub struct Shell {
     pub loaded: bool,
     pub message: String,
     seen_group_result: u64,
+    seen_test_mode: u64,
     pub diag: crate::about_ui::DiagState,
     pub preview_lines: Vec<String>,
     pub app_version: String,
@@ -300,6 +301,7 @@ impl Shell {
             loaded: false,
             message: String::new(),
             seen_group_result: 0,
+            seen_test_mode: 0,
             diag: Default::default(),
             preview_lines: Vec::new(),
             app_version,
@@ -484,6 +486,13 @@ impl Shell {
                     let text =
                         crate::features::result_text_named(r.kind, &r.result, r.subject.as_deref());
                     self.notice.result(self.page, text);
+                }
+            }
+            if let Some((seq, on, applied)) = g.test_mode_result {
+                if seq != self.seen_test_mode {
+                    self.seen_test_mode = seq;
+                    self.notice
+                        .show(self.page, crate::backend::test_mode_notice(on, applied));
                 }
             }
             (
@@ -701,15 +710,11 @@ impl Shell {
                 }
             }
             Act::TurnOffTestMode => {
-                self.w.test_mode = false;
                 self.send(Cmd::SetTestMode(false, None));
-                self.notice.show(self.page, "Test mode is off");
             }
             Act::Toggle(k) => {
                 if k == "test-mode" {
-                    self.w.test_mode = !self.w.test_mode;
-                    self.send(Cmd::SetTestMode(self.w.test_mode, None));
-                    self.notice.show(self.page, "Saved");
+                    self.send(Cmd::SetTestMode(!self.w.test_mode, None));
                 } else if k == "closing-quits" {
                     self.closing_quits = !self.closing_quits;
                     self.save_settings();
