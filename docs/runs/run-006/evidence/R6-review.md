@@ -21,7 +21,7 @@ results. Focus 5 ("accurate against R6-check evidence") is therefore
 
 ## Summary
 
-No critical or major findings. Four moderate and five minor findings follow.
+No critical or major findings. Three moderate and six minor findings follow.
 None of them is a data-loss path. Release-blocking rule (packet): no critical
 or major finding is open.
 
