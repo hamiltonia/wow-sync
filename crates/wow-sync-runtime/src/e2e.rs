@@ -661,9 +661,65 @@ mod tests {
     }
 
     #[test]
-    fn install_without_marker_refused() {
+    fn install_without_marker_enrolls_and_syncs_by_default() {
         let lab = Lab::new();
         let mut a = lab.pc("a");
+        std::fs::remove_file(a.install.root.join(".wowsync-synthetic")).unwrap();
+        a.addon("Alpha", "alpha-v1");
+        assert!(!a.svc.status().test_mode);
+        assert_eq!(a.svc.inspect().kind, PreviewKind::Recognized);
+        let gid = a.create();
+        synced(&mut a);
+        let mut b = lab.pc("b");
+        std::fs::remove_file(b.install.root.join(".wowsync-synthetic")).unwrap();
+        b.join(&gid);
+        synced(&mut b);
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+    }
+
+    #[test]
+    fn test_mode_persists_and_blocks_unmarked_installs_both_ways() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        a.addon("Alpha", "alpha-v1");
+        a.create();
+        synced(&mut a);
+        assert_eq!(
+            a.svc.command(Command::SetTestMode(true)),
+            Ok(CommandOutcome::Recorded)
+        );
+        assert!(a.svc.status().test_mode);
+        a.restart();
+        assert!(a.svc.status().test_mode, "persisted across restarts");
+        synced(&mut a);
+
+        std::fs::remove_file(a.install.root.join(".wowsync-synthetic")).unwrap();
+        a.addon("Beta", "beta-v1");
+        assert!(matches!(
+            a.svc.sync_once(),
+            Err(ServiceError::TestModeBlocked)
+        ));
+        let st = a.svc.status();
+        assert!(st.provider_error.is_some() && st.test_mode, "{st:?}");
+
+        assert_eq!(
+            a.svc.command(Command::SetTestMode(false)),
+            Ok(CommandOutcome::Recorded)
+        );
+        assert!(!a.svc.status().test_mode);
+        a.restart();
+        synced(&mut a);
+        assert_eq!(a.read("Beta/main.lua").as_deref(), Some("beta-v1"));
+    }
+
+    #[test]
+    fn test_mode_refuses_an_unmarked_install_before_enrollment() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        assert_eq!(
+            a.svc.command(Command::SetTestMode(true)),
+            Ok(CommandOutcome::Recorded)
+        );
         std::fs::remove_file(a.install.root.join(".wowsync-synthetic")).unwrap();
         let p = a.svc.inspect();
         assert_eq!(p.kind, PreviewKind::Refused, "{p:?}");
@@ -676,6 +732,208 @@ mod tests {
         };
         assert!(matches!(a.svc.enroll(&req), Err(ServiceError::Refused(_))));
         assert!(!lab.shared.join("WoWSync").exists());
+    }
+
+    fn copy_dir(from: &Path, to: &Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for e in std::fs::read_dir(from).unwrap().flatten() {
+            let (src, dst) = (e.path(), to.join(e.file_name()));
+            if src.is_dir() {
+                copy_dir(&src, &dst);
+            } else {
+                std::fs::copy(&src, &dst).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn first_run_join_of_a_populated_install_loses_nothing() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        a.addon("Alpha", "alpha-v2");
+        a.addon("Gamma", "gamma-v1");
+        let eps = "## Interface: 11508\n## Version: 2.0\n";
+        a.addon_with("Eps", "eps-a", eps);
+        let g = a.create();
+        synced(&mut a);
+
+        let mut b = lab.pc("b");
+        b.addon("Alpha", "alpha-v1");
+        b.addon("Delta", "delta-v1");
+        b.addon_with("Eps", "eps-b", eps);
+        let before = lab.tmp.join("b-before");
+        copy_dir(&b.install.addons, &before);
+        b.join(&g);
+        for _ in 0..2 {
+            synced(&mut b);
+            synced(&mut a);
+        }
+        synced(&mut b);
+
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v2"));
+        assert_eq!(b.read("Gamma/main.lua").as_deref(), Some("gamma-v1"));
+        assert_eq!(b.read("Delta/main.lua").as_deref(), Some("delta-v1"));
+        assert_eq!(a.read("Delta/main.lua").as_deref(), Some("delta-v1"));
+        assert_eq!(b.read("Eps/main.lua").as_deref(), Some("eps-b"));
+        assert_eq!(a.read("Eps/main.lua").as_deref(), Some("eps-a"));
+
+        let st = b.svc.status();
+        let row = st
+            .recovery_points
+            .iter()
+            .find(|r| r.package.as_str() == "alpha")
+            .expect("the replaced older Alpha is kept for the GUI");
+        assert_eq!(
+            b.svc.command(Command::Rollback {
+                package: row.package.clone(),
+                recovered: row.release,
+            }),
+            Ok(CommandOutcome::Recorded)
+        );
+        synced(&mut b);
+        assert!(
+            same_tree(&b.install.addons.join("Alpha"), &before.join("Alpha")),
+            "restored byte for byte"
+        );
+        for kept in ["Delta", "Eps"] {
+            assert!(same_tree(&b.install.addons.join(kept), &before.join(kept)));
+        }
+    }
+
+    #[test]
+    fn first_run_create_from_a_populated_install_changes_nothing_locally() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        a.addon("Alpha", "alpha-v1");
+        a.addon("Beta", "beta-v1");
+        let before = lab.tmp.join("a-before");
+        copy_dir(&a.install.addons, &before);
+        let g = a.create();
+        for _ in 0..3 {
+            let r = synced(&mut a);
+            assert!(r.applied.is_empty(), "{r:?}");
+        }
+        assert!(same_tree(&a.install.addons, &before));
+        assert!(a.svc.status().recovery_points.is_empty());
+        let mut b = lab.pc("b");
+        b.join(&g);
+        synced(&mut b);
+        assert!(same_tree(&a.install.addons, &b.install.addons));
+    }
+
+    #[test]
+    fn first_run_join_with_a_group_removed_addon_keeps_it_restorable() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let g = a.create();
+        a_removes_alpha(&mut a, &g);
+        let (ac, _) = pc_ids(&a);
+        let removal = removal_hash(&lab, &g, &ac);
+
+        let mut b = lab.pc("b");
+        b.addon("Alpha", "alpha-v1");
+        b.addon("Delta", "delta-v1");
+        let before = lab.tmp.join("b-before");
+        copy_dir(&b.install.addons, &before);
+        b.join(&g);
+        for _ in 0..3 {
+            synced(&mut b);
+            synced(&mut a);
+        }
+        assert!(same_tree(
+            &b.install.addons.join("Delta"),
+            &before.join("Delta")
+        ));
+        assert_eq!(a.read("Delta/main.lua").as_deref(), Some("delta-v1"));
+        // A copy the joiner already had is not deleted by a removal that predates it.
+        assert!(same_tree(
+            &b.install.addons.join("Alpha"),
+            &before.join("Alpha")
+        ));
+        assert_eq!(b.svc.status().removal_hashes, vec![removal]);
+    }
+
+    #[test]
+    fn forever_suffix_folders_sync_by_the_forever_rule_and_others_are_never_changed() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let toc = |v: &str| format!("## Interface: 11508\n## Version: {v}\n");
+        a.install.add_addon(
+            "Suf",
+            "Suf.toc",
+            &toc("1.0"),
+            &[
+                ("Suf_Forever.toc", toc("1.0").as_bytes()),
+                ("Suf_Vanilla.toc", toc("9.0").as_bytes()),
+                ("main.lua", b"suf"),
+            ],
+        );
+        a.install.add_addon(
+            "OnlyVanilla",
+            "OnlyVanilla_Vanilla.toc",
+            &toc("1.0"),
+            &[("main.lua", b"vanilla-secret")],
+        );
+        a.install.set_old_mtimes();
+        let g = a.create();
+        synced(&mut a);
+        let mut b = lab.pc("b");
+        b.join(&g);
+        synced(&mut b);
+        assert!(same_tree(
+            &a.install.addons.join("Suf"),
+            &b.install.addons.join("Suf")
+        ));
+        assert!(!b.install.addons.join("OnlyVanilla").exists());
+        let rel = layout::blob(&g, &sha256(b"vanilla-secret"));
+        let p: PathBuf = rel
+            .split('/')
+            .fold(lab.shared.join("WoWSync"), |x, s| x.join(s));
+        assert!(
+            !p.exists(),
+            "a folder this game would not load is not uploaded"
+        );
+    }
+
+    #[test]
+    fn enrolled_forever_with_the_old_plain_mapping_is_reconfirmed_and_loses_nothing() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        a.addon("Alpha", "alpha-v1");
+        a.create();
+        synced(&mut a);
+        let st = LocalState::open_at(&a.cfg.state_dir).unwrap();
+        let bytes = st.read("enrollment.json", 65536).unwrap().unwrap();
+        let mut le: wow_sync_core::records::LocalEnrollment = decode(&bytes, 65536).unwrap();
+        le.validation.mapping_id = "validated-plain/1".into();
+        st.write_atomic("enrollment.json", &wow_sync_core::records::encode(&le))
+            .unwrap();
+        a.restart();
+        assert!(matches!(
+            a.svc.sync_once(),
+            Err(ServiceError::NeedsReconfirmation)
+        ));
+        assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        let offered = a.svc.status().reconfirm.expect("reconfirmation is offered");
+        assert!(a
+            .svc
+            .reconfirm(&ReconfirmRequest {
+                identity_confirmed: false,
+                scope_confirmed: true,
+                digest: offered.digest,
+            })
+            .is_err());
+        a.svc
+            .reconfirm(&ReconfirmRequest {
+                identity_confirmed: true,
+                scope_confirmed: true,
+                digest: offered.digest,
+            })
+            .unwrap();
+        a.addon("Beta", "beta-v1");
+        let r = synced(&mut a);
+        assert!(r.published.is_some(), "{r:?}");
+        assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
     }
 
     struct Crashy {

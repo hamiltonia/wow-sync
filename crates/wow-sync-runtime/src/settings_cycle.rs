@@ -451,9 +451,11 @@ pub fn save_use_shared(
 }
 
 /// The folders whose selected `.toc` declares saved variables (metadata only, never Lua).
-pub fn declaring_folders(scans: &[wow_sync_core::inventory::FolderScan]) -> Vec<DeclaringFolder> {
+pub fn declaring_folders(
+    scans: &[wow_sync_core::inventory::FolderScan],
+    mapping: &wow_sync_core::variant::TocMapping,
+) -> Vec<DeclaringFolder> {
     use wow_sync_core::toc::{select_toc, TocSelection};
-    use wow_sync_core::variant::TocMapping;
     let mut out = Vec::new();
     for s in scans {
         if s.status != wow_sync_core::inventory::ScanStatus::Ok {
@@ -462,9 +464,7 @@ pub fn declaring_folders(scans: &[wow_sync_core::inventory::FolderScan]) -> Vec<
         let Ok(folder) = wow_sync_core::paths::validate_folder_name(&s.name) else {
             continue;
         };
-        if let TocSelection::Selected { info, .. } =
-            select_toc(&s.name, &s.tocs, &TocMapping::ValidatedPlain)
-        {
+        if let TocSelection::Selected { info, .. } = select_toc(&s.name, &s.tocs, mapping) {
             out.push(DeclaringFolder {
                 folder,
                 saved_variables: info.saved_variables,

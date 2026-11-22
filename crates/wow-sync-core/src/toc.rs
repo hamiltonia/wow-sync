@@ -157,13 +157,124 @@ fn candidate_kind(folder: &str, file: &str) -> Option<Option<String>> {
     None
 }
 
-/// The only `.toc` selection rule. In the slice every client uses the plain rule: a folder
-/// with any suffixed candidate is `Unvalidated`, whatever the mapping says (Q-3, Q-20).
-pub fn select_toc(
+/// The only `.toc` selection rule (domain.md §3). An unfamiliar client uses the plain rule: a
+/// folder with any suffixed candidate is `Unvalidated`. A known profile selects by game-type
+/// suffix, then family suffix, then the plain `.toc`; other suffixes are ignored (D-28, Q-3).
+pub fn select_toc(folder: &str, candidates: &[TocCandidate], mapping: &TocMapping) -> TocSelection {
+    match mapping {
+        TocMapping::ValidatedPlain => select_plain(folder, candidates),
+        TocMapping::Profile(p) => select_profile(folder, candidates, p),
+    }
+}
+
+fn select_one(c: &TocCandidate, suffix: Option<String>) -> TocSelection {
+    match &c.contents {
+        FileObs::Bytes(b) => match parse_toc(b) {
+            Ok(info) => TocSelection::Selected {
+                file_name: c.file_name.clone(),
+                suffix,
+                info,
+            },
+            Err(e) => TocSelection::Error {
+                file_name: c.file_name.clone(),
+                reason: format!("{e:?}"),
+            },
+        },
+        FileObs::Missing => TocSelection::Error {
+            file_name: c.file_name.clone(),
+            reason: "missing".to_string(),
+        },
+        FileObs::Unreadable(r) => TocSelection::Error {
+            file_name: c.file_name.clone(),
+            reason: r.clone(),
+        },
+    }
+}
+
+fn same_set<T: PartialEq>(a: &[T], b: &[T]) -> bool {
+    a.iter().all(|x| b.contains(x)) && b.iter().all(|x| a.contains(x))
+}
+
+/// One tier of the profile rule: candidates for the listed suffixes, in order. Nothing found
+/// is `None`; several that agree on version, dependencies and ids select the first listed
+/// suffix; several that differ are `Ambiguous` (domain.md §3 step 2).
+fn select_tier(
     folder: &str,
     candidates: &[TocCandidate],
-    _mapping: &TocMapping,
+    suffixes: &[&str],
+) -> Option<TocSelection> {
+    let mut found: Vec<(usize, String, &TocCandidate)> = Vec::new();
+    for c in candidates {
+        let Some(Some(s)) = candidate_kind(folder, &c.file_name) else {
+            continue;
+        };
+        if let Some(rank) = suffixes.iter().position(|x| x.eq_ignore_ascii_case(&s)) {
+            found.push((rank, s, c));
+        }
+    }
+    if found.is_empty() {
+        return None;
+    }
+    found.sort_by(|a, b| (a.0, &a.2.file_name).cmp(&(b.0, &b.2.file_name)));
+    let parsed: Vec<TocSelection> = found
+        .iter()
+        .map(|(_, s, c)| select_one(c, Some(s.clone())))
+        .collect();
+    if let Some(e) = parsed
+        .iter()
+        .find(|p| matches!(p, TocSelection::Error { .. }))
+    {
+        return Some(e.clone());
+    }
+    let infos: Vec<&TocInfo> = parsed
+        .iter()
+        .filter_map(|p| match p {
+            TocSelection::Selected { info, .. } => Some(info),
+            _ => None,
+        })
+        .collect();
+    let first = infos[0];
+    let agree = infos.iter().all(|i| {
+        i.version == first.version
+            && same_set(&i.hard_deps, &first.hard_deps)
+            && same_set(&i.ids, &first.ids)
+    });
+    if agree {
+        return parsed.into_iter().next();
+    }
+    Some(TocSelection::Ambiguous {
+        files: found.iter().map(|f| f.2.file_name.clone()).collect(),
+    })
+}
+
+fn select_profile(
+    folder: &str,
+    candidates: &[TocCandidate],
+    profile: &crate::variant::Profile,
 ) -> TocSelection {
+    for suffixes in [profile.toc_suffixes, profile.family_suffixes] {
+        if let Some(sel) = select_tier(folder, candidates, suffixes) {
+            return sel;
+        }
+    }
+    let plain: Vec<&TocCandidate> = candidates
+        .iter()
+        .filter(|c| candidate_kind(folder, &c.file_name) == Some(None))
+        .collect();
+    match plain.as_slice() {
+        [] => TocSelection::None {
+            reason: "no .toc for this variant".to_string(),
+        },
+        [c] => select_one(c, None),
+        many => {
+            let mut files: Vec<String> = many.iter().map(|c| c.file_name.clone()).collect();
+            files.sort();
+            TocSelection::Ambiguous { files }
+        }
+    }
+}
+
+fn select_plain(folder: &str, candidates: &[TocCandidate]) -> TocSelection {
     let mut plain: Vec<&TocCandidate> = Vec::new();
     let mut suffixed: Vec<String> = Vec::new();
     for c in candidates {
@@ -307,48 +418,158 @@ mod tests {
         }
     }
 
+    fn profile_pick(folder: &str, cands: &[TocCandidate]) -> TocSelection {
+        select_toc(folder, cands, &TocMapping::Profile(&KNOWN_PROFILES[0]))
+    }
+
+    fn picked(sel: &TocSelection) -> Option<&str> {
+        match sel {
+            TocSelection::Selected { file_name, .. } => Some(file_name),
+            _ => None,
+        }
+    }
+
     #[test]
-    fn suffixed_tocs_unvalidated_for_recognized_client() {
-        let profile = TocMapping::Profile(&KNOWN_PROFILES[0]);
+    fn plain_rule_blocks_suffixed_tocs_for_unfamiliar_clients() {
         let cands = [
             cand("F.toc", "## Version: 1\n"),
             cand("F_Forever.toc", "## Version: 1\n"),
         ];
-        for mapping in [&profile, &TocMapping::ValidatedPlain] {
-            let sel = select_toc("F", &cands, mapping);
+        assert_eq!(
+            select_toc("F", &cands, &TocMapping::ValidatedPlain),
+            TocSelection::Unvalidated {
+                files: vec!["F_Forever.toc".to_string()]
+            }
+        );
+    }
+
+    #[test]
+    fn forever_profile_suffix_mixes_observed_on_the_dev_pc() {
+        let v = |n: u32| format!("## Version: {n}\n## Interface: 1\n");
+        // (files with their version, expected pick or None)
+        type Row<'a> = (Vec<(&'a str, u32)>, Option<&'a str>);
+        let table: Vec<Row> = vec![
+            (vec![("F.toc", 1)], Some("F.toc")),
+            (
+                vec![("F.toc", 1), ("F_Camelot.toc", 2)],
+                Some("F_Camelot.toc"),
+            ),
+            (
+                vec![("F.toc", 1), ("F_Forever.toc", 2)],
+                Some("F_Forever.toc"),
+            ),
+            (
+                vec![("F_Forever.toc", 3), ("F_Camelot.toc", 3), ("F.toc", 1)],
+                Some("F_Forever.toc"),
+            ),
+            (
+                vec![("F.toc", 1), ("F_Mainline.toc", 2)],
+                Some("F_Mainline.toc"),
+            ),
+            (
+                vec![("F_Mainline.toc", 2), ("F_Camelot.toc", 3)],
+                Some("F_Camelot.toc"),
+            ),
+            (vec![("F_Vanilla.toc", 1)], None),
+            (
+                vec![("F_Vanilla.toc", 1), ("F_Mists.toc", 1), ("F_TBC.toc", 1)],
+                None,
+            ),
+            (vec![("F.toc", 1), ("F_TBC.toc", 2)], Some("F.toc")),
+            (
+                vec![
+                    ("F.toc", 1),
+                    ("F_Wrath.toc", 2),
+                    ("F-Cata.toc", 3),
+                    ("F_BCC.toc", 4),
+                ],
+                Some("F.toc"),
+            ),
+            (
+                vec![("f.TOC", 1), ("F-CAMELOT.toc", 2)],
+                Some("F-CAMELOT.toc"),
+            ),
+            (
+                vec![("F-forever.toc", 5), ("F_Camelot.toc", 5)],
+                Some("F-forever.toc"),
+            ),
+            (vec![("F_Classic.toc", 1), ("F.toc", 2)], Some("F.toc")),
+        ];
+        for (files, want) in table {
+            let cands: Vec<TocCandidate> = files.iter().map(|(n, ver)| cand(n, &v(*ver))).collect();
+            let sel = profile_pick("F", &cands);
+            match want {
+                Some(w) => assert_eq!(picked(&sel), Some(w), "{files:?}"),
+                None => assert!(
+                    matches!(sel, TocSelection::None { .. }),
+                    "{files:?} {sel:?}"
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn forever_camelot_with_different_summaries_is_ambiguous() {
+        for (a, b) in [
+            ("## Version: 1\n", "## Version: 2\n"),
+            (
+                "## Version: 1\n## Dependencies: A\n",
+                "## Version: 1\n## Dependencies: B\n",
+            ),
+            (
+                "## Version: 1\n## X-Wago-ID: a\n",
+                "## Version: 1\n## X-Wago-ID: b\n",
+            ),
+        ] {
+            let sel = profile_pick(
+                "F",
+                &[
+                    cand("F_Forever.toc", a),
+                    cand("F_Camelot.toc", b),
+                    cand("F.toc", a),
+                ],
+            );
             assert_eq!(
                 sel,
-                TocSelection::Unvalidated {
-                    files: vec!["F_Forever.toc".to_string()]
+                TocSelection::Ambiguous {
+                    files: vec!["F_Forever.toc".to_string(), "F_Camelot.toc".to_string()]
                 }
             );
         }
+        // Dependencies compare as sets, so order and spacing do not matter.
+        let sel = profile_pick(
+            "F",
+            &[
+                cand("F_Forever.toc", "## Dependencies: A, B\n"),
+                cand("F_Camelot.toc", "## Dependencies: B,A\n"),
+            ],
+        );
+        assert_eq!(picked(&sel), Some("F_Forever.toc"));
+    }
+
+    #[test]
+    fn profile_candidate_errors_fail_closed() {
+        let bad = TocCandidate {
+            file_name: "F_Camelot.toc".into(),
+            contents: FileObs::Bytes(vec![b'#', b'#', 0xff]),
+        };
+        let sel = profile_pick("F", &[bad, cand("F.toc", "## Version: 1\n")]);
+        assert!(matches!(sel, TocSelection::Error { .. }), "{sel:?}");
+    }
+
+    #[test]
+    fn profile_reports_the_suffix_it_selected() {
+        let sel = profile_pick("F", &[cand("F-camelot.toc", "## Version: 1\n")]);
+        let TocSelection::Selected { suffix, .. } = sel else {
+            panic!("{sel:?}")
+        };
+        assert_eq!(suffix.as_deref(), Some("camelot"));
     }
 
     #[test]
     fn unfamiliar_with_suffixed_tocs_is_unvalidated() {
         let sel = select_toc("F", &[cand("F-Mists.toc", "")], &TocMapping::ValidatedPlain);
         assert!(matches!(sel, TocSelection::Unvalidated { .. }));
-    }
-
-    #[test]
-    fn equal_summary_suffixed_tocs_still_unvalidated() {
-        let body = "## Version: 3.1\n## Interface: 1\n";
-        let sel = select_toc(
-            "F",
-            &[
-                cand("F_Forever.toc", body),
-                cand("F_Camelot.toc", body),
-                cand("F.toc", body),
-            ],
-            &TocMapping::Profile(&KNOWN_PROFILES[0]),
-        );
-        assert_eq!(
-            sel,
-            TocSelection::Unvalidated {
-                files: vec!["F_Camelot.toc".to_string(), "F_Forever.toc".to_string()]
-            }
-        );
     }
 
     #[test]

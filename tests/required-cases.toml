@@ -30,7 +30,8 @@ tests = [
     "variant::tests::suffixed_toc_folders_blocked_for_unfamiliar",
     "variant::tests::duplicate_product_folder_unsupported",
     "variant::tests::already_enrolled_variant_unsupported",
-    "variant::tests::install_without_synthetic_marker_refused",
+    "variant::tests::unmarked_install_is_accepted_by_default",
+    "variant::tests::required_policy_refuses_missing_wrong_or_bom_prefixed_markers",
 ]
 
 [[case]]
@@ -59,9 +60,8 @@ tests = [
     "toc::tests::non_utf8_toc_is_error_not_empty",
     "toc::tests::oversized_toc_is_error",
     "toc::tests::plain_only_folder_selected",
-    "toc::tests::suffixed_tocs_unvalidated_for_recognized_client",
+    "toc::tests::plain_rule_blocks_suffixed_tocs_for_unfamiliar_clients",
     "toc::tests::unfamiliar_with_suffixed_tocs_is_unvalidated",
-    "toc::tests::equal_summary_suffixed_tocs_still_unvalidated",
     "toc::tests::only_foreign_suffix_is_unvalidated",
     "toc::tests::no_candidate_is_none",
     "toc::tests::unreadable_candidate_is_error",
@@ -412,7 +412,8 @@ tier = "offline"
 tests = [
     "e2e::tests::unfamiliar_variant_blocked_until_confirmed",
     "e2e::tests::join_refused_for_other_product",
-    "e2e::tests::install_without_marker_refused",
+    "e2e::tests::install_without_marker_enrolls_and_syncs_by_default",
+    "e2e::tests::test_mode_refuses_an_unmarked_install_before_enrollment",
 ]
 
 [[case]]
@@ -1608,6 +1609,39 @@ tests = [
 # <<< section: R5-check
 
 # >>> section: R6-gate
+[[case]]
+id = "R6-gate:marker-policy"
+tier = "offline"
+tests = [
+    "variant::tests::unmarked_install_is_accepted_by_default",
+    "variant::tests::required_policy_refuses_missing_wrong_or_bom_prefixed_markers",
+    "e2e::tests::install_without_marker_enrolls_and_syncs_by_default",
+    "e2e::tests::test_mode_persists_and_blocks_unmarked_installs_both_ways",
+    "e2e::tests::test_mode_refuses_an_unmarked_install_before_enrollment",
+]
+
+[[case]]
+id = "R6-gate:forever-toc-profile"
+tier = "offline"
+tests = [
+    "toc::tests::forever_profile_suffix_mixes_observed_on_the_dev_pc",
+    "toc::tests::forever_camelot_with_different_summaries_is_ambiguous",
+    "toc::tests::profile_candidate_errors_fail_closed",
+    "toc::tests::profile_reports_the_suffix_it_selected",
+    "variant::tests::enrolled_forever_with_the_old_plain_mapping_is_reconfirmed_not_dropped",
+    "variant::tests::profile_disclosure_names_the_suffix_order",
+    "e2e::tests::forever_suffix_folders_sync_by_the_forever_rule_and_others_are_never_changed",
+    "e2e::tests::enrolled_forever_with_the_old_plain_mapping_is_reconfirmed_and_loses_nothing",
+]
+
+[[case]]
+id = "R6-gate:first-run-loses-nothing"
+tier = "offline"
+tests = [
+    "e2e::tests::first_run_join_of_a_populated_install_loses_nothing",
+    "e2e::tests::first_run_create_from_a_populated_install_changes_nothing_locally",
+    "e2e::tests::first_run_join_with_a_group_removed_addon_keeps_it_restorable",
+]
 # <<< section: R6-gate
 
 # >>> section: R6-app

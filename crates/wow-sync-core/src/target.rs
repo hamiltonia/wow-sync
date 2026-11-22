@@ -1675,10 +1675,7 @@ mod tests {
         let t = Scenario::new(vec![])
             .peer(2, vec![addon_unvalidated("Suite", "2.0", "b")])
             .target();
-        assert_eq!(
-            reason(pkg(&t, "suite")),
-            DecisionReason::UnvalidatedTocMapping
-        );
+        assert_eq!(reason(pkg(&t, "suite")), DecisionReason::NoCompatibleToc);
     }
 
     #[test]

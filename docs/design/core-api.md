@@ -40,21 +40,23 @@ pub struct VariantObservation {
     pub flavor_info: FileObs,
     pub build_info: FileObs,
     pub addons_dir: DirObs,          // Missing | PlainDir | NotPlain
-    pub synthetic_marker: FileObs,   // <install root>/.wowsync-synthetic (slice gate, domain.md §2.1)
+    pub synthetic_marker: FileObs,   // <install root>/.wowsync-synthetic (consulted only under MarkerPolicy::Required)
 }
 pub struct VariantIdentity { pub product: ProductCode, pub folder: String,
                              pub build_version: Option<String>, pub profile: Option<&'static Profile> }
 pub struct Profile { pub product: &'static str, pub folder: &'static str, pub label: &'static str,
-                     pub toc_suffixes: &'static [&'static str], pub mapping_id: &'static str /* "profile:wowf/1" */ }
-pub const KNOWN_PROFILES: &[Profile];   // only wowf in the slice (domain.md §2)
+                     pub toc_suffixes: &'static [&'static str], pub family_suffixes: &'static [&'static str],
+                     pub mapping_id: &'static str /* "profile:wowf/2" */ }
+pub const KNOWN_PROFILES: &[Profile];   // only wowf (domain.md §2)
 pub enum VariantVerdict { Recognized(VariantIdentity), Unfamiliar(VariantIdentity), Refused(RefuseReason) }
-pub fn validate_variant(obs: &VariantObservation) -> VariantVerdict;
+pub enum MarkerPolicy { NotRequired /* default */, Required /* test mode, D-28 */ }
+pub fn validate_variant(obs: &VariantObservation, policy: MarkerPolicy) -> VariantVerdict;
 
 pub enum TocMapping { Profile(&'static Profile), ValidatedPlain /* "validated-plain/1" */ }
 pub struct OtherVariants { pub same_product_folders: Vec<String>, pub enrolled_elsewhere: bool }
 pub enum LayoutAssessment {
     Supported { mapping: TocMapping, eligible: Vec<FolderKey>, blocked: Vec<(FolderKey, BlockReason)>, digest: Sha256 },
-    Unsupported(LayoutReason),       // AddOnsLayout | DuplicateProductFolder | AlreadyEnrolled | NotSyntheticInstall (slice, Q-24)
+    Unsupported(LayoutReason),       // AddOnsLayout | DuplicateProductFolder | AlreadyEnrolled | NotSyntheticInstall (test mode only, D-28)
 }
 pub fn assess_layout(id: &VariantIdentity, unfamiliar: bool, addons: &[FolderScan], others: &OtherVariants) -> LayoutAssessment;
 pub struct GuidedConfirmation { pub identity: bool, pub scope: bool, pub digest: Sha256 }

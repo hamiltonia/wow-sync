@@ -86,8 +86,8 @@ use wow_sync_core::toc::TocCandidate;
 use wow_sync_core::variant::{
     assess_layout, check_join, confirm_enrolled, confirm_variant, consent_disclosures, consent_gap,
     reconfirm_variant, validate_variant, ConfirmedVariant, ConsentAction, ConsentContext, DirObs,
-    FileObs, GuidedConfirmation, LayoutAssessment, OtherVariants, RefuseReason, VariantObservation,
-    VariantVerdict,
+    FileObs, GuidedConfirmation, LayoutAssessment, MarkerPolicy, OtherVariants, RefuseReason,
+    VariantObservation, VariantVerdict,
 };
 use wow_sync_core::variant::{BlockReason, LayoutReason};
 
@@ -234,6 +234,9 @@ pub enum ServiceError {
     NeedsReconfirmation,
     /// The game product or folder is not the enrolled one; reconfirming cannot fix that.
     VariantChanged,
+    /// Test mode is on and this install has no synthetic marker: syncing is blocked until test
+    /// mode is turned off (D-28). Nothing was changed or un-enrolled.
+    TestModeBlocked,
     Provider(String),
     Local(String),
 }
@@ -253,6 +256,11 @@ impl std::fmt::Display for ServiceError {
                 "this installation is no longer the game version that was enrolled (its product \
                  or folder changed). Syncing is paused; restore the original install or set this \
                  computer up again"
+            ),
+            Self::TestModeBlocked => write!(
+                f,
+                "Test mode is on, and this installation does not carry the test marker, so \
+                 syncing is paused. Nothing was changed; turn test mode off to continue"
             ),
             Self::Provider(s) => write!(f, "shared folder problem: {s}"),
             Self::Local(s) => write!(f, "local problem: {s}"),
@@ -417,6 +425,9 @@ pub struct StatusSnapshot {
     /// `held_releases`. Only releases this computer holds locally have a date: no shared record
     /// carries a per-release date (the code state has none), so a peer-only release has no entry.
     pub held_release_dates: std::collections::BTreeMap<wow_sync_core::ids::Sha256, u64>,
+    /// Test mode is on for this computer (D-28): only install roots with the synthetic marker
+    /// sync. Off by default; `Command::SetTestMode` changes it.
+    pub test_mode: bool,
 }
 
 impl StatusSnapshot {
@@ -883,6 +894,20 @@ impl SliceService {
             Command::ExportDiagnostics { .. } | Command::SavePreviewedDiagnostics { .. } => {
                 return self.diagnostics_command(&cmd);
             }
+            Command::SetTestMode(on) => {
+                crate::control::set_test_mode(&self.state, *on).map_err(CommandError::Service)?;
+                crate::control::log_activity(
+                    &self.state,
+                    if *on { "test-mode-on" } else { "test-mode-off" },
+                    None,
+                    if *on {
+                        "Test mode turned on: only folders with the test marker can sync"
+                    } else {
+                        "Test mode turned off"
+                    },
+                );
+                return Ok(CommandOutcome::Recorded);
+            }
             _ => {}
         }
         if cmd == Command::ReEnroll {
@@ -1342,6 +1367,7 @@ impl SliceService {
                 }
                 // Answered before the group state is read.
                 Command::CheckUpdates
+                | Command::SetTestMode(_)
                 | Command::ExportDiagnostics { .. }
                 | Command::SavePreviewedDiagnostics { .. } => return Err(CommandError::NotAllowed),
             }
@@ -1601,14 +1627,19 @@ impl SliceService {
         Ok((folders, scan.listing_stable))
     }
 
+    fn marker_policy(&self) -> MarkerPolicy {
+        MarkerPolicy::from_test_mode(crate::control::test_mode(&self.state))
+    }
+
     /// Sibling variant folders that validate to the same product (the core decides what counts).
     fn others(&self, product: &str, enrolled_elsewhere: bool) -> OtherVariants {
+        let policy = self.marker_policy();
         let mut same = Vec::new();
         for f in list_variant_folders(&self.cfg.install_root) {
             if f == self.cfg.variant_folder {
                 continue;
             }
-            let v = validate_variant(&self.observation(&f));
+            let v = validate_variant(&self.observation(&f), policy);
             let id = match &v {
                 VariantVerdict::Recognized(i) | VariantVerdict::Unfamiliar(i) => i,
                 VariantVerdict::Refused(_) => continue,
@@ -1627,7 +1658,10 @@ impl SliceService {
         &self,
         enrolled_elsewhere: bool,
     ) -> Result<(VariantVerdict, LayoutAssessment, Vec<FolderScan>, bool), ServiceError> {
-        let verdict = validate_variant(&self.observation(&self.cfg.variant_folder));
+        let verdict = validate_variant(
+            &self.observation(&self.cfg.variant_folder),
+            self.marker_policy(),
+        );
         let (scans, stable) = match &verdict {
             VariantVerdict::Refused(_) => (Vec::new(), true),
             _ => self.scan()?,
@@ -1960,6 +1994,7 @@ impl SliceService {
         confirm_enrolled(&verdict, &assessment, &e.validation).map_err(|r| match r {
             RefuseReason::StaleConfirmation => ServiceError::NeedsReconfirmation,
             RefuseReason::VariantChanged => ServiceError::VariantChanged,
+            RefuseReason::NotSyntheticInstall => ServiceError::TestModeBlocked,
             r => ServiceError::Refused(refuse_text(&r).0),
         })
     }
@@ -2035,7 +2070,7 @@ impl SliceService {
         let variant = self.rederive_variant(&enrollment)?;
         let (scans, stable) = self.scan()?;
         let titles = folder_titles(&scans);
-        let decls = crate::settings_cycle::declaring_folders(&scans);
+        let decls = crate::settings_cycle::declaring_folders(&scans, variant.mapping());
         let inventory = build_inventory(scans, stable, &variant);
         let marks = match self
             .state
@@ -2277,6 +2312,12 @@ impl SliceService {
     }
 
     fn snapshot(&mut self, w: &World, area: &InstallArea) -> StatusSnapshot {
+        let mut s = self.snapshot_inner(w, area);
+        s.test_mode = self.test_mode();
+        s
+    }
+
+    fn snapshot_inner(&mut self, w: &World, area: &InstallArea) -> StatusSnapshot {
         let (journals, unknown_journals) = self.journals(area);
         let (interrupted, needs_help) = journal_status(&journals);
         let mut retained: Vec<RecoveryPoint> = Vec::new();
@@ -2447,6 +2488,7 @@ impl SliceService {
             game_build,
         };
         StatusSnapshot {
+            test_mode: false,
             enrolled: true,
             headline: render_headline(&sv),
             group_name: w.group.display_name.clone(),
@@ -2536,6 +2578,17 @@ impl SliceService {
 
     /// Read-only view of the current state.
     pub fn status(&mut self) -> StatusSnapshot {
+        let mut s = self.status_inner();
+        s.test_mode = self.test_mode();
+        s
+    }
+
+    /// Whether test mode is on for this computer (`Command::SetTestMode`).
+    pub fn test_mode(&self) -> bool {
+        crate::control::test_mode(&self.state)
+    }
+
+    fn status_inner(&mut self) -> StatusSnapshot {
         let w = match self.observe_world(false) {
             Ok(w) => {
                 self.provider_error = None;
@@ -2548,6 +2601,15 @@ impl SliceService {
                     enrolled: true,
                     headline: headline_sentence(Headline::NeedsHelp),
                     provider_error: Some(ServiceError::VariantChanged.to_string()),
+                    ..Default::default()
+                };
+            }
+            Err(ServiceError::TestModeBlocked) => {
+                self.provider_error = None;
+                return StatusSnapshot {
+                    enrolled: true,
+                    headline: headline_sentence(Headline::NeedsHelp),
+                    provider_error: Some(ServiceError::TestModeBlocked.to_string()),
                     ..Default::default()
                 };
             }
