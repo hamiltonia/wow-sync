@@ -1,0 +1,33 @@
+offline.log — initial offline run, exit 0:
+[PASS   ] offline/fmt
+[PASS   ] offline/clippy
+[PASS   ] offline/test
+[PASS   ] offline/required-cases
+[PASS   ] offline/deny
+[PASS   ] offline/markdown-links
+overall: PASS (allow-blocked: false) -> exit 0
+
+native-1.log — initial native run 1, exit 0:
+[PASS   ] native/tier
+overall: PASS (allow-blocked: false) -> exit 0
+
+native-2.log — initial native run 2, exit 0:
+[PASS   ] native/tier
+overall: PASS (allow-blocked: false) -> exit 0
+
+native-3.log — initial native run 3, exit 0:
+[PASS   ] native/tier
+overall: PASS (allow-blocked: false) -> exit 0
+
+final-offline.log — precommit rerun after evidence links created, exit 0:
+[PASS   ] offline/fmt
+[PASS   ] offline/clippy
+[PASS   ] offline/test
+[PASS   ] offline/required-cases
+[PASS   ] offline/deny
+[PASS   ] offline/markdown-links
+overall: PASS (allow-blocked: false) -> exit 0
+
+final-native.log — precommit rerun after evidence links created, exit 0:
+[PASS   ] native/tier
+overall: PASS (allow-blocked: false) -> exit 0

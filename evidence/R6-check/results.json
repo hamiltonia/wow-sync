@@ -1,0 +1,74 @@
+{
+  "source": "6e87a35fb82e00e1a3fea012fb7919265443c545",
+  "latest_main_ci_observed": {
+    "run": 45069233956,
+    "head": "ca929fca9fa14cdb778a3af2f60fa91ab212271b",
+    "status": "completed",
+    "conclusion": "success",
+    "updated_at": "2026-11-22T21:10:49Z"
+  },
+  "original_backup": {
+    "files": 33312,
+    "directories": 1321,
+    "bytes": 3455374298,
+    "manifest_sha256": "2a38b48c97a2fc16d3ac25e69a34baccce06e66c3ae65d57146306fa76867e24"
+  },
+  "toc_oracle": { "eligible": 101, "blocked": 1, "gui_matches": true },
+  "first_run": {
+    "A_original_files": 33312,
+    "A_changed_original_files": 0,
+    "A_missing_original_files": 0,
+    "B_changed_folders": ["HealKit"],
+    "B_changed_original_files": 1,
+    "B_missing_original_files": 1,
+    "local_only_equal": true,
+    "local_only_payload_sha256": "5701486b65042e1e48b9fc6965400b35f302b680cdd2cfb693b411557af78c3d",
+    "HealKit_A_toc_sha256": "72d3def28a86b916be71cca0638ec7cf4e3567842ceb81fdd5e70d80df379607",
+    "HealKit_B_toc_sha256": "72d3def28a86b916be71cca0638ec7cf4e3567842ceb81fdd5e70d80df379607"
+  },
+  "gui_recovery": {
+    "B_restored_exactly": true,
+    "A_group_rollback_converged": false,
+    "group_oracle": "FAIL after 600 seconds",
+    "files": 68,
+    "bytes": 1133584,
+    "before_and_restored_B_tree_sha256": "6b07b18557a1ac6c72ea61bb60fd3289a5bb0be82442f4ad7014d02b959f937d"
+  },
+  "rejected_release_admission": [
+    {
+      "member": 0,
+      "inventory_complete": false,
+      "folder_statuses": [["HealKit", "healkit", "ok"], ["QuestieDB", "questiedb", "ok"]]
+    },
+    {
+      "member": 1,
+      "inventory_complete": false,
+      "folder_statuses": [["HealKit", "healkit", "ok"], ["QuestieDB", "questiedb", "ok"]]
+    }
+  ],
+  "independent_update": {
+    "addon": "ForeverFishing",
+    "A_and_B_equal": true,
+    "version": "0.9.131",
+    "files": 306,
+    "code_tree_sha256": "c0a91f472e275b8973756933f1f2b180c45fdc8e193e505ad1960111dba8531e"
+  },
+  "synthetic_settings_preparation": {
+    "files": 1,
+    "settings_manifest_sha256": "c44a19e5bf362510b33560efce8defcbdd6fb3150b1288cbc75b2ea9a6ce86a7",
+    "owned_declaration_stored_A_and_B": [true, true],
+    "removal_or_restore_verified": false
+  },
+  "artifact": {
+    "run": 45067079956,
+    "source": "6e87a35fb82e00e1a3fea012fb7919265443c545",
+    "zip_sha256": "2170cc0150b38971574e1c6ff490320edc2bcadff673de4019cb8cae05183acf",
+    "checksum_matches": true,
+    "contents": ["LICENSE", "README.md", "RELEASE-NOTES.md", "wow-sync.exe"],
+    "notes_byte_identical": true,
+    "notes_sha256": "6798ccf030c4620243c8953ef3764ed095bb979a501c39455b6aef6244cf25ce",
+    "exe_sha256": "65b7c723ce10de01fdb39421078acde400c93f402da264bd3b75edec1e00b070",
+    "observed_about_version": "0.2.0",
+    "observed_diagnostics_build_commit": "6e87a35fb82e00e1a3fea012fb7919265443c545"
+  }
+}

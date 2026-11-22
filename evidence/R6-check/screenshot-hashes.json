@@ -1,0 +1,12 @@
+{
+  "location": "D:\\WoWSyncLab\\R6-check\\redacted-evidence",
+  "format": "PNG; 12-pixel border cropped from reviewed original app-window captures",
+  "sha256": {
+    "C-refusal.png": "5f96791cf7302cb9cdd30ea67bbd21954530f0daf3aa54bb44acda6f464393b1",
+    "A-first-sync.png": "f17852a40663d3e766936bbc955a5fcf8efe9d68cfe672b7cf126134f322b166",
+    "A-rollback-pending.png": "f13fd36a989d4dcb86a91b636c13b049e90bf587cdeb9978d64ffee37bd5cb3c",
+    "B-first-restore-corrected.png": "da81a5897ebbbfa4c9b1abb88a0b750d693bffbe17c59b6d4702b62c9949ea47",
+    "artifact-about-final.png": "938963068db5d13d4403cba470410701af691c3213f374f05c2ec661b888e516",
+    "artifact-diag-preview.png": "aa0768758eab3ae9627fbc3f582d8522408d6b8a20f1a13c49b3353e3da012da"
+  }
+}
