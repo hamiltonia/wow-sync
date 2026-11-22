@@ -1,5 +1,7 @@
 //! Developer helper (console): builds synthetic installs and a fake running client so the
 //! shell can be exercised without real game data. Never touches a path it did not create.
+//! The `.wowsync-synthetic` marker it writes is not required for real installs; it only
+//! marks a folder as a test-mode install.
 //!
 //!   devkit make-install <root> [--folder _forever_] [--product wowf]
 //!   devkit add-addon <root> <folder> <Name> <tag> [<version>] [--depends X]
@@ -35,7 +37,7 @@ fn make_install(root: &Path, folder: &str, product: &str) {
     )
     .expect("write .flavor.info");
     std::fs::write(root.join(".wowsync-synthetic"), "wowsync-synthetic/1")
-        .expect("write synthetic marker");
+        .expect("write test-mode marker");
 }
 
 fn add_addon(root: &Path, folder: &str, name: &str, tag: &str, version: &str, depends: &str) {
