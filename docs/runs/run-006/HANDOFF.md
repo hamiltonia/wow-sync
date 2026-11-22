@@ -16,16 +16,16 @@ chat is not.
 | Packet | State |
 |---|---|
 | R6-gate | merged `37d489b` (both tiers green) |
-| R6-app | stage A merged `34ef8e5`; stage A2 (test-mode GUI) in progress |
-| R6-release | `url` 2.5.9 merged `d4fad8f`; 0.2.0 bump merged `58151ba`; notes fixes in progress |
-| R6-check | not started (phase B, after phase A merges) |
-| R6-review | not started (phase C) |
+| R6-app | stage A merged `34ef8e5`; stage A2 merged `6e87a35` |
+| R6-release | `url` 2.5.9 merged `d4fad8f`; 0.2.0 bump merged `58151ba`; notes fixes merged `e4dadcd` |
+| R6-check | launched on `6e87a35` (agent `3820f9e4`); dispatch run 45067079956 |
+| R6-review | launched in parallel on `6e87a35` (agent `c843f88e`) |
 
 Run-006 usage: about 1,070 AIU of 10,000 (combined total 38,687.9 against a baseline of 37,617.3).
 
 ## Incidents
 
-None yet.
+- I-6: a leftover stand-in `Wow.exe` from run-003 (`wow-sync.worktrees\R3-ui-build`) had been running since 2026-11-17. The orchestrator stopped it by PID before R6-check. The `R3-ui-build` worktree remains; remove it at close.
 
 ## Owner barriers
 
