@@ -162,9 +162,12 @@ policy before each operation.
 
 **Unverified assumption.** The two shapes are the documented WoW layout.
 They have not been checked on a real client for every variant, and
-real-client checks were deferred by D-23. Until a variant's layout is
-verified on a real client, settings sync for that variant runs only on
-synthetic test data (the Q-24 gate) **(Q-68)**.
+real-client checks were deferred by D-23. Under D-28 real WTF settings sync by
+default once the variant is validated; the synthetic marker is required only
+in test mode **(Q-68)**. R6-check (run-006) observed the real WTF scope and
+the saved-variable declarations validate; settings removal and restore on real
+data have not been run yet, and a recheck is pending. No real-client
+confirmation of every variant exists.
 
 ## 2. Capture at completed play-session boundaries (R-07, A-11)
 

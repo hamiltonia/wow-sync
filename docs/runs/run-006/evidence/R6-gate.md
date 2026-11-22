@@ -96,3 +96,24 @@ mutation; it was reverted and redone in separate calls. No commit was involved.
   `rejected` Same->Different) did NOT fail it, so the no-resurrection outcome is enforced at
   more than one layer; both reverted (`git diff --exit-code` 0). The test's recovery-copy and
   all-peers-converge assertions are the observable check; no single-mutation failing control found.
+
+## G2 fix (partial inventory) and RV6-03
+
+- Merged main `b00d86d`.
+- Cause: `Source` treated an incomplete state as wholly unknown. Fix in `target.rs`: `Source` now has
+  `complete`; an incomplete (but admitted) copy answers `Tree` for listed folders with a known tree,
+  and `Unknown` (never `Absent`) for folders it does not list or could not read. Unadmitted copies
+  stay wholly Unknown. Incompleteness still never yields a removal or rejection.
+- Tests: e2e `unreadable_unrelated_toc_does_not_freeze_rollback_or_later_release` (300 KiB toc add-on
+  plus healthy Alpha; failing first without the fix: A stayed on alpha-v2 after B's rollback; passes
+  with it: both converge on alpha-v1, a later healthy add-on still converges, the unrelated add-on is
+  untouched). Unit `incomplete_state_keeps_known_folders_but_absence_is_unknown`; control: making
+  absence of an incomplete copy `Absent` again fails it (reverted, diff clean). Both listed in case
+  `R6-gate:first-run-loses-nothing`.
+- Design note: a newer release after a rollback does not auto-install (rollback.md §3.1, Q-81,
+  T-R06); it raises the NewerAfterRollback notice, so "newer release converging" is not asserted.
+  A newer local edit on a computer that has not accepted it is set aside with a recovery copy.
+  Not asserted/changed here.
+- RV6-03: settings.md and Q-68/Q-77 updated to D-28 and R6-check's observations; no real-client
+  confirmation claimed.
+- Verify: `--tier offline` pass, `--tier native` pass.
