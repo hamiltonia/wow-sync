@@ -170,6 +170,45 @@ Answers from an interactive review session with the orchestrator.
   - UI direction.
   - Run-003 scope and credit ceiling.
 
+### D-28: Real installs without opt-in; run-006 approved (2026-11-22)
+
+- Owner: "I don't think the data is so precious that we can't test against
+  live? I can easily create separate backups, and we're not even working from
+  the primary gaming system where the real data is." Then: "you can have
+  another 10k AIU, I also prefer the addon to work without opt in, but having
+  a 'test opt-out' feature is nice to have. People using this aren't going to
+  lose anything on first run."
+- **Q-24 answered: the synthetic marker gate is removed by default.** Real
+  installs enroll through the normal guided identity and scope confirmation,
+  with no extra opt-in. All other safety rules stay in force.
+- **Test mode (nice-to-have).** The orchestrator reads "test opt-out" as a
+  user setting that brings the marker gate back, so only marker-carrying test
+  folders can be enrolled. The owner may correct this reading.
+- **First run loses nothing.** This is now a verified requirement, not an
+  assumption: anything the first sync replaces or removes on a computer must be
+  recoverable through the GUI.
+- **D-08 amended.** Real add-on and settings data from the dev PC may be
+  placed in `D:\Dropbox\Gaming Sync\WoW Sync Test`. The rest of
+  `D:\Dropbox\Gaming Sync` stays out of scope. Repository evidence still never
+  contains add-on contents, settings, or account, realm or character names.
+- **D-14 still applies to the dev PC `_forever_` install.** Workers snapshot
+  it before tests and restore it after. Nobody starts, kills or injects into
+  WoW.
+- **Q-3 working answer.** The orchestrator took this from public
+  documentation (warcraft.wiki.gg "TOC format", read 2026-11-22), not from an
+  owner client test. Forever's game-type suffixes are `Forever` and `Camelot`
+  (aliases), and its family suffix is `Mainline`. Selection order: game-type
+  suffixes, then `Mainline`, then the plain `.toc`. Other suffixes
+  (`Classic`, `Vanilla`, `TBC`, `Mists`, …) are ignored. The run-006 profile
+  rule implements this. The owner's in-client check stays optional
+  confirmation.
+- **Q-22.** The current fail-safe behaviour is accepted for real data: the
+  same version label with different content is a decision, never guessed.
+- **Run-006: ceiling 10,000 AIU** from run-006 start, stopping new work at
+  ≥9,500. [run-006 PLAN.md](runs/run-006/PLAN.md) is approved as committed
+  with this decision. It includes publishing a `v0.2.0` GitHub pre-release
+  after its gates pass.
+
 ### D-27: Run-005 plan approved (2026-11-21)
 
 - The owner said "draft and execute the plan, unless there's a real
@@ -409,4 +448,5 @@ phase D barrier.
 | 2026-11-17 | D-24 | Run-004 plan approved; P4-1 GitHub Releases check yes; P4-2 notification crate yes | `573615b` |
 | 2026-11-20 | D-25 | Run-004 design defaults accepted for Q-55..Q-87 pending set; Q-77 no value (real settings sync disabled); R4D-28 bounded fix | `a951c2f` |
 | 2026-11-21 | D-26 | Q-88 (a); Q-77 32 MiB; owner runs macOS kit; v0.1.0 Windows pre-release approved; run-005 ceiling 10,000 AIU, plan pending | `9ca8f10` |
-| 2026-11-21 | D-27 | Run-005 plan drafted and approved by owner instruction ("draft and execute") | this commit |
+| 2026-11-21 | D-27 | Run-005 plan drafted and approved by owner instruction ("draft and execute") | `fe13e3d` |
+| 2026-11-22 | D-28 | Q-24 marker gate removed by default (test mode nice-to-have); D-08 amended; Q-3 working answer; run-006 10,000 AIU, plan approved | this commit |

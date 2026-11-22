@@ -1606,3 +1606,15 @@ tests = [
 
 # >>> section: R5-check
 # <<< section: R5-check
+
+# >>> section: R6-gate
+# <<< section: R6-gate
+
+# >>> section: R6-app
+# <<< section: R6-app
+
+# >>> section: R6-release
+# <<< section: R6-release
+
+# >>> section: R6-check
+# <<< section: R6-check

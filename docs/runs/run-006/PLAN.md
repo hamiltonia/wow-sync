@@ -1,67 +1,120 @@
-# Run 006: live testing on the dev PC (proposal)
+# Run 006: real installs, Forever toc rule, plain refusals, `v0.2.0`
 
-Status: **proposed, not approved.** Nothing in this plan may start until the
-owner approves it and a ceiling, and records the decisions in §4.
+Status: **approved** (D-28). Ceiling 10,000 AIU from run-006 start, stop
+launching new work at ≥9,500. Baseline in [USAGE.md](USAGE.md).
 
-- Drafted 2026-11-22 by the Opus 5.5 orchestrator after the owner tried
-  `v0.1.0` on the dev PC's `_forever_` install and was refused with the
-  internal text "This folder cannot be used: NotSyntheticInstall".
-- Owner input (2026-11-22): "I don't think the data is so precious that we
-  can't test against live? I can easily create separate backups, and we're
-  not even working from the primary gaming system where the real data is."
-  This is consistent with D-14: the dev PC's WoW data is test data.
-- Proposed ceiling: 2,000 AIU from run-006 start. Stop new work at ≥1,800.
+- Drafted 2026-11-22 by the Opus 5.5 orchestrator. Trigger: the owner ran
+  `v0.1.0` on the dev PC's `_forever_` install and setup stopped on "This
+  folder cannot be used: NotSyntheticInstall" with no usable explanation.
+- Inputs: D-28, [../run-005/REPORT.md](../run-005/REPORT.md),
+  `docs/design/domain.md` §2.1 and §3, questions Q-3, Q-20, Q-22, Q-24, Q-68.
 
 ## 1. Goals
 
-1. **Opt-in real-install enrollment (Q-24):** setup keeps refusing
-   unmarked installs by default. A guided opt-in lets the user enroll a real
-   install after confirming that backups exist. Before the first change to
-   that install, the app takes a restorable snapshot of `Interface\AddOns`
-   and the in-scope `WTF` files. The decision, snapshot location and time
-   are recorded and shown.
-2. **Plain-language refusals:** setup never shows internal names such as
-   `NotSyntheticInstall` (the cause is a `{r:?}` debug format in
-   `crates/wow-sync-runtime/src/service.rs`). Each refusal says why and what
-   to do. "Try again" appears only when fixing something outside the app
-   can change the result. The card's heading line is not blank.
-3. **Forever `.toc` rule (Q-3, Q-20):** the rule follows the owner's client
-   check (§4). Until it is answered, add-ons with suffixed tocs stay blocked,
-   and the app explains why instead of silently listing them.
-4. **Live verification on the dev PC:** a verifier enrolls the dev PC's
-   `_forever_` install, which D-14 already allows, after taking a snapshot.
-   It checks scan, sync, removal and restore against the real add-ons and
-   their settings, then restores the snapshot. It never launches, kills or
-   injects into WoW.
-5. **Release `v0.2.0`** as a pre-release. The release notes describe the
-   opt-in, its risks, and how to restore from the snapshot.
+1. **Real installs enroll without opt-in (Q-24, D-28).** `validate_variant`
+   no longer requires `.wowsync-synthetic`. Identity, layout, guided
+   confirmation and every other check stay.
+2. **Forever toc rule (Q-3, Q-20, D-28).** For `wowf` the mapping becomes the
+   profile rule of domain.md §3, extended with the `Mainline` family suffix:
+   - first the game-type suffixes `Forever` and `Camelot`;
+   - then `Mainline`;
+   - then the plain `F.toc`;
+   - other suffixes are ignored.
+   Disagreement among the game-type candidates is `Ambiguous`. Unfamiliar
+   products keep `validated-plain/1`. Existing enrollments whose layout
+   digest changes go through the existing reconfirmation flow, without data
+   loss.
+3. **First run loses nothing (D-28).** Joining a populated group, or starting
+   a new group from a populated install, never deletes or overwrites anything
+   without a GUI-restorable recovery copy. This includes local add-ons that
+   the group does not have, local add-ons the group has removed, and older or
+   different local versions. Prove it with tests. Fix any gap that is found.
+4. **Plain-language setup.** No internal identifiers such as
+   `NotSyntheticInstall` or `{:?}` output in user text (cause:
+   `runtime/src/service.rs` ~1618).
+   - Every refusal and layout reason has a sentence that says what is wrong
+     and what to do.
+   - "Try again" appears only when an outside fix can change the result.
+   - The variant card shows a heading, not a blank line.
+   - Blocked add-ons are listed with a readable reason.
+5. **Test mode (nice-to-have, D-28).** A setting, off by default, restores
+   the marker gate so only marker-carrying test folders can be enrolled. The
+   setup text explains the refusal when it applies.
+6. **Live verification on the dev PC (D-14, D-28).** An independent verifier
+   enrolls the real `_forever_` install through the GUI, after a hashed
+   backup. It checks:
+   - eligibility counts;
+   - sync to a second computer simulated by a copy under `D:\WoWSyncLab`;
+   - removal and restore with settings;
+   - first-run safety;
+   - test mode.
+   The provider is under `D:\Dropbox\Gaming Sync\WoW Sync Test`. Afterwards
+   the verifier restores the backup and proves the restore by hash. Evidence
+   is redacted.
+7. **Pre-release `v0.2.0`.** Version 0.2.0 and release notes that cover:
+   - real-install support;
+   - the Forever toc rule and its documentary source;
+   - test mode;
+   - the "make a backup" advice;
+   - the remaining gaps.
+   The release is published only after the gates in §3.
 
 ## 2. Non-goals
 
-- The primary gaming computer is out of scope until the Mac or another
-  computer joins under a later decision.
-- No Dropbox API, installer, signing or macOS binary.
-- No execution of add-on Lua or saved-variable files.
+- No installer, signing, macOS binary or Dropbox API.
+- No other WoW flavors beyond the existing unfamiliar-product path.
+- No execution of add-on Lua or saved-variable files. No WoW automation.
 
-## 3. Packets (proposed)
+## 3. Phases and packets
 
-| ID | Role / model | Work |
-|---|---|---|
-| R6-gate | Implementation / claude-sonnet-5.5 | Goals 1 and 3: core gate, snapshot and restore, toc rule |
-| R6-app | Implementation / claude-sonnet-5.5 | Goal 2 and the opt-in GUI flow; release notes and version (goal 5) |
-| R6-check | Verification / gpt-6.1-sol | Goal 4 on the dev PC, plus negative cases: no opt-in, declined backup confirmation, snapshot failure, WoW running |
-| R6-review | Integration / claude-opus-5.5 | Safety review of the opt-in and snapshot before the tag |
+| Phase | ID | Role / model | Work |
+|---|---|---|---|
+| A | R6-gate | Implementation / claude-sonnet-5.5 | Goals 1–3 and the core/runtime half of 5: `variant.rs`, `toc.rs`, first-run planning, runtime wiring, design docs |
+| A | R6-app | Implementation / claude-sonnet-5.5 | Goal 4 and the GUI/settings half of 5 (stage A2 after R6-gate's API merges) |
+| A | R6-release | Implementation / claude-sonnet-5.5 | Goal 7 (version, notes, README), devkit/testkit marker paths, existing-test updates outside core/runtime |
+| B | R6-check | Verification / gpt-6.1-sol | Goal 6 plus negative cases; artifact smoke test of the release build |
+| C | R6-review | Integration / claude-opus-5.5 | Safety review of goals 1–3 and 5 against SPEC/AGENTS rules before the tag |
 
-## 4. Owner decisions needed
+`runtime/src/service.rs` is shared by R6-gate (gate/toc wiring) and R6-app
+(refusal text). Keep edits small and local; the second to merge runs
+`git merge main`. Gates for the tag:
+- both verify tiers;
+- green CI;
+- a dispatch build;
+- R6-check PASS on goal 6 and the artifact;
+- R6-review with no open critical or major finding.
 
-1. **Gate shape.** Recommended: an opt-in with backup confirmation and an
-   automatic snapshot, with the default unchanged for other users, because
-   the release is public. Alternatives: remove the gate, or allow only the
-   dev PC.
-2. **D-08 amendment:** may real add-on data be placed in
-   `D:\Dropbox\Gaming Sync\WoW Sync Test`? Today D-08 allows synthetic data
-   only.
-3. **Q-3 client check:** the owner installs a supplied test add-on that has
-   different `.toc` variants and reports which one the Forever client loads.
-   Without it, most real add-ons stay blocked.
-4. **Ceiling:** approve 2,000 AIU, or set another.
+Planned workers: 5. Up to 5 more for fixes and rechecks (D-05 limits:
+5 concurrent, 20 total, no nesting, 2 retries per task).
+
+## 4. Budget estimate
+
+| Item | AIU |
+|---|---|
+| R6-gate | 1,800 |
+| R6-app (A and A2) | 1,200 |
+| R6-release | 400 |
+| R6-check | 1,200 |
+| R6-review | 500 |
+| Orchestrator | 1,500 |
+| Fixes, rechecks, retries | 2,400 |
+| **Total** | **9,000** |
+
+## 5. Stop conditions
+
+- Stop at ≥9,500 AIU, at an owner barrier, or on any unapproved scope,
+  credential or user-data need.
+- **Stop all work** if a COMMON rule is broken, or if any real dev-PC data is
+  changed without a verified backup.
+- Every `main` push is followed by a CI watch. No tag without the §3 gates.
+
+## 6. Owner questions
+
+None blocking.
+- Optional: the owner may confirm Q-3 in the Forever client.
+- Optional: the owner may correct the D-28 reading of "test opt-out".
+New product questions go to `docs/design/questions.md`; dependent work stops.
+
+## 7. Packet rules
+
+[packets/COMMON.md](packets/COMMON.md).

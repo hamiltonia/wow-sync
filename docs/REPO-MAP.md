@@ -7,7 +7,7 @@ discrepancy (README "Authority and approval").
 
 Maintained under E-08 and A-40. This map records locations, not progress: for
 current run state, blockers and next steps read
-`docs/runs/<run-id>/HANDOFF.md` of the latest run (run-005: [HANDOFF.md](runs/run-005/HANDOFF.md)).
+`docs/runs/<run-id>/HANDOFF.md` of the latest run (run-006: [HANDOFF.md](runs/run-006/HANDOFF.md)).
 
 ## Start here
 
@@ -34,16 +34,16 @@ outside the repository.
 ## Runs, packets, evidence
 
 Run state lives under `docs/runs/<run-id>/` (D-06). Each run has the files
-below. No run is active; the latest closed run is run-005.
+below. Run-006 is the active run; the latest closed run is run-005.
 
-| What | Where (run-005) |
+| What | Where (run-006) |
 |---|---|
-| Approved run plan (phases, packet table, spikes, stop conditions) | [PLAN.md](runs/run-005/PLAN.md) |
-| Current state and resume point for a fresh orchestrator | [HANDOFF.md](runs/run-005/HANDOFF.md) |
-| Run report | [REPORT.md](runs/run-005/REPORT.md) |
-| Cumulative AI-credit and model usage ledger | [USAGE.md](runs/run-005/USAGE.md) |
-| Work packets, one per worker | [packets/](runs/run-005/packets/) |
-| Worker and verifier evidence, one file per packet | [evidence/](runs/run-005/evidence/) |
+| Approved run plan (phases, packet table, spikes, stop conditions) | [PLAN.md](runs/run-006/PLAN.md) |
+| Current state and resume point for a fresh orchestrator | [HANDOFF.md](runs/run-006/HANDOFF.md) |
+| Run report | written at close; latest: [run-005 REPORT.md](runs/run-005/REPORT.md) |
+| Cumulative AI-credit and model usage ledger | [USAGE.md](runs/run-006/USAGE.md) |
+| Work packets, one per worker | [packets/](runs/run-006/packets/) |
+| Worker and verifier evidence, one file per packet | `runs/run-006/evidence/` (created by the first merged evidence) |
 
 ### How a worker finds its scope
 
