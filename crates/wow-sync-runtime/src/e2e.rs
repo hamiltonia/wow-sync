@@ -849,6 +849,69 @@ mod tests {
         );
     }
 
+    #[test]
+    fn unreadable_unrelated_toc_does_not_freeze_rollback_or_later_release() {
+        let lab = Lab::new();
+        let big = format!(
+            "## Interface: 11508\n## Version: 1.0\n## X-Pad: {}\n",
+            "a".repeat(300 * 1024)
+        );
+        let mut a = lab.pc("a");
+        a.addon("Alpha", "alpha-v2");
+        a.addon_with("Big", "big", &big);
+        let g = a.create();
+        synced(&mut a);
+        let mut b = lab.pc("b");
+        b.addon("Alpha", "alpha-v1");
+        b.addon_with("Big", "big", &big);
+        let before = lab.tmp.join("b-before");
+        copy_dir(&b.install.addons, &before);
+        b.join(&g);
+        for _ in 0..2 {
+            synced(&mut b);
+            synced(&mut a);
+        }
+        assert_eq!(b.read("Alpha/main.lua").as_deref(), Some("alpha-v2"));
+
+        let row = b
+            .svc
+            .status()
+            .recovery_points
+            .into_iter()
+            .find(|r| r.package.as_str() == "alpha")
+            .expect("the replaced older Alpha is kept");
+        assert_eq!(
+            b.svc.command(Command::Rollback {
+                package: row.package.clone(),
+                recovered: row.release,
+            }),
+            Ok(CommandOutcome::Recorded)
+        );
+        for _ in 0..3 {
+            synced(&mut b);
+            synced(&mut a);
+        }
+        for pc in [&a, &b] {
+            assert_eq!(pc.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        }
+
+        a.addon("Fishing", "fish-v1");
+        let r = synced(&mut a);
+        assert!(r.published.is_some(), "{r:?} / {}", texts(&r));
+        for _ in 0..2 {
+            synced(&mut b);
+            synced(&mut a);
+        }
+        assert_eq!(b.read("Fishing/main.lua").as_deref(), Some("fish-v1"));
+        for pc in [&a, &b] {
+            assert_eq!(pc.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
+        }
+        assert!(same_tree(
+            &b.install.addons.join("Big"),
+            &before.join("Big")
+        ));
+    }
+
     fn has_file(dir: &Path, name: &str, content: &[u8]) -> bool {
         std::fs::read_dir(dir).is_ok_and(|r| {
             r.flatten().any(|e| {

@@ -530,19 +530,22 @@ pub enum ScopeMatch {
 #[derive(Debug, Clone)]
 pub struct Source {
     admitted: bool,
+    /// Whether a key this copy does not list is known absent. An incomplete copy still answers
+    /// for the folders it lists with a known tree, but absence is never evidence.
+    complete: bool,
     folders: BTreeMap<FolderKey, Content>,
 }
 
 impl Source {
     pub fn from_inventory(inv: &Inventory) -> Self {
-        Self::build(&inv.folders, inv.listing_stable)
+        Self::build(&inv.folders, inv.listing_stable, inv.listing_stable)
     }
 
     pub fn from_state(state: &CodeState, admitted: bool) -> Self {
-        Self::build(&state.folders, admitted && state.inventory_complete)
+        Self::build(&state.folders, admitted, state.inventory_complete)
     }
 
-    fn build(folders: &[FolderState], admitted: bool) -> Self {
+    fn build(folders: &[FolderState], admitted: bool, complete: bool) -> Self {
         let folders = folders
             .iter()
             .map(|f| {
@@ -553,14 +556,22 @@ impl Source {
                 (f.key.clone(), c)
             })
             .collect();
-        Self { admitted, folders }
+        Self {
+            admitted,
+            complete,
+            folders,
+        }
     }
 
     pub fn content(&self, k: &FolderKey) -> Content {
         if !self.admitted {
             return Content::Unknown;
         }
-        self.folders.get(k).copied().unwrap_or(Content::Absent)
+        match self.folders.get(k) {
+            Some(c) => *c,
+            None if self.complete => Content::Absent,
+            None => Content::Unknown,
+        }
     }
 
     /// A source standing in for a recorded release (a keep whose copy nobody holds now). Like
@@ -569,6 +580,7 @@ impl Source {
         let folders = r.scope.iter().map(|k| (k.clone(), r.content(k))).collect();
         Self {
             admitted: true,
+            complete: true,
             folders,
         }
     }
@@ -1109,6 +1121,26 @@ mod contract_tests {
         assert_eq!(same_release_entries(&x, &y), ScopeMatch::Unknown);
         let z = Release::new(&[k("a"), k("b")], &[(k("a"), t(3)), (k("b"), t(2))]);
         assert_eq!(same_release_entries(&x, &z), ScopeMatch::Different);
+    }
+
+    #[test]
+    fn incomplete_state_keeps_known_folders_but_absence_is_unknown() {
+        let mut st = crate::testkit::member_state(
+            &crate::testkit::computer(2),
+            1,
+            &inventory(vec![addon("A", Some("1.0"), "a")]),
+        );
+        st.inventory_complete = false;
+        let s = Source::from_state(&st, true);
+        let tree = match s.content(&k("a")) {
+            Content::Tree(t) => t,
+            c => panic!("{c:?}"),
+        };
+        assert_eq!(s.content(&k("zzz")), Content::Unknown);
+        let known = Release::new(&[k("a")], &[(k("a"), tree)]);
+        assert_eq!(same_release(&s, &known), ScopeMatch::Same);
+        let absent = Release::new(&[k("zzz")], &[]);
+        assert_eq!(same_release(&s, &absent), ScopeMatch::Unknown);
     }
 
     #[test]
