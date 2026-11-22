@@ -1,0 +1,31 @@
+Selected failure sections from complete lab control logs; these are excerpts,
+not full compiler logs or original shell command-line captures.
+
+control-1.log; observed exit 101:
+test variant::tests::unmarked_install_is_accepted_by_default ... FAILED
+assertion failed: !matches!(validate_variant(&base), VariantVerdict::Refused(_))
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 357 filtered out
+
+control-2.log; observed exit 101:
+test toc::tests::forever_profile_suffix_mixes_observed_on_the_dev_pc ... FAILED
+assertion `left == right` failed: [("F.toc", 1), ("F_Mainline.toc", 2)]
+  left: Some("F.toc")
+ right: Some("F_Mainline.toc")
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 357 filtered out
+
+control-3.log; observed exit 101:
+test e2e::tests::first_run_join_of_a_populated_install_loses_nothing ... FAILED
+assertion `left == right` failed
+  left: Some("eps-a")
+ right: Some("eps-b")
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 186 filtered out
+
+control-4.log; observed exit 101:
+test service::reason_text_tests::every_refusal_reads_as_a_sentence_that_says_what_to_do ... FAILED
+NotSyntheticInstall shows "NotSynthetic": NotSyntheticInstall. Turn off test mode.
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 186 filtered out
+
+control-5.log; observed exit 101:
+test e2e::tests::test_mode_persists_and_blocks_unmarked_installs_both_ways ... FAILED
+assertion failed: a.svc.status().test_mode
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 186 filtered out
