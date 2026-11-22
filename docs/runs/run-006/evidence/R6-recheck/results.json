@@ -1,0 +1,156 @@
+{
+  "source": "57dbe1ffcc61e9c2f3e71fca38d3592aa6c2c694",
+  "worker_model": "gpt-6.1-sol",
+  "environment": {
+    "os": "Windows 11 Pro x64",
+    "version": "10.0.26300",
+    "rustc": "1.100.0",
+    "cargo_deny": "0.20.2"
+  },
+  "tiers": {
+    "offline": {"result": "PASS", "runs": 1, "exit": 0},
+    "native": {"result": "PASS", "runs": 1, "exit": 0},
+    "locked_release_build": {"result": "PASS", "exit": 0}
+  },
+  "baseline": {
+    "files": 33312,
+    "directories": 1321,
+    "bytes": 3455374298,
+    "manifest_sha256": "2a38b48c97a2fc16d3ac25e69a34baccce06e66c3ae65d57146306fa76867e24",
+    "backup_equals_fresh_live": true,
+    "reused_prior_backup": true,
+    "no_wow": true
+  },
+  "setup": {
+    "eligible": 101,
+    "blocked": 1,
+    "finish_opened_overview_with_first_sync": true,
+    "G1": "PASS",
+    "B_final_review_lab_path_checked_before_enroll": true
+  },
+  "first_sync": {
+    "HealKit_A_B_equal": true,
+    "files": 67,
+    "code_sha256": "be60e0446ce2bf7bb1ba7a84681182666e5794c25b2880fb082de62b34d1ef40",
+    "local_only_preserved_and_published": true
+  },
+  "rollback": {
+    "result": "PASS",
+    "RV6_02_group_dialog": "PASS",
+    "A_B_old_release_equal": true,
+    "version": "0.1.0",
+    "files": 68,
+    "bytes": 1133584,
+    "code_sha256": "6b07b18557a1ac6c72ea61bb60fd3289a5bb0be82442f4ad7014d02b959f937d",
+    "old_and_rejected_copies_available_A_B": true
+  },
+  "newer_after_rollback": {
+    "result": "FAIL",
+    "finding": "H1",
+    "fixture_version": "2.0.0",
+    "fixture_sha256": "4afb41c0d2ae99f16d809732844d897c76ee3503fc67cee4ed39f6b9ac5c07c7",
+    "later_release_preserved_in_A_recovery": true,
+    "old_and_rejected_release_still_available_A_B": true,
+    "A_B_active_old_sha256": "6b07b18557a1ac6c72ea61bb60fd3289a5bb0be82442f4ad7014d02b959f937d",
+    "B_received_later_release": false,
+    "persistent_notice_or_Use_available_at_observations": false,
+    "choosing_Use_and_convergence": "NOT RUN",
+    "latest_code_states_inventory_complete": [false, false]
+  },
+  "blocked_addon": {
+    "name": "QuestieDB",
+    "oversized_toc_bytes": [18428311, 18428311],
+    "A_B_equal_original": [true, true],
+    "files": 64,
+    "bytes": 38562661,
+    "tree_sha256": "2b7ad2346052473c874e898f0f1e2dc1026f7eaa7f6261215e3afa1fc42af8b4"
+  },
+  "update": {
+    "result": "PASS",
+    "addon": "ForeverFishing",
+    "version": "0.9.131",
+    "A_B_equal": true,
+    "files": 306,
+    "code_sha256": "c0a91f472e275b8973756933f1f2b180c45fdc8e193e505ad1960111dba8531e"
+  },
+  "uninstall": {
+    "result": "FAIL",
+    "finding": "H2",
+    "owned_declarations_stored_A_B": [true, true],
+    "synthetic_settings_files_per_computer": 1,
+    "synthetic_settings_content_sha256": "f1ab6103be580b9cf5762e57dc62d27ffcdf50288119c9d433bbba0c7da6ccc3",
+    "oracle_seconds": 600,
+    "code_absent_A_B": [true, true],
+    "owned_settings_present_A_B": [true, true],
+    "settings_original_hash_A_B": [true, true]
+  },
+  "removed_restore": {
+    "code_restore": "PASS",
+    "GUI_both_Restore_actions_executed": true,
+    "code_equal_A_B": true,
+    "code_files": 306,
+    "code_sha256": "c0a91f472e275b8973756933f1f2b180c45fdc8e193e505ad1960111dba8531e",
+    "settings_equal_A_B": true,
+    "paired_settings_restoration": "NOT RUN",
+    "limit": "Settings were never removed; matching hashes cannot prove restoration."
+  },
+  "test_mode": {
+    "result": "PASS",
+    "persisted_flag_on": true,
+    "header_paused_by_test_mode_with_names": true,
+    "readable_unmarked_install_reason": true,
+    "B_unchanged_during_45_second_probe": true,
+    "flag_removed_on_off": true,
+    "A_B_resumed_probe_equal": true,
+    "probe_files": 3,
+    "probe_sha256": "f9f03a37d8fcc02822e7f6e065fd638073abb06cf8b293d3b1d6880b0f9dc04d",
+    "G3_pause_dispatch_and_persistence": "PASS"
+  },
+  "artifact": {
+    "result": "PASS",
+    "run": 45076737602,
+    "conclusion": "success",
+    "head": "57dbe1ffcc61e9c2f3e71fca38d3592aa6c2c694",
+    "zip_sha256": "32b724847db370ce5d8bad904130f43a70c77d5fb01d3478e59878066e3b507b",
+    "checksum_matches": true,
+    "contents": ["LICENSE", "README.md", "RELEASE-NOTES.md", "wow-sync.exe"],
+    "notes_byte_identical": true,
+    "readme_and_license_byte_identical": true,
+    "exe_sha256": "8b9a28687bf832ef8bc171a9b3c35f6437bd6d5683cd65d497deb700eb30f415",
+    "actual_about_version": "0.2.0",
+    "gui_saved_diagnostics_build_commit": "57dbe1ffcc61e9c2f3e71fca38d3592aa6c2c694",
+    "diagnostics_sha256": "eee1f9b80ab491445b9508e5c2922eb667a6dd60f711c24961e88201d7704fed"
+  },
+  "preserved_A_recovery": {
+    "healkit": {
+      "files": 137,
+      "bytes": 2267762,
+      "equals_live_recovery": true,
+      "manifest_sha256": "ae75a8e86da98e4cbb15b76632c27650b687191efc6ed981a283a7aae2dbedf5"
+    },
+    "foreverfishing": {
+      "files": 1,
+      "bytes": 359,
+      "equals_live_recovery": true,
+      "manifest_sha256": "9b7b6cc92be354218d29f9cd9e5928bce36229a621aa8e723021e48f9ec75ed6"
+    }
+  },
+  "wow_running_subcheck": "NOT RUN",
+  "restore": {
+    "result": "PASS",
+    "files": 33312,
+    "directories": 1321,
+    "bytes": 3455374298,
+    "manifest_sha256": "2a38b48c97a2fc16d3ac25e69a34baccce06e66c3ae65d57146306fa76867e24",
+    "equals_original": true,
+    "no_wow": true,
+    "verifier_created_wowsync_removed": true,
+    "owner_app_34296_alive_afterwards": true,
+    "Battle_net_running_afterwards": true
+  },
+  "providers": {
+    "R6-recheck-2026-11-22": {"state": "KEPT", "reason": "H1 and H2", "verifier_apps_stopped": true},
+    "R6-check-2026-11-22": {"state": "KEPT", "reason": "Expanded requested G2 is not PASS; deletion condition unmet."}
+  },
+  "documentation_validation": {"json_parses": true, "tracked_markdown_files": 227, "broken_relative_links": 0}
+}
