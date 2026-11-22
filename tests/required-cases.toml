@@ -1641,6 +1641,8 @@ tests = [
     "e2e::tests::first_run_join_of_a_populated_install_loses_nothing",
     "e2e::tests::first_run_create_from_a_populated_install_changes_nothing_locally",
     "e2e::tests::first_run_join_with_a_group_removed_addon_keeps_it_restorable",
+    "e2e::tests::first_run_join_holding_a_group_rejected_release_does_not_resurrect_it",
+    "e2e::tests::use_shared_settings_replaces_a_local_difference_and_keeps_it_as_a_recovery_copy",
 ]
 # <<< section: R6-gate
 

@@ -79,3 +79,20 @@ mutation; it was reverted and redone in separate calls. No commit was involved.
 - Optional owner client check of the Forever toc order remains unrun (Q-3); source is the
   warcraft.wiki.gg "TOC format" page (read 2026-11-22).
 - Blocked: nothing.
+
+## Review-fix round (RV6-05, RV6-08, RV6-04 part)
+
+- Merged main `6336525`.
+- RV6-05: consent text in `variant.rs` no longer shows `profile:wowf/2` or `validated-plain/1`; it
+  states the suffix order (Forever, Camelot, Mainline, then plain) or the plain-toc-only rule in
+  plain language. Consent tests updated.
+- RV6-08: `R6-gate:first-run-loses-nothing` now also lists the settings first-sync recovery test and
+  new e2e `first_run_join_holding_a_group_rejected_release_does_not_resurrect_it` (all peers end on
+  the group's release; the joiner's copy is in its recovery folder).
+- RV6-04: `questions.md` (Q-22, limitation row), `apply.md`, `ARCHITECTURE.md` describe D-28 as built.
+- Left alone: RV6-03 (waits for R6-check), RV6-06 (R6-app).
+- Verify: `--tier offline` pass, `--tier native` pass.
+- Control (A-38) for the new test: two single-line mutations (`target.rs` screen; `reject.rs`
+  `rejected` Same->Different) did NOT fail it, so the no-resurrection outcome is enforced at
+  more than one layer; both reverted (`git diff --exit-code` 0). The test's recovery-copy and
+  all-peers-converge assertions are the observable check; no single-mutation failing control found.
