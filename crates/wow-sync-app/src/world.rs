@@ -174,6 +174,7 @@ pub struct Install {
     pub refused: Option<String>,
     /// True when an outside fix (files, folders) could change a refusal.
     pub can_retry: bool,
+    pub test_mode_blocked: bool,
     pub eligible: Vec<String>,
     pub blocked: Vec<String>,
 }
@@ -232,6 +233,7 @@ pub struct World {
     pub pause_damaged: bool,
     pub game_running: bool,
     pub provider_error: Option<String>,
+    pub test_mode: bool,
     pub stale_secs: Option<i64>,
     pub reconfirm: Option<Reconfirm>,
     pub features: crate::features::FeatureData,
@@ -374,6 +376,7 @@ impl World {
             pause_damaged: false,
             game_running: false,
             provider_error: None,
+            test_mode: false,
             stale_secs: None,
             reconfirm: None,
             features: Default::default(),
@@ -403,6 +406,7 @@ impl World {
         w.group = s.group_name.clone();
         w.identity_label = s.identity_line.clone();
         w.provider_error = s.provider_error.clone();
+        w.test_mode = s.test_mode;
         w.recovery_extra = s.retained_extra_recovery;
         w.reconfirm = s.reconfirm.as_ref().map(reconfirm_of);
         w.paused_since = i.paused_since_ms.map(|ms| {

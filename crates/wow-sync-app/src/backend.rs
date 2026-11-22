@@ -30,6 +30,8 @@ pub enum Cmd {
     CancelQuit,
     /// Read-only: describe this installation against the shared folder (setup step 4).
     Inspect(Target),
+    /// Turn test mode on or off; the target is used only before enrollment.
+    SetTestMode(bool, Option<Target>),
     Enroll(Target, EnrollRequest),
     Reconfirm(ReconfirmRequest),
     SaveSettings(AppSettings),
@@ -329,6 +331,18 @@ fn run(
                 if let Some(s) = svc.as_ref() {
                     let _ = s.save_app_settings(&st);
                     publish(&shared, &wake, |g| g.settings = st);
+                }
+                continue;
+            }
+            Some(Cmd::SetTestMode(on, t)) => {
+                let cmd = wow_sync_runtime::Command::SetTestMode(on);
+                if let Some(s) = svc.as_mut() {
+                    let _ = s.command(cmd);
+                    refresh(s, &shared, &wake, false);
+                } else if let Some(t) = t {
+                    if let Ok(mut s) = SliceService::new(config_for(&opts, &t)) {
+                        let _ = s.command(cmd);
+                    }
                 }
                 continue;
             }

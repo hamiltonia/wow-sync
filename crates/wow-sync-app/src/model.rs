@@ -586,6 +586,7 @@ pub enum BannerAction {
     Resume,
     TryAgain,
     Reconfirm,
+    TurnOffTestMode,
 }
 
 #[derive(Clone, Debug)]
@@ -596,9 +597,25 @@ pub struct Banner {
     pub action_label: &'static str,
 }
 
+pub fn blocked_by_test_mode(w: &World) -> bool {
+    w.test_mode
+        && w.provider_error
+            .as_deref()
+            .is_some_and(|e| e.starts_with("Test mode is on"))
+}
+
+pub const TEST_MODE_HELP: &str = "Test mode is on, and this installation is not marked as a test folder, so syncing is paused. Nothing was changed.";
+
 pub fn banners(w: &World) -> (Vec<Banner>, usize) {
     let mut all = Vec::new();
-    if let Some(e) = &w.provider_error {
+    if blocked_by_test_mode(w) {
+        all.push(Banner {
+            text: TEST_MODE_HELP.into(),
+            tone: Tone::Help,
+            action: BannerAction::TurnOffTestMode,
+            action_label: "Turn off test mode",
+        });
+    } else if let Some(e) = &w.provider_error {
         all.push(Banner {
             text: format!("{e}. Start Dropbox, then choose Try again."),
             tone: Tone::Error,
@@ -676,6 +693,8 @@ pub enum NeedTarget {
     Decision(String),
     Computer(usize),
     Risk,
+    /// Test mode refuses this folder; the button turns it off.
+    TestMode,
     /// A refused restore of a removed add-on; its Try again and Dismiss are on the Removed list.
     Restore,
 }
@@ -718,7 +737,18 @@ pub fn need_items(w: &World) -> Vec<NeedItem> {
             });
         }
     }
-    if let Some(e) = &w.provider_error {
+    if blocked_by_test_mode(w) {
+        v.push(NeedItem {
+            title: "Test mode is blocking this folder".into(),
+            reason:
+                "Test mode only syncs folders marked as test folders, and this one is not marked."
+                    .into(),
+            affects: "Nothing syncs until test mode is turned off".into(),
+            button: "Turn off test mode",
+            tone: Tone::Help,
+            target: NeedTarget::TestMode,
+        });
+    } else if let Some(e) = &w.provider_error {
         v.push(NeedItem {
             title: "Can't read the shared folder".into(),
             reason: format!("{e}. Start Dropbox, then choose Try again."),
@@ -1352,6 +1382,47 @@ mod tests {
         w.identity_label = "WoW Retail".into();
         w.view.headline = Headline::Ok;
         w
+    }
+
+    fn blocked() -> World {
+        let mut w = enrolled();
+        w.test_mode = true;
+        w.provider_error = Some(wow_sync_runtime::ServiceError::TestModeBlocked.to_string());
+        w
+    }
+
+    #[test]
+    fn test_mode_blocking_offers_to_turn_it_off_and_never_blames_dropbox() {
+        let w = blocked();
+        assert!(blocked_by_test_mode(&w));
+        let (b, _) = banners(&w);
+        assert_eq!(b[0].action, BannerAction::TurnOffTestMode);
+        assert_eq!(b[0].action_label, "Turn off test mode");
+        let items = need_items(&w);
+        assert_eq!(items[0].target, NeedTarget::TestMode);
+        assert_eq!(items[0].button, "Turn off test mode");
+        for t in [
+            b[0].text.clone(),
+            items[0].title.clone(),
+            items[0].reason.clone(),
+            items[0].affects.clone(),
+        ] {
+            assert!(
+                !t.contains("Dropbox") && !t.contains("TestModeBlocked"),
+                "{t}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_real_shared_folder_error_is_not_mistaken_for_test_mode() {
+        let mut w = enrolled();
+        w.provider_error = Some("The shared folder is missing".into());
+        assert!(!blocked_by_test_mode(&w));
+        w.test_mode = true;
+        assert!(!blocked_by_test_mode(&w));
+        assert_eq!(banners(&w).0[0].action, BannerAction::TryAgain);
+        assert!(!blocked_by_test_mode(&enrolled()));
     }
 
     #[test]

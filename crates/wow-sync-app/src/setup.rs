@@ -198,6 +198,18 @@ impl Shell {
                     .get(self.setup.install)
                     .filter(|i| i.refused.is_some())
                 {
+                    if ins.test_mode_blocked {
+                        body.push(
+                            self.btn(
+                                "turn-off-test-mode",
+                                "Turn off test mode",
+                                Bk::Secondary,
+                                Act::Setup(SetupAct::TurnOffTestMode),
+                                cx,
+                            )
+                            .into_any_element(),
+                        );
+                    }
                     if ins.can_retry {
                         body.push(
                             self.btn(
@@ -209,7 +221,7 @@ impl Shell {
                             )
                             .into_any_element(),
                         );
-                    } else {
+                    } else if !ins.test_mode_blocked {
                         body.push(
                             self.muted("Trying again will not change this. Choose Back to pick another installation.")
                                 .into_any_element(),

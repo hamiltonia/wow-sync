@@ -42,3 +42,44 @@ Screenshots (`evidence/R6-app/`): `setup-refused-retry.png` (AddOns missing: rea
 - Blocked reasons do not name the other game versions (reason carries no toc suffix list).
 - "1 add-ons are eligible" plural wording is pre-existing.
 - Screenshots show window edges over the desktop; the app was launched with `--dev` on lab data only.
+
+## Stage A2: test-mode GUI
+
+Built on R6-gate (main `37d489b`): `Command::SetTestMode(bool)`, `StatusSnapshot.test_mode`,
+`ServiceError::TestModeBlocked`.
+
+- **Settings** (App settings → Testing): "Test mode: only sync test folders", off by default, with
+  one line saying only folders carrying the test marker sync while it is on. Persists through
+  `Command::SetTestMode` (`Cmd::SetTestMode` in the backend).
+- **Setup step 3**: a folder refused only because test mode is on (`NotSyntheticInstall`, direct or
+  via layout) says so in a sentence and offers "Turn off test mode"; choosing it turns the mode off
+  and re-inspects the folder. `EnrollPreview.test_mode_blocked` carries this; no "Try again" is
+  shown because trying again alone cannot change it.
+- **Needs attention / banner / Overview**: an enrolled install blocked by test mode
+  (`provider_error` is `TestModeBlocked`) reads "Test mode is blocking this folder" with a
+  "Turn off test mode" action, instead of the Dropbox "Start Dropbox, then choose Try again" text.
+  The Overview shared-folder row says "paused by test mode".
+- Tests: `model::tests::test_mode_blocking_offers_to_turn_it_off_and_never_blames_dropbox`,
+  `model::tests::a_real_shared_folder_error_is_not_mistaken_for_test_mode`,
+  `service::reason_text_tests::test_mode_refusal_is_flagged_so_the_offer_can_be_shown`.
+  Required case `R6-app:test-mode-gui` (offline).
+
+| Check | Result |
+|---|---|
+| New tests (3) | PASS |
+| A-38 control: `blocked_by_test_mode` prefix mutated to `"Zzz"`; blocking test failed (`model.rs:1397`); reverted, `git diff` clean for that line | PASS (control failed as required) |
+| GUI, debug build, lab `D:\WoWSyncLab\R6-app` (synthetic; unmarked install, state `st9`/`st10`) | PASS |
+| `cargo xtask verify --tier offline` / `--tier native` (Windows 11 x64, after `git merge main` at `37d489b`) | PASS / PASS |
+
+Screenshots (`evidence/R6-app/`): `settings-test-mode-off.png`, `settings-test-mode-on.png` (toggle
+clicked; `test-mode.txt` appeared in the state dir), `setup-test-mode-blocked.png`,
+`setup-test-mode-turned-off.png` (after the button: "Can be synced", file removed),
+`needs-attention-test-mode.png`, `overview-test-mode-banner.png`,
+`overview-test-mode-turned-off.png` (banner action: status recovered, "Test mode is off").
+
+## Observations for others
+
+- While blocked, the status header reads "Waiting" with an empty group and computer name (the
+  gate's blocked snapshot carries no group/computer text). Not changed here; R6-gate owns it.
+- The Settings toggle sits below the fold at the default window size; screenshots were taken after
+  scrolling.

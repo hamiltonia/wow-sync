@@ -173,6 +173,9 @@ impl Shell {
             .into_any_element(),
         );
         let shared = match &self.w.provider_error {
+            Some(_) if model::blocked_by_test_mode(&self.w) => {
+                format!("{} · paused by test mode", self.w.shared_label)
+            }
             Some(e) => format!("{} · can't be read: {e}", self.w.shared_label),
             None => format!("{} · readable", self.w.shared_label),
         };
@@ -2291,6 +2294,24 @@ impl Shell {
         col = col.child(self.panel(
             "Window",
             vec![cqt.into_any_element(), wb.into_any_element()],
+        ));
+        let tmt = self.toggle(
+            "test-mode",
+            "Test mode: only sync test folders",
+            self.w.test_mode,
+            false,
+            Act::Toggle("test-mode".into()),
+            cx,
+        );
+        col = col.child(self.panel(
+            "Testing",
+            vec![
+                tmt.into_any_element(),
+                self.muted(
+                    "While this is on, only folders that carry the test marker sync. Any other installation is left alone and WoW Sync pauses for it. Leave it off for normal use.",
+                )
+                .into_any_element(),
+            ],
         ));
         let crash = self.btn_off("crash", "Send anonymous crash reports", "coming later", cx);
         let what = self.btn_off("what-sent", "What is sent?", "coming later", cx);

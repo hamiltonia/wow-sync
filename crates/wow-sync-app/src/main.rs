@@ -139,6 +139,7 @@ fn install_row(root: &std::path::Path, folder: &str) -> Install {
         inspected: false,
         refused: None,
         can_retry: false,
+        test_mode_blocked: false,
         eligible: Vec::new(),
         blocked: Vec::new(),
     }
