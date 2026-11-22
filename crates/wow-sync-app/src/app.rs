@@ -551,10 +551,15 @@ impl Shell {
         if let Some(d) = self.w.setup.as_mut() {
             if let Some(ins) = d.installs.get_mut(sel) {
                 ins.inspected = true;
-                ins.identity = p.identity_line.clone();
+                ins.identity = if p.identity_line.is_empty() {
+                    ins.folder.clone()
+                } else {
+                    p.identity_line.clone()
+                };
                 ins.recognised = p.kind == PreviewKind::Recognized;
                 ins.refused = (p.kind == PreviewKind::Refused)
                     .then(|| p.problem.clone().unwrap_or_else(|| p.identity_line.clone()));
+                ins.can_retry = p.retryable;
                 ins.eligible = p.eligible.clone();
                 ins.blocked = p.blocked.clone();
             }

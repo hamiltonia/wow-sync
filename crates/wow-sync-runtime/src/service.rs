@@ -89,6 +89,125 @@ use wow_sync_core::variant::{
     FileObs, GuidedConfirmation, LayoutAssessment, OtherVariants, RefuseReason, VariantObservation,
     VariantVerdict,
 };
+use wow_sync_core::variant::{BlockReason, LayoutReason};
+
+/// A refusal in words the owner can act on: what is wrong, then what to do.
+/// `retry` is true only when something outside WoW Sync can change the answer.
+pub fn refuse_text(r: &RefuseReason) -> (String, bool) {
+    const BACK: &str = "Go Back and choose another folder.";
+    let (text, retry) = match r {
+        RefuseReason::FlavorMissing => (
+            "This folder does not look like a game installation: its .flavor.info file is missing. \
+             Start the game once from Battle.net so it is created, then choose Try again. If it is \
+             the wrong folder, go Back and choose another.".to_string(),
+            true,
+        ),
+        RefuseReason::FlavorUnreadable(_) => (
+            "WoW Sync could not read this folder's .flavor.info file. Close anything that may be \
+             using the game folder and check you have permission to read it, then choose Try again."
+                .to_string(),
+            true,
+        ),
+        RefuseReason::FlavorUnparseable => (
+            format!("This folder's .flavor.info file is not in the expected format, so the game version cannot be told. {BACK}"),
+            false,
+        ),
+        RefuseReason::InvalidProductCode => (
+            format!("This folder names a game product WoW Sync does not recognise. {BACK}"),
+            false,
+        ),
+        RefuseReason::BuildInfo(_) => (
+            "WoW Sync could not read the .build.info file that describes the game version. Check \
+             that the game is installed completely and that you can read the game folder, then \
+             choose Try again.".to_string(),
+            true,
+        ),
+        RefuseReason::ProductNotInBuildInfo => (
+            format!("The game's .build.info file does not list this game version, so it cannot be checked. {BACK}"),
+            false,
+        ),
+        RefuseReason::ProductAmbiguousInBuildInfo => (
+            format!("The game's .build.info file lists this game version more than once, so WoW Sync cannot tell which entry is right. {BACK}"),
+            false,
+        ),
+        RefuseReason::ProductInactive => (
+            "The game version in this folder is not marked as installed and active. Finish the \
+             install or update in Battle.net, then choose Try again.".to_string(),
+            true,
+        ),
+        RefuseReason::FolderMismatch => (
+            format!("This folder has the wrong name for the game version it contains, so it may be a copy or a renamed folder. {BACK}"),
+            false,
+        ),
+        RefuseReason::AddOnsMissing => (
+            "This installation has no Interface\\AddOns folder yet. Start the game once, or \
+             create the folder, then choose Try again.".to_string(),
+            true,
+        ),
+        RefuseReason::NotSyntheticInstall => (
+            format!("This folder is not a test folder, and this copy of WoW Sync only works with test folders. {BACK}"),
+            false,
+        ),
+        RefuseReason::Layout(l) => return layout_text(l),
+        RefuseReason::ConfirmationRequired => (
+            "Confirm both the game version and the add-on list to continue. Nothing has been changed."
+                .to_string(),
+            false,
+        ),
+        RefuseReason::StaleConfirmation => (
+            "The installation changed after you looked at it. Check it again and confirm. Nothing has been changed."
+                .to_string(),
+            false,
+        ),
+        RefuseReason::VariantChanged => (
+            "This is not the game version that was set up for this group. Go Back and choose the original installation."
+                .to_string(),
+            false,
+        ),
+    };
+    (text, retry)
+}
+
+pub fn layout_text(r: &LayoutReason) -> (String, bool) {
+    match r {
+        LayoutReason::AddOnsLayout => (
+            "The AddOns folder is not an ordinary folder (it may be a shortcut or link), so WoW \
+             Sync will not change it. Go Back and choose another installation.".into(),
+            false,
+        ),
+        LayoutReason::DuplicateProductFolder => (
+            "Another folder on this computer holds the same game version, so WoW Sync cannot tell \
+             which one is yours. Go Back and choose one, or remove the extra copy and choose Try again."
+                .into(),
+            true,
+        ),
+        LayoutReason::AlreadyEnrolled => (
+            "This game version is already set up on this computer. Go Back and choose another installation."
+                .into(),
+            false,
+        ),
+        LayoutReason::NotSyntheticInstall => (
+            "This folder is not a test folder, and this copy of WoW Sync only works with test folders. Go Back and choose another folder."
+                .into(),
+            false,
+        ),
+    }
+}
+
+/// Why one add-on folder is left out of syncing.
+pub fn block_text(r: &BlockReason) -> &'static str {
+    match r {
+        BlockReason::UnsupportedName(_) => "its folder name cannot be used for syncing",
+        BlockReason::CaseCollision => "another folder has the same name apart from capital letters",
+        BlockReason::NotReadable(_) => "WoW Sync cannot read it",
+        BlockReason::UnvalidatedTocMapping => "it has files only for other game versions",
+        BlockReason::NoToc => "it has no add-on description (.toc) file",
+        BlockReason::TocError(_) => "its add-on description (.toc) file cannot be read",
+        BlockReason::TocAmbiguous => {
+            "it has several description (.toc) files and WoW Sync cannot tell which applies"
+        }
+    }
+}
 
 const SMALL: u64 = 64 * 1024;
 const STATE_LIMIT: u64 = 16 * 1024 * 1024;
@@ -189,6 +308,8 @@ pub struct EnrollPreview {
     pub needs_guided_confirmation: bool,
     pub groups: Vec<GroupInfo>,
     pub problem: Option<String>,
+    /// True only when fixing something outside WoW Sync can change `problem`.
+    pub retryable: bool,
     /// Consent text shown before anything is written (domain.md §1 step 5, §2.1).
     pub disclosures: Vec<String>,
 }
@@ -1595,6 +1716,7 @@ impl SliceService {
                     needs_guided_confirmation: false,
                     groups: vec![],
                     problem: Some(e.to_string()),
+                    retryable: true,
                     disclosures: vec![],
                 }
             }
@@ -1609,13 +1731,16 @@ impl SliceService {
             needs_guided_confirmation: false,
             groups: self.existing_groups(),
             problem: None,
+            retryable: false,
             disclosures: vec![],
         };
         let (id, kind) = match &verdict {
             VariantVerdict::Recognized(i) => (i, PreviewKind::Recognized),
             VariantVerdict::Unfamiliar(i) => (i, PreviewKind::Unfamiliar),
             VariantVerdict::Refused(r) => {
-                p.problem = Some(format!("This folder cannot be used: {r:?}"));
+                let (text, retry) = refuse_text(r);
+                p.problem = Some(text);
+                p.retryable = retry;
                 return p;
             }
         };
@@ -1641,7 +1766,10 @@ impl SliceService {
                     blocked.len()
                 );
                 p.eligible = eligible.iter().map(|k| k.to_string()).collect();
-                p.blocked = blocked.iter().map(|(k, r)| format!("{k}: {r:?}")).collect();
+                p.blocked = blocked
+                    .iter()
+                    .map(|(k, r)| format!("{k}: {}", block_text(r)))
+                    .collect();
                 p.digest = Some(digest);
                 p.disclosures = consent_disclosures(&ConsentContext {
                     identity: id,
@@ -1651,7 +1779,9 @@ impl SliceService {
                 });
             }
             LayoutAssessment::Unsupported(r) => {
-                p.problem = Some(format!("Unsupported layout: {r:?}"));
+                let (text, retry) = layout_text(&r);
+                p.problem = Some(text);
+                p.retryable = retry;
             }
         }
         p
@@ -1668,7 +1798,7 @@ impl SliceService {
             digest: req.digest.unwrap_or(Sha256([0; 32])),
         };
         let confirmed = reconfirm_variant(&verdict, &assessment, &guided, &le.validation)
-            .map_err(|r| ServiceError::Refused(format!("{r:?}")))?;
+            .map_err(|r| ServiceError::Refused(refuse_text(&r).0))?;
         Self::check_consent(ConsentAction::Reconfirm, &verdict, &assessment, &guided)?;
         le.validation = confirmed.validation().clone();
         self.state
@@ -1692,10 +1822,7 @@ impl SliceService {
         let unfamiliar = matches!(verdict, VariantVerdict::Unfamiliar(_));
         match consent_gap(action, unfamiliar, guided, digest) {
             None => Ok(()),
-            Some(g) => Err(ServiceError::Refused(format!(
-                "{:?}",
-                RefuseReason::from(g)
-            ))),
+            Some(g) => Err(ServiceError::Refused(refuse_text(&RefuseReason::from(g)).0)),
         }
     }
 
@@ -1728,7 +1855,7 @@ impl SliceService {
             digest: req.digest.unwrap_or(Sha256([0; 32])),
         };
         let confirmed = confirm_variant(&verdict, &assessment, Some(&guided))
-            .map_err(|r| ServiceError::Refused(format!("{r:?}")))?;
+            .map_err(|r| ServiceError::Refused(refuse_text(&r).0))?;
         Self::check_consent(ConsentAction::Enroll, &verdict, &assessment, &guided)?;
         let provider = self.open_provider()?;
         let now = now_unix_ms() as u64;
@@ -1833,7 +1960,7 @@ impl SliceService {
         confirm_enrolled(&verdict, &assessment, &e.validation).map_err(|r| match r {
             RefuseReason::StaleConfirmation => ServiceError::NeedsReconfirmation,
             RefuseReason::VariantChanged => ServiceError::VariantChanged,
-            r => ServiceError::Refused(format!("{r:?}")),
+            r => ServiceError::Refused(refuse_text(&r).0),
         })
     }
 
@@ -3296,5 +3423,89 @@ fn dummy_identity() -> wow_sync_core::variant::VariantIdentity {
         folder: String::new(),
         build_version: None,
         profile: None,
+    }
+}
+
+#[cfg(test)]
+mod reason_text_tests {
+    use super::*;
+
+    fn all_refusals() -> Vec<RefuseReason> {
+        let s = || "RAW_INTERNAL".to_string();
+        vec![
+            RefuseReason::FlavorMissing,
+            RefuseReason::FlavorUnreadable(s()),
+            RefuseReason::FlavorUnparseable,
+            RefuseReason::InvalidProductCode,
+            RefuseReason::BuildInfo(s()),
+            RefuseReason::ProductNotInBuildInfo,
+            RefuseReason::ProductAmbiguousInBuildInfo,
+            RefuseReason::ProductInactive,
+            RefuseReason::FolderMismatch,
+            RefuseReason::AddOnsMissing,
+            RefuseReason::NotSyntheticInstall,
+            RefuseReason::Layout(LayoutReason::AddOnsLayout),
+            RefuseReason::Layout(LayoutReason::DuplicateProductFolder),
+            RefuseReason::Layout(LayoutReason::AlreadyEnrolled),
+            RefuseReason::Layout(LayoutReason::NotSyntheticInstall),
+            RefuseReason::ConfirmationRequired,
+            RefuseReason::StaleConfirmation,
+            RefuseReason::VariantChanged,
+        ]
+    }
+
+    fn plain(text: &str, what: &str) {
+        for bad in [
+            "{",
+            "}",
+            "RAW_INTERNAL",
+            "Reason",
+            "::",
+            "Layout(",
+            "NotSynthetic",
+        ] {
+            assert!(!text.contains(bad), "{what} shows {bad:?}: {text}");
+        }
+        assert!(text.ends_with('.'), "{what} is not a sentence: {text}");
+    }
+
+    #[test]
+    fn every_refusal_reads_as_a_sentence_that_says_what_to_do() {
+        for r in all_refusals() {
+            let (text, retry) = refuse_text(&r);
+            plain(&text, &format!("{r:?}"));
+            let consent = matches!(
+                r,
+                RefuseReason::ConfirmationRequired | RefuseReason::StaleConfirmation
+            );
+            if retry {
+                assert!(text.contains("Try again"), "{r:?}: {text}");
+            } else if !consent {
+                assert!(text.contains("Back"), "{r:?} points nowhere: {text}");
+                assert!(!text.contains("Try again"), "{r:?}: {text}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_block_reason_reads_plainly() {
+        let s = || "RAW_INTERNAL".to_string();
+        let all = [
+            BlockReason::UnsupportedName(s()),
+            BlockReason::CaseCollision,
+            BlockReason::NotReadable(s()),
+            BlockReason::UnvalidatedTocMapping,
+            BlockReason::NoToc,
+            BlockReason::TocError(s()),
+            BlockReason::TocAmbiguous,
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for r in all {
+            let t = block_text(&r);
+            for bad in ["{", "}", "RAW_INTERNAL", "Toc", "Reason", "::"] {
+                assert!(!t.contains(bad), "{r:?} shows {bad:?}: {t}");
+            }
+            assert!(seen.insert(t), "{r:?} wording is not distinct");
+        }
     }
 }
