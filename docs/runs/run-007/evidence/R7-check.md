@@ -488,3 +488,137 @@ usage. The recheck estimate is below its 400 AIU stop limit. No nested agents
 were launched. G1 is fixed in the executed reproductions; G2 (minor) and the
 A-47 zero-install GUI block remain explicitly open, so this is not an
 unqualified acceptance PASS.
+
+## Recheck 2 — G2 fix at b537000
+
+Source: `b537000bb5f8a4f79cb04e8e723af3b1895f8b4b`, in
+`D:\GitHub\wow-sync.worktrees\R7-check`, branch `run007/R7-check`.
+Same Windows environment, isolation and synthetic-data rules as above.
+The orchestrator requested this focused recheck with a 220 AIU stop limit.
+Previous results remain historical; no product source or tests were changed.
+
+### Results
+
+| Requested check | Status | Executed result |
+|---|---|---|
+| G2 live edit, both GUIs and 20 ms publication sampling | PASS | Every one of 87 A samples and 87 B samples explicitly showed zero decisions; captured unstable state, automatic exact convergence and recovery. |
+| Needs attention reproduction | PASS | An additional live mutation had no copy-choice row in either GUI across 84 samples per computer; captured instability and exact convergence. |
+| Stable live revert and GUI resolution | PASS | Revert remained intact; exactly one add-on decision on A and B after stability, GUI resolution converged both, displaced newer copy preserved. |
+| Dispatch 45253007667 | PASS | Correct source, matching supplied ZIP SHA-256, visible isolated setup window and version 0.3.0 startup. |
+| Offline/native regression tiers | PASS | Both exited 0 without allow-blocked; seven native cases verified against 845 results. |
+| Other original packet cases | NOT RUN | Outside this focused rerun; the earlier A-47 zero-install GUI block is not waived. |
+
+### G2 observations
+
+Built the source with `cargo build --release`, successfully, with the same
+four existing adapter unused-import/dead-code warnings. Enrolled fresh A/B
+synthetic installs through the GUI, with separate state directories, 500 ms
+scans and provider subtree
+`D:\Dropbox\Gaming Sync\WoW Sync Test\R7-check\recheck2`.
+
+Repeated the original G2 single-author mutation on `R7LiveProbe`, leaving
+both apps active. A background observer sampled provider records with a
+nominal 20 ms interval. A persistent native UI Automation observer inspected
+both GUIs throughout the edit and convergence, with a 100 ms sleep between
+A/B polling cycles (not a claim of continuous frame-by-frame observation).
+All 174 Add-ons-page samples explicitly contained `Needs you, 0 add-ons`;
+none contained **needs your decision**, **Waiting for your decision** or
+**Choose a copy**.
+
+A's sequence 2 was actually unstable with a null tree and retained lineage;
+sequence 3 was stable and named the baseline hash as ancestor. B converged
+without a choice. Exact relative path/size/SHA-256 equality was asserted,
+and B's displaced active copy matched recovery. The waiting row appeared in
+15 A samples and 38 B samples, rather than a spurious decision.
+
+Also repeated the specific Needs attention-page mutation that exposed G2
+previously. Both GUIs stayed free of decision rows through 84 samples each,
+then returned to Add-ons with zero decisions and exact equality.
+
+One optional-page instrumentation attempt initially expected a numeric
+`Needs attention, 0 items` control. Actual UI inspection showed that an empty
+page instead exposes `Needs attention, current page` and **See what is
+waiting**, without a numbered list. Retained that observation, corrected
+only this page-specific sampler assumption, and repeated the mutation.
+The original Add-ons-page numeric zero assertions were unchanged and had
+already passed. This was an observer mismatch, not a product failure.
+
+The initial helper's `waiting_observed: false` field searched for the full
+reason text, which the collapsed add-on row does not expose. The retained
+raw UI samples and `live-edit-ui-audit.json` independently establish the
+actual **waiting** rows and explicit zero counts; no full-reason detail
+inspection is claimed.
+
+### Live-revert regression
+
+As before, stopped only A by its captured launch PID, installed a settled
+newer synthetic copy, restarted it and let B converge. With both apps active,
+reverted A live to the original bytes. The nominal 20 ms record observer
+captured A sequence 9 unstable with prior lineage intact, then sequence 10
+stable with the newer hash as ancestor. After ten seconds A still held the
+revert and B the newer copy; both GUIs showed exactly one add-on decision.
+
+Selected A's copy through **Needs attention → add-on → Keep this ...
+This computer**. A/B converged exactly to the reverted copy, both GUIs
+showed zero decisions, and B's displaced newer tree matched recovery.
+Thus suppressing decisions while unstable did not suppress the required
+stable revert decision or silently replace the deliberate revert.
+
+Raw evidence is retained under
+`D:\WoWSyncLab\R7-check\evidence\recheck2`: JSONL UI samples, their audit,
+published-state summaries, per-computer decision counts, recovery matches,
+isolated logs and the lab procedures. No imported add-on code was executed.
+
+### Recheck 2 verification tiers
+
+Ran both mandatory tiers locally against `b537000`. Offline passed fmt,
+clippy, workspace tests, required-cases, deny and markdown-links. Native
+passed seven required cases against 845 test results. No retry or
+allow-blocked exception was needed. Complete runner output and the native
+JSON report are retained; hidden child-test output is not claimed.
+The native report's dirty flag reflects only this assigned evidence document.
+
+### Recheck 2 artifact, cleanup and verdict
+
+Actions run **45253007667** completed successfully at the exact source
+`b537000bb5f8a4f79cb04e8e723af3b1895f8b4b`. Downloaded its
+`wow-sync-0.3.0-windows-x64.zip`; the archive SHA-256 exactly matched the
+supplied `.zip.sha256`:
+
+```text
+ec779c9154b6c581a89ae79612c6d566c3f7364b710d2cdb0b0faf81f9341a04
+```
+
+Checked member paths before extraction and verified the expected executable,
+LICENSE, README and release notes. The packaged executable opened its setup
+GUI using an independent `--state`, isolated app-data environment and an
+explicit synthetic `--dev --install` target. Native UI inspection succeeded,
+startup logged 0.3.0, and the smoke process was stopped only by its captured
+launch PID, 12516. `artifact-proof.json`, `artifact-ui.json` and
+`recheck2-artifact.png` retain the actual proof. This was an executable
+startup smoke, not a second full sync run on the packaged binary.
+
+Cleanup PASS:
+
+- All currently recorded launched app PIDs (3620, 27760 and 12516) were
+  independently confirmed exited after PID-specific stops.
+- The approved R7-check Dropbox test subtree was deleted.
+- Lab again contains only `evidence`; removed synthetic installs, isolated
+  states/app-data, scratch and downloaded/extracted binaries.
+- Preserved all 108 initial and 58 first-recheck hashed artifacts unchanged.
+  The new recheck2 manifest hashes 53 retained files, including its cleanup
+  proof, actual runner outputs and observer procedures.
+- Created no `subst` mapping; no R7-check mapping remains. Did not touch
+  real AddOns/WTF, the demo, owner state, or unrelated provider entries.
+  Did not start, stop or reconfigure WoW, Battle.net or the owner's app.
+- Before commit, main was clean and only this assigned evidence file differed
+  in the worker checkout.
+
+**Focused verdict: PASS.** G2 is closed by the executed observations; the
+required stable-revert decision still works, and no new finding was observed.
+This does not convert the earlier A-47 zero-install GUI BLOCKED result into
+a PASS or claim that unrelated original packet cases were rerun.
+
+Estimated **150 AIU** for Recheck 2, below its 220 stop ceiling
+(approximately 800 AIU cumulative across this worker's verification rounds).
+These are estimates, not metered usage. No nested agents were launched.
