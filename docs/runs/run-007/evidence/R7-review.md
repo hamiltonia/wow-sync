@@ -88,3 +88,56 @@ touched file.
 ## Budget
 
 Within the about-300-AIU guide; no sub-agents.
+
+## Recheck (main `77ddb72`)
+
+Re-reviewed on `run007/R7-review`, fast-forwarded to `77ddb72`. Probes were
+temporary `zz_probe_*` tests in `e2e.rs` and `target.rs`, using synthetic
+content only. All probes were reverted, and `git diff --exit-code` is clean.
+Baseline: `cargo test -q -p wow-sync-core -p wow-sync-runtime` passes
+375 + 207 + 2 tests.
+
+### Status of RV7-01 to RV7-09
+
+| ID | Status | Evidence |
+|---|---|---|
+| RV7-01 | **resolved** (this exact scenario) | `shared-releases.json` and `shared_at` are gone; no references remain outside `docs/runs`. Lineage is now published in `code-state/1` `lineage`. The `lineage.rs` BFS uses a seen-set, so cycles terminate. `newer(x, y)` needs y reachable from x and not the reverse. I re-ran the exact probe: `three_at_v1`, a moves to v2, a and b sync every round, and c syncs only from round 4. Rounds 0–3: a=v2, b=v2, c=v1. Rounds 4–7: all v2. No decisions after round 0. Round 0 showed a transient `Ambiguous` on a; see RV7-10. |
+| RV7-02 | resolved | `compare_package` returns version ambiguity first. Then any `Less`/`Greater` gives `MembersDisagree`. Only otherwise does it return `UnrecognisedDiffers`. `lineage_never_overrides_contradicting_version_evidence_in_a_package` passes. |
+| RV7-03 | resolved | `Explanation::ContentLineage` reads "changed from the copy last shared, on X; replaces <hash>". The test asserts the text has no "unversioned". The decision-candidate label still says "unversioned"; that is acceptable there. |
+| RV7-04 | resolved | `toc.rs` `header_has_ended` requires a non-blank, non-`#` line inside the window; otherwise the result is `TooLarge`. Covered by `cut_header_without_a_file_line_is_not_selected`. |
+| RV7-05 | partly resolved | `is_dropbox_folder` checks the choice against `info.json`/default roots (tested), and the app shows `NOT_DROPBOX_TEXT` and logs a warning. It still accepts the folder (a warning, not a refusal) and forces `online_only = false` (`setup.rs:87`). This is a deliberate trade-off; it stays minor and needs owner acceptance. |
+| RV7-06 | resolved | `main.rs` runs `detect()` only when there is no saved target. `backend::detect_later` searches on its own thread after the first status, and only if not enrolled. |
+| RV7-07 | resolved | `pick_folder` runs `check_picked` on `background_executor`, shows "Checking…", and ignores re-entry while checking. UNC paths are not rejected, but they no longer block the UI thread. |
+| RV7-08 | resolved | New three-computer and offline e2e tests assert `offered_kinds == [Ambiguous]`, recovery copies, and that the loser does not resurface. Gap: no e2e test has the author's change while every peer is offline, and none has a revert. That is how RV7-10 escaped. |
+| RV7-09 | resolved | The TODO is gone. Unrecognised settings not being synced is disclosed. `backend::log_addon_notes` now logs "not synced" and "Unrecognised" add-ons once per change, by key and reason only, which matches the log claim. Remaining note wording issues are in RV7-13. |
+
+### Break attempts
+
+| Attempt | Result |
+|---|---|
+| Cyclic or mutual lineage (unit) | `unrecognised_copies_that_descend_from_each_other_need_a_decision` gives `Ambiguous`. A core probe with local v1, own published v2, and peer v2:[v1] also gives `NeedsDecision(Ambiguous)`. **But this only holds in core; see RV7-10.** |
+| Revert (e2e P3) | All three at v2; then a restores v1 locally. After a's **first** sync, a is at v2 again with no decision offered. v1 is only in a's recovery copies (`recovery_holds(a,"v1") = true`). |
+| Author alone (e2e P5) | a and b at v1; b offline; a changes to v2. On a, 4 syncs each offered `[Ambiguous]` for a's own change. It cleared only when b came back and echoed v2. |
+| Ancestor cap (e2e P2) | Three at v1; c offline; a makes 40 changes, and a and b sync after each. After about 32 changes, b stalls at e31 and both a and b are offered `Ambiguous`. c's v1 is no longer reachable from the current copy's truncated list. When c returns, everything converges to e39 with no decisions, because b's e31 entry still links to v1. Safe, but see RV7-11. |
+| Forged lineage (unit) | Local v3; peer 2 holds v1 with no lineage; peer 3 holds v3 and publishes an entry `v1:[v3]` for a hash it does not hold. Result: `Chosen` v1, so the local v3 is replaced by the stale copy. See RV7-12. |
+| Decision loser (e2e P4) | a decides for v1 over `from-a`/`from-b` while b is offline. b returns and gets v1; `from-b` does not resurface. a's later edit of the winner raises the existing `NewVersionAfterDecision` item (pre-existing keep semantics). No defect. |
+| Old-version peer, no lineage | Never `newer`, so it gives a decision, never a win (`differing_unrecognised_copies_without_lineage_need_a_decision`). v0.2.0 `decode` has no `deny_unknown_fields`, so old readers ignore `lineage`. |
+| Contradicting version evidence | Covered by the RV7-02 test; it gives `MembersDisagree`, never a lineage win. |
+
+### New findings
+
+| ID | Severity | Location | Issue | Fix |
+|---|---|---|---|---|
+| RV7-10 | **major** | `crates/wow-sync-core/src/target.rs:228` with `crates/wow-sync-runtime/src/service.rs:2030` | `compute_inner` looks for the local computer's previous published state in `input.members`. The runtime never puts itself there: `read_members` skips `me`. So `local_prev` is always `None` in production, and the local copy never carries its "replaced" ancestor when the target is computed. Only the unit `Scenario::local_published` adds self, which is why core tests pass. Effects: (1) a computer that changes an unrecognised add-on is offered a "choose a copy" decision about its own change until some peer echoes it. If every peer is offline, the decision persists (P5). Choosing the other copy reverts the change. This violates A-48 ("a lineage-newer copy propagates automatically"). (2) A deliberate revert to an earlier copy is silently replaced by the group's copy on the next sync, with no decision (P3). That contradicts `domain.md:416` ("mutually-descended copies (a revert) … `NeedsDecision`") and the v0.3.0 notes ("the copy that changed … wins"). It is recovery-preserved, so there is no data loss. | Pass the computer's own latest published state (`own_latest`, already loaded for publishing) into `TargetInput`, for example as `local_prev`, and use it in `compute_inner`. Add e2e tests for author-alone-with-peers-offline (expect no decision) and for a revert (expect the documented outcome). |
+| RV7-11 | minor | `crates/wow-sync-core/src/lineage.rs:119` (`truncate(MAX_ANCESTORS)`) | With more than 32 changes while a peer is offline, the online computers stall and are offered a decision, even though nobody changed concurrently (P2). It self-heals when the peer returns. It is safe (nothing is overwritten or resurrected), but the user gets a spurious prompt and the most recent change does not reach the online computers. | Keep ancestors that are still held by an admitted peer ahead of truncation, or document the limit in the notes and `domain.md`. |
+| RV7-12 | minor | `crates/wow-sync-core/src/lineage.rs:53` (`LineageGraph::add`, via `from_states`) | A state's lineage entry is accepted for any hash, including one the publishing computer does not hold. One member can therefore make a stale copy held by another peer "newer" than the current copy, and it is `Chosen` (forged-lineage probe). Members are admitted and trusted, so this needs a bug or a hostile member. Validation still costs one comparison. | In `from_states` (and `CodeState` validation), accept a `PackageLineage` only when its `hash` equals that state's own package hash for `package`. |
+| RV7-13 | minor (docs) | `docs/release/v0.3.0.md:38`, `:46`, `:53` | The oversized `.toc` change is described twice ("Large `.toc` files" and again under "Add-ons that cannot be recognised"). Line 53 ("the copy that changed since the last shared copy wins") is untrue for a revert and, today, for an author whose peers are offline (RV7-10). | Merge the two `.toc` paragraphs. After RV7-10, describe the actual outcome for a revert and for the 32-ancestor limit. |
+
+### Recheck verdict
+
+Counts: **critical 0, major 1 (RV7-10), minor 4 (RV7-11, RV7-12, RV7-13, and
+RV7-05 still partly resolved)**. RV7-01 to RV7-04 and RV7-06 to RV7-09 are
+resolved. RV7-10 is open and major: it should be fixed, with its e2e tests,
+before `v0.3.0` is tagged.
+
+Budget: recheck within the about-300-AIU guide; no sub-agents.
