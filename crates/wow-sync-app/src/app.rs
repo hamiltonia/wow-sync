@@ -156,6 +156,8 @@ pub struct SetupState {
     pub finished: bool,
     /// Why the last folder a person chose was not accepted.
     pub pick_note: Option<String>,
+    /// A chosen folder is being looked at off the window thread.
+    pub checking: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -962,6 +964,9 @@ impl Shell {
     /// Asks for a folder with the system dialog. Nothing is read or changed until the choice
     /// has been checked by `folder_picked`.
     fn pick_folder(&mut self, game: bool, cx: &mut Context<Self>) {
+        if self.setup.checking {
+            return;
+        }
         let prompt = if game {
             "Choose the World of Warcraft folder"
         } else {
@@ -982,11 +987,24 @@ impl Shell {
                 Ok(Ok(Some(v))) => v.into_iter().next(),
                 _ => None,
             };
+            let Some(p) = chosen else {
+                log("folder picker closed without a choice");
+                return;
+            };
             this.update(cx, |s, cx| {
-                match chosen {
-                    Some(p) => s.folder_picked(game, p),
-                    None => log("folder picker closed without a choice"),
-                }
+                s.setup.checking = true;
+                s.setup.pick_note = None;
+                cx.notify();
+            })
+            .ok();
+            let looked = p.clone();
+            let checked = cx
+                .background_executor()
+                .spawn(async move { crate::setup::check_picked(game, &looked) })
+                .await;
+            this.update(cx, |s, cx| {
+                s.setup.checking = false;
+                s.folder_picked(p, checked);
                 cx.notify();
             })
             .ok();
@@ -994,34 +1012,46 @@ impl Shell {
         .detach();
     }
 
-    /// Takes the person's folder into setup. A game folder joins the list and is then checked
-    /// like any other; it is never trusted because it was chosen by hand.
-    pub fn folder_picked(&mut self, game: bool, path: std::path::PathBuf) {
+    /// Takes the person's folder into setup once it has been looked at. A game folder joins the
+    /// list and is then checked like any other; it is never trusted because it was chosen by
+    /// hand. A folder Dropbox does not report is accepted with a warning, not refused.
+    pub fn folder_picked(&mut self, path: std::path::PathBuf, checked: crate::setup::Checked) {
         self.setup.pick_note = None;
         let Some(d) = self.w.setup.as_mut() else {
             return;
         };
-        if game {
-            match crate::setup::add_chosen_install(d, &path) {
-                Ok(i) => {
-                    log(&format!(
-                        "game folder chosen: {} (accepted)",
-                        path.display()
-                    ));
-                    self.setup_act_select(i);
-                }
-                Err(note) => {
-                    log_warn(&format!(
-                        "game folder chosen: {} (not a game folder)",
-                        path.display()
-                    ));
-                    self.setup.pick_note = Some(note);
+        match checked {
+            crate::setup::Checked::Game(found) => {
+                match crate::setup::add_found_install(d, &path, found) {
+                    Ok(i) => {
+                        log(&format!(
+                            "game folder chosen: {} (accepted)",
+                            path.display()
+                        ));
+                        self.setup_act_select(i);
+                    }
+                    Err(note) => {
+                        log_warn(&format!(
+                            "game folder chosen: {} (not a game folder)",
+                            path.display()
+                        ));
+                        self.setup.pick_note = Some(note);
+                    }
                 }
             }
-        } else {
-            crate::setup::apply_dropbox_choice(d, &path);
-            self.setup.folder_chosen = false;
-            log(&format!("Dropbox folder chosen: {}", path.display()));
+            crate::setup::Checked::Dropbox { known } => {
+                crate::setup::apply_dropbox_choice(d, &path);
+                self.setup.folder_chosen = false;
+                if known {
+                    log(&format!("Dropbox folder chosen: {}", path.display()));
+                } else {
+                    log_warn(&format!(
+                        "Dropbox folder chosen: {} (not reported by Dropbox; warned)",
+                        path.display()
+                    ));
+                    self.setup.pick_note = Some(crate::setup::NOT_DROPBOX_TEXT.into());
+                }
+            }
         }
         self.pending_focus = Some("@content".into());
     }

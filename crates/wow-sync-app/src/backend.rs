@@ -290,6 +290,29 @@ fn os_attach(o: &BackendOptions) -> Option<Attach> {
         .then_some(SliceService::attach_os_services as Attach)
 }
 
+/// Looks for the game and Dropbox off the sync thread, once the first status has been read,
+/// and only for a computer that is not set up. An enrolled computer never pays for the
+/// all-drives search, so sync starts as soon as it is ready.
+fn detect_later(computer: String, shared: SharedState, wake: Sender<()>) {
+    let _ = std::thread::Builder::new()
+        .name("wow-sync-detect".into())
+        .spawn(move || {
+            for _ in 0..300 {
+                let g = lock(&shared);
+                if !g.snapshot.headline.is_empty() {
+                    if g.snapshot.enrolled {
+                        return;
+                    }
+                    break;
+                }
+                drop(g);
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            let data = crate::detect(&computer);
+            publish(&shared, &wake, |g| g.setup = Some(data));
+        });
+}
+
 fn run(
     target: Option<Target>,
     setup: Option<SetupData>,
@@ -312,10 +335,13 @@ fn run(
         }
     }
     publish(&shared, &wake, |g| {
-        g.setup = setup;
+        g.setup = setup.clone();
         g.started = true;
         g.shared_root = target.as_ref().map(|t| t.shared_root.clone());
     });
+    if setup.is_none() {
+        detect_later(opts.display_name.clone(), shared.clone(), wake.clone());
+    }
     let mut gate = QuitGate::default();
     let mut force = true;
     loop {

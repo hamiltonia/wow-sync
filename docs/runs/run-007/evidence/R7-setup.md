@@ -39,3 +39,10 @@ Sample log (lab):
 ## Open
 - TODO: release notes "Add-ons that cannot be recognised" text awaits R7-sync's text from the orchestrator.
 - The log does not yet list R7-sync's unrecognised add-ons separately (format unknown to this worker).
+
+## Review follow-up (RV7-05/06/07/09)
+- RV7-05: a picked Dropbox folder that is not, or inside, a path from Dropbox's info.json (or the default folder) is accepted with the warning in setup::NOT_DROPBOX_TEXT; never blocked. Tests: discover::tests::a_picked_folder_is_dropbox_only_when_it_is_or_is_inside_a_reported_one, setup::tests::a_picked_folder_not_reported_by_dropbox_is_a_warning_not_a_refusal.
+- RV7-06: the all-drives search runs before the window only for a computer with no saved enrollment. An enrolled computer starts the service first; backend::detect_later runs the search on its own thread after the first status, and only if not enrolled. Design argument, no timing measured (NOT RUN: no timing test).
+- RV7-07: pick validation (install_from_choice, info.json read) runs on the background executor; the page shows 'Checking...' meanwhile. No GUI test (BLOCKED: no GPUI render tests); logic covered by the setup tests.
+- RV7-09: the log now records each add-on whose status text says 'not synced' or 'Unrecognised' once per change; the notes describe lineage only as 'the copy that changed since the last shared copy wins; otherwise you choose once'.
+- Both verify tiers PASS.
