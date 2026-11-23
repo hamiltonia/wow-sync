@@ -106,6 +106,14 @@ mod tests {
             std::fs::read_to_string(self.install.addons.join(rel)).ok()
         }
 
+        /// A folder with no `.toc` at all: unrecognised, synced by content (R-05, D-29).
+        fn bare(&self, name: &str, content: &str) {
+            let dir = self.install.addons.join(name);
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("main.lua"), content).unwrap();
+            self.install.set_old_mtimes();
+        }
+
         fn confirm_request(&self, join: JoinChoice) -> EnrollRequest {
             let p = self.svc.inspect();
             EnrollRequest {
@@ -451,34 +459,144 @@ mod tests {
     }
 
     #[test]
-    fn blocked_folder_is_not_published_and_shows_not_synced() {
+    fn unrecognised_folder_is_published_by_content_and_says_so() {
         let lab = Lab::new();
         let mut a = lab.pc("a");
         a.addon("Good", "good-v1");
         a.install.add_addon(
-            "Blocked",
-            "Blocked_Foreign.toc",
+            "Odd",
+            "Odd_Foreign.toc",
             "## Interface: 11508\n## Version: 9.0\n",
-            &[("main.lua", b"blocked-secret")],
+            &[("main.lua", b"odd-content")],
         );
         a.install.set_old_mtimes();
         let g = a.create();
         let r = synced(&mut a);
         assert!(r.published.is_some(), "{r:?}");
-        let rel = layout::blob(&g, &sha256(b"blocked-secret"));
+        let rel = layout::blob(&g, &sha256(b"odd-content"));
         let p: PathBuf = rel
             .split('/')
             .fold(lab.shared.join("WoWSync"), |x, s| x.join(s));
-        assert!(!p.exists(), "blocked folder content must not be uploaded");
+        assert!(p.exists(), "unrecognised content is uploaded");
         let line = r
             .status
             .packages
             .iter()
-            .find(|p| p.key == "blocked")
+            .find(|p| p.key == "odd")
             .map(|p| p.text.clone())
             .unwrap_or_default();
-        assert!(line.contains("not synced"), "{line} / {}", texts(&r));
-        assert!(!line.contains("up to date"), "{line}");
+        assert!(
+            line.contains("Unrecognised: synced by content") && !line.contains("not synced"),
+            "{line} / {}",
+            texts(&r)
+        );
+        let good = r.status.packages.iter().find(|p| p.key == "good").unwrap();
+        assert!(!good.text.contains("Unrecognised"), "{}", good.text);
+    }
+
+    fn converge(a: &mut Pc, b: &mut Pc) {
+        for _ in 0..4 {
+            synced(a);
+            synced(b);
+        }
+    }
+
+    #[test]
+    fn unrecognised_folder_only_on_a_installs_on_b_and_later_edits_follow() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.bare("Bare", "v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        converge(&mut a, &mut b);
+        assert_eq!(b.read("Bare/main.lua").as_deref(), Some("v1"));
+        assert!(
+            b.cfg.state_dir.join("shared-releases.json").exists(),
+            "the shared release is remembered locally"
+        );
+        a.bare("Bare", "v2");
+        converge(&mut a, &mut b);
+        assert_eq!(a.read("Bare/main.lua").as_deref(), Some("v2"));
+        assert_eq!(
+            b.read("Bare/main.lua").as_deref(),
+            Some("v2"),
+            "the copy changed since the shared release wins without a question"
+        );
+    }
+
+    #[test]
+    fn unrecognised_folder_changed_on_both_is_never_overwritten_and_asks() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.bare("Bare", "v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        converge(&mut a, &mut b);
+        a.bare("Bare", "from-a");
+        b.bare("Bare", "from-b");
+        converge(&mut a, &mut b);
+        assert_eq!(a.read("Bare/main.lua").as_deref(), Some("from-a"));
+        assert_eq!(b.read("Bare/main.lua").as_deref(), Some("from-b"));
+        let r = synced(&mut b);
+        assert!(
+            r.status
+                .packages
+                .iter()
+                .any(|p| p.key == "bare" && p.text.contains("Unrecognised: synced by content")),
+            "{}",
+            texts(&r)
+        );
+    }
+
+    #[test]
+    fn unrecognised_folders_that_differ_at_first_join_are_not_overwritten() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.bare("Bare", "from-a");
+        b.bare("Bare", "from-b");
+        let g = a.create();
+        b.join(&g);
+        converge(&mut a, &mut b);
+        assert_eq!(a.read("Bare/main.lua").as_deref(), Some("from-a"));
+        assert_eq!(b.read("Bare/main.lua").as_deref(), Some("from-b"));
+    }
+
+    #[test]
+    fn unrecognised_folder_removal_and_restore_round_trip() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.bare("Bare", "v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        converge(&mut a, &mut b);
+        assert_eq!(b.read("Bare/main.lua").as_deref(), Some("v1"));
+        std::fs::remove_dir_all(a.install.addons.join("Bare")).unwrap();
+        let st = LocalState::open_at(&a.cfg.state_dir).unwrap();
+        let store = RemovalStore::new(&st, g.clone());
+        let (base, mut obs) = store.load();
+        let key = base.packages.keys().next().expect("a baseline").clone();
+        obs.gone.insert(key, (1, 1));
+        store.save(&base, &obs).unwrap();
+        synced(&mut a);
+        let (ac, _) = pc_ids(&a);
+        let removal = removal_hash(&lab, &g, &ac);
+        converge(&mut a, &mut b);
+        assert_eq!(b.read("Bare/main.lua"), None, "the removal propagated");
+        let out = a.svc.command(Command::RestoreRemoved { removal }).unwrap();
+        assert!(matches!(out, CommandOutcome::Recorded), "{out:?}");
+        for _ in 0..8 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        assert_eq!(a.read("Bare/main.lua").as_deref(), Some("v1"));
+        assert_eq!(b.read("Bare/main.lua").as_deref(), Some("v1"));
     }
 
     #[test]
@@ -1096,7 +1214,7 @@ mod tests {
     }
 
     #[test]
-    fn forever_suffix_folders_sync_by_the_forever_rule_and_others_are_never_changed() {
+    fn forever_suffix_folders_sync_by_the_forever_rule_and_unrecognised_ones_by_content() {
         let lab = Lab::new();
         let mut a = lab.pc("a");
         let toc = |v: &str| format!("## Interface: 11508\n## Version: {v}\n");
@@ -1126,15 +1244,18 @@ mod tests {
             &a.install.addons.join("Suf"),
             &b.install.addons.join("Suf")
         ));
-        assert!(!b.install.addons.join("OnlyVanilla").exists());
+        assert!(
+            same_tree(
+                &a.install.addons.join("OnlyVanilla"),
+                &b.install.addons.join("OnlyVanilla")
+            ),
+            "a folder with only other-version .toc files is unrecognised and syncs by content"
+        );
         let rel = layout::blob(&g, &sha256(b"vanilla-secret"));
         let p: PathBuf = rel
             .split('/')
             .fold(lab.shared.join("WoWSync"), |x, s| x.join(s));
-        assert!(
-            !p.exists(),
-            "a folder this game would not load is not uploaded"
-        );
+        assert!(p.exists(), "its content is uploaded (D-29)");
     }
 
     #[test]

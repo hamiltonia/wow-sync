@@ -339,13 +339,11 @@ pub(crate) fn local_points(variant_dir: &std::path::Path) -> Vec<LocalPoint> {
                 .and_then(|(_, n, _)| {
                     use std::io::Read;
                     let mut f = work
-                        .open_read(
-                            &format!("recovery/{}/{op}/{n}/{n}.toc", pkg.name),
-                            256 * 1024,
-                        )
+                        .open_read(&format!("recovery/{}/{op}/{n}/{n}.toc", pkg.name), u64::MAX)
                         .ok()?;
                     let mut b = Vec::new();
-                    f.read_to_end(&mut b).ok()?;
+                    let cap = wow_sync_core::toc::TOC_LIMIT as u64 + 1;
+                    (&mut f).take(cap).read_to_end(&mut b).ok()?;
                     wow_sync_core::toc::parse_toc(&b).ok()?.version
                 })
                 .map(|v| v.chars().take(100).collect());

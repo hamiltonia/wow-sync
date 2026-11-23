@@ -1005,19 +1005,20 @@ number is therefore **advisory display text only**. It never blocks an
 install and never creates a decision. There is no "Use it anyway" button.
 
 The slice's `DecisionReason::NoCompatibleToc` actually means **unusable
-metadata** (`target::folder_problem`: a non-`Ok` `FolderStatus`, or a
-`TocKind` other than `Selected`/`Unvalidated`). Phase C renames it:
+metadata** (`target::folder_problem`: a non-`Ok` `FolderStatus` only; a
+folder without a `Selected` toc is unrecognised and synced by content, D-29).
+Phase C renames it:
 
 | Reason | Cause | Options |
 |---|---|---|
-| `Ambiguous` | copies cannot be ordered but differ (domain.md §6) | one **Keep this copy** per distinct copy; **Decide later** |
+| `Ambiguous` | copies cannot be ordered but differ (domain.md §6); for an unrecognised add-on (`AmbiguityReason::UnrecognisedDiffers`) when no content lineage orders them. Decided with the local `wowsync.shared-releases` record (`SharedReleases { group_id, packages: key → shared hash }`, never published) | one **Keep this copy** per distinct copy; **Decide later** |
 | `PartialCandidate` | one copy of a version lacks folders another has | **Keep the complete copy**; **Keep the smaller copy**; **Decide later** |
 | `ChoicesDiffer`, `RollbackTargetsDiffer` | §4.4 | one option per constrained content; **Decide later** |
 | `RecoveredUnavailable` | a live recovered rollback target has no source left (rollback.md §3.1) | one **Use <version>** per available non-rejected candidate; **Decide later** |
 | `LookalikeOfRejected` | a candidate has the version label of an active rejection but different content (rollback.md §3.3) | **Use this copy**; **Block this copy too** (a rejection, not a choice); **Decide later** |
 | `NewerAfterRollback` (notice, not blocking) | a non-rejected source that is `Different` (§4.2) from every entry of the rejection's `considered` and is demonstrably newer than the recovered target (rollback.md §3.1) | **Use <version>** (a keep covering the rejection); **Stay on <recovered>** (dismiss) |
 | `NewVersionAfterDecision` | a source that is `Different` (§4.2) from every `considered` entry of a live keep and is demonstrably newer than, or unordered against, the kept copy (§5.3, Q-49) | **Keep <kept>** (a new keep that lists the new copy in `considered`); **Use <new>** (a keep of the new copy); **Follow newest again** (resume); **Decide later**. The kept copy stays installed meanwhile |
-| `UnusableMetadata(kind)` | `FolderStatus` `Unreadable`, `Unsafe`, `Unsupported`, `Unstable`, or `TocKind` `None`, `Ambiguous`, `Error` | **no override.** "This copy can't be used: <reason>. Reinstall or fix it on <computer>." Waits for a usable copy |
+| `UnusableMetadata(kind)` | `FolderStatus` `Unreadable`, `Unsafe`, `Unsupported`, `Unstable` (a `TocKind` of `None`, `Ambiguous`, `Unvalidated` or `Error` is no longer unusable: D-29) | **no override.** "This copy can't be used: <reason>. Reinstall or fix it on <computer>." Waits for a usable copy |
 | `DifferentTocMapping`, `UnvalidatedTocMapping` | safe-scope validation (R-02) | **no override.** "Waiting for a WoW Sync update that knows this game version" |
 
 No option ever makes unvalidated, unsafe or unreadable content installable

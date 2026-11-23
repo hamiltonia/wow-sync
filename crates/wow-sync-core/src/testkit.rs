@@ -221,6 +221,11 @@ pub fn addon_unvalidated(name: &str, version: &str, tag: &str) -> FolderScan {
     scan
 }
 
+/// A folder with no `.toc` at all: it is synced by content (R-05, D-29).
+pub fn addon_unrecognised(name: &str, tag: &str) -> FolderScan {
+    folder_scan(name, &[("main.lua", tag.as_bytes())], &[])
+}
+
 pub fn inventory(scans: Vec<FolderScan>) -> Inventory {
     build_inventory(scans, true, &confirmed_forever())
 }
@@ -339,6 +344,7 @@ pub struct Scenario {
     pub local_client: ClientInfo,
     pub members: Vec<MemberView>,
     pub trees: BTreeMap<Sha256, TreeAvail>,
+    pub shared: BTreeMap<FolderKey, Sha256>,
 }
 
 impl Scenario {
@@ -348,7 +354,14 @@ impl Scenario {
             local_client: client(BUILD),
             members: Vec::new(),
             trees: BTreeMap::new(),
+            shared: BTreeMap::new(),
         }
+    }
+
+    /// Records the last shared release of `package` (R-05 content lineage).
+    pub fn shared_at(mut self, package: &str, hash: Sha256) -> Self {
+        self.shared.insert(FolderKey::lossy(package), hash);
+        self
     }
 
     pub fn peer(self, n: u8, scans: Vec<FolderScan>) -> Self {
@@ -437,6 +450,21 @@ impl Scenario {
             local_id: &computer(1),
             members: &self.members,
             trees: &self.trees,
+            shared: &self.shared,
+        })
+    }
+
+    /// The shared-release memory after observing this scenario.
+    pub fn shared_after(&self) -> BTreeMap<FolderKey, Sha256> {
+        crate::target::shared_releases(&TargetInput {
+            group: &group_record(),
+            variant: &confirmed_forever(),
+            local: &self.local,
+            local_client: &self.local_client,
+            local_id: &computer(1),
+            members: &self.members,
+            trees: &self.trees,
+            shared: &self.shared,
         })
     }
 

@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use wow_sync_core::admit::{MemberLatest, MemberView};
 use wow_sync_core::explain::{render_named, Explanation};
 use wow_sync_core::ids::{ComputerId, Sha256};
-use wow_sync_core::inventory::{FolderScan, FolderState, Inventory};
+use wow_sync_core::inventory::{FolderScan, FolderState, Inventory, UNRECOGNISED_LABEL};
 use wow_sync_core::paths::FolderKey;
 use wow_sync_core::status::{confirmations, MemberSummary, PackageStatus, StatusView};
 use wow_sync_core::target::{GroupTarget, PackageTarget};
@@ -19,6 +19,8 @@ pub struct FolderRow {
     pub version: Option<String>,
     pub files: u32,
     pub bytes: u64,
+    /// Set when the folder has no recognised `.toc` and syncs by content (R-05, D-29).
+    pub unrecognised: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,7 +151,24 @@ fn folder_row(f: &FolderState) -> FolderRow {
         version: f.toc.version.clone(),
         files: f.files,
         bytes: f.bytes,
+        unrecognised: f
+            .unrecognised_reason()
+            .map(|r| format!("{UNRECOGNISED_LABEL} \u{2014} {r}.")),
     }
+}
+
+/// The plain-language note for the unrecognised folders of one package, if any.
+pub fn unrecognised_note(folders: &[FolderRow]) -> Option<String> {
+    let notes: Vec<&str> = folders
+        .iter()
+        .filter_map(|f| f.unrecognised.as_deref())
+        .collect();
+    let first = *notes.first()?;
+    Some(if notes.len() == 1 {
+        first.to_string()
+    } else {
+        format!("{first} (and {} more folders)", notes.len() - 1)
+    })
 }
 
 fn main_version(folders: &[FolderState], key: &FolderKey) -> Option<String> {
@@ -239,11 +258,16 @@ pub fn build_package_rows(i: &DetailInput) -> Vec<PackageRow> {
                                 .join(", ")
                         )
                     };
+                    let rows: Vec<FolderRow> = v.folders.iter().map(folder_row).collect();
+                    let differences = match unrecognised_note(&rows) {
+                        Some(n) => format!("{differences} {n}"),
+                        None => differences,
+                    };
                     candidates.push(CandidateRow {
                         version: main_version(&v.folders, key),
                         holders: holders.iter().map(&name_of).collect(),
                         here: holders.contains(i.this_id),
-                        folders: v.folders.iter().map(folder_row).collect(),
+                        folders: rows,
                         differences,
                     });
                 }
@@ -269,11 +293,15 @@ pub fn build_package_rows(i: &DetailInput) -> Vec<PackageRow> {
         } else {
             Vec::new()
         };
+        let sentence = match unrecognised_note(&folders) {
+            Some(n) => format!("{} {n}", render_named(why, &name_of)),
+            None => render_named(why, &name_of),
+        };
         rows.push(PackageRow {
             key: key.to_string(),
             title,
             status: status.clone(),
-            sentence: render_named(why, &name_of),
+            sentence,
             next: next_action(status, why, i.game_running),
             version_here,
             version_target,

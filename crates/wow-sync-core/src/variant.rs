@@ -5,7 +5,7 @@ use crate::hash::Hasher;
 use crate::ids::Sha256;
 use crate::inventory::{FolderScan, ScanStatus};
 use crate::paths::{validate_folder_name, FolderKey};
-use crate::toc::{select_toc, TocSelection};
+
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -266,10 +266,6 @@ pub enum BlockReason {
     UnsupportedName(String),
     CaseCollision,
     NotReadable(String),
-    UnvalidatedTocMapping,
-    NoToc,
-    TocError(String),
-    TocAmbiguous,
 }
 
 impl BlockReason {
@@ -278,10 +274,6 @@ impl BlockReason {
             BlockReason::UnsupportedName(_) => "name",
             BlockReason::CaseCollision => "case",
             BlockReason::NotReadable(_) => "unreadable",
-            BlockReason::UnvalidatedTocMapping => "unvalidated",
-            BlockReason::NoToc => "notoc",
-            BlockReason::TocError(_) => "tocerror",
-            BlockReason::TocAmbiguous => "ambiguous",
         }
     }
 }
@@ -322,11 +314,7 @@ pub fn assess_layout(
         if matches!(f.status, ScanStatus::Unstable(_)) {
             continue;
         }
-        let verdict = classify_folder(
-            f,
-            counts.get(&f.name.to_lowercase()).copied().unwrap_or(0),
-            &mapping,
-        );
+        let verdict = classify_folder(f, counts.get(&f.name.to_lowercase()).copied().unwrap_or(0));
         let key = validate_folder_name(&f.name).unwrap_or_else(|_| FolderKey::lossy(&f.name));
         match verdict {
             Ok(()) => eligible.push(key),
@@ -360,11 +348,8 @@ pub fn assess_layout(
     }
 }
 
-fn classify_folder(
-    f: &FolderScan,
-    name_count: usize,
-    mapping: &TocMapping,
-) -> Result<(), BlockReason> {
+fn classify_folder(f: &FolderScan, name_count: usize) -> Result<(), BlockReason> {
+    // A folder without a recognised `.toc` is eligible: it syncs by content (R-05, D-29).
     if let Err(e) = validate_folder_name(&f.name) {
         return Err(BlockReason::UnsupportedName(e.to_string()));
     }
@@ -377,13 +362,7 @@ fn classify_folder(
             return Err(BlockReason::NotReadable(r.clone()))
         }
     }
-    match select_toc(&f.name, &f.tocs, mapping) {
-        TocSelection::Selected { .. } => Ok(()),
-        TocSelection::Unvalidated { .. } => Err(BlockReason::UnvalidatedTocMapping),
-        TocSelection::None { .. } => Err(BlockReason::NoToc),
-        TocSelection::Ambiguous { .. } => Err(BlockReason::TocAmbiguous),
-        TocSelection::Error { reason, .. } => Err(BlockReason::TocError(reason)),
-    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -935,7 +914,7 @@ mod tests {
     }
 
     #[test]
-    fn suffixed_toc_folders_blocked_for_unfamiliar() {
+    fn unrecognised_folders_are_eligible_for_unfamiliar() {
         let v = validate_variant(&obs("wow_test", "_test_"));
         let VariantVerdict::Unfamiliar(id) = &v else {
             panic!()
@@ -955,7 +934,7 @@ mod tests {
         };
         assert_eq!(
             eligible.iter().map(|k| k.as_str()).collect::<Vec<_>>(),
-            vec!["plain"]
+            vec!["mixed", "notoc", "onlysuffix", "plain"]
         );
         let reason = |n: &str| {
             blocked
@@ -963,12 +942,8 @@ mod tests {
                 .find(|(k, _)| k.as_str() == n)
                 .map(|(_, r)| r.clone())
         };
-        assert_eq!(reason("mixed"), Some(BlockReason::UnvalidatedTocMapping));
-        assert_eq!(
-            reason("onlysuffix"),
-            Some(BlockReason::UnvalidatedTocMapping)
-        );
-        assert_eq!(reason("notoc"), Some(BlockReason::NoToc));
+        // D-29: folders without a recognised .toc sync by content, so they are eligible.
+        assert_eq!(blocked.len(), 1);
         assert!(matches!(
             reason("bad name."),
             Some(BlockReason::UnsupportedName(_))
@@ -992,9 +967,8 @@ mod tests {
         };
         assert_eq!(mapping, TocMapping::Profile(&KNOWN_PROFILES[0]));
         assert_eq!(mapping.id(), "profile:wowf/2");
-        assert_eq!(eligible.len(), 2);
-        assert_eq!(blocked.len(), 1);
-        assert_eq!(blocked[0].1, BlockReason::NoToc);
+        assert_eq!(eligible.len(), 3);
+        assert!(blocked.is_empty());
     }
 
     #[test]

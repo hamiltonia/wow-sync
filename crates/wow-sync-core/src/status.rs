@@ -790,7 +790,7 @@ mod tests {
     }
 
     #[test]
-    fn blocked_local_folder_is_not_synced_not_up_to_date() {
+    fn unrecognised_local_folder_is_in_sync_by_content() {
         let sc = Scenario::new(vec![
             addon("Good", Some("1.0"), "g"),
             crate::testkit::addon_unvalidated("Odd", "1.0", "o"),
@@ -799,15 +799,8 @@ mod tests {
         let seen = BTreeMap::new();
         let v = derive_status(&input(&t, &sc.members, &seen));
         let odd = v.packages.iter().find(|p| p.0.as_str() == "odd").unwrap();
-        assert_eq!(odd.1, PackageStatus::NotSynced);
-        let text = render_package(odd);
-        assert!(
-            text.contains("not synced") && !text.contains("up to date"),
-            "{text}"
-        );
-        let good = v.packages.iter().find(|p| p.0.as_str() == "good").unwrap();
-        assert_eq!(good.1, PackageStatus::InSync);
-        assert!(!t.effective.contains_key(&FolderKey::lossy("odd")));
+        assert_eq!(odd.1, PackageStatus::InSync);
+        assert!(t.effective.contains_key(&FolderKey::lossy("odd")));
         assert_eq!(v.headline, Headline::Ok);
     }
 

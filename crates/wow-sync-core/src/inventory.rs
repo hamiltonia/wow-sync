@@ -104,11 +104,35 @@ pub struct FolderState {
     pub file_entries: Vec<FileEntry>,
 }
 
+/// The status label of an add-on without a recognised `.toc` (R-05, D-29).
+pub const UNRECOGNISED_LABEL: &str = "Unrecognised: synced by content";
+
 impl FolderState {
-    /// Only these folders are published or installed (R-03, A-46): readable, safe, and with a
-    /// toc selected under the confirmed mapping. Everything else stays visibly "not synced".
+    /// Only these folders are published or installed (R-03, A-46, D-29): readable, safe and
+    /// stable. A folder whose `.toc` is not recognised is eligible too and synced by content
+    /// (`unrecognised`); unreadable, unsafe, unstable and unsupported folders stay "not synced".
     pub fn transfer_eligible(&self) -> bool {
-        self.status == FolderStatus::Ok && self.toc.kind == TocKind::Selected
+        self.status == FolderStatus::Ok
+    }
+
+    /// Eligible, but no `.toc` was selected: the folder is synced by content lineage (R-05).
+    pub fn unrecognised(&self) -> bool {
+        self.status == FolderStatus::Ok && self.toc.kind != TocKind::Selected
+    }
+
+    /// Why the folder is unrecognised, as a short phrase; `None` for a recognised folder.
+    pub fn unrecognised_reason(&self) -> Option<&'static str> {
+        if !self.unrecognised() {
+            return None;
+        }
+        Some(match self.toc.kind {
+            TocKind::None => "no description (.toc) file for this game version",
+            TocKind::Ambiguous => {
+                "several description (.toc) files and no way to tell which applies"
+            }
+            TocKind::Unvalidated => "description (.toc) files only for other game versions",
+            _ => "its description (.toc) file cannot be read",
+        })
     }
 }
 
@@ -229,6 +253,33 @@ pub fn build_inventory(
 mod tests {
     use super::*;
     use crate::testkit;
+
+    #[test]
+    fn eligibility_follows_status_and_unrecognised_folders_say_why() {
+        let v = testkit::confirmed_forever();
+        let mut locked = testkit::addon("Locked", Some("1.0"), "l");
+        locked.status = ScanStatus::Unreadable("denied".into());
+        let inv = build_inventory(
+            vec![
+                testkit::addon("Plain", Some("1.0"), "p"),
+                testkit::addon_unrecognised("Bare", "b"),
+                testkit::addon_unvalidated("Foreign", "1.0", "f"),
+                locked,
+            ],
+            true,
+            &v,
+        );
+        let f = |n: &str| inv.folders.iter().find(|f| f.name == n).unwrap();
+        assert!(f("Plain").transfer_eligible() && !f("Plain").unrecognised());
+        assert_eq!(f("Plain").unrecognised_reason(), None);
+        for n in ["Bare", "Foreign"] {
+            assert!(f(n).transfer_eligible() && f(n).unrecognised(), "{n}");
+        }
+        assert!(f("Bare")
+            .unrecognised_reason()
+            .is_some_and(|r| r.contains(".toc")));
+        assert!(!f("Locked").transfer_eligible() && !f("Locked").unrecognised());
+    }
 
     #[test]
     fn case_collision_marks_both_unsupported() {

@@ -37,12 +37,36 @@ pub enum TocError {
     NotUtf8,
 }
 
-const TOC_LIMIT: usize = 256 * 1024;
+/// The header window of a `.toc` (domain.md §3). A file longer than this is read from its
+/// header only: the complete lines of the first `TOC_LIMIT` bytes.
+pub const TOC_LIMIT: usize = 256 * 1024;
 
+/// The complete lines of the first `TOC_LIMIT` bytes. A cut line is dropped whole, so a cut
+/// multi-byte character never reaches the UTF-8 check. `None` = no complete line in the window.
+fn header_window(bytes: &[u8]) -> Option<&[u8]> {
+    let window = &bytes[..bytes.len().min(TOC_LIMIT + 1)];
+    let end = window.iter().rposition(|b| *b == b'\n')?;
+    Some(&window[..=end])
+}
+
+/// Parses a `.toc` header. Bytes beyond `TOC_LIMIT` are not read for meaning: only the complete
+/// lines before the cut count. An oversized file whose window holds no `##` metadata line is
+/// `TooLarge` (its header lies beyond the window), never an empty success.
 pub fn parse_toc(bytes: &[u8]) -> Result<TocInfo, TocError> {
-    if bytes.len() > TOC_LIMIT {
+    let oversized = bytes.len() > TOC_LIMIT;
+    let bytes = if oversized {
+        header_window(bytes).ok_or(TocError::TooLarge)?
+    } else {
+        bytes
+    };
+    let info = parse_header(bytes)?;
+    if oversized && info == TocInfo::default() {
         return Err(TocError::TooLarge);
     }
+    Ok(info)
+}
+
+fn parse_header(bytes: &[u8]) -> Result<TocInfo, TocError> {
     let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
     let text = std::str::from_utf8(bytes).map_err(|_| TocError::NotUtf8)?;
     let mut info = TocInfo::default();
@@ -388,6 +412,71 @@ mod tests {
             &[TocCandidate {
                 file_name: "F.toc".into(),
                 contents: FileObs::Bytes(vec![b'a'; TOC_LIMIT + 1]),
+            }],
+            &TocMapping::ValidatedPlain,
+        );
+        assert!(matches!(sel, TocSelection::Error { .. }));
+    }
+
+    fn big_toc(header: &str, filler_line: &str, total: usize) -> Vec<u8> {
+        let mut b = header.as_bytes().to_vec();
+        while b.len() < total {
+            b.extend_from_slice(filler_line.as_bytes());
+        }
+        b
+    }
+
+    #[test]
+    fn oversized_toc_is_read_from_its_header() {
+        let b = big_toc(
+            "## Interface: 11508\n## Title: Big\n## Version: 9.9.9\n## SavedVariables: BigDB\n",
+            "Data\\File_0001.lua\n",
+            1_200_000,
+        );
+        let sel = select_toc(
+            "Big",
+            &[TocCandidate {
+                file_name: "Big.toc".into(),
+                contents: FileObs::Bytes(b),
+            }],
+            &TocMapping::ValidatedPlain,
+        );
+        match sel {
+            TocSelection::Selected { info, .. } => {
+                assert_eq!(info.version.as_deref(), Some("9.9.9"));
+                assert_eq!(info.saved_variables, vec!["BigDB".to_string()]);
+                assert_eq!(info.interface, vec![11508]);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn cut_inside_a_multibyte_character_keeps_the_header() {
+        // The window ends in the middle of a three-byte character on a line without a newline.
+        let mut b = b"## Version: 2.0\n".to_vec();
+        while b.len() < TOC_LIMIT - 1 {
+            b.extend_from_slice("x\n".as_bytes());
+        }
+        b.truncate(TOC_LIMIT - 1);
+        b.extend_from_slice("€€€€".as_bytes());
+        assert!(b.len() > TOC_LIMIT);
+        assert!(std::str::from_utf8(&b[..TOC_LIMIT]).is_err());
+        let info = parse_toc(&b).unwrap();
+        assert_eq!(info.version.as_deref(), Some("2.0"));
+    }
+
+    #[test]
+    fn header_beyond_the_window_is_not_selected() {
+        let b = big_toc("", "# a comment line\n", TOC_LIMIT + 4096);
+        let mut b = b;
+        b.extend_from_slice(b"## Version: 1\n");
+        assert_eq!(parse_toc(&b), Err(TocError::TooLarge));
+        let sel = select_toc(
+            "F",
+            &[TocCandidate {
+                file_name: "F.toc".into(),
+                contents: FileObs::Bytes(b),
             }],
             &TocMapping::ValidatedPlain,
         );
