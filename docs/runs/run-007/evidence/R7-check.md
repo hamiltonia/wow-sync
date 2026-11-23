@@ -303,3 +303,188 @@ The earlier UI failures and GUI resolutions are retained separately.
 `cleanup-proof.json` records actual cleanup. Product source and
 `tests/required-cases.toml` remained unchanged; only this evidence file was
 committed. Main-checkout cleanliness was checked before commit.
+
+## Recheck — G1 fix at 1a50f81
+
+Source: `1a50f819dfae0cd31e7bfdb0db6ddb740d05ed98`, in the same assigned
+checkout/branch and Windows environment. The preceding results are historical
+evidence for `aba7d24`; they have not been overwritten with the recheck results.
+Built the fixed source with `cargo build --release` successfully. The build
+emitted four existing unused-import/dead-code warnings in `update_http.rs`.
+No product source, tests, dependencies or policy were changed by this worker.
+The running-agent registry identified this worker's actual model as
+`gpt-6.1-sol`, matching the verification packet.
+
+**Recheck verdict: FAIL on the strict no-decision condition.** G1's persistent
+lineage loss and silent live-revert replacement are fixed in the executed
+reproductions. A separate minor finding, G2, remains: a normal live edit briefly
+offers an unnecessary copy-choice decision, then converges automatically.
+Zero-install GUI acceptance remains BLOCKED, not assumed.
+
+### Focused results
+
+| Requested recheck | Status | Actual result |
+|---|---|---|
+| Live edit across an unstable observation | FAIL | Exact A/B convergence and old-copy recovery PASS without taking a decision; the literal no-decision condition FAILS because a temporary ChooseCopy is shown (G2). |
+| Live revert across an unstable observation | PASS | Revert remained on A; A and B each showed exactly one add-on decision. A GUI choice converged both to the reverted copy and preserved B's displaced newer copy. |
+| Offline third peer | PASS | C's process was stopped; A changed live and B converged. C returned to the exact A/B copy with zero settled decisions and its exact old copy in recovery. |
+| Competing no-toc copies | PASS | A/B alternatives remained intact, exactly one add-on decision appeared, GUI selection converged A/B/C, and B's losing copy was preserved. |
+| Competing ambiguous-toc copies | PASS | Same decision, exact convergence and recovery checks passed independently. |
+| New dispatch artifact | PASS | Actions 45247261122 succeeded at the fixed source; ZIP SHA-256 matched and the packaged executable opened an isolated setup window. |
+| A-47 zero-install GUI | BLOCKED | No safe supported empty-install input exists in this build; normal discovery still finds the real D: install. |
+| Offline/native regression tiers | PASS | Both tiers exited 0 with no allow-blocked exception on the fixed source. Native verified seven required cases against 843 test results. |
+
+### Live-edit and live-revert observations
+
+Three newly enrolled synthetic computers used independent state directories,
+500 ms scans, the scoped provider's `recheck` subtree, and the same approved
+launch isolation as the initial verification. A/B were active during each
+live mutation. Published records were sampled every 20 ms, so the unstable
+observation was actually captured rather than inferred from the final copy.
+Exact comparisons used relative file names, byte lengths and SHA-256, not
+timestamps. Add-on contents were synthetic, never executed.
+
+For the first live edit, A sequence 2 was unstable, retained its previous
+lineage, and sequence 3 named the baseline hash as an ancestor. B received the
+edited copy automatically. A repeated live edit captured A sequence 4 unstable
+with its prior lineage intact, then sequence 5 with both earlier hashes as
+ancestors. B converged exactly and its previous active copy matched a recovery
+directory. This closes G1's lost-ancestor reproduction, but not G2 below.
+
+The original immediate no-decision assertion failed on the first edit and
+was retained as `live-edit-a-0.json`, not discarded. A diagnostic repeat
+recorded all intermediate UI observations instead of aborting at the first
+nonzero count, then independently asserted final zero decisions and exact
+convergence. This diagnostic change does not turn the failed no-prompt
+requirement into a PASS.
+
+For the revert, stopped only A by its captured launch PID, installed a
+settled newer synthetic copy, restarted A and waited for B to match it.
+With both apps active, wrote A's original bytes back. Captured:
+
+| A sequence | Observation | Lineage |
+|---|---|---|
+| 6 | Shared newer copy, stable | Newer hash names original hash as ancestor. |
+| 7 | Revert initially unstable | Previous newer lineage retained unchanged. |
+| 8 | Original bytes stable again | Original hash names the newer hash as ancestor. |
+
+After ten seconds A still held the intended reverted bytes, B still held the
+newer bytes, and each GUI displayed `Needs you, 1 add-ons`. Through Needs
+attention, selected the add-on and **Keep this ... This computer** on A.
+Both copies then matched A's revert exactly, both showed zero decisions,
+and B's displaced newer tree matched recovery exactly. No provider records
+were forged and no source, mtimes or recent-file limits were altered.
+
+Raw proofs are under `evidence\recheck` in the retained lab:
+`live-edit-immediate-records.json`, `live-edit-proof.json`,
+`live-revert-before-resolution.json`, `live-revert-resolved.json`,
+`offline-proof.json`, `R7Compete-proof.json` and `R7AmbComp-proof.json`,
+with per-computer UI count observations.
+
+### G2 — minor: a live single-author edit briefly asks for a copy decision
+
+Reproduction on the fixed source:
+
+1. Enroll A/B, let an unrecognised no-toc add-on reach identical copies, and
+   leave both apps syncing at 500 ms intervals.
+2. Change only A's synthetic file while both apps remain active.
+3. During the recent-file/unstable interval, the GUI reports
+   `Needs you, 1 add-ons` and **needs your decision**. A diagnostic repeat
+   on the Needs attention page explicitly showed **Waiting for your decision
+   on 1 add-on** and an add-on row ending **Choose a copy**.
+4. Do nothing. Once the stable descendant is available, both copies converge
+   automatically and the decision disappears.
+
+The second live-edit sample observed A/B at one decision initially, then A
+at zero while B still showed one, and finally both at zero. A third
+independent mutation captured the actual Needs attention row and screenshot,
+then A/B/C exact convergence without making a choice. This is not the former
+persistent G1 conflict and did not lose data, hence minor; it still fails
+the requested no-decision observation. No claim is made about selecting a
+candidate during this transient window.
+
+Evidence: `transient-attention-page.json`, `transient-attention-states.json`
+and `recheck-transient-attention.png`, plus the live-edit samples.
+
+### A-47 zero-install GUI limitation
+
+Rechecked the actual CLI/setup entry path, not a guessed flag:
+`main.rs` enables developer mode only when both `--dev` and `--install`
+are supplied, and that branch always seeds a one-element `installs` vector.
+An invalid `--install` therefore does not produce an empty discovery list.
+Without that developer combination, normal fixed-drive and launcher discovery
+finds the real D: install. `--setup-step 3` changes the page, not the discovery
+input, and saved target/enrollment state is not a supported arbitrary
+serialized empty setup list.
+
+No supported safe flag/state mechanism was found. Did not hide, rename,
+remap or alter the real installation, modify product code, access owner
+state, or interfere with the owner's app to manufacture this condition.
+This requested GUI subcase remains BLOCKED; the source inspection is not
+reported as executed GUI evidence. Other initial A-47 subcases were NOT RUN
+again in this focused recheck.
+
+### Recheck regression evidence
+
+Ran both required tiers in the assigned checkout with the documented cargo
+PATH prefix and lab-local TEMP/TMP. `tier-offline-stdout.log` records PASS
+for fmt, clippy, workspace tests, required-cases, deny and markdown-links.
+`tier-native-stdout.log` and `tier-native-report.json` record PASS for native,
+including seven required cases against 843 results. These are actual runner
+results, not inferred from the release build or implementation claims.
+The native report names source `1a50f81` and `git_dirty: true`: the only dirty
+tracked file was this worker's staged evidence document. No tier failure,
+retry, relaxed assertion or allow-blocked exception was needed.
+
+### New dispatch artifact
+
+Waited for Actions run **45247261122**, which completed successfully at
+`1a50f819dfae0cd31e7bfdb0db6ddb740d05ed98`. Downloaded its artifact with
+`gh run download` into the approved lab. Its offline/native tiers, release
+build, package and upload steps all succeeded; publication was skipped for
+this dispatch, as expected.
+
+`wow-sync-0.3.0-windows-x64.zip` matched its supplied `.zip.sha256` exactly:
+
+```text
+3b16549bc9882437335c831c10e5b23aff30c52d39779598ddfede04a1c5a5b9
+```
+
+Checked ZIP member paths before extraction and verified packaged LICENSE,
+README, release notes and executable. Launched the **packaged** executable
+with its own `--state`, isolated app-data environment, synthetic `--dev
+--install`, and scoped provider. Its visible setup window and native controls
+responded to inspection; startup logged version 0.3.0. Stopped only its
+captured launch PID, 39868. This is a startup smoke, not a second complete
+sync run on the packaged binary.
+
+`artifact-proof.json` retains the source/run result, archive hash and exact
+member sizes/hashes; `artifact-ui.json` and `recheck-artifact.png` retain the
+actual GUI observation.
+
+### Recheck cleanup and handoff
+
+- All A/B/C instances and the artifact smoke instance exited, with stops made
+  only by their captured launch PIDs. Cleanup independently checked that
+  current recorded PIDs 24200, 19744, 38904 and 39868 were no longer active.
+- Deleted the entire approved R7-check test-provider subtree. No other
+  Dropbox entry was changed or removed.
+- Lab again contains only `evidence`. Removed synthetic installs, isolated
+  state/app-data, scratch, downloaded archive and extracted binaries.
+  Retained recheck procedures, redacted logs, observations, screenshots,
+  tier results and hashes under `evidence\recheck`.
+- Revalidated all 108 original artifact-manifest entries unchanged.
+  The separate recheck manifest hashes 58 retained recheck files, including
+  `cleanup-proof.json`; the old evidence remains intact.
+- Created no recheck `subst` mapping; no R7-check mapping remains.
+  Did not access real AddOns/WTF or the owner's default state, and did not
+  stop, launch or reconfigure WoW, Battle.net or the owner's app.
+- Before commit, the main checkout was clean and this worktree's only
+  tracked change was the assigned evidence document.
+
+Estimated **250 AIU** for this focused recheck, approximately **650 AIU**
+including the initial verification. These are worker estimates, not metered
+usage. The recheck estimate is below its 400 AIU stop limit. No nested agents
+were launched. G1 is fixed in the executed reproductions; G2 (minor) and the
+A-47 zero-install GUI block remain explicitly open, so this is not an
+unqualified acceptance PASS.
