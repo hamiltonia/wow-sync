@@ -203,3 +203,117 @@ files changed in this worktree, and no negative control or required-case change
 was made.
 The independent model selection is exposed by the registry; cumulative AIU
 accounting remains the coordinator/harness record and is not fabricated here.
+
+## Final recheck
+
+### Source and protocol
+
+The targeted final recheck used merged source
+`62657786b6cac7a2b43a59dd5a990d0b4852aa77`, after `git merge main` in the
+same worker worktree/branch. Authority is the coordinator's final assignment,
+[H1 fix evidence](R6-gate.md), [H2 fix evidence](R6-settings.md) and updated
+[rollback §3.1](../../../design/rollback.md). The historical results above
+are retained, not relabelled.
+
+Lab/state: `D:\WoWSyncLab\R6-recheck\final`; fresh provider child `final`
+under the approved R6-recheck parent. Before app access, fresh hashes of both
+live trees and the accepted backup, followed by a second live scan, matched
+the original baseline exactly. The same file/directory counts, byte count and
+canonical digest above apply. WoW was absent. Owner PID 34296, Battle.net and
+owner app data were untouched. A used real data; B was a fresh backup-derived
+copy, and its final review explicitly showed the lab path before enrollment.
+Neither peer opted into settings sync or selected a settings master.
+
+### Final results
+
+| Check | Result | Observation |
+|---|---|---|
+| Offline once / native once | PASS / PASS | Both emitted overall PASS and exited 0 at 6265778. Locked release build also exited 0. |
+| H1 held newer copy | PASS | Following GUI group rollback, A retained exact 2.0.0 installed, B retained exact 0.1.0. Provider code states contained only 0.1.0/1.10.1, not 2.0.0. After reconciliation, Needs attention persistently listed the local-only newer version and offered both “Use this” and “Stay”. |
+| H1 Use | PASS | The actual GUI “Use this: Use version 2.0.0” action ended the recovered-target constraint; both peers converged exactly on 2.0.0. |
+| H1 Stay | PASS | B's GUI rolled the group back again from 2.0.0 to 0.1.0. A then received a distinct synthetic 3.0.0 copy. Its new Needs attention decision offered Stay; that GUI action restored exact 0.1.0 on both and retained exact 3.0.0 in A recovery. |
+| G2 / group-wide dialog regression | PASS | Initial and second GUI rollbacks converged exactly on 0.1.0. The reviewed confirmations explicitly described replacing the release on every group computer and blocking the replaced release group-wide. Oversized QuestieDB tocs were retained in the fixture. |
+| H2 update | PASS | Exact ForeverFishing 0.9.131 tree reached B. |
+| H2 uninstall / paired restoration | FAIL | Both code trees disappeared, but both declared synthetic settings files remained byte-identical after the actual 600-second oracle. GUI Removed → Restore → confirmation Restore returned code exactly on both. The unchanged settings files were never removed, so paired settings restoration is not proved. H2 remains open. |
+| Test-mode header regression | PASS | Toggle persisted; enrolled A's header read “Paused by test mode” with group/computer names. Turning it off removed the flag and the normal up-to-date header returned. |
+| Dispatch 45083927388 | PASS | Completed/success at 6265778. Checksum, exact four contents, byte-identical notes/README/license, packaged About 0.2.0 and GUI-exported build_commit all matched. |
+| Real-data restore / equality | PASS | Fresh restored AddOns/WTF manifest equals the original exactly; 33,312 files, 1,321 directories, 3,455,374,298 bytes and the identical baseline digest. Verifier-created .wowsync was removed. |
+| WoW-running subcheck | NOT RUN | No game or stand-in process was launched; this subcheck was not required by the final assignment. |
+
+This is **not an overall release PASS**: H2 still fails A-10/A-26 despite
+passing automated tiers and the successful H1 decisions.
+
+### Hash and interaction evidence
+
+The earlier old/2.0.0/ForeverFishing/settings hash oracles were reproduced
+exactly. Distinct 3.0.0 full-tree SHA-256:
+`0a14e7a0132a9588029adef9ca657b41d4796ad621015d9a6f1fddcf8da6d7ec`.
+After Use, old 0.1.0 was available on B, rejected 1.10.1 was available in
+recovery on both, and active 2.0.0 matched on both. A lab helper's extra
+assertion that **every** historical release must exist on **each** peer failed
+because A had no old 0.1.0 recovery copy; its raw observation still proved the
+old copy on B. That extra assertion is not a required per-peer duplication
+claim and is not silently reported as passing. After Stay, current 0.1.0 and
+the two previous distinct 2.0.0/3.0.0 copies were available; older 1.10.1 was
+no longer among those three states.
+
+H2 reproduction repeated steps 1–5 above at the fixed head, without settings
+consent. Both ownership books declared ForeverFishingDB; the absent-only
+synthetic file was placed in one existing matching account scope on both.
+The removal oracle emitted `AssertionError: Expected convergence not observed
+within 600 seconds`. Final aggregate observations confirmed code absent and
+settings present/original hash on **both**. There is no inferred implementation
+cause, new finding number, or fabricated settings-recovery pass.
+
+Artifact ZIP SHA-256:
+`f172777e43efed1c50a4151a051ff8c13dc9b7c56505155ee174733bc8dd668e`;
+executable SHA-256:
+`c6241a4c686124314687315a483ee4ab5ffced23fd7a5e0fdaf16722701db7b5`.
+About visibly read WoW Sync 0.2.0. App settings → Data → Export diagnostics →
+Preview → Save produced `app_version=0.2.0` and
+`build_commit=62657786b6cac7a2b43a59dd5a990d0b4852aa77`.
+No private diagnostics payload is committed.
+
+All GUI input foreground-checked the largest visible owned window and
+verified persisted effects. B installation inspection needed several minutes;
+the clipped final setup button became accessible by increasing the owned
+window height. Before the second rollback, an old open confirmation was
+cancelled, then a fresh confirmation was reviewed for target 0.1.0/current
+2.0.0 before executing Restore. No incorrect rollback was executed.
+
+### Final cleanup
+
+Owned PIDs A **36212**, B **33816**, Artifact **26632** were individually
+matched against captured executable and launch time before explicit stops.
+Only those verifier-owned processes were stopped. A recovery was copied to
+the final lab and re-hashed equal before restoration:
+HealKit 138 files / 2,267,848 bytes, digest
+`68d19bebbaa5053edf28e3c853d85cd20450d4d110e7776c62f11945bdc67f22`;
+ForeverFishing 2 files / 1,069 bytes, digest
+`ead05edd782fc06ffdb0e7072aac47178e5a2104585c8b604a3581128e03410d`.
+
+Final restoration command:
+`python D:\WoWSyncLab\R6-recheck\final.py safety restore`.
+It re-hashed the backup before touching either tree, restored both, removed
+only the verifier-created `.wowsync`, then generated a fresh full manifest.
+The command exited 0 with `equals_original=true`, `no_wow=true` and canonical
+SHA-256
+`2a38b48c97a2fc16d3ac25e69a34baccce06e66c3ae65d57146306fa76867e24`.
+The owner app and Battle.net remained running afterwards.
+
+Provider state:
+
+- `R6-recheck-2026-11-22`: **retained**, including its final child, for
+  unresolved H2; no verifier app remains publishing.
+- `R6-check-2026-11-22`: **deleted and verified absent**, because G2 and
+  its expanded H1 flow now pass. A first deletion encountered a transient
+  filesystem lock; a later retry succeeded without stopping another process.
+
+Safe final aggregates are in [final-results.json](R6-recheck/final-results.json);
+actual tier summaries and the failed live oracle are in
+[final-tier-stdout.log](R6-recheck/final-tier-stdout.log).
+Private manifests, screenshots, full app data and original bytes remain
+only in approved labs/provider. No product/tests/tools/other docs changed.
+The staged Markdown link checker passed (228 tracked files, zero broken links);
+evidence JSON/proof consistency and whitespace were checked before commit.
+Main remained clean. No push or merge was performed.

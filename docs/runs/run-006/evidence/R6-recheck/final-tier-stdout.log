@@ -1,0 +1,21 @@
+Source 62657786b6cac7a2b43a59dd5a990d0b4852aa77
+Windows 11 Pro x64, build 26300; Rust 1.100.0; cargo-deny 0.20.2
+
+Emitted offline.log:
+[PASS   ] offline/fmt
+[PASS   ] offline/clippy
+[PASS   ] offline/test
+[PASS   ] offline/required-cases
+[PASS   ] offline/deny
+[PASS   ] offline/markdown-links
+overall: PASS (allow-blocked: false) -> exit 0
+
+Emitted native.log:
+[PASS   ] native/tier
+overall: PASS (allow-blocked: false) -> exit 0
+
+Actual final live H2 removal oracle, nonzero exit:
+AssertionError: Expected convergence not observed within 600 seconds
+Both code trees absent; both owned synthetic settings files still present,
+with original SHA-256 f1ab6103be580b9cf5762e57dc62d27ffcdf50288119c9d433bbba0c7da6ccc3.
+Subsequent GUI code restoration does not convert this oracle to PASS.
