@@ -1824,12 +1824,13 @@ mod tests {
 
     #[test]
     fn a_lineage_entry_for_a_copy_its_publisher_does_not_hold_is_ignored() {
-        // Peer 3 claims v1:[v3] but holds v2; peer 2 holds v1. Local v3 must not be replaced.
+        // Peer 3 holds v3 (the same copy as local) but claims v1:[v3]; peer 2 holds v1.
+        // Local v3 must not be replaced by v1.
         let h3 = |s: &str| h(&Scenario::new(unrec(s)));
         let (v1, v3) = (h3("v1"), h3("v3"));
         let t = Scenario::new(unrec("v3"))
             .peer(2, unrec("v1"))
-            .peer(3, unrec("v2"))
+            .peer(3, unrec("v3"))
             .peer_lineage(3, "suite", v1, &[v3])
             .target();
         assert_eq!(reason(pkg(&t, "suite")), DecisionReason::Ambiguous);
