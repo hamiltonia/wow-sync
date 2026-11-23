@@ -736,6 +736,63 @@ mod tests {
         }
     }
 
+    fn write_live(pc: &Pc, content: &str) {
+        std::fs::write(pc.install.addons.join("Bare").join("main.lua"), content).unwrap();
+    }
+
+    fn with_recent_window(pc: &mut Pc) {
+        pc.cfg.recent_ms = 3_600_000;
+        pc.restart();
+    }
+
+    #[test]
+    fn a_live_edit_that_publishes_an_unstable_observation_still_converges_without_a_decision() {
+        let lab = Lab::new();
+        let (mut a, mut b, mut c) = three_at_v1(&lab);
+        with_recent_window(&mut a);
+        write_live(&a, "v2");
+        synced(&mut a);
+        synced(&mut b);
+        assert_eq!(b.read("Bare/main.lua").as_deref(), Some("v1"));
+        a.install.set_old_mtimes();
+        for _ in 0..4 {
+            synced(&mut a);
+            synced(&mut b);
+            synced(&mut c);
+        }
+        for pc in [&a, &b, &c] {
+            assert_eq!(pc.read("Bare/main.lua").as_deref(), Some("v2"));
+            assert!(offered_kinds(pc).is_empty(), "{:?}", offered_kinds(pc));
+        }
+    }
+
+    #[test]
+    fn a_live_revert_through_an_unstable_observation_is_not_undone_and_asks_once() {
+        let lab = Lab::new();
+        let (mut a, mut b, mut c) = three_at_v1(&lab);
+        a.bare("Bare", "v2");
+        for _ in 0..4 {
+            synced(&mut a);
+            synced(&mut b);
+            synced(&mut c);
+        }
+        with_recent_window(&mut a);
+        write_live(&a, "v1");
+        synced(&mut a);
+        a.install.set_old_mtimes();
+        for _ in 0..4 {
+            synced(&mut a);
+            synced(&mut b);
+            synced(&mut c);
+        }
+        assert_eq!(a.read("Bare/main.lua").as_deref(), Some("v1"));
+        assert_eq!(b.read("Bare/main.lua").as_deref(), Some("v2"));
+        assert_eq!(
+            offered_kinds(&a),
+            vec![wow_sync_core::decision::DecisionKind::Ambiguous]
+        );
+    }
+
     #[test]
     fn unrecognised_folder_changed_on_both_is_never_overwritten_and_asks() {
         let lab = Lab::new();
