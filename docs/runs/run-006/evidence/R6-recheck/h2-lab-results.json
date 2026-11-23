@@ -1,0 +1,52 @@
+{
+  "checkout_head": "457c9df66f0c60623997a7c7c6fb4889216f9e29",
+  "product_build_commit": "62657786b6cac7a2b43a59dd5a990d0b4852aa77",
+  "artifact_run": 45083927388,
+  "executable_sha256": "c6241a4c686124314687315a483ee4ab5ffced23fd7a5e0fdaf16722701db7b5",
+  "environment": "Windows 11 Pro x64 build 26300; two local lab copies",
+  "result": "PASS",
+  "prior_H2_product_finding": "withdrawn; ForeverFishingDB.lua was Unowned",
+  "lab_only": true,
+  "live_installation_accessed": false,
+  "settings_sync_consent": false,
+  "settings_master_selected": false,
+  "accepted_backup": {
+    "rehash_equal": true,
+    "files": 33312,
+    "directories": 1321,
+    "bytes": 3455374298,
+    "manifest_sha256": "2a38b48c97a2fc16d3ac25e69a34baccce06e66c3ae65d57146306fa76867e24"
+  },
+  "fixture": {
+    "addon": "ForeverFishing",
+    "code_files": 305,
+    "code_sha256": "d963bf29a4f9a7eba3ab1ca3760c3718d59a95986d6f3bba2e7d88965753796e",
+    "settings_filename": "ForeverFishing.lua",
+    "synthetic_settings_fallback": false,
+    "settings_files_per_peer": 1,
+    "settings_sha256": "e514e1261301b96e452a2c84d7274f9a8666030b432d6bbae02adc90571f500c",
+    "both_enrolled_declarations_recorded": true,
+    "code_and_settings_equal_before_uninstall": true
+  },
+  "uninstall": {
+    "result": "PASS",
+    "oracle_limit_seconds": 600,
+    "code_absent_A_B": true,
+    "owned_settings_absent_A_B": true,
+    "unowned_negative_untouched_A_B": true
+  },
+  "GUI_restore": {
+    "result": "PASS",
+    "oracle_limit_seconds": 600,
+    "code_byte_identical_A_B": true,
+    "owned_settings_byte_identical_A_B": true,
+    "unowned_negative_untouched_A_B": true
+  },
+  "offline_and_native": "NOT RUN in H2-only recheck; unchanged binary reused",
+  "cleanup": {
+    "only_owned_PIDs_stopped": [20788, 38352],
+    "R6-h2-2026-11-22": "deleted; absence verified",
+    "R6-recheck-2026-11-22": "deleted; absence verified",
+    "R6-check-2026-11-22": "already absent"
+  }
+}
