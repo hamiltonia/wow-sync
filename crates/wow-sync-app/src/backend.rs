@@ -205,7 +205,31 @@ static LAST_LOGGED: Mutex<String> = Mutex::new(String::new());
 /// Writes what is holding sync (plan blocks, a provider problem) once per change, so a
 /// five-second check cycle does not fill the log. The lines are the plain-language sentences
 /// the window shows; they carry no add-on or settings contents.
+static LAST_ADDONS: Mutex<String> = Mutex::new(String::new());
+
+/// Logs each add-on that is not synced or syncs by content, with the reason only, once per
+/// change. Uses the folder key and the sentence the window shows; no file contents.
+fn log_addon_notes(st: &StatusSnapshot) {
+    let lines: Vec<String> = st
+        .packages
+        .iter()
+        .filter(|p| p.text.contains("not synced") || p.text.contains("Unrecognised"))
+        .map(|p| format!("add-on {}: {}", p.key, p.text.replace('\n', " ")))
+        .collect();
+    let sig = lines.join("\n");
+    let mut last = LAST_ADDONS.lock().unwrap_or_else(|e| e.into_inner());
+    if *last == sig {
+        return;
+    }
+    let previous: Vec<String> = last.lines().map(str::to_owned).collect();
+    *last = sig;
+    for l in lines.iter().filter(|l| !previous.contains(l)) {
+        crate::app::log_warn(l);
+    }
+}
+
 fn log_status_changes(st: &StatusSnapshot) {
+    log_addon_notes(st);
     let sig = format!("{:?}|{:?}", st.blocks, st.provider_error);
     let mut last = LAST_LOGGED.lock().unwrap_or_else(|e| e.into_inner());
     if *last == sig {
