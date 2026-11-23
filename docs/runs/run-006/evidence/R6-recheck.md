@@ -317,3 +317,98 @@ only in approved labs/provider. No product/tests/tools/other docs changed.
 The staged Markdown link checker passed (228 tracked files, zero broken links);
 evidence JSON/proof consistency and whitespace were checked before commit.
 Main remained clean. No push or merge was performed.
+
+## H2 recheck (lab copies)
+
+### Corrected fixture and authority
+
+The coordinator identified the earlier H2 fixture error:
+[settings §1.1](../../../design/settings.md), Q-67, defines saved files as
+`<AddOnFolder>.lua`, not `<VariableName>.lua`. A `.toc` declaration establishes
+that the folder has account saved variables; it does not make every file
+named for those variables owned. Thus the previous `ForeverFishingDB.lua`
+was **Unowned**, and leaving it untouched was correct. The earlier H2
+ownership classification and product-defect conclusion are withdrawn; the
+historical observations and failed inappropriate oracle remain above.
+
+This H2-only assignment used checkout
+`D:\GitHub\wow-sync.worktrees\R6-recheck`, branch `run006/R6-recheck`,
+merged head `457c9df`. Product code/dependencies were unchanged from
+6265778. The previously verified dispatch 45083927388 executable was reused;
+its fresh SHA-256 again matched
+`c6241a4c686124314687315a483ee4ab5ffced23fd7a5e0fdaf16722701db7b5`.
+
+**Lab copies only:** no access to or mutation of
+`D:\Games\World of Warcraft` occurred in this recheck. Before copying, the
+accepted backup was freshly re-hashed against the previously accepted
+private manifest: exact equality, 33,312 files, 1,321 directories,
+3,455,374,298 bytes, canonical digest
+`2a38b48c97a2fc16d3ac25e69a34baccce06e66c3ae65d57146306fa76867e24`.
+Both full trees were copied into separate A/B Forever installs under
+`D:\WoWSyncLab\R6-recheck\h2`; identity metadata came from the prior lab copy,
+not the live installation.
+
+Both apps used isolated state/environment directories, synthetic names,
+the packaged release executable and explicit `--dev --install <lab-root>
+--provider <fresh-provider>` arguments so discovery stayed within the
+designated lab install. Both final GUI reviews were checked for their lab
+paths before enrollment. No settings-sync consent or master was selected.
+The provider was the newly created `R6-h2-2026-11-22` folder within the
+approved WoW Sync Test scope.
+
+The backup already contained **one** account `ForeverFishing.lua`; no
+synthetic replacement was needed. Its exact hash matched on both peers
+before enrollment and again after both enrolled scans recorded the folder's
+declaration, before uninstall:
+`e514e1261301b96e452a2c84d7274f9a8666030b432d6bbae02adc90571f500c`.
+The original ForeverFishing code contained 305 files, full-tree digest
+`d963bf29a4f9a7eba3ab1ca3760c3718d59a95986d6f3bba2e7d88965753796e`.
+An absent-only synthetic `R6H2Unowned.lua`, with no corresponding addon
+folder, was added in the same copied scope on both as a negative check.
+No Lua was executed; scope names and contents remain private.
+
+### Results
+
+| H2-only check | Result | Actual observation |
+|---|---|---|
+| Accepted backup re-hash | PASS | Fresh complete manifest equalled the accepted baseline before either copy was made. |
+| Enrolled precondition | PASS | Both scans recorded ForeverFishing's account declaration; original code/settings hashes still matched on both. No settings-sync consent/master. |
+| Uninstall | PASS | Deleting only A's ForeverFishing code caused both code folders and both owned `ForeverFishing.lua` files to disappear within the unchanged 600-second oracle. |
+| GUI paired restore | PASS | B's Removed → Restore → confirmation Restore returned the complete code tree and the original owned settings file byte-identically on both within the 600-second oracle. |
+| Unowned negative | PASS | `R6H2Unowned.lua` retained its original hash on both after removal and after restoration. |
+| Live-tree restore | NOT RUN / not applicable | Only lab copies were accessed; the real installation was not read or written. |
+| Offline/native tiers | NOT RUN in this H2-only recheck | Unchanged product executable reused; prior final-head tier evidence remains above. Documentation links and evidence consistency were validated. |
+| Provider cleanup | PASS | Both `R6-h2-2026-11-22` and retained `R6-recheck-2026-11-22` were deleted and verified absent. |
+
+**H2: PASS; no remaining H2 product finding.** This is corrected
+folder-shaped fixture evidence for R-04/R-07/R-10, A-10/A-26, not a new
+cross-machine/platform claim. The prior variable-shaped negative observation
+was expected preservation of an unowned file.
+
+Commands used the lab-only dispatcher and helper:
+
+```powershell
+python D:\WoWSyncLab\R6-recheck\h2.py h2-scenario prepare
+# GUI enrollments with explicit lab --install and fresh --provider
+python D:\WoWSyncLab\R6-recheck\h2.py h2-scenario ready
+python D:\WoWSyncLab\R6-recheck\h2.py h2-scenario uninstall
+python D:\WoWSyncLab\R6-recheck\h2.py h2-scenario wait-removed
+# B Removed -> Restore -> reviewed confirmation -> Restore
+python D:\WoWSyncLab\R6-recheck\h2.py h2-scenario wait-restored
+```
+
+Both filesystem oracles exited 0 and emitted PASS. Safe aggregates are in
+[h2-lab-results.json](R6-recheck/h2-lab-results.json). Private manifests,
+settings, app state and reviewed captures remain only in the approved lab;
+no settings content or account/realm/character name is committed.
+
+Owned A PID **20788** and B PID **38352** were checked against captured
+executable and launch time, then stopped explicitly. A transient filesystem
+lock during provider deletion cleared on a later retry; no other process
+was stopped. The previous R6-check provider was already absent. Both current
+providers are now absent, with no verifier process publishing.
+
+Only this evidence and its small aggregate JSON changed. Main stayed clean;
+no product code, tests, tools or other docs changed, and no push/merge was
+performed. Scope, hash/oracle consistency, JSON, whitespace and canonical
+Markdown links were checked before commit.
