@@ -41,6 +41,16 @@ synthetic data only.
 | RV7-04 | An oversized `.toc` stays `Selected` only when the window shows a non-blank, non-`#` line (header ended); else `TooLarge` (unrecognised). Test `cut_header_without_a_file_line_is_not_selected` (both cases). |
 | RV7-08 | The e2e tests assert exactly one `Ambiguous` decision (and none where none is expected) and that recovery copies are kept (`recovery_holds`), including the three-computer offline cases. |
 
+## Recheck fixes (RV7-10, 11, 12)
+
+| ID | Resolution |
+|---|---|
+| RV7-10 | `TargetInput.local_prev` carries this computer's own latest published state (read in `observe_world`; `members` skip this computer). Service-path e2e tests: `an_author_whose_peers_are_all_offline_publishes_the_change_without_a_decision` (no decision, peers install), `a_revert_to_an_earlier_copy_is_not_undone_silently_and_asks_once` (revert stays, one `Ambiguous`). Control: passing `None` failed both. Documented in domain.md §6. |
+| RV7-11 | `next_lineage` keeps ancestors still held by an admitted peer ahead of the 32 cap. e2e `more_changes_than_the_lineage_cap_while_a_peer_is_offline_do_not_stall_the_rest` (36 changes, no decision, c converges on return); unit `ancestors_still_held_by_a_peer_survive_the_cap`. Dropped older ancestors can only turn a win into a decision. |
+| RV7-12 | `LineageGraph::from_states` accepts an entry only when its hash equals the package hash its publisher holds. Test `a_lineage_entry_for_a_copy_its_publisher_does_not_hold_is_ignored`. |
+
+Counts after the fixes: core 377, runtime 210 (+2 public_api). Verify tiers: see the final commit message.
+
 ## Intentional behaviour changes (D-29)
 
 - Folders previously blocked for a toc reason now sync (e.g. a suffixed-only

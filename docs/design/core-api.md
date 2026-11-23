@@ -169,7 +169,8 @@ pub enum MemberLatest { Valid { seq: u64, state: CodeState }, Unusable { seq: u6
 pub struct TargetInput<'a> { pub group: &'a GroupRecord, pub variant: &'a ConfirmedVariant,
                              pub local: &'a Inventory, pub local_client: &'a ClientInfo,
                              pub local_id: &'a ComputerId, pub members: &'a [MemberView],
-                             pub trees: &'a BTreeMap<Sha256, TreeAvail> /* Ok(record) | Missing | CloudOnly | Corrupt */ }
+                             pub trees: &'a BTreeMap<Sha256, TreeAvail> /* Ok(record) | Missing | CloudOnly | Corrupt */,
+                             pub local_prev: Option<&'a CodeState> /* this computer's own latest published state (lineage parent) */ }
 pub enum PackageTarget { InSync, Chosen { version: PackageVersion, sources: Vec<ComputerId>, why: Explanation },
                          NeedsDecision { reason: DecisionReason, candidates: Vec<(PackageVersion, Vec<ComputerId>)>, why: Explanation },
                          Unavailable { why: Explanation } }

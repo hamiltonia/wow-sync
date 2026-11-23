@@ -669,6 +669,74 @@ mod tests {
     }
 
     #[test]
+    fn an_author_whose_peers_are_all_offline_publishes_the_change_without_a_decision() {
+        let lab = Lab::new();
+        let (mut a, mut b, mut c) = three_at_v1(&lab);
+        a.bare("Bare", "v2");
+        for _ in 0..4 {
+            synced(&mut a);
+            assert_eq!(a.read("Bare/main.lua").as_deref(), Some("v2"));
+            assert!(offered_kinds(&a).is_empty(), "{:?}", offered_kinds(&a));
+        }
+        for _ in 0..3 {
+            synced(&mut b);
+            synced(&mut c);
+            synced(&mut a);
+        }
+        for pc in [&a, &b, &c] {
+            assert_eq!(pc.read("Bare/main.lua").as_deref(), Some("v2"));
+            assert!(offered_kinds(pc).is_empty(), "{:?}", offered_kinds(pc));
+        }
+    }
+
+    #[test]
+    fn a_revert_to_an_earlier_copy_is_not_undone_silently_and_asks_once() {
+        let lab = Lab::new();
+        let (mut a, mut b, mut c) = three_at_v1(&lab);
+        a.bare("Bare", "v2");
+        for _ in 0..4 {
+            synced(&mut a);
+            synced(&mut b);
+            synced(&mut c);
+        }
+        a.bare("Bare", "v1");
+        for _ in 0..4 {
+            synced(&mut a);
+            synced(&mut b);
+            synced(&mut c);
+        }
+        assert_eq!(a.read("Bare/main.lua").as_deref(), Some("v1"));
+        assert_eq!(b.read("Bare/main.lua").as_deref(), Some("v2"));
+        assert_eq!(
+            offered_kinds(&a),
+            vec![wow_sync_core::decision::DecisionKind::Ambiguous]
+        );
+    }
+
+    #[test]
+    fn more_changes_than_the_lineage_cap_while_a_peer_is_offline_do_not_stall_the_rest() {
+        let lab = Lab::new();
+        let (mut a, mut b, mut c) = three_at_v1(&lab);
+        for i in 1..=36 {
+            a.bare("Bare", &format!("e{i}"));
+            synced(&mut a);
+            synced(&mut b);
+            synced(&mut b);
+            assert_eq!(b.read("Bare/main.lua"), Some(format!("e{i}")), "change {i}");
+            assert!(offered_kinds(&a).is_empty() && offered_kinds(&b).is_empty());
+        }
+        for _ in 0..4 {
+            synced(&mut c);
+            synced(&mut a);
+            synced(&mut b);
+        }
+        for pc in [&a, &b, &c] {
+            assert_eq!(pc.read("Bare/main.lua").as_deref(), Some("e36"));
+            assert!(offered_kinds(pc).is_empty());
+        }
+    }
+
+    #[test]
     fn unrecognised_folder_changed_on_both_is_never_overwritten_and_asks() {
         let lab = Lab::new();
         let mut a = lab.pc("a");
