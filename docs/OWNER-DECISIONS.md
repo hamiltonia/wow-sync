@@ -209,6 +209,37 @@ Answers from an interactive review session with the orchestrator.
   with this decision. It includes publishing a `v0.2.0` GitHub pre-release
   after its gates pass.
 
+### D-29: Find WoW on every drive; sync everything; run-007 approved (2026-11-23)
+
+- Trigger: on a second PC, WoW at `G:\Games\World of Warcraft` was not found
+  (v0.2.0 probes only drives C–F) and setup had no way to choose a folder. On
+  the dev PC QuestieDB was blocked because its `.toc` files (17.6 MB each)
+  exceed the 256 KiB inspection cap.
+- Owner: "in general we need a way to sync everything, even if wrong". Then:
+  "I use all drives (a-z), so you should assume that. It really makes more
+  sense to ask the user for the folder if you can't find one, if scanning a-z
+  is too slow".
+- **Install discovery** must cover every local drive A–Z (and may also read
+  Battle.net's own install record). When nothing is found, setup says so and
+  lets the user choose the folder. A chosen folder still goes through guided
+  identity and scope confirmation.
+- **"Sync everything"** is accepted as direction.
+- **Run-007 approved (2026-11-23).** The owner was offered a run-007 proposal
+  with defaults and replied "approved, continue". The orchestrator records the
+  offered defaults as approved:
+  - scope: install discovery with a folder picker; header-only reading of
+    oversized `.toc` files; syncing add-ons that cannot be recognised; a
+    diagnostic log that is on by default and size-limited;
+  - unrecognised add-ons: sync automatically when there is no disagreement or
+    when lineage shows which copy is newer; otherwise ask once for that
+    add-on (SPEC R-05 as amended);
+  - ceiling **4,000 AIU** from the run-007 baseline in
+    [run-007 USAGE.md](runs/run-007/USAGE.md), stopping new work at ≥3,700;
+  - publish a `v0.3.0` pre-release after its gates pass.
+  The owner may correct any of these.
+- SPEC R-03 and R-05 and ACCEPTANCE A-47 and A-48 are amended with this
+  decision. [run-007 PLAN.md](runs/run-007/PLAN.md) is approved as committed.
+
 ### D-27: Run-005 plan approved (2026-11-21)
 
 - The owner said "draft and execute the plan, unless there's a real
@@ -449,4 +480,5 @@ phase D barrier.
 | 2026-11-20 | D-25 | Run-004 design defaults accepted for Q-55..Q-87 pending set; Q-77 no value (real settings sync disabled); R4D-28 bounded fix | `a951c2f` |
 | 2026-11-21 | D-26 | Q-88 (a); Q-77 32 MiB; owner runs macOS kit; v0.1.0 Windows pre-release approved; run-005 ceiling 10,000 AIU, plan pending | `9ca8f10` |
 | 2026-11-21 | D-27 | Run-005 plan drafted and approved by owner instruction ("draft and execute") | `fe13e3d` |
-| 2026-11-22 | D-28 | Q-24 marker gate removed by default (test mode nice-to-have); D-08 amended; Q-3 working answer; run-006 10,000 AIU, plan approved | this commit |
+| 2026-11-22 | D-28 | Q-24 marker gate removed by default (test mode nice-to-have); D-08 amended; Q-3 working answer; run-006 10,000 AIU, plan approved | `c77d050` |
+| 2026-11-23 | D-29 | Discovery on drives A–Z with a folder picker; sync unrecognised add-ons; SPEC R-03/R-05, A-47/A-48; run-007 4,000 AIU, plan approved | this commit |

@@ -14,6 +14,9 @@ the optional test mode). Back up your `Interface\AddOns` and
 open owner questions:
 [docs/runs/run-006/HANDOFF.md](docs/runs/run-006/HANDOFF.md).
 Decisions: [docs/OWNER-DECISIONS.md](docs/OWNER-DECISIONS.md).
+Run-007 is in progress (D-29, [plan](docs/runs/run-007/PLAN.md)): finding WoW
+on any drive, a folder picker, syncing add-ons that cannot be recognised, and
+a diagnostic log.
 Repository layout: [docs/REPO-MAP.md](docs/REPO-MAP.md).
 
 This repository (`hamiltonia/wow-sync`) is the permanent project home. It is not

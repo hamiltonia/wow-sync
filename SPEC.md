@@ -103,6 +103,10 @@ Require the Dropbox desktop client. Guide users through selecting their shared
 location, establishing a group, identifying computers, choosing the settings
 master and keeping required data available offline.
 
+Find game installations on every local drive and from the game launcher's own
+record. When none is found, say so and let the user choose the folder; a chosen
+folder still goes through guided identity and scope confirmation (D-29).
+
 Explain the effects of setup consent, including automatic settings sharing and
 replacement of local group-managed data. After consent, joining an existing
 group may apply its policy automatically, preserving replaced local data for
@@ -145,6 +149,13 @@ preference as proof of a newer release. Version labels, channels, manual edits,
 multi-folder packages and identical labels with different contents can be
 ambiguous. If ordering cannot be established, require a decision for that addon
 and continue safe work elsewhere.
+
+Add-on folders whose description (`.toc`) cannot be recognised are still
+synced (D-29). Without a usable version label, ordering comes only from
+content lineage: a copy that changed from the last shared copy, while every
+other computer still has that shared copy, is the newer one. Copies that
+differ with no such lineage need a one-time decision for that add-on.
+Oversized `.toc` files are recognised from their header.
 
 The app is a sync tool, not addon police (D-21). Whether an addon works with
 a game build is the user's responsibility. Never withhold an addon because of
