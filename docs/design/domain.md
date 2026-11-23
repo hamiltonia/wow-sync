@@ -434,6 +434,11 @@ the copies differ"); identical copies are `Same`. The only ordering is lineage:
   stays recognised as an ancestor however many changes pass; once it syncs,
   the anchor drops away. Older ancestors may be dropped, which can only turn a
   win into a decision, never pick a wrong winner.
+- While a live edit is unstable (no hash can be published), the previous
+  published lineage entry for the package is carried forward unchanged, and the
+  next stable publication takes its replaced copy from that entry. The basis is
+  therefore this computer's last stable published copy, derived from published
+  records and surviving restarts.
 - A package mixing recognised and unrecognised folders first checks the
   recognised folders' version evidence; if it contradicts the lineage order the
   package is a `MembersDisagree` decision (never a lineage win).

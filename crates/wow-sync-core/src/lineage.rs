@@ -107,22 +107,46 @@ pub fn next_lineage(
     let peer_invs: Vec<Inventory> = peers.iter().map(|s| state_inventory(s)).collect();
     let mut observations: Vec<&Inventory> = vec![local];
     observations.extend(peer_invs.iter());
-    let graph = LineageGraph::from_states(peers.iter().copied().chain(prev));
+    let mut graph = LineageGraph::from_states(peers.iter().copied().chain(prev));
+    // This computer's own previous record is trusted as written, so an entry carried across an
+    // unstable or missing observation still counts (G1).
+    for l in prev.into_iter().flat_map(|p| &p.lineage) {
+        graph.add(l);
+    }
     let prev_inv = prev.map(state_inventory);
     let mut out = Vec::new();
     for pkg in group_packages(&observations) {
-        let Some(now) = package_version(&pkg, local, client) else {
-            continue;
-        };
-        if !is_unrecognised(&now) || !whole(&now) {
+        let now = package_version(&pkg, local, client);
+        let stable = now.as_ref().filter(|n| whole(n));
+        if stable.is_some_and(|n| !is_unrecognised(n)) {
             continue;
         }
+        let Some(now) = stable else {
+            // The copy cannot be hashed right now (unstable or missing): carry the last
+            // published lineage for the package forward unchanged so the next stable
+            // publication still knows what it replaced.
+            if let Some(l) = prev
+                .into_iter()
+                .flat_map(|p| &p.lineage)
+                .find(|l| l.package == pkg.key)
+            {
+                out.push(l.clone());
+            }
+            continue;
+        };
         let mut ancestors: Vec<Sha256> = Vec::new();
         let replaced = prev
             .zip(prev_inv.as_ref())
             .and_then(|(p, inv)| package_version(&pkg, inv, &p.client))
-            .filter(|pv| whole(pv) && pv.hash != now.hash)
-            .map(|pv| pv.hash);
+            .filter(whole)
+            .map(|pv| pv.hash)
+            .or_else(|| {
+                prev.into_iter()
+                    .flat_map(|p| &p.lineage)
+                    .find(|l| l.package == pkg.key)
+                    .map(|l| l.hash)
+            })
+            .filter(|h| *h != now.hash);
         if let Some(h) = replaced {
             ancestors.push(h);
             ancestors.extend(graph.ancestors(&pkg.key, h));

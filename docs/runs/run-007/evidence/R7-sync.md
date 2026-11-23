@@ -100,6 +100,7 @@ Counts after the fixes: core 377, runtime 210 (+2 public_api). Verify tiers: see
 | eligibility | `transfer_eligible` requires `toc.kind == Selected` | `inventory::...eligibility_follows_status...`, `plan::...unrecognised_folders_are_published_by_content` | yes |
 | lineage | `LineageGraph::newer` always `false` | 3 `target` tests (`...changed_here_from_the_peer_copy_wins`, `...changed_on_the_peer_is_installed...`, `a_superseded_...`), e2e `...later_edits_follow`, `a_peer_that_was_offline...` | yes |
 | publisher-held check (RV7-14) | `from_states` accepts every entry (`if true \|\| held == Some(l.hash)`); the test now has peer 3 hold v3 | `a_lineage_entry_for_a_copy_its_publisher_does_not_hold_is_ignored` fails with `Chosen` v1 instead of `NeedsDecision`; passes with the check | yes |
+| G1 carry-forward across an unstable observation | `next_lineage` does not carry the previous entry forward | `a_live_edit_that_publishes_an_unstable_observation_still_converges_without_a_decision` fails (spurious decision); the revert test did not finish within 4 minutes under the mutation and was stopped, so only the edit test is a confirmed control failure | yes |
 | header ended | `header_has_ended` always `true` | `cut_header_without_a_file_line_is_not_selected` | yes |
 
 ## Settings finding
