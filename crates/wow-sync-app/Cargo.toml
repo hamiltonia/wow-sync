@@ -16,8 +16,8 @@ name = "devkit"
 path = "src/bin/devkit.rs"
 
 [dependencies]
-wow-sync-runtime = { version = "0.2.0", path = "../wow-sync-runtime" }
-wow-sync-core = { version = "0.2.0", path = "../wow-sync-core" }
+wow-sync-runtime = { version = "0.3.0", path = "../wow-sync-runtime" }
+wow-sync-core = { version = "0.3.0", path = "../wow-sync-core" }
 gpui = { workspace = true }
 gpui_platform = { workspace = true }
 tray-icon = { workspace = true }

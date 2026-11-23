@@ -200,8 +200,29 @@ fn now_ms() -> i64 {
     crate::world::now_ms()
 }
 
+static LAST_LOGGED: Mutex<String> = Mutex::new(String::new());
+
+/// Writes what is holding sync (plan blocks, a provider problem) once per change, so a
+/// five-second check cycle does not fill the log. The lines are the plain-language sentences
+/// the window shows; they carry no add-on or settings contents.
+fn log_status_changes(st: &StatusSnapshot) {
+    let sig = format!("{:?}|{:?}", st.blocks, st.provider_error);
+    let mut last = LAST_LOGGED.lock().unwrap_or_else(|e| e.into_inner());
+    if *last == sig {
+        return;
+    }
+    *last = sig;
+    for b in &st.blocks {
+        crate::app::log_warn(&format!("sync held: {b}"));
+    }
+    if let Some(e) = &st.provider_error {
+        crate::app::log_error(&format!("shared folder problem: {e}"));
+    }
+}
+
 fn refresh(svc: &mut SliceService, shared: &SharedState, wake: &Sender<()>, checked: bool) {
     let st = svc.status();
+    log_status_changes(&st);
     let decisions = svc.offered_decisions().to_vec();
     let (pause, act, settings) = (svc.pause_state(), svc.activity_log(300), svc.app_settings());
     let toggles = svc.toggles();
@@ -260,7 +281,10 @@ fn run(
                 s.inject_crash_after(opts.crash_after);
                 svc = Some(s);
             }
-            Err(e) => publish(&shared, &wake, |g| g.message = e.to_string()),
+            Err(e) => {
+                crate::app::log_error(&format!("could not open the sync service: {e}"));
+                publish(&shared, &wake, |g| g.message = e.to_string())
+            }
         }
     }
     publish(&shared, &wake, |g| {
@@ -297,6 +321,7 @@ fn run(
                         g.message.clear();
                     }
                     Err(e) => {
+                        crate::app::log_error(&format!("inspect failed: {e}"));
                         g.preview = None;
                         g.message = e.to_string();
                     }
@@ -325,13 +350,19 @@ fn run(
                         });
                         force = true;
                     }
-                    Err(e) => publish(&shared, &wake, |g| g.message = humane(&e)),
+                    Err(e) => {
+                        crate::app::log_error(&format!("enrollment failed: {e}"));
+                        publish(&shared, &wake, |g| g.message = humane(&e))
+                    }
                 }
                 continue;
             }
             Some(Cmd::Reconfirm(req)) => {
                 if let Some(s) = svc.as_mut() {
                     let res = s.reconfirm(&req);
+                    if let Err(e) = &res {
+                        crate::app::log_error(&format!("reconfirmation failed: {e}"));
+                    }
                     publish(&shared, &wake, |g| {
                         g.message = match res {
                             Ok(()) => String::new(),
@@ -449,6 +480,7 @@ fn run(
         match res {
             Ok(_) => publish(&shared, &wake, |g| g.message.clear()),
             Err(e) => {
+                crate::app::log_error(&format!("sync cycle failed: {e}"));
                 let has_provider = s.status().provider_error.is_some();
                 publish(&shared, &wake, |g| {
                     g.message = if has_provider {

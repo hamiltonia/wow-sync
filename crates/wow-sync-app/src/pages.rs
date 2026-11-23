@@ -2319,8 +2319,24 @@ impl Shell {
             "Privacy",
             vec![crash.into_any_element(), what.into_any_element()],
         ));
-        let o1 = self.btn_off("open-shared", "Open shared folder", "not available yet", cx);
-        let o2 = self.btn_off("open-data", "Open data folder", "not available yet", cx);
+        let o1 = if self.w.shared_label.is_empty() {
+            self.btn_off("open-shared", "Open shared folder", "not set up yet", cx)
+        } else {
+            self.btn(
+                "open-shared",
+                "Open shared folder",
+                Bk::Secondary,
+                Act::OpenSharedFolder,
+                cx,
+            )
+        };
+        let o2 = self.btn(
+            "open-data",
+            "Open data folder",
+            Bk::Secondary,
+            Act::OpenDataFolder,
+            cx,
+        );
         let o3 = self.btn(
             "export-diag",
             "Export diagnostics…",

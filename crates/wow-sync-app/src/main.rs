@@ -6,7 +6,8 @@
 //!            [--folder _forever_] [--start-hidden] [--interval-ms N] [--recent-ms N]
 //!            [--crash-after N] [--hide-after-secs N]
 //! Window-state options for evidence: --theme --page --detail --sheet --setup-step --filter --zoom.
-//! Logging goes to $WOWSYNC_LOG.
+//! The diagnostic log is on by default: <state dir>\logs\wow-sync.log (rotated to .1 at 1 MiB;
+//! the state dir is %LOCALAPPDATA%\WoWSync\state, or --state). $WOWSYNC_LOG overrides the path.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod about_ui;
@@ -18,6 +19,7 @@ mod change_ui;
 mod computers_ui;
 mod consent;
 mod decisions_ui;
+mod diag_log;
 mod features;
 mod model;
 mod notice;
@@ -145,10 +147,32 @@ fn install_row(root: &std::path::Path, folder: &str) -> Install {
     }
 }
 
-/// Read-only detection of the game installs and of Dropbox (UG-24).
+/// Read-only detection of the game installs and of Dropbox (UG-24). Every place looked at is
+/// written to the diagnostic log with its result.
 fn detect(computer: &str) -> SetupData {
-    let installs = wow_sync_runtime::find_wow(&wow_sync_runtime::wow_candidates())
-        .into_iter()
+    let found = wow_sync_runtime::discover_wow();
+    let letters: String = found.drives.iter().collect();
+    app::log(&format!("searching local fixed drives: {letters}"));
+    match &found.battlenet {
+        None => app::log("Battle.net product.db: not found, unreadable or too large"),
+        Some(p) => {
+            app::log(&format!("Battle.net product.db: {} game path(s)", p.len()));
+            for path in p {
+                app::log(&format!("Battle.net product.db path: {}", path.display()));
+            }
+        }
+    }
+    for p in &found.probes {
+        app::log(&format!(
+            "probe [{}] {}: {}",
+            p.source,
+            p.path.display(),
+            p.result.word()
+        ));
+    }
+    let installs: Vec<Install> = found
+        .installs
+        .iter()
         .flat_map(|d| {
             d.variants
                 .iter()
@@ -156,12 +180,18 @@ fn detect(computer: &str) -> SetupData {
                 .collect::<Vec<_>>()
         })
         .collect();
-    let dropbox = wow_sync_runtime::find_dropbox(
-        &wow_sync_runtime::dropbox_info_files(),
-        &wow_sync_runtime::dropbox_defaults(),
-    )
-    .into_iter()
-    .next();
+    app::log(&format!(
+        "game detection: {} install row(s) from {} probe(s)",
+        installs.len(),
+        found.probes.len()
+    ));
+    let info_files = wow_sync_runtime::dropbox_info_files();
+    let all = wow_sync_runtime::find_dropbox(&info_files, &wow_sync_runtime::dropbox_defaults());
+    let dropbox = all.into_iter().next();
+    match &dropbox {
+        Some(p) => app::log(&format!("Dropbox found: {}", p.display())),
+        None => app::log_warn("Dropbox not found in its info files or the default folder"),
+    }
     SetupData {
         dropbox: dropbox.as_ref().map(|p| p.display().to_string()),
         shared_root: dropbox.map(|p| p.join("WoW Sync")),
@@ -173,7 +203,7 @@ fn detect(computer: &str) -> SetupData {
 }
 
 fn main() {
-    std::panic::set_hook(Box::new(|info| app::log(&format!("PANIC {info}"))));
+    std::panic::set_hook(Box::new(|info| app::log_error(&format!("PANIC {info}"))));
     let mut cli = parse();
     ui::set_zoom(cli.zoom);
 
@@ -187,6 +217,12 @@ fn main() {
         }
     });
     let _ = std::fs::create_dir_all(&state);
+    diag_log::init(&state);
+    app::log(&format!(
+        "WoW Sync {} starting, dev={developer}, state {}",
+        env!("CARGO_PKG_VERSION"),
+        state.display()
+    ));
     let key = format!(
         "{:x}{}",
         state
@@ -246,7 +282,7 @@ fn main() {
         shared.clone(),
         wake_tx,
     );
-    app::log(&format!("start dev={developer}"));
+    app::log(&format!("sync thread started, dev={developer}"));
 
     let args = cli.args;
     gpui_platform::application()

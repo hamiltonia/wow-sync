@@ -33,8 +33,9 @@ pub use detail::{
 };
 pub use diag::{ExportError, SaveError};
 pub use discover::{
-    dropbox_defaults, dropbox_info_files, dropbox_paths_from_info, find_dropbox, find_wow,
-    wow_candidates, DetectedInstall,
+    discover_wow, dropbox_defaults, dropbox_info_files, dropbox_paths_from_info, find_dropbox,
+    find_wow, install_from_choice, paths_from_product_db, probe_list, scan, wow_candidates,
+    DetectedInstall, Discovery, Probe, ProbeResult, PRODUCT_DB_LIMIT,
 };
 pub use effects::{FaultPlan, Faulty, Hooks, RealEffects};
 pub use notices::{CycleOutcome, DataAtRisk, NoticeRunner, RiskKind};
