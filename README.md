@@ -1,7 +1,7 @@
 # WoW Sync: intent specification seed
 
 Status: specification approved by the owner at `7a2ccdf` on 2026-11-14.
-Runs 001 to 006 are closed. Run-005 closed run-004's gaps (uninstall
+Runs 001 to 007 are closed. Run-005 closed run-004's gaps (uninstall
 recovery of code and settings, the 32 MiB settings cap, Q-88, DataAtRisk) and
 published the `v0.1.0` Windows
 [pre-release](https://github.com/hamiltonia/wow-sync/releases/tag/v0.1.0),
@@ -14,13 +14,18 @@ the optional test mode). Back up your `Interface\AddOns` and
 open owner questions:
 [docs/runs/run-006/HANDOFF.md](docs/runs/run-006/HANDOFF.md).
 Decisions: [docs/OWNER-DECISIONS.md](docs/OWNER-DECISIONS.md).
-Run-007 is in progress (D-29, [plan](docs/runs/run-007/PLAN.md)) and targets the
-`v0.3.0` pre-release ([notes](docs/release/v0.3.0.md), the download is
-`wow-sync-0.3.0-windows-x64.zip` on its GitHub release once published):
-finding WoW on any drive (and a folder picker when it cannot be found), reading
-large `.toc` files, syncing add-ons that cannot be recognised, and a diagnostic
-log on by default (`%LOCALAPPDATA%\WoWSync\state\logs\wow-sync.log`). The latest
-published release is still `v0.2.0`.
+Run-007 (D-29) published the `v0.3.0`
+[pre-release](https://github.com/hamiltonia/wow-sync/releases/tag/v0.3.0)
+([notes](docs/release/v0.3.0.md); download
+`wow-sync-0.3.0-windows-x64.zip`). It adds:
+- finding WoW on any drive, with a folder picker when it cannot be found;
+- reading large `.toc` files;
+- syncing add-ons that cannot be recognised, using published lineage;
+- a diagnostic log on by default, at
+  `%LOCALAPPDATA%\WoWSync\state\logs\wow-sync.log`.
+
+Report: [docs/runs/run-007/REPORT.md](docs/runs/run-007/REPORT.md). The latest
+release is `v0.3.0`.
 Repository layout: [docs/REPO-MAP.md](docs/REPO-MAP.md).
 
 This repository (`hamiltonia/wow-sync`) is the permanent project home. It is not
