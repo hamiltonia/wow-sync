@@ -269,6 +269,12 @@ pub fn applied_explanation(key: &FolderKey, plan: &Explanation) -> Explanation {
             to: Some(to.clone()),
             source: source.clone(),
         },
+        Explanation::ContentLineage { folder, source, .. } => Explanation::AppliedFrom {
+            package: folder.clone(),
+            from: None,
+            to: None,
+            source: source.clone(),
+        },
         Explanation::Installed { source } => Explanation::AppliedFrom {
             package: key.as_str().to_string(),
             from: None,

@@ -342,6 +342,7 @@ pub fn compare_package(a: &PackageVersion, b: &PackageVersion) -> PackageOrder {
     let mut greater = false;
     let mut equal_label = false;
     let mut ambiguous: Option<AmbiguityReason> = None;
+    let mut unrecognised: Option<AmbiguityReason> = None;
     let note = |r: AmbiguityReason, ambiguous: &mut Option<AmbiguityReason>| {
         if ambiguous.is_none() {
             *ambiguous = Some(r);
@@ -361,7 +362,7 @@ pub fn compare_package(a: &PackageVersion, b: &PackageVersion) -> PackageOrder {
                 Some(fb),
                 "unrecognised add-on: no version to compare, the copies differ",
             ));
-            note(AmbiguityReason::UnrecognisedDiffers, &mut ambiguous);
+            note(AmbiguityReason::UnrecognisedDiffers, &mut unrecognised);
             continue;
         }
         let (la, lb) = (
@@ -400,6 +401,21 @@ pub fn compare_package(a: &PackageVersion, b: &PackageVersion) -> PackageOrder {
                 note(AmbiguityReason::VersionAmbiguous(why), &mut ambiguous);
             }
         }
+    }
+    // Version evidence of recognised folders is never overridden by content lineage: when it
+    // orders or fails to order the copies, an unrecognised folder in the same package makes the
+    // evidence contradictory or unclear, so the package needs a decision.
+    if let Some(reason) = unrecognised {
+        let reason = match (&ambiguous, less || greater) {
+            (Some(why), _) => why.clone(),
+            (None, true) => AmbiguityReason::MembersDisagree,
+            (None, false) => reason,
+        };
+        return PackageOrder::Ambiguous {
+            reason,
+            set,
+            evidence: ev,
+        };
     }
     if let Some(reason) = ambiguous {
         return PackageOrder::Ambiguous {

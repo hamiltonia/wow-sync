@@ -811,6 +811,7 @@ mod older_peer_tests {
                     apply_report: None,
                     authority_index: None,
                     features: features.iter().map(|f| f.to_string()).collect(),
+                    lineage: Vec::new(),
                 }),
             },
         }

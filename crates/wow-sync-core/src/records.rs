@@ -221,6 +221,22 @@ pub struct CodeState {
     /// Additive: the capabilities this app applies (contracts.md §1.13).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub features: Vec<String>,
+    /// Additive in `code-state/1` (contracts.md §1.6, D-29): for each unrecognised package this
+    /// computer holds, the copies it was derived from. Old readers ignore it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lineage: Vec<PackageLineage>,
+}
+
+/// The most ancestors one lineage entry names (newest first); older ones are dropped.
+pub const MAX_ANCESTORS: usize = 32;
+
+/// Published ancestry of one unrecognised package copy (R-05, D-29): `ancestors` are the package
+/// hashes this copy replaced or descends from, newest first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackageLineage {
+    pub package: FolderKey,
+    pub hash: Sha256,
+    pub ancestors: Vec<Sha256>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -261,6 +277,15 @@ record!(CodeState, "wowsync.code-state", 16 * MIB, |self| {
                 Ok(k) if k == f.key => {}
                 _ => return Err(format!("folder name {:?} does not match its key", f.name)),
             }
+        }
+    }
+    let mut lineage_keys = std::collections::BTreeSet::new();
+    for l in &self.lineage {
+        if !lineage_keys.insert(l.package.clone()) {
+            return Err(format!("duplicate lineage for {}", l.package));
+        }
+        if l.ancestors.len() > MAX_ANCESTORS {
+            return Err(format!("too many ancestors for {}", l.package));
         }
     }
     Ok(())
@@ -957,60 +982,6 @@ impl AdmissionWatermarks {
         self.members
             .iter()
             .find(|w| &w.computer_id == c && &w.enrollment_id == e)
-    }
-}
-
-/// Local-only: the last release of each package this computer held identically with another
-/// computer. It is the shared copy content lineage points back to (R-05, D-29); it is never
-/// published, and a missing entry only means "no shared copy known".
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SharedRelease {
-    pub package: FolderKey,
-    pub hash: Sha256,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct SharedReleases {
-    pub group_id: GroupId,
-    pub packages: Vec<SharedRelease>,
-}
-record!(SharedReleases, "wowsync.shared-releases", MIB, |self| {
-    let mut seen = std::collections::BTreeSet::new();
-    if !self.packages.iter().all(|p| seen.insert(p.package.clone())) {
-        return Err("a package is listed once".into());
-    }
-    Ok(())
-});
-
-impl SharedReleases {
-    pub fn empty(group_id: GroupId) -> Self {
-        Self {
-            group_id,
-            packages: Vec::new(),
-        }
-    }
-
-    pub fn to_map(&self) -> std::collections::BTreeMap<FolderKey, Sha256> {
-        self.packages
-            .iter()
-            .map(|p| (p.package.clone(), p.hash))
-            .collect()
-    }
-
-    pub fn from_map(
-        group_id: GroupId,
-        map: &std::collections::BTreeMap<FolderKey, Sha256>,
-    ) -> Self {
-        Self {
-            group_id,
-            packages: map
-                .iter()
-                .map(|(k, h)| SharedRelease {
-                    package: k.clone(),
-                    hash: *h,
-                })
-                .collect(),
-        }
     }
 }
 

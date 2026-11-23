@@ -5,6 +5,7 @@ use crate::explain::{AmbiguousCandidate, Explanation};
 use crate::hash::package_hash;
 use crate::ids::{ComputerId, GroupId, Sha256};
 use crate::inventory::{FileEntry, FolderState, FolderStatus, Inventory};
+use crate::lineage::{next_lineage, state_inventory, LineageGraph};
 use crate::package::{
     compare_package, group_packages, package_version, AmbiguityReason, ClientInfo, Package,
     PackageOrder, PackageVersion,
@@ -43,9 +44,6 @@ pub struct TargetInput<'a> {
     pub local_id: &'a ComputerId,
     pub members: &'a [MemberView],
     pub trees: &'a BTreeMap<Sha256, TreeAvail>,
-    /// The last release of each package this computer held identically with a peer (R-05
-    /// content lineage). Empty when unknown: lineage then never orders anything.
-    pub shared: &'a BTreeMap<FolderKey, Sha256>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,15 +95,6 @@ pub struct GroupTarget {
 struct Cand {
     pv: PackageVersion,
     holders: Vec<(ComputerId, ClientInfo)>,
-}
-
-fn state_inventory(state: &CodeState) -> Inventory {
-    let mut folders = state.folders.clone();
-    folders.sort_by(|a, b| a.key.cmp(&b.key));
-    Inventory {
-        folders,
-        listing_stable: true,
-    }
 }
 
 fn label(pv: &PackageVersion, pkg: &Package) -> String {
@@ -199,41 +188,6 @@ pub fn compute_target(input: &TargetInput) -> GroupTarget {
     compute_inner(input, None).0
 }
 
-/// The shared-release memory after this observation (R-05 content lineage): every package whose
-/// local copy is complete and identical to the copy of an admitted peer is recorded at that
-/// release; other packages keep what was known. Entries of packages no longer seen are dropped.
-pub fn shared_releases(input: &TargetInput) -> BTreeMap<FolderKey, Sha256> {
-    let peers = valid_peers(input);
-    let peer_invs: Vec<Inventory> = peers.iter().map(|p| state_inventory(p.2)).collect();
-    let mut observations: Vec<&Inventory> = vec![input.local];
-    observations.extend(peer_invs.iter());
-    let whole = |pv: &PackageVersion| {
-        pv.folders
-            .iter()
-            .all(|f| f.status == FolderStatus::Ok && f.tree.is_some())
-    };
-    let mut out = BTreeMap::new();
-    for pkg in group_packages(&observations) {
-        if let Some(h) = input.shared.get(&pkg.key) {
-            out.insert(pkg.key.clone(), *h);
-        }
-        let Some(local) = package_version(&pkg, input.local, input.local_client) else {
-            continue;
-        };
-        if !whole(&local) {
-            continue;
-        }
-        let held_by_peer = peer_invs.iter().zip(&peers).any(|(inv, (_, _, st))| {
-            package_version(&pkg, inv, &st.client)
-                .is_some_and(|pv| whole(&pv) && pv.hash == local.hash)
-        });
-        if held_by_peer {
-            out.insert(pkg.key.clone(), local.hash);
-        }
-    }
-    out
-}
-
 /// Whether a whole source may be a candidate for a package (contracts.md §4.1 level 2, §5.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Screened {
@@ -270,6 +224,24 @@ fn compute_inner(input: &TargetInput, screen: Option<Screen>) -> (GroupTarget, V
     let peer_invs: Vec<Inventory> = peers.iter().map(|p| state_inventory(p.2)).collect();
     let mut observations: Vec<&Inventory> = vec![input.local];
     observations.extend(peer_invs.iter());
+    let lineage = {
+        let local_prev = input.members.iter().find_map(|m| match &m.latest {
+            MemberLatest::Valid { state, .. }
+                if m.computer == *input.local_id
+                    && state.group_id == input.group.group_id
+                    && state.computer_id == m.computer =>
+            {
+                Some(&**state)
+            }
+            _ => None,
+        });
+        let peer_states: Vec<&CodeState> = peers.iter().map(|p| p.2).collect();
+        let mut g = LineageGraph::from_states(peer_states.iter().copied().chain(local_prev));
+        for l in next_lineage(input.local, input.local_client, local_prev, &peer_states) {
+            g.add(&l);
+        }
+        g
+    };
     let mut sources: BTreeMap<&ComputerId, Source> = BTreeMap::new();
     if screen.is_some() {
         sources.insert(input.local_id, Source::from_inventory(input.local));
@@ -360,12 +332,12 @@ fn compute_inner(input: &TargetInput, screen: Option<Screen>) -> (GroupTarget, V
                 x.pv.hash == c.pv.hash
                     || match compare_package(&c.pv, &x.pv) {
                         PackageOrder::Same | PackageOrder::Greater { .. } => true,
-                        // Unrecognised content has no version: the copy that changed from the
-                        // last shared release, which the other still holds, is the newer one.
+                        // Unrecognised content has no version: a copy is newer only when the
+                        // other is one of its published ancestors.
                         PackageOrder::Ambiguous {
                             reason: AmbiguityReason::UnrecognisedDiffers,
                             ..
-                        } => input.shared.get(&pkg.key) == Some(&x.pv.hash),
+                        } => lineage.newer(&pkg.key, c.pv.hash, x.pv.hash),
                         _ => false,
                     }
             })
@@ -484,6 +456,21 @@ fn choose(
     }
     let sources: Vec<ComputerId> = holders.into_iter().map(|h| h.0).collect();
     let why = match local_pv {
+        Some(l)
+            if matches!(
+                compare_package(&c.pv, l),
+                PackageOrder::Ambiguous {
+                    reason: AmbiguityReason::UnrecognisedDiffers,
+                    ..
+                }
+            ) =>
+        {
+            Explanation::ContentLineage {
+                folder: display_name(&c.pv, pkg),
+                source: sources[0].clone(),
+                replaces: Some(l.hash.to_string().chars().take(8).collect()),
+            }
+        }
         Some(l) => Explanation::NewerVersion {
             folder: display_name(&c.pv, pkg),
             from: label(l, pkg),
@@ -1269,7 +1256,6 @@ mod contract_tests {
             local_id: &local_id,
             members: &sc.members,
             trees: &sc.trees,
-            shared: &sc.shared,
         };
         let c = compose(&input, &Ledger::new(), &Neutral, &BTreeSet::new(), &Neutral);
         assert_eq!(c.target, compute_target(&input));
@@ -1344,7 +1330,6 @@ mod contract_tests {
             local_id: &local_id,
             members: &sc.members,
             trees: &sc.trees,
-            shared: &sc.shared,
         };
         compose(&input, &Ledger::new(), fake, held, fake)
     }
@@ -1735,35 +1720,124 @@ mod tests {
         assert_eq!(reason(pkg(&t, "suite")), DecisionReason::Ambiguous);
     }
 
+    fn h(sc: &Scenario) -> Sha256 {
+        release(sc, "suite")
+    }
+
     #[test]
-    fn unrecognised_copy_changed_here_since_the_shared_release_wins() {
-        let old = release(&Scenario::new(unrec("b")), "suite");
+    fn unrecognised_copy_changed_here_from_the_peer_copy_wins() {
+        // This computer published "b" and has since changed it to "a": "b" is its ancestor.
         let t = Scenario::new(unrec("a"))
+            .local_published(unrec("b"))
             .peer(2, unrec("b"))
-            .shared_at("suite", old)
             .target();
         assert_eq!(pkg(&t, "suite"), &PackageTarget::InSync);
     }
 
     #[test]
-    fn unrecognised_copy_changed_on_the_peer_since_the_shared_release_is_installed() {
-        let old = release(&Scenario::new(unrec("a")), "suite");
+    fn unrecognised_copy_changed_on_the_peer_is_installed_and_explains_itself() {
+        let (old, new) = (h(&Scenario::new(unrec("a"))), h(&Scenario::new(unrec("b"))));
         let t = Scenario::new(unrec("a"))
             .peer(2, unrec("b"))
-            .shared_at("suite", old)
+            .peer_lineage(2, "suite", new, &[old])
             .target();
         match pkg(&t, "suite") {
-            PackageTarget::Chosen { sources, .. } => assert_eq!(sources, &vec![computer(2)]),
+            PackageTarget::Chosen { sources, why, .. } => {
+                assert_eq!(sources, &vec![computer(2)]);
+                let text = crate::explain::render(why);
+                assert!(text.contains("changed from the copy last shared"), "{text}");
+                assert!(text.contains(&old.to_string()[..8]), "{text}");
+                assert!(!text.contains("unversioned"), "{text}");
+            }
             other => panic!("expected the peer's copy, got {other:?}"),
         }
     }
 
     #[test]
-    fn unrecognised_copies_both_changed_since_the_shared_release_need_a_decision() {
-        let old = release(&Scenario::new(unrec("old")), "suite");
+    fn unrecognised_copies_both_changed_since_the_common_copy_need_a_decision() {
+        let old = h(&Scenario::new(unrec("old")));
+        let new = h(&Scenario::new(unrec("b")));
+        let t = Scenario::new(unrec("a"))
+            .local_published(unrec("old"))
+            .peer(2, unrec("b"))
+            .peer_lineage(2, "suite", new, &[old])
+            .target();
+        assert_eq!(reason(pkg(&t, "suite")), DecisionReason::Ambiguous);
+    }
+
+    #[test]
+    fn unrecognised_copy_unrelated_to_the_group_copy_is_not_installed_or_overwritten() {
+        // A new computer joins with its own copy; the group's copy descends from another.
+        let (v1, v2) = (
+            h(&Scenario::new(unrec("v1"))),
+            h(&Scenario::new(unrec("v2"))),
+        );
+        let t = Scenario::new(unrec("mine"))
+            .peer(2, unrec("v2"))
+            .peer_lineage(2, "suite", v2, &[v1])
+            .target();
+        assert_eq!(reason(pkg(&t, "suite")), DecisionReason::Ambiguous);
+    }
+
+    #[test]
+    fn a_superseded_unrecognised_copy_never_wins_again() {
+        // a and b hold v2 (descended from v1, v2 via v3); c returns offline with v1.
+        let v: Vec<Sha256> = ["v1", "v2", "v3"]
+            .iter()
+            .map(|t| h(&Scenario::new(unrec(t))))
+            .collect();
+        let group = |sc: Scenario| {
+            sc.peer_lineage(2, "suite", v[2], &[v[1], v[0]])
+                .peer_lineage(3, "suite", v[2], &[v[1], v[0]])
+        };
+        // c's view: it holds the oldest copy and replaces it with the newest.
+        let on_c = group(
+            Scenario::new(unrec("v1"))
+                .peer(2, unrec("v3"))
+                .peer(3, unrec("v3")),
+        )
+        .target();
+        match pkg(&on_c, "suite") {
+            PackageTarget::Chosen { sources, .. } => {
+                assert_eq!(sources, &vec![computer(2), computer(3)])
+            }
+            other => panic!("{other:?}"),
+        }
+        // a's view: its own copy is the newest; the stale peer cannot win and no decision arises.
+        let on_a = Scenario::new(unrec("v3"))
+            .local_published(unrec("v2"))
+            .peer(2, unrec("v3"))
+            .peer(3, unrec("v1"))
+            .peer_lineage(2, "suite", v[2], &[v[1], v[0]])
+            .target();
+        assert_eq!(pkg(&on_a, "suite"), &PackageTarget::InSync);
+    }
+
+    #[test]
+    fn unrecognised_copies_that_descend_from_each_other_need_a_decision() {
+        // A change reverted to an earlier copy: both claim the other as an ancestor.
+        let (a, b) = (h(&Scenario::new(unrec("a"))), h(&Scenario::new(unrec("b"))));
         let t = Scenario::new(unrec("a"))
             .peer(2, unrec("b"))
-            .shared_at("suite", old)
+            .peer_lineage(2, "suite", b, &[a])
+            .peer_lineage(2, "suite", a, &[b])
+            .target();
+        assert_eq!(reason(pkg(&t, "suite")), DecisionReason::Ambiguous);
+    }
+
+    #[test]
+    fn lineage_never_overrides_contradicting_version_evidence_in_a_package() {
+        // Suite is recognised and older here; Suite_Data is unrecognised and descends from the
+        // peer's. The version evidence and the lineage disagree: the package needs a decision.
+        let mix = |core: &str, data: &str| {
+            vec![
+                addon("Suite", Some(core), "core"),
+                crate::testkit::addon_unrecognised("Suite_Data", data),
+            ]
+        };
+        let t = Scenario::new(mix("1.0", "new"))
+            .local_published(mix("2.0", "old"))
+            .peer(2, mix("2.0", "old"))
             .target();
         assert_eq!(reason(pkg(&t, "suite")), DecisionReason::Ambiguous);
     }
@@ -1781,19 +1855,38 @@ mod tests {
     }
 
     #[test]
-    fn shared_release_is_recorded_only_when_a_peer_holds_the_same_copy() {
-        let sc = Scenario::new(unrec("a")).peer(2, unrec("a"));
-        let shared = sc.shared_after();
-        assert_eq!(
-            shared.get(&FolderKey::lossy("suite")),
-            Some(&release(&sc, "suite"))
+    fn next_lineage_names_the_replaced_copy_and_what_the_records_know() {
+        let (v1, v2, v3) = (
+            h(&Scenario::new(unrec("v1"))),
+            h(&Scenario::new(unrec("v2"))),
+            h(&Scenario::new(unrec("v3"))),
         );
-        let differing = Scenario::new(unrec("a")).peer(2, unrec("b"));
-        assert!(differing.shared_after().is_empty());
-        let kept = differing.shared_at("suite", release(&sc, "suite"));
-        assert_eq!(kept.shared_after().len(), 1);
-        let gone = Scenario::new(vec![]).shared_at("suite", release(&sc, "suite"));
-        assert!(gone.shared_after().is_empty());
+        let key = FolderKey::lossy("suite");
+        // Published before this feature: no lineage entries, only the folders.
+        let prev =
+            crate::testkit::member_state(&computer(1), 1, &crate::testkit::inventory(unrec("v1")));
+        let now = crate::testkit::inventory(unrec("v2"));
+        let first = next_lineage(&now, &client(crate::testkit::BUILD), Some(&prev), &[]);
+        assert_eq!(first.len(), 1);
+        assert_eq!((first[0].hash, first[0].ancestors.clone()), (v2, vec![v1]));
+        // A peer already published v3 descending from v2: installing it keeps the whole chain.
+        let mut peer =
+            crate::testkit::member_state(&computer(2), 1, &crate::testkit::inventory(unrec("v3")));
+        peer.lineage.push(crate::records::PackageLineage {
+            package: key,
+            hash: v3,
+            ancestors: vec![v2, v1],
+        });
+        let mut prev2 = crate::testkit::member_state(&computer(1), 2, &now);
+        prev2.lineage = first;
+        let installed = crate::testkit::inventory(unrec("v3"));
+        let next = next_lineage(
+            &installed,
+            &client(crate::testkit::BUILD),
+            Some(&prev2),
+            &[&peer],
+        );
+        assert_eq!(next[0].ancestors, vec![v2, v1]);
     }
 
     fn two_part(core: &str, core_tag: &str, data: &str) -> Vec<crate::inventory::FolderScan> {
