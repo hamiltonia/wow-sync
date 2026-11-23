@@ -43,7 +43,7 @@ below. Run-006 is the active run; the latest closed run is run-005.
 | Run report | written at close; latest: [run-005 REPORT.md](runs/run-005/REPORT.md) |
 | Cumulative AI-credit and model usage ledger | [USAGE.md](runs/run-006/USAGE.md) |
 | Work packets, one per worker | [packets/](runs/run-006/packets/) |
-| Worker and verifier evidence, one file per packet | `runs/run-006/evidence/` (created by the first merged evidence) |
+| Worker and verifier evidence, one file per packet | [evidence/](runs/run-006/evidence/) |
 
 ### How a worker finds its scope
 
