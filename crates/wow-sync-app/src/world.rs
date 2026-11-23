@@ -179,6 +179,16 @@ pub struct Install {
     pub blocked: Vec<String>,
 }
 
+impl Install {
+    /// A new check is starting: whatever an earlier one said no longer applies.
+    pub fn start_checking(&mut self) {
+        self.inspected = false;
+        self.refused = None;
+        self.can_retry = false;
+        self.test_mode_blocked = false;
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Group {
     pub id: String,

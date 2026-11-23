@@ -211,6 +211,22 @@ mod tests {
     }
 
     #[test]
+    fn the_inspection_and_tray_lines_show_paths_under_the_profile_as_a_tilde() {
+        let p = Some("C:\\Users\\Someone");
+        for msg in [
+            "inspect start C:\\Users\\Someone\\Games\\World of Warcraft\\_forever_",
+            "inspect done C:\\Users\\Someone\\Games\\wow\\_forever_ in 6100 ms: 102 add-on(s) eligible",
+            "inspect cancelled c:/users/someone/Games/wow/_forever_",
+            "inspect failed C:\\Users\\Someone\\AppData\\Local\\WoW Sync: local problem",
+        ] {
+            let line = format_line(0, 1, Level::Info, msg, p);
+            assert!(!line.to_lowercase().contains("someone"), "{line}");
+            assert!(line.contains("~"), "{line}");
+        }
+        assert!(format_line(0, 1, Level::Info, "tray: quit", p).ends_with("tray: quit\n"));
+    }
+
+    #[test]
     fn the_profile_prefix_becomes_a_tilde_in_both_slash_styles() {
         let p = Some("C:\\Users\\Someone");
         assert_eq!(

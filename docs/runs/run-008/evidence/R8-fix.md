@@ -42,3 +42,22 @@ Battle.net process touched; D:\WoWSyncDemo untouched.
 ## Verification
 `cargo xtask verify --tier offline`: PASS. `--tier native`: PASS.
 New required cases: R8-fix:setup-inspection.
+
+## Round 2 (RV8-01..09)
+- RV8-01: Quit during setup-after scans. Cause: enroll/status/sync ran inline on the backend thread and
+  each hashed the tree many times (~12 scans per loop pass). Fix: `Shared.abort_reads` (set by the UI in
+  `begin_quit`, cleared by "keep running") feeds `SliceService.read_ctl`; read-only scans return
+  `ServiceError::Cancelled` at the next file and change nothing. Writes never consult the flag; the
+  post-apply observe is uncancellable once files changed, so the cycle publishes. Scans per pass are now
+  ~4 (status 1, sync 3, enroll 1) and the sync result's status snapshot is reused instead of rescanned.
+  Tests: `e2e::quit_abandons_a_slow_sync_status_and_enroll_scan_within_a_bound` (slowed scan, Quit stops
+  within 500 ms) and `e2e::a_write_in_progress_finishes_whole_even_when_quit_is_requested`.
+- Quit timing during a sync scan: before ~12 scans x 6-7 s (real 33k-file tree) = ~1.5 min (reviewer's
+  probe, 0.45 s/scan at 6k files); after: stops within one file's hash time (test bound 500 ms,
+  slowed 25 ms/file). Measured on a synthetic tree only.
+- RV8-02 release notes rewritten. RV8-03: seq guard is the sole stale-publish defence and is tested via
+  `_late_` seam. RV8-04: `setup::fold_preview` + `digest_for` tests. RV8-05: `Install::start_checking`
+  on every re-check, Next disabled until done. RV8-06: panic caught, ticker drop-guard, spawn failure
+  ends as an error. RV8-07: setup_panel digest uses `digest_for`. RV8-09: redaction test for the new lines.
+- Not reproduced: the RYZENFISH stall on real hardware; the GUI was not driven in either round.
+- Verify: offline PASS, native PASS. New cases appended to R8-fix:setup-inspection.

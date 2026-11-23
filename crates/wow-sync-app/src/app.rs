@@ -542,6 +542,7 @@ impl Shell {
         self.closing_quits = settings.closing_quits;
         self.first_close_done = settings.first_close_seen;
         self.merge_preview(preview);
+        self.mark_checking_rows();
         if enrolled_now && self.setup.working {
             self.setup.working = false;
             self.setup.finished = true;
@@ -578,6 +579,20 @@ impl Shell {
         cx.notify();
     }
 
+    /// A row whose check is running shows no earlier result, so it never offers Next on one.
+    fn mark_checking_rows(&mut self) {
+        let Some((root, folder, _)) = self.setup.inspecting.clone() else {
+            return;
+        };
+        if let Some(ins) = self.w.setup.as_mut().and_then(|d| {
+            d.installs
+                .iter_mut()
+                .find(|i| i.root == root && i.folder == folder)
+        }) {
+            ins.start_checking();
+        }
+    }
+
     /// Folds the read-only check into the setup row of the installation it was made for, which
     /// need not be the selected one: a late result never lands on another row.
     fn merge_preview(
@@ -587,7 +602,6 @@ impl Shell {
             (std::path::PathBuf, String),
         )>,
     ) {
-        use wow_sync_runtime::PreviewKind;
         let Some((p, (root, variant))) = preview else {
             self.preview_lines.clear();
             return;
@@ -595,29 +609,13 @@ impl Shell {
         let sel = self.setup.install;
         let mut seen: Option<(String, Option<String>, Vec<String>, usize)> = None;
         if let Some(d) = self.w.setup.as_mut() {
-            let target = d
-                .installs
-                .iter()
-                .position(|i| i.folder == variant && i.root == root);
+            let target = crate::setup::fold_preview(d, &p, &root, &variant);
             if target == Some(sel) {
                 self.preview_lines = p.disclosures.clone();
             } else {
                 self.preview_lines.clear();
             }
-            if let Some(ins) = target.and_then(|i| d.installs.get_mut(i)) {
-                ins.inspected = true;
-                ins.identity = if p.identity_line.is_empty() {
-                    ins.folder.clone()
-                } else {
-                    p.identity_line.clone()
-                };
-                ins.recognised = p.kind == PreviewKind::Recognized;
-                ins.refused = (p.kind == PreviewKind::Refused)
-                    .then(|| p.problem.clone().unwrap_or_else(|| p.identity_line.clone()));
-                ins.can_retry = p.retryable;
-                ins.test_mode_blocked = p.test_mode_blocked;
-                ins.eligible = p.eligible.clone();
-                ins.blocked = p.blocked.clone();
+            if let Some(ins) = target.and_then(|i| d.installs.get(i)) {
                 seen = Some((
                     ins.folder.clone(),
                     ins.refused.clone(),
@@ -817,6 +815,9 @@ impl Shell {
                 self.begin_quit();
             }
             Act::SheetKeepRunning => {
+                backend::lock(&self.shared)
+                    .abort_reads
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
                 self.send(Cmd::CancelQuit);
                 self.quit_pending = false;
                 self.close_sheet()
@@ -875,6 +876,9 @@ impl Shell {
 
     fn begin_quit(&mut self) {
         self.quit_pending = true;
+        backend::lock(&self.shared)
+            .abort_reads
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         self.send(Cmd::QuitWhenSafe);
     }
 
@@ -984,9 +988,18 @@ impl Shell {
     }
 
     fn inspect_selected(&mut self) {
-        if let Some(t) = self.setup_target() {
-            self.send(Cmd::Inspect(t));
+        let Some(t) = self.setup_target() else { return };
+        let sel = self.setup.install;
+        // The row is "checking" from now on, and no earlier result may fill it in meanwhile.
+        if let Some(ins) = self.w.setup.as_mut().and_then(|d| d.installs.get_mut(sel)) {
+            ins.start_checking();
         }
+        {
+            let mut g = backend::lock(&self.shared);
+            g.preview = None;
+            g.preview_for = None;
+        }
+        self.send(Cmd::Inspect(t));
     }
 
     /// Asks for a folder with the system dialog. Nothing is read or changed until the choice
@@ -1087,9 +1100,6 @@ impl Shell {
     fn setup_act_select(&mut self, i: usize) {
         self.setup.install = i;
         self.setup.consent.clear();
-        if let Some(ins) = self.w.setup.as_mut().and_then(|d| d.installs.get_mut(i)) {
-            ins.inspected = false;
-        }
         self.inspect_selected();
     }
 
@@ -1158,17 +1168,7 @@ impl Shell {
             join,
             identity_confirmed: self.setup.consent.identity,
             scope_confirmed: self.setup.consent.scope,
-            digest: {
-                let g = backend::lock(&self.shared);
-                let for_this = g
-                    .preview_for
-                    .as_ref()
-                    .is_some_and(|(r, f)| *r == t.install_root && *f == t.variant_folder);
-                g.preview
-                    .as_ref()
-                    .filter(|_| for_this)
-                    .and_then(|p| p.digest)
-            },
+            digest: backend::lock(&self.shared).digest_for(&t),
             display_name: d.computer.clone(),
         };
         self.setup.working = true;
@@ -1685,14 +1685,10 @@ impl Render for Shell {
         let pal = self.pal();
         let setup_mode = !self.w.enrolled || self.setup.finished;
         let setup_panel = (setup_mode && self.setup.step >= 4).then(|| {
-            format!(
-                "setup|{}|{:?}",
-                self.setup.install,
-                backend::lock(&self.shared)
-                    .preview
-                    .as_ref()
-                    .and_then(|p| p.digest)
-            )
+            let digest = self
+                .setup_target()
+                .and_then(|t| backend::lock(&self.shared).digest_for(&t));
+            format!("setup|{}|{:?}", self.setup.install, digest)
         });
         self.setup.consent.observe(setup_panel);
         let reconf_panel = (!setup_mode && self.detail == Detail::Reconfirm).then(|| {

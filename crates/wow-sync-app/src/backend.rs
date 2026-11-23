@@ -93,6 +93,22 @@ pub struct Shared {
     /// Identifies the check whose result may still be published; a cancelled or replaced
     /// check finds a different value and publishes nothing.
     pub inspect_seq: u64,
+    /// How many checks have ended (finished, failed, cancelled or replaced).
+    pub inspect_ended: u64,
+    /// Set by the window the moment Quit is chosen, before the sync thread can read the
+    /// command: read-only scans of the install stop at the next file. Never stops a write.
+    pub abort_reads: Arc<AtomicBool>,
+}
+
+impl Shared {
+    /// The digest of the check made for exactly `t`, never another folder's.
+    pub fn digest_for(&self, t: &Target) -> Option<wow_sync_core::ids::Sha256> {
+        let (root, folder) = self.preview_for.as_ref()?;
+        if *root != t.install_root || *folder != t.variant_folder {
+            return None;
+        }
+        self.preview.as_ref().and_then(|p| p.digest)
+    }
 }
 
 /// A read-only check of one installation that has not finished.
@@ -263,7 +279,20 @@ fn log_status_changes(st: &StatusSnapshot) {
 }
 
 fn refresh(svc: &mut SliceService, shared: &SharedState, wake: &Sender<()>, checked: bool) {
+    if lock(shared).abort_reads.load(Ordering::Relaxed) {
+        return;
+    }
     let st = svc.status();
+    refresh_with(svc, shared, wake, checked, st);
+}
+
+fn refresh_with(
+    svc: &SliceService,
+    shared: &SharedState,
+    wake: &Sender<()>,
+    checked: bool,
+    st: StatusSnapshot,
+) {
     log_status_changes(&st);
     let decisions = svc.offered_decisions().to_vec();
     let (pause, act, settings) = (svc.pause_state(), svc.activity_log(300), svc.app_settings());
@@ -365,12 +394,17 @@ impl Inspector {
                 files: ctl.files.clone(),
             });
         });
-        let (shared, wake) = (shared.clone(), wake.clone());
+        let (owned_shared, owned_wake) = (shared.clone(), wake.clone());
         let spawned = std::thread::Builder::new()
             .name("inspect".into())
-            .spawn(move || run_inspect(cfg, t, ctl, seq, shared, wake));
+            .spawn(move || run_inspect(cfg, t, ctl, seq, owned_shared, owned_wake));
         if let Err(e) = spawned {
             crate::app::log_error(&format!("inspect could not start: {e}"));
+            self.running = None;
+            publish(shared, wake, |g| {
+                g.inspecting = None;
+                g.message = format!("The check could not start: {e}");
+            });
         }
     }
 
@@ -396,7 +430,41 @@ fn inspect_once(
         }
         return Ok(None);
     }
+    #[cfg(test)]
+    if cfg.variant_folder == "_late_" {
+        // A check that ends with a result after it was cancelled or replaced.
+        while !ctl.cancelled() {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let cfg = ServiceConfig {
+            variant_folder: "_retail_".into(),
+            ..cfg
+        };
+        return Ok(Some(SliceService::new(cfg)?.inspect()));
+    }
+    #[cfg(test)]
+    if cfg.variant_folder == "_panic_" {
+        panic!("test: the check fails unexpectedly");
+    }
     Ok(SliceService::new(cfg)?.inspect_ctl(ctl))
+}
+
+/// Counts a check as over, however it ended.
+struct Ended(SharedState);
+
+impl Drop for Ended {
+    fn drop(&mut self) {
+        lock(&self.0).inspect_ended += 1;
+    }
+}
+
+/// Stops the progress ticker however the check ends, including by a panic.
+struct StopTicker(Arc<AtomicBool>);
+
+impl Drop for StopTicker {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Relaxed);
+    }
 }
 
 fn run_inspect(
@@ -409,9 +477,11 @@ fn run_inspect(
 ) {
     let place = t.install_root.join(&t.variant_folder);
     let place = place.display();
+    let _ended = Ended(shared.clone());
     crate::app::log(&format!("inspect start {place}"));
     let started = Instant::now();
     let ticking = Arc::new(AtomicBool::new(true));
+    let _stop = StopTicker(ticking.clone());
     {
         let (ticking, shared, wake) = (ticking.clone(), shared.clone(), wake.clone());
         let _ = std::thread::Builder::new()
@@ -426,13 +496,18 @@ fn run_inspect(
                 }
             });
     }
-    let res = inspect_once(cfg, &ctl);
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| inspect_once(cfg, &ctl)))
+        .unwrap_or_else(|_| {
+            Err(wow_sync_runtime::ServiceError::Local(
+                "the check stopped unexpectedly".into(),
+            ))
+        });
     ticking.store(false, Ordering::Relaxed);
     let ms = started.elapsed().as_millis();
     let files = ctl.files.load(Ordering::Relaxed);
     let result = match res {
-        Ok(Some(p)) if !ctl.cancelled() => Ok(p),
-        Ok(_) => {
+        Ok(Some(p)) => Ok(p),
+        Ok(None) => {
             crate::app::log(&format!("inspect cancelled {place}"));
             return;
         }
@@ -481,10 +556,16 @@ fn run(
     shared: SharedState,
     wake: Sender<()>,
 ) {
+    let abort = lock(&shared).abort_reads.clone();
+    let read_ctl = || ScanCtl {
+        cancel: abort.clone(),
+        ..ScanCtl::default()
+    };
     let mut svc: Option<SliceService> = None;
     if let Some(t) = &target {
         match open_service(config_for(&opts, t), os_attach(&opts)) {
             Ok(mut s) => {
+                s.set_read_ctl(read_ctl());
                 s.inject_crash_after(opts.crash_after);
                 svc = Some(s);
             }
@@ -511,7 +592,7 @@ fn run(
         } else {
             let scheduled = svc
                 .as_mut()
-                .is_some_and(|s| !s.pause_state().holds_sync() && s.status().enrolled);
+                .is_some_and(|s| !s.pause_state().holds_sync() && s.is_enrolled());
             let next = scheduled.then(|| now_ms() + opts.interval.as_millis() as i64);
             publish(&shared, &wake, |g| g.next_check_ms = next);
             match rx.recv_timeout(opts.interval) {
@@ -536,6 +617,7 @@ fn run(
                 let _ = std::fs::create_dir_all(&t.shared_root);
                 let res =
                     open_service(config_for(&opts, &t), os_attach(&opts)).and_then(|mut s| {
+                        s.set_read_ctl(read_ctl());
                         s.enroll(&req)?;
                         Ok(s)
                     });
@@ -553,6 +635,9 @@ fn run(
                             g.shared_root = Some(t.shared_root.clone());
                         });
                         force = true;
+                    }
+                    Err(wow_sync_runtime::ServiceError::Cancelled) => {
+                        crate::app::log("enrollment stopped because the app is quitting");
                     }
                     Err(e) => {
                         crate::app::log_error(&format!("enrollment failed: {e}"));
@@ -650,13 +735,16 @@ fn run(
             }
             Some(Cmd::SyncNow) => manual = true,
             Some(Cmd::CancelQuit) => {
+                abort.store(false, Ordering::Relaxed);
                 gate.cancel();
                 publish(&shared, &wake, |g| g.quit_ready = false);
                 continue;
             }
             Some(Cmd::QuitWhenSafe) => {
-                // A read-only check is abandoned; a sync or write step finishes first because
-                // commands are only read between steps, so none is running here.
+                // A read-only check or scan is abandoned; only a write step that is already
+                // running delays quit, and it finishes whole because commands are read between
+                // steps.
+                abort.store(true, Ordering::Relaxed);
                 inspector.cancel(&shared, &wake);
                 if gate.request() == StopState::Now {
                     publish(&shared, &wake, |g| g.quit_ready = true);
@@ -666,7 +754,7 @@ fn run(
             None => {}
         }
         let Some(s) = svc.as_mut() else { continue };
-        if !s.status().enrolled {
+        if !s.is_enrolled() {
             continue;
         }
         if s.pause_state().holds_sync() && !manual {
@@ -683,7 +771,19 @@ fn run(
             let _ = s.set_paused(true);
         }
         match res {
-            Ok(_) => publish(&shared, &wake, |g| g.message.clear()),
+            Ok(r) if !r.crashed && !abort.load(Ordering::Relaxed) => {
+                publish(&shared, &wake, |g| g.message.clear());
+                let mut st = r.status;
+                st.test_mode = s.test_mode();
+                refresh_with(s, &shared, &wake, true, st);
+            }
+            Ok(_) => {
+                publish(&shared, &wake, |g| g.message.clear());
+                refresh(s, &shared, &wake, true);
+            }
+            Err(wow_sync_runtime::ServiceError::Cancelled) => {
+                crate::app::log("sync cycle stopped because the app is quitting");
+            }
             Err(e) => {
                 crate::app::log_error(&format!("sync cycle failed: {e}"));
                 let has_provider = s.status().provider_error.is_some();
@@ -694,9 +794,9 @@ fn run(
                         e.to_string()
                     }
                 });
+                refresh(s, &shared, &wake, true);
             }
         }
-        refresh(s, &shared, &wake, true);
         publish(&shared, &wake, |g| g.busy = false);
         if gate.end_step() {
             publish(&shared, &wake, |g| g.quit_ready = true);
@@ -816,6 +916,111 @@ mod tests {
         );
         drop(g);
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    fn ended(shared: &SharedState) -> u64 {
+        lock(shared).inspect_ended
+    }
+
+    #[test]
+    fn a_check_that_ends_with_a_result_after_cancel_or_replace_publishes_nothing() {
+        let late = |t: &Target| Target {
+            variant_folder: "_late_".into(),
+            ..t.clone()
+        };
+        let (base, shared, tx, t) = lab_backend("late");
+        tx.send(Cmd::Inspect(late(&t))).unwrap();
+        wait_for("the check", Duration::from_secs(5), || {
+            lock(&shared).inspecting.is_some()
+        });
+        tx.send(Cmd::CancelInspect).unwrap();
+        wait_for("it to end", Duration::from_secs(5), || ended(&shared) == 1);
+        {
+            let g = lock(&shared);
+            assert!(g.preview.is_none() && g.preview_for.is_none() && g.inspecting.is_none());
+        }
+        // Replaced by a newer check instead of cancelled.
+        tx.send(Cmd::Inspect(late(&t))).unwrap();
+        wait_for("the second", Duration::from_secs(5), || {
+            lock(&shared).inspecting.is_some()
+        });
+        tx.send(Cmd::Inspect(held(&t))).unwrap();
+        wait_for("it to end", Duration::from_secs(5), || ended(&shared) == 2);
+        {
+            let g = lock(&shared);
+            assert!(
+                g.preview.is_none(),
+                "an old result must not fill the new check"
+            );
+            assert!(
+                g.inspecting.is_some(),
+                "the newer check is still the live one"
+            );
+        }
+        tx.send(Cmd::CancelInspect).unwrap();
+        wait_for("the last", Duration::from_secs(5), || ended(&shared) == 3);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_check_that_panics_ends_as_an_error_and_stops_its_ticker() {
+        let (base, shared, tx, t) = lab_backend("panic");
+        let boom = Target {
+            variant_folder: "_panic_".into(),
+            ..t
+        };
+        tx.send(Cmd::Inspect(boom)).unwrap();
+        wait_for("the check to end", Duration::from_secs(5), || {
+            ended(&shared) == 1
+        });
+        {
+            let g = lock(&shared);
+            assert!(g.inspecting.is_none(), "the row is no longer checking");
+            assert!(g.preview.is_none());
+            assert!(g.message.contains("stopped unexpectedly"), "{}", g.message);
+        }
+        let v = lock(&shared).version;
+        std::thread::sleep(Duration::from_millis(700));
+        assert_eq!(
+            lock(&shared).version,
+            v,
+            "the progress ticker is still publishing"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn enroll_uses_only_the_digest_of_the_folder_it_was_checked_for() {
+        let (base, _shared, _tx, t) = lab_backend("digest");
+        let mut g = Shared::default();
+        let preview = SliceService::new(config_for(&lab_opts(&base), &t))
+            .unwrap()
+            .inspect();
+        let preview = EnrollPreview {
+            digest: Some(wow_sync_core::ids::Sha256([7; 32])),
+            ..preview
+        };
+        g.preview = Some(preview);
+        g.preview_for = Some((t.install_root.clone(), "_forever_".into()));
+        assert_eq!(g.digest_for(&t), None, "another folder's digest is ignored");
+        g.preview_for = Some((t.install_root.clone(), t.variant_folder.clone()));
+        assert!(g.digest_for(&t).is_some());
+        g.preview_for = Some((base.join("elsewhere"), t.variant_folder.clone()));
+        assert_eq!(g.digest_for(&t), None);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    fn lab_opts(base: &Path) -> BackendOptions {
+        BackendOptions {
+            interval: Duration::from_secs(60),
+            crash_after: None,
+            state_dir: base.join("state2"),
+            display_name: "Desk".into(),
+            app_version: "0.0.0".into(),
+            recent_ms: 0,
+            save_target: false,
+            os_services: false,
+        }
     }
 
     #[test]

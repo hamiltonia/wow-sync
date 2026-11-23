@@ -32,6 +32,37 @@ fn same_path(a: &Path, b: &Path) -> bool {
     k(a).trim_end_matches('\\') == k(b).trim_end_matches('\\')
 }
 
+/// Records a finished check in the row of the installation it was made for (matched by folder
+/// and root, never by which row is selected) and returns that row's index. A result for an
+/// installation that is not listed changes nothing.
+pub fn fold_preview(
+    d: &mut SetupData,
+    p: &wow_sync_runtime::EnrollPreview,
+    root: &Path,
+    folder: &str,
+) -> Option<usize> {
+    use wow_sync_runtime::PreviewKind;
+    let at = d
+        .installs
+        .iter()
+        .position(|i| i.folder == folder && i.root == root)?;
+    let ins = &mut d.installs[at];
+    ins.inspected = true;
+    ins.identity = if p.identity_line.is_empty() {
+        ins.folder.clone()
+    } else {
+        p.identity_line.clone()
+    };
+    ins.recognised = p.kind == PreviewKind::Recognized;
+    ins.refused = (p.kind == PreviewKind::Refused)
+        .then(|| p.problem.clone().unwrap_or_else(|| p.identity_line.clone()));
+    ins.can_retry = p.retryable;
+    ins.test_mode_blocked = p.test_mode_blocked;
+    ins.eligible = p.eligible.clone();
+    ins.blocked = p.blocked.clone();
+    Some(at)
+}
+
 /// Rows whose variant folder has a `.flavor.info` come first, so the row selected by default
 /// is one the check can accept. A refused row stays listed, with its reason, after the
 /// others; the order is otherwise kept.
@@ -812,6 +843,59 @@ mod tests {
         let mut d = empty();
         apply_dropbox_choice(&mut d, &t.join("Elsewhere"));
         assert!(d.dropbox.is_some() && !d.online_only);
+    }
+
+    #[test]
+    fn a_result_lands_only_on_its_own_row_and_an_unlisted_target_changes_nothing() {
+        let t = lab("fold");
+        let wow = t.join("World of Warcraft");
+        let mut d = empty();
+        d.installs = vec![
+            crate::install_row(&wow, "_classic_beta_"),
+            crate::install_row(&wow, "_forever_"),
+        ];
+        let preview = wow_sync_runtime::EnrollPreview {
+            kind: wow_sync_runtime::PreviewKind::Recognized,
+            identity_line: "Forever".into(),
+            scope_line: String::new(),
+            eligible: vec!["Alpha".into()],
+            blocked: vec![],
+            digest: None,
+            needs_guided_confirmation: false,
+            groups: vec![],
+            problem: None,
+            retryable: false,
+            test_mode_blocked: false,
+            disclosures: vec![],
+        };
+        // Row 0 is the selected one when the result for row 1 arrives.
+        assert_eq!(fold_preview(&mut d, &preview, &wow, "_forever_"), Some(1));
+        assert!(!d.installs[0].inspected && d.installs[0].eligible.is_empty());
+        assert!(d.installs[1].inspected && d.installs[1].recognised);
+        assert_eq!(d.installs[1].eligible, ["Alpha"]);
+        let before = format!("{:?}", d.installs);
+        assert_eq!(fold_preview(&mut d, &preview, &wow, "_retail_"), None);
+        assert_eq!(
+            fold_preview(&mut d, &preview, &t.join("other"), "_forever_"),
+            None
+        );
+        assert_eq!(format!("{:?}", d.installs), before);
+        let _ = std::fs::remove_dir_all(&t);
+    }
+
+    #[test]
+    fn a_row_that_starts_a_new_check_drops_what_the_old_one_said() {
+        let t = lab("recheck");
+        let wow = t.join("World of Warcraft");
+        let mut row = crate::install_row(&wow, "_forever_");
+        row.inspected = true;
+        row.refused = Some("old reason".into());
+        row.can_retry = true;
+        row.test_mode_blocked = true;
+        row.start_checking();
+        assert!(!row.inspected && row.refused.is_none());
+        assert!(!row.can_retry && !row.test_mode_blocked);
+        let _ = std::fs::remove_dir_all(&t);
     }
 
     #[test]
