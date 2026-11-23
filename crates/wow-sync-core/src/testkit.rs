@@ -345,6 +345,7 @@ pub struct Scenario {
     pub local_client: ClientInfo,
     pub members: Vec<MemberView>,
     pub trees: BTreeMap<Sha256, TreeAvail>,
+    pub local_prev: Option<CodeState>,
 }
 
 impl Scenario {
@@ -354,6 +355,7 @@ impl Scenario {
             local_client: client(BUILD),
             members: Vec::new(),
             trees: BTreeMap::new(),
+            local_prev: None,
         }
     }
 
@@ -370,16 +372,7 @@ impl Scenario {
     /// Marks this computer's own previously published state (what it published before its
     /// inventory changed); its lineage descends from that copy.
     pub fn local_published(mut self, scans: Vec<FolderScan>) -> Self {
-        let st = member_state(&computer(1), 1, &inventory(scans));
-        self.members.push(MemberView {
-            computer: computer(1),
-            enrollment: enrollment(1),
-            display_name: "PC1".into(),
-            latest: MemberLatest::Valid {
-                seq: 1,
-                state: Box::new(st),
-            },
-        });
+        self.local_prev = Some(member_state(&computer(1), 1, &inventory(scans)));
         self
     }
 
@@ -469,6 +462,7 @@ impl Scenario {
             local_id: &computer(1),
             members: &self.members,
             trees: &self.trees,
+            local_prev: self.local_prev.as_ref(),
         })
     }
 

@@ -420,6 +420,20 @@ the copies differ"); identical copies are `Same`. The only ordering is lineage:
   `code-choice` keeps record the losing hash as considered, so the loser cannot
   return from an offline peer. No clock, mtime, local file or computer
   preference decides.
+- This computer's own latest published state is an explicit input
+  (`TargetInput.local_prev`): the copy it replaced is the parent of a
+  deliberate local change, so a change made while every peer is offline is
+  published with lineage and needs no decision, and peers install it. A
+  **revert** to an earlier copy (this computer's copy is an ancestor of the
+  group's copy and the group's copy now descends from it) is mutual ancestry:
+  it is never undone silently and raises one decision. Lineage entries are
+  accepted only for the package hash their own publisher holds (a member cannot
+  vouch for a copy it lacks).
+- At most 32 ancestors are published per package. Copies an admitted peer still
+  holds are kept ahead of the cap, so an offline peer that holds an old copy
+  stays recognised as an ancestor however many changes pass; once it syncs,
+  the anchor drops away. Older ancestors may be dropped, which can only turn a
+  win into a decision, never pick a wrong winner.
 - A package mixing recognised and unrecognised folders first checks the
   recognised folders' version evidence; if it contradicts the lineage order the
   package is a `MembersDisagree` decision (never a lineage win).

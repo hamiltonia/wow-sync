@@ -44,6 +44,9 @@ pub struct TargetInput<'a> {
     pub local_id: &'a ComputerId,
     pub members: &'a [MemberView],
     pub trees: &'a BTreeMap<Sha256, TreeAvail>,
+    /// This computer's own latest published state: the copy it replaced is the parent of a
+    /// deliberate local change (domain.md §6). Never supplied by `members`, which skip this computer.
+    pub local_prev: Option<&'a CodeState>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -225,16 +228,7 @@ fn compute_inner(input: &TargetInput, screen: Option<Screen>) -> (GroupTarget, V
     let mut observations: Vec<&Inventory> = vec![input.local];
     observations.extend(peer_invs.iter());
     let lineage = {
-        let local_prev = input.members.iter().find_map(|m| match &m.latest {
-            MemberLatest::Valid { state, .. }
-                if m.computer == *input.local_id
-                    && state.group_id == input.group.group_id
-                    && state.computer_id == m.computer =>
-            {
-                Some(&**state)
-            }
-            _ => None,
-        });
+        let local_prev = input.local_prev;
         let peer_states: Vec<&CodeState> = peers.iter().map(|p| p.2).collect();
         let mut g = LineageGraph::from_states(peer_states.iter().copied().chain(local_prev));
         for l in next_lineage(input.local, input.local_client, local_prev, &peer_states) {
@@ -1256,6 +1250,7 @@ mod contract_tests {
             local_id: &local_id,
             members: &sc.members,
             trees: &sc.trees,
+            local_prev: sc.local_prev.as_ref(),
         };
         let c = compose(&input, &Ledger::new(), &Neutral, &BTreeSet::new(), &Neutral);
         assert_eq!(c.target, compute_target(&input));
@@ -1330,6 +1325,7 @@ mod contract_tests {
             local_id: &local_id,
             members: &sc.members,
             trees: &sc.trees,
+            local_prev: sc.local_prev.as_ref(),
         };
         compose(&input, &Ledger::new(), fake, held, fake)
     }
@@ -1815,14 +1811,46 @@ mod tests {
 
     #[test]
     fn unrecognised_copies_that_descend_from_each_other_need_a_decision() {
-        // A change reverted to an earlier copy: both claim the other as an ancestor.
+        // The peer holds b, descended from a. This computer reverted from b back to a, so its
+        // own copy a now descends from b: neither copy is newer than the other.
         let (a, b) = (h(&Scenario::new(unrec("a"))), h(&Scenario::new(unrec("b"))));
         let t = Scenario::new(unrec("a"))
+            .local_published(unrec("b"))
             .peer(2, unrec("b"))
             .peer_lineage(2, "suite", b, &[a])
-            .peer_lineage(2, "suite", a, &[b])
             .target();
         assert_eq!(reason(pkg(&t, "suite")), DecisionReason::Ambiguous);
+    }
+
+    #[test]
+    fn a_lineage_entry_for_a_copy_its_publisher_does_not_hold_is_ignored() {
+        // Peer 3 claims v1:[v3] but holds v2; peer 2 holds v1. Local v3 must not be replaced.
+        let h3 = |s: &str| h(&Scenario::new(unrec(s)));
+        let (v1, v3) = (h3("v1"), h3("v3"));
+        let t = Scenario::new(unrec("v3"))
+            .peer(2, unrec("v1"))
+            .peer(3, unrec("v2"))
+            .peer_lineage(3, "suite", v1, &[v3])
+            .target();
+        assert_eq!(reason(pkg(&t, "suite")), DecisionReason::Ambiguous);
+    }
+
+    #[test]
+    fn ancestors_still_held_by_a_peer_survive_the_cap() {
+        // Peer 3 stays offline holding e0 while this computer makes 40 changes.
+        let c =
+            crate::testkit::member_state(&computer(3), 1, &crate::testkit::inventory(unrec("e0")));
+        let c_hash = h(&Scenario::new(unrec("e0")));
+        let mut prev =
+            crate::testkit::member_state(&computer(1), 1, &crate::testkit::inventory(unrec("e0")));
+        for i in 1..=40u64 {
+            let next = crate::testkit::inventory(unrec(&format!("e{i}")));
+            let lin = next_lineage(&next, &client(crate::testkit::BUILD), Some(&prev), &[&c]);
+            assert!(lin[0].ancestors.len() <= crate::records::MAX_ANCESTORS);
+            assert!(lin[0].ancestors.contains(&c_hash), "step {i}");
+            prev = crate::testkit::member_state(&computer(1), i + 1, &next);
+            prev.lineage = lin;
+        }
     }
 
     #[test]

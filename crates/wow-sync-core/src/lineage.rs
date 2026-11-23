@@ -40,11 +40,25 @@ pub struct LineageGraph {
 }
 
 impl LineageGraph {
+    /// Only an entry that names the package hash its own publisher holds is accepted: a member
+    /// cannot vouch for a copy it does not have (RV7-12).
     pub fn from_states<'a>(states: impl IntoIterator<Item = &'a CodeState>) -> Self {
+        let states: Vec<&CodeState> = states.into_iter().collect();
+        let invs: Vec<Inventory> = states.iter().map(|s| state_inventory(s)).collect();
+        let observations: Vec<&Inventory> = invs.iter().collect();
+        let packages = group_packages(&observations);
         let mut g = Self::default();
-        for s in states {
+        for (s, inv) in states.iter().zip(&invs) {
             for l in &s.lineage {
-                g.add(l);
+                let held = packages
+                    .iter()
+                    .find(|p| p.key == l.package)
+                    .and_then(|p| package_version(p, inv, &s.client))
+                    .filter(whole)
+                    .map(|pv| pv.hash);
+                if held == Some(l.hash) {
+                    g.add(l);
+                }
             }
         }
         g
@@ -116,6 +130,24 @@ pub fn next_lineage(
         ancestors.extend(graph.ancestors(&pkg.key, now.hash));
         let mut seen = BTreeSet::from([now.hash]);
         ancestors.retain(|h| seen.insert(*h));
+        // Copies that an admitted peer still holds are kept ahead of the cap, so a peer that
+        // was offline through many changes is still recognised as an ancestor (RV7-11).
+        let held: BTreeSet<Sha256> = peers
+            .iter()
+            .zip(&peer_invs)
+            .filter_map(|(s, inv)| package_version(&pkg, inv, &s.client))
+            .filter(whole)
+            .map(|pv| pv.hash)
+            .collect();
+        let anchors = ancestors.iter().filter(|h| held.contains(h)).count();
+        let mut room = MAX_ANCESTORS.saturating_sub(anchors);
+        ancestors.retain(|h| {
+            held.contains(h) || {
+                let keep = room > 0;
+                room = room.saturating_sub(1);
+                keep
+            }
+        });
         ancestors.truncate(MAX_ANCESTORS);
         out.push(PackageLineage {
             package: pkg.key.clone(),

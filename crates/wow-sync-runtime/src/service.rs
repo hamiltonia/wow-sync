@@ -2243,6 +2243,27 @@ impl SliceService {
             RemovalBehaviour::new(&self.plane.ledger, &group.group_id, &self.plane.members)
                 .with_inventory(inventory.clone(), enrollment.next_seq);
         let constraints = Constraints::for_derived(&derived);
+        let own_states =
+            match provider.list(&layout::state_dir(&group.group_id, &computer.computer_id)) {
+                Ok(l) => l
+                    .into_iter()
+                    .filter(|e| !e.is_dir && e.state == EntryState::Local)
+                    .map(|e| e.name)
+                    .collect(),
+                Err(_) => vec![],
+            };
+        let own_latest = own_publish_slot(&own_states, &enrollment.enrollment_id, 0)
+            .0
+            .and_then(|name| {
+                let rel = format!(
+                    "{}/{name}",
+                    layout::state_dir(&group.group_id, &computer.computer_id)
+                );
+                provider
+                    .read(&rel, STATE_LIMIT)
+                    .ok()
+                    .and_then(|b| decode::<CodeState>(&b, STATE_LIMIT as usize).ok())
+            });
         let input = TargetInput {
             group: &group,
             variant: &variant,
@@ -2251,6 +2272,9 @@ impl SliceService {
             local_id: &computer.computer_id,
             members: &views,
             trees: &trees,
+            local_prev: own_latest
+                .as_ref()
+                .filter(|s| s.group_id == group.group_id && s.computer_id == computer.computer_id),
         };
         let target = compose(
             &input,
@@ -2298,27 +2322,6 @@ impl SliceService {
             ));
             (offers, withheld, local_only)
         };
-        let own_states =
-            match provider.list(&layout::state_dir(&group.group_id, &computer.computer_id)) {
-                Ok(l) => l
-                    .into_iter()
-                    .filter(|e| !e.is_dir && e.state == EntryState::Local)
-                    .map(|e| e.name)
-                    .collect(),
-                Err(_) => vec![],
-            };
-        let own_latest = own_publish_slot(&own_states, &enrollment.enrollment_id, 0)
-            .0
-            .and_then(|name| {
-                let rel = format!(
-                    "{}/{name}",
-                    layout::state_dir(&group.group_id, &computer.computer_id)
-                );
-                provider
-                    .read(&rel, STATE_LIMIT)
-                    .ok()
-                    .and_then(|b| decode::<CodeState>(&b, STATE_LIMIT as usize).ok())
-            });
         Ok(World {
             enrollment,
             computer,
