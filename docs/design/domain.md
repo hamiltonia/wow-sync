@@ -434,6 +434,12 @@ the copies differ"); identical copies are `Same`. The only ordering is lineage:
   stays recognised as an ancestor however many changes pass; once it syncs,
   the anchor drops away. Older ancestors may be dropped, which can only turn a
   win into a decision, never pick a wrong winner.
+- While any participant's copy of an unrecognised package is unstable or has no
+  tree (this computer, or a peer whose latest record shows it so), no choice is
+  offered and no winner is picked: the package is held as "waiting: files are
+  still changing". A copy stuck unstable therefore shows that wait indefinitely;
+  once every copy is stable, unrelated or reverted copies still raise the one
+  decision.
 - While a live edit is unstable (no hash can be published), the previous
   published lineage entry for the package is carried forward unchanged, and the
   next stable publication takes its replaced copy from that entry. The basis is
