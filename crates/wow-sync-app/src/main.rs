@@ -258,7 +258,11 @@ fn main() {
         };
         (Some(t), Some(data))
     } else {
-        (backend::load_target(&state), Some(detect(&computer)))
+        let target = backend::load_target(&state);
+        // Only a computer with no saved enrollment needs the search before the window opens;
+        // an enrolled one starts syncing first (see `backend::detect_later`).
+        let setup = target.is_none().then(|| detect(&computer));
+        (target, setup)
     };
     cli.args.dev = target.clone().filter(|_| developer);
 

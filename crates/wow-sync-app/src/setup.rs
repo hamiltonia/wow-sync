@@ -32,12 +32,40 @@ fn same_path(a: &Path, b: &Path) -> bool {
     k(a).trim_end_matches('\\') == k(b).trim_end_matches('\\')
 }
 
+/// Warning shown for a chosen folder Dropbox does not report. It does not block: Dropbox may
+/// be installed in an unusual way.
+pub const NOT_DROPBOX_TEXT: &str = "This folder is not a Dropbox folder that WoW Sync can see. Sync only works if every computer uses the same Dropbox folder.";
+
+/// What looking at a picked folder found. Built off the window thread, because the folder may
+/// be on a slow disk or a network share.
+pub enum Checked {
+    Game(Option<(wow_sync_runtime::DetectedInstall, Option<String>)>),
+    Dropbox { known: bool },
+}
+
+pub fn check_picked(game: bool, chosen: &Path) -> Checked {
+    if game {
+        Checked::Game(wow_sync_runtime::install_from_choice(chosen))
+    } else {
+        Checked::Dropbox {
+            known: wow_sync_runtime::is_dropbox_folder(
+                chosen,
+                &wow_sync_runtime::dropbox_info_files(),
+                &wow_sync_runtime::dropbox_defaults(),
+            ),
+        }
+    }
+}
+
 /// Adds the game folder a person chose to the list, as an install root or as one of its
 /// `_variant_` folders, and returns the row to select. The row is only a candidate: it still
 /// goes through the read-only check and the identity and scope confirmation.
-pub fn add_chosen_install(d: &mut SetupData, chosen: &Path) -> Result<usize, String> {
-    let (found, variant) = wow_sync_runtime::install_from_choice(chosen)
-        .ok_or_else(|| not_a_game_folder_text(chosen))?;
+pub fn add_found_install(
+    d: &mut SetupData,
+    chosen: &Path,
+    found: Option<(wow_sync_runtime::DetectedInstall, Option<String>)>,
+) -> Result<usize, String> {
+    let (found, variant) = found.ok_or_else(|| not_a_game_folder_text(chosen))?;
     for v in &found.variants {
         if !d
             .installs
@@ -63,6 +91,32 @@ pub fn apply_dropbox_choice(d: &mut SetupData, chosen: &Path) {
 }
 
 impl Shell {
+    /// "Checking…" while a picked folder is being looked at, or what was found about it.
+    fn pick_status(&self, pal: &crate::theme::Palette) -> Vec<AnyElement> {
+        if self.setup.checking {
+            return vec![div()
+                .id("pick-checking")
+                .role(Role::Status)
+                .aria_label("Checking the folder you chose")
+                .text_color(rgb(pal.muted))
+                .child("Checking…")
+                .into_any_element()];
+        }
+        self.setup
+            .pick_note
+            .clone()
+            .map(|note| {
+                div()
+                    .id("pick-note")
+                    .role(Role::Alert)
+                    .aria_label(SharedString::from(note.clone()))
+                    .text_color(rgb(pal.fg(Tone::Help)))
+                    .child(SharedString::from(note))
+                    .into_any_element()
+            })
+            .into_iter()
+            .collect()
+    }
     /// Consent needs both the exact game version and the add-on list; scope alone is not enough.
     pub fn setup_can_next(&self) -> bool {
         let Some(d) = &self.w.setup else { return true };
@@ -117,6 +171,7 @@ impl Shell {
                 .into_any_element(),
             self.heading(STEPS[step as usize - 1], 1).into_any_element(),
         ];
+        body.extend(self.pick_status(&pal));
         match step {
             1 => {
                 body.push(div().child("WoW Sync keeps your World of Warcraft add-ons the same on every computer you use. It shares them through your Dropbox folder.").into_any_element());
@@ -257,17 +312,6 @@ impl Shell {
                             .role(Role::Status)
                             .aria_label(SharedString::from(NOT_FOUND_TEXT))
                             .child(NOT_FOUND_TEXT)
-                            .into_any_element(),
-                    );
-                }
-                if let Some(note) = self.setup.pick_note.clone() {
-                    body.push(
-                        div()
-                            .id("pick-note")
-                            .role(Role::Alert)
-                            .aria_label(SharedString::from(note.clone()))
-                            .text_color(rgb(pal.fg(Tone::Help)))
-                            .child(SharedString::from(note))
                             .into_any_element(),
                     );
                 }
@@ -644,6 +688,13 @@ mod tests {
         SetupData::default()
     }
 
+    fn add_chosen_install(d: &mut SetupData, chosen: &Path) -> Result<usize, String> {
+        match check_picked(true, chosen) {
+            Checked::Game(found) => add_found_install(d, chosen, found),
+            Checked::Dropbox { .. } => unreachable!(),
+        }
+    }
+
     #[test]
     fn the_empty_state_says_what_to_do_in_plain_words() {
         assert_eq!(
@@ -697,6 +748,19 @@ mod tests {
         assert!(add_chosen_install(&mut d, &t.join("Data")).is_err());
         assert!(d.installs.is_empty());
         let _ = std::fs::remove_dir_all(&t);
+    }
+
+    #[test]
+    fn a_picked_folder_not_reported_by_dropbox_is_a_warning_not_a_refusal() {
+        let t = lab("notdropbox");
+        let Checked::Dropbox { known } = check_picked(false, &t.join("Elsewhere")) else {
+            panic!("a Dropbox check was asked for");
+        };
+        assert!(!known);
+        assert!(NOT_DROPBOX_TEXT.starts_with("This folder is not a Dropbox folder"));
+        let mut d = empty();
+        apply_dropbox_choice(&mut d, &t.join("Elsewhere"));
+        assert!(d.dropbox.is_some() && !d.online_only);
     }
 
     #[test]

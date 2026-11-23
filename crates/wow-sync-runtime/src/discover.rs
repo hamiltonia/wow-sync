@@ -329,6 +329,17 @@ pub fn find_dropbox(info_files: &[PathBuf], defaults: &[PathBuf]) -> Vec<PathBuf
     out
 }
 
+/// True when `chosen` is, or is inside, one of the Dropbox folders Dropbox reports (its info
+/// files) or the default Dropbox folder. Compared by name, case-insensitively, without
+/// following links.
+pub fn is_dropbox_folder(chosen: &Path, info_files: &[PathBuf], defaults: &[PathBuf]) -> bool {
+    let c = path_key(chosen);
+    find_dropbox(info_files, defaults).iter().any(|r| {
+        let r = path_key(r);
+        !r.is_empty() && (c == r || c.starts_with(&format!("{r}\\")))
+    })
+}
+
 pub fn dropbox_info_files() -> Vec<PathBuf> {
     ["APPDATA", "LOCALAPPDATA"]
         .iter()
@@ -497,6 +508,34 @@ mod tests {
             ]
         );
         assert!(dropbox_paths_from_info("garbage {").is_empty());
+    }
+
+    #[test]
+    fn a_picked_folder_is_dropbox_only_when_it_is_or_is_inside_a_reported_one() {
+        let t = TempDir::new();
+        let real = t.join("Dropbox");
+        let inner = real.join("Games");
+        std::fs::create_dir_all(&inner).unwrap();
+        let other = t.join("Documents");
+        std::fs::create_dir_all(&other).unwrap();
+        let sibling = t.join("Dropbox2");
+        std::fs::create_dir_all(&sibling).unwrap();
+        let info = t.join("info.json");
+        std::fs::write(
+            &info,
+            format!(
+                "{{\"personal\": {{\"path\": \"{}\"}}}}",
+                real.display().to_string().replace('\\', "\\\\")
+            ),
+        )
+        .unwrap();
+        let infos = [info];
+        assert!(is_dropbox_folder(&real, &infos, &[]));
+        assert!(is_dropbox_folder(&inner, &infos, &[]));
+        assert!(!is_dropbox_folder(&other, &infos, &[]));
+        assert!(!is_dropbox_folder(&sibling, &infos, &[]));
+        assert!(!is_dropbox_folder(&real, &[], &[]));
+        assert!(is_dropbox_folder(&other, &[], std::slice::from_ref(&other)));
     }
 
     #[test]
