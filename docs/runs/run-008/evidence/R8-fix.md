@@ -61,3 +61,8 @@ New required cases: R8-fix:setup-inspection.
   ends as an error. RV8-07: setup_panel digest uses `digest_for`. RV8-09: redaction test for the new lines.
 - Not reproduced: the RYZENFISH stall on real hardware; the GUI was not driven in either round.
 - Verify: offline PASS, native PASS. New cases appended to R8-fix:setup-inspection.
+
+## Round 3 (RV8-11, RV8-12)
+- RV8-11: a cancelled enroll now publishes 'Setup was stopped before it finished...' (the page leaves 'Setting up' and Back returns); CancelQuit clears the abort flag and forces a fresh status read. Test: backend::keep_running_after_quit_leaves_a_stopped_setup_actionable_and_clears_the_flag (real enroll cancelled by the flag; asserts message, no enrolled_now, flag cleared, quit_ready false). The fresh-status read itself is not asserted by a test.
+- RV8-12: a failed last look in sync_once now sets the Error headline and provider_error on the returned status in the same pass; no new test.
+- Verify: offline PASS, native PASS.
