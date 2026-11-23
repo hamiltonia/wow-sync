@@ -13,7 +13,8 @@ use crate::decisions::{
 };
 use crate::decisions::{write_own_bytes, write_own_record};
 use crate::detail::{
-    build_package_rows, folder_titles, member_rows, render_with_names, DetailInput, StatusDetail,
+    build_package_rows, folder_titles, member_rows, render_with_names, unrecognised_note,
+    DetailInput, StatusDetail,
 };
 use crate::effects::{
     load_pending, FaultPlan, Faulty, Hooks, PendingSink, RealEffects, PENDING_REPORT,
@@ -65,7 +66,7 @@ use wow_sync_core::plan::{Activity, ApplyPlan, PackageApply};
 use wow_sync_core::records::{
     decode, decode_tree, encode, AdmissionWatermarks, ApplyJournal, ApplyReport, BasisEntry,
     CodeState, GroupRecord, LocalComputer, LocalEnrollment, MemberRecord, PendingReport,
-    RecordError, RecoveryPoint, RootFormat,
+    RecordError, RecoveryPoint, RootFormat, SharedReleases,
 };
 use wow_sync_core::reject::{build_lift, LiftError, RejectBehaviour};
 use wow_sync_core::removal::known_summary;
@@ -80,7 +81,7 @@ use wow_sync_core::status::{
     render_block, render_headline, render_member, render_result, Headline, StatusInput, StatusView,
 };
 use wow_sync_core::target::{
-    compose, package_copies, GroupTarget, PackageCopies, TargetInput, TreeAvail,
+    compose, package_copies, shared_releases, GroupTarget, PackageCopies, TargetInput, TreeAvail,
 };
 use wow_sync_core::toc::TocCandidate;
 use wow_sync_core::variant::{
@@ -200,12 +201,6 @@ pub fn block_text(r: &BlockReason) -> &'static str {
         BlockReason::UnsupportedName(_) => "its folder name cannot be used for syncing",
         BlockReason::CaseCollision => "another folder has the same name apart from capital letters",
         BlockReason::NotReadable(_) => "WoW Sync cannot read it",
-        BlockReason::UnvalidatedTocMapping => "it has files only for other game versions",
-        BlockReason::NoToc => "it has no add-on description (.toc) file",
-        BlockReason::TocError(_) => "its add-on description (.toc) file cannot be read",
-        BlockReason::TocAmbiguous => {
-            "it has several description (.toc) files and WoW Sync cannot tell which applies"
-        }
     }
 }
 
@@ -2248,6 +2243,14 @@ impl SliceService {
             RemovalBehaviour::new(&self.plane.ledger, &group.group_id, &self.plane.members)
                 .with_inventory(inventory.clone(), enrollment.next_seq);
         let constraints = Constraints::for_derived(&derived);
+        let shared_before = match self.state.read("shared-releases.json", SMALL * 16) {
+            Ok(Some(b)) => decode::<SharedReleases>(&b, (SMALL * 16) as usize)
+                .ok()
+                .filter(|r| r.group_id == group.group_id)
+                .map(|r| r.to_map())
+                .unwrap_or_default(),
+            _ => BTreeMap::new(),
+        };
         let input = TargetInput {
             group: &group,
             variant: &variant,
@@ -2256,7 +2259,20 @@ impl SliceService {
             local_id: &computer.computer_id,
             members: &views,
             trees: &trees,
+            shared: &shared_before,
         };
+        let shared_after = shared_releases(&input);
+        if persist && shared_after != shared_before {
+            self.state
+                .write_atomic(
+                    "shared-releases.json",
+                    &encode(&SharedReleases::from_map(
+                        group.group_id.clone(),
+                        &shared_after,
+                    )),
+                )
+                .map_err(local)?;
+        }
         let target = compose(
             &input,
             &self.plane.ledger,
@@ -2525,6 +2541,10 @@ impl SliceService {
             ),
             &rows,
         );
+        let notes: BTreeMap<String, String> = rows
+            .iter()
+            .filter_map(|r| Some((r.key.clone(), unrecognised_note(&r.folders)?)))
+            .collect();
         let detail = StatusDetail {
             view: sv.clone(),
             packages: rows,
@@ -2554,11 +2574,17 @@ impl SliceService {
                 .iter()
                 .map(|p| PackageLine {
                     key: p.0.to_string(),
-                    text: format!(
-                        "{}: {}",
-                        p.0.as_str(),
-                        render_with_names(&p.2, &w.views, &w.computer.computer_id)
-                    ),
+                    text: {
+                        let line = format!(
+                            "{}: {}",
+                            p.0.as_str(),
+                            render_with_names(&p.2, &w.views, &w.computer.computer_id)
+                        );
+                        match notes.get(p.0.as_str()) {
+                            Some(n) => format!("{line} {n}"),
+                            None => line,
+                        }
+                    },
                 })
                 .collect(),
             members: sv.members.iter().map(render_member).collect(),
@@ -3625,10 +3651,6 @@ mod reason_text_tests {
             BlockReason::UnsupportedName(s()),
             BlockReason::CaseCollision,
             BlockReason::NotReadable(s()),
-            BlockReason::UnvalidatedTocMapping,
-            BlockReason::NoToc,
-            BlockReason::TocError(s()),
-            BlockReason::TocAmbiguous,
         ];
         let mut seen = std::collections::HashSet::new();
         for r in all {

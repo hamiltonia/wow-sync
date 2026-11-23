@@ -447,8 +447,10 @@ Never a whole-profile choice.
     have: WeakAurasOptions."
   - `NoCompatibleToc` (renamed `UnusableMetadata` in run-004,
     [contracts.md](../contracts.md) §5.1; it has no options, only this
-    explanation): "A copy of this add-on has no readable .toc file for
-    this computer's WoW client, so WoW Sync can't tell which files to use."
+    explanation): "A copy of this add-on is unreadable, unsafe or unstable
+    on a computer, so WoW Sync can't use it." Add-ons with no recognised .toc
+    are not shown here: they sync by content and say "Unrecognised: synced by
+    content" (D-29).
   - `DifferentTocMapping`: "The computers that hold this add-on read its .toc
     files by a different rule than this computer, so WoW Sync can't tell which
     files apply here."

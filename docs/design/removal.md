@@ -109,7 +109,7 @@ becomes a removal of this computer only if every row holds:
 | E5 | **Not our own move.** No journal (any phase) names P or a folder of P, and no journal remained after `recover_interrupted` in either scan's cycle | our own apply, removal or restore |
 | E6 | **No unexplained newcomer.** Compared with the top-level snapshot referenced by **P's own** baseline entry (never a later snapshot refreshed by another package, R3D-14), no new non-`ok` top-level entry appeared, and no new entry whose name differs from a folder of P only by Unicode, case or normalization, or that `paths` rejects (Q-14) | a rename to a non-ASCII or unsupported name |
 | E7 | *Withdrawn.* D-21 rejected Q-42: no confirmation when many addons vanish at once. A wiped AddOns with an unchanged directory identity is a removal of every package after the settle wait; every copy goes to recovery (§5) | — |
-| E8 | **P was synced.** No folder of P was `Blocked(UnvalidatedTocMapping)` ([domain.md](domain.md) §2.1) | removing something the group never shared |
+| E8 | **P was synced.** No folder of P was `Blocked` ([domain.md](domain.md) §2.1; unrecognised folders are synced, D-29) | removing something the group never shared |
 
 If E1–E5 and E8 hold but E6 fails, P is **unclear**, not removed: the local
 target is `Held(RemovalUnclear)` and the GUI asks "Was *X* removed, or

@@ -15,7 +15,8 @@ pub struct ScanOptions {
     pub max_file_bytes: u64,
     /// 100_000.
     pub max_files_per_folder: u32,
-    /// 256 KiB.
+    /// A `.toc` is read from its start up to this many bytes (+1 to mark a cut); keep it equal
+    /// to the core `TOC_LIMIT`. 256 KiB.
     pub max_toc_bytes: u64,
     /// 2000 (Q-15).
     pub recent_ms: u64,
@@ -292,15 +293,14 @@ pub fn scan_folder_with_hook(
     }
 }
 
+/// Reads at most `limit + 1` bytes from the start of the file: a longer file is never loaded
+/// whole, and the extra byte tells the parser the file was cut.
 fn read_bounded(root: &Root, rel: &str, limit: u64) -> Result<Vec<u8>, String> {
-    let f = root.open_read(rel, limit).map_err(|e| e.to_string())?;
+    let f = root.open_read(rel, u64::MAX).map_err(|e| e.to_string())?;
     let mut buf = Vec::new();
     f.take(limit + 1)
         .read_to_end(&mut buf)
         .map_err(|e| e.to_string())?;
-    if buf.len() as u64 > limit {
-        return Err(format!("larger than {limit} bytes"));
-    }
     Ok(buf)
 }
 
@@ -522,12 +522,15 @@ mod tests {
         assert_eq!(f.tocs[0].file_name, "Alpha.toc");
         assert_eq!(f.tocs[0].contents, Ok(b"## Version: 1\n".to_vec()));
         assert!(f.fingerprint.is_some());
-        // Oversized toc is reported per file, not as a folder failure.
+        // An oversized toc is read from its start only: the limit plus one byte, so the parser
+        // can tell it was cut. The whole file still goes into the tree hash.
         let mut o = opts();
         o.max_toc_bytes = 4;
         let f = scan_folder(&root, "Alpha", &o);
         assert_eq!(f.status, ScanStatus::Ok);
-        assert!(f.tocs[0].contents.is_err());
+        assert_eq!(f.tocs[0].contents, Ok(b"## Ve".to_vec()));
+        assert_eq!(f.files[0].size, 14);
+        assert_eq!(f.files[0].sha256, sha(b"## Version: 1\n"));
         // Oversized file makes the folder unreadable.
         let mut o = opts();
         o.max_file_bytes = 2;
@@ -537,6 +540,28 @@ mod tests {
         ));
         assert_eq!(hash_folder(&root, "Alpha").unwrap().unwrap().len(), 3);
         assert_eq!(hash_folder(&root, "Nope").unwrap(), None);
+    }
+
+    #[test]
+    fn oversized_toc_is_read_as_a_bounded_prefix() {
+        let t = TempDir::new();
+        let inst = SyntheticInstall::new_forever(t.path(), "wow");
+        let mut toc = b"## Interface: 11508\n## Version: 3\n".to_vec();
+        while toc.len() < 1_100_000 {
+            toc.extend_from_slice(b"Db\\Row_000000.lua\n");
+        }
+        inst.add_addon("Big", "Big.toc", "", &[("a.lua", b"one")]);
+        std::fs::write(inst.addons.join("Big").join("Big.toc"), &toc).unwrap();
+        inst.set_old_mtimes();
+        let root = Root::open(&inst.addons, ReparsePolicy::RejectAll).unwrap();
+        let f = scan_folder(&root, "Big", &opts());
+        assert_eq!(f.status, ScanStatus::Ok, "{:?}", f.status);
+        let read = f.tocs[0].contents.as_ref().unwrap();
+        assert_eq!(read.len() as u64, opts().max_toc_bytes + 1);
+        assert_eq!(&read[..], &toc[..read.len()]);
+        let hashed = f.files.iter().find(|x| x.rel_path == "Big.toc").unwrap();
+        assert_eq!(hashed.size, toc.len() as u64);
+        assert_eq!(hashed.sha256, sha(&toc));
     }
 
     #[test]

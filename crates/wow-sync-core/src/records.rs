@@ -960,6 +960,60 @@ impl AdmissionWatermarks {
     }
 }
 
+/// Local-only: the last release of each package this computer held identically with another
+/// computer. It is the shared copy content lineage points back to (R-05, D-29); it is never
+/// published, and a missing entry only means "no shared copy known".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SharedRelease {
+    pub package: FolderKey,
+    pub hash: Sha256,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SharedReleases {
+    pub group_id: GroupId,
+    pub packages: Vec<SharedRelease>,
+}
+record!(SharedReleases, "wowsync.shared-releases", MIB, |self| {
+    let mut seen = std::collections::BTreeSet::new();
+    if !self.packages.iter().all(|p| seen.insert(p.package.clone())) {
+        return Err("a package is listed once".into());
+    }
+    Ok(())
+});
+
+impl SharedReleases {
+    pub fn empty(group_id: GroupId) -> Self {
+        Self {
+            group_id,
+            packages: Vec::new(),
+        }
+    }
+
+    pub fn to_map(&self) -> std::collections::BTreeMap<FolderKey, Sha256> {
+        self.packages
+            .iter()
+            .map(|p| (p.package.clone(), p.hash))
+            .collect()
+    }
+
+    pub fn from_map(
+        group_id: GroupId,
+        map: &std::collections::BTreeMap<FolderKey, Sha256>,
+    ) -> Self {
+        Self {
+            group_id,
+            packages: map
+                .iter()
+                .map(|(k, h)| SharedRelease {
+                    package: k.clone(),
+                    hash: *h,
+                })
+                .collect(),
+        }
+    }
+}
+
 /// Local-only: the apply report not yet carried by a published state of this enrollment.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingReport {

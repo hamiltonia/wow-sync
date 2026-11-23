@@ -51,7 +51,9 @@ pub enum SetRelation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AmbiguityReason {
     FolderNotUsable,
-    TocNotSelected,
+    /// A differing folder has no recognised `.toc` on one side: only content lineage can order
+    /// it (R-05, D-29); with no shared copy to point to, the add-on needs one decision.
+    UnrecognisedDiffers,
     VersionAmbiguous(String),
     MembersDisagree,
     SameLabelsDifferentContent,
@@ -353,8 +355,13 @@ pub fn compare_package(a: &PackageVersion, b: &PackageVersion) -> PackageOrder {
             continue;
         }
         if fa.toc.kind != TocKind::Selected || fb.toc.kind != TocKind::Selected {
-            ev.push(evidence(&fa.key, Some(fa), Some(fb), "no selected toc"));
-            note(AmbiguityReason::TocNotSelected, &mut ambiguous);
+            ev.push(evidence(
+                &fa.key,
+                Some(fa),
+                Some(fb),
+                "unrecognised add-on: no version to compare, the copies differ",
+            ));
+            note(AmbiguityReason::UnrecognisedDiffers, &mut ambiguous);
             continue;
         }
         let (la, lb) = (

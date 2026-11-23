@@ -562,10 +562,9 @@ mod tests {
 
     #[test]
     fn blocked_folders_are_never_published() {
-        let scans = vec![
-            addon("Good", Some("1.0"), "g"),
-            crate::testkit::addon_unvalidated("Blocked", "9.9", "secret"),
-        ];
+        let mut bad = addon("Blocked", Some("9.9"), "secret");
+        bad.status = crate::inventory::ScanStatus::Unreadable("locked".into());
+        let scans = vec![addon("Good", Some("1.0"), "g"), bad];
         let sc = Scenario::new(scans);
         let p = plan_publish(&sc.local, &sc.publish_ctx(1, &[])).unwrap();
         let blocked = sc
@@ -574,7 +573,7 @@ mod tests {
             .iter()
             .find(|f| f.name == "Blocked")
             .unwrap();
-        assert_eq!(blocked.status, FolderStatus::Ok);
+        assert_eq!(blocked.status, FolderStatus::Unreadable);
         assert!(!blocked.transfer_eligible());
         let good = sc.local.folders.iter().find(|f| f.name == "Good").unwrap();
         assert!(good
@@ -592,6 +591,35 @@ mod tests {
         // Still listed in the state, visibly not complete.
         assert!(p.state.folders.iter().any(|f| f.name == "Blocked"));
         assert!(!p.state.inventory_complete);
+    }
+
+    #[test]
+    fn unrecognised_folders_are_published_by_content() {
+        let scans = vec![
+            addon("Good", Some("1.0"), "g"),
+            crate::testkit::addon_unvalidated("Odd", "9.9", "content"),
+            crate::testkit::addon_unrecognised("Bare", "bare"),
+        ];
+        let sc = Scenario::new(scans);
+        let p = plan_publish(&sc.local, &sc.publish_ctx(1, &[])).unwrap();
+        for name in ["Odd", "Bare"] {
+            let f = sc.local.folders.iter().find(|f| f.name == name).unwrap();
+            assert!(f.unrecognised() && f.transfer_eligible(), "{name}");
+            assert!(
+                f.file_entries
+                    .iter()
+                    .all(|e| p.objects.iter().any(|o| o.expect == e.sha256)),
+                "{name} content is uploaded"
+            );
+            assert!(
+                p.objects
+                    .iter()
+                    .filter(|o| o.kind == ObjectKind::Tree)
+                    .count()
+                    >= 3
+            );
+        }
+        assert!(p.state.inventory_complete);
     }
 
     #[test]

@@ -86,8 +86,9 @@ used for ordering or freshness decisions.
   body disagrees with its file name, group, computer, enrollment or product
   is invalid.
 - `inventory_complete` is `false` if any folder is not transfer-eligible:
-  unreadable, unstable, or blocked by the variant's layout/TOC rules
+  unreadable, unstable, or blocked by the variant's layout/name rules
   (blocked folders are listed without a tree and never published as content).
+    A folder without a recognised `.toc` is published by content (D-29).
   The record is still published (other computers can use the eligible
   folders) but the absent/unreadable/blocked folders never imply removal.
 - `apply_report` is optional; present after an apply on that computer. Results

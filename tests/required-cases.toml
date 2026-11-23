@@ -27,7 +27,7 @@ tests = [
     "variant::tests::unknown_product_with_agreeing_metadata_blocked_without_layout_validation",
     "variant::tests::consent_alone_does_not_confirm",
     "variant::tests::stale_digest_rejected",
-    "variant::tests::suffixed_toc_folders_blocked_for_unfamiliar",
+    "variant::tests::unrecognised_folders_are_eligible_for_unfamiliar",
     "variant::tests::duplicate_product_folder_unsupported",
     "variant::tests::already_enrolled_variant_unsupported",
     "variant::tests::unmarked_install_is_accepted_by_default",
@@ -148,8 +148,8 @@ tests = [
     "target::tests::record_timestamps_cannot_influence_target",
     "target::tests::other_variant_state_ignored",
     "target::tests::different_toc_mapping_needs_decision",
-    "target::tests::foreign_suffix_only_candidate_not_installed",
-    "target::tests::unvalidated_mapping_candidate_not_installed",
+    "target::tests::foreign_suffix_only_copy_is_unrecognised_not_blocked",
+    "target::tests::differing_unrecognised_copies_without_lineage_need_a_decision",
     "target::tests::partial_suite_candidate_needs_decision",
     "target::tests::partial_candidate_not_installed_on_empty_peer",
     "target::tests::complete_candidate_installed_on_empty_peer",
@@ -457,7 +457,7 @@ tests = [
     "status::tests::only_journals_that_record_the_game_halt_blame_the_game",
     "status::tests::an_old_journal_without_the_cause_field_still_loads_as_unknown",
     "status::tests::headline_names_running_game_while_waiting",
-    "status::tests::blocked_local_folder_is_not_synced_not_up_to_date",
+    "status::tests::unrecognised_local_folder_is_in_sync_by_content",
 ]
 
 [[case]]
@@ -465,7 +465,7 @@ id = "R2-fix:slice"
 tier = "offline"
 tests = [
     "e2e::tests::enrolled_unfamiliar_client_keeps_syncing_after_new_folder",
-    "e2e::tests::blocked_folder_is_not_published_and_shows_not_synced",
+    "e2e::tests::unrecognised_folder_is_published_by_content_and_says_so",
     "e2e::tests::enrollment_preview_discloses_scope_and_uses_canonical_label",
     "e2e::tests::ambiguity_status_names_versions_and_computers",
     "e2e::tests::running_game_headline_and_applied_line_name_source",
@@ -1630,7 +1630,7 @@ tests = [
     "toc::tests::profile_reports_the_suffix_it_selected",
     "variant::tests::enrolled_forever_with_the_old_plain_mapping_is_reconfirmed_not_dropped",
     "variant::tests::profile_disclosure_names_the_suffix_order",
-    "e2e::tests::forever_suffix_folders_sync_by_the_forever_rule_and_others_are_never_changed",
+    "e2e::tests::forever_suffix_folders_sync_by_the_forever_rule_and_unrecognised_ones_by_content",
     "e2e::tests::enrolled_forever_with_the_old_plain_mapping_is_reconfirmed_and_loses_nothing",
 ]
 
@@ -1693,6 +1693,41 @@ tests = [
 
 # >>> section: R6-release
 # <<< section: R6-release
+
+# >>> section: R7-sync
+[[case]]
+id = "R7-sync:toc-header"
+tier = "offline"
+tests = [
+    "toc::tests::oversized_toc_is_read_from_its_header",
+    "toc::tests::cut_inside_a_multibyte_character_keeps_the_header",
+    "toc::tests::header_beyond_the_window_is_not_selected",
+    "toc::tests::oversized_toc_is_error",
+    "fs_scan::tests::oversized_toc_is_read_as_a_bounded_prefix",
+    "fs_scan::tests::scan_hashes_files_and_reads_tocs",
+]
+
+[[case]]
+id = "R7-sync:unrecognised-by-content"
+tier = "offline"
+tests = [
+    "inventory::tests::eligibility_follows_status_and_unrecognised_folders_say_why",
+    "plan::tests::unrecognised_folders_are_published_by_content",
+    "plan::tests::blocked_folders_are_never_published",
+    "target::tests::unrecognised_add_on_only_on_a_peer_is_installed",
+    "target::tests::identical_unrecognised_copies_are_in_sync",
+    "target::tests::differing_unrecognised_copies_without_lineage_need_a_decision",
+    "target::tests::unrecognised_copy_changed_here_since_the_shared_release_wins",
+    "target::tests::unrecognised_copy_changed_on_the_peer_since_the_shared_release_is_installed",
+    "target::tests::unrecognised_copies_both_changed_since_the_shared_release_need_a_decision",
+    "target::tests::shared_release_is_recorded_only_when_a_peer_holds_the_same_copy",
+    "e2e::tests::unrecognised_folder_is_published_by_content_and_says_so",
+    "e2e::tests::unrecognised_folder_only_on_a_installs_on_b_and_later_edits_follow",
+    "e2e::tests::unrecognised_folder_changed_on_both_is_never_overwritten_and_asks",
+    "e2e::tests::unrecognised_folders_that_differ_at_first_join_are_not_overwritten",
+    "e2e::tests::unrecognised_folder_removal_and_restore_round_trip",
+]
+# <<< section: R7-sync
 
 # >>> section: R6-check
 # <<< section: R6-check

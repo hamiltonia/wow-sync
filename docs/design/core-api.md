@@ -169,7 +169,8 @@ pub enum MemberLatest { Valid { seq: u64, state: CodeState }, Unusable { seq: u6
 pub struct TargetInput<'a> { pub group: &'a GroupRecord, pub variant: &'a ConfirmedVariant,
                              pub local: &'a Inventory, pub local_client: &'a ClientInfo,
                              pub local_id: &'a ComputerId, pub members: &'a [MemberView],
-                             pub trees: &'a BTreeMap<Sha256, TreeAvail> /* Ok(record) | Missing | CloudOnly | Corrupt */ }
+                             pub trees: &'a BTreeMap<Sha256, TreeAvail> /* Ok(record) | Missing | CloudOnly | Corrupt */,
+                             pub shared: &'a BTreeMap<FolderKey, Sha256> /* last shared release per package, local record (D-29) */ }
 pub enum PackageTarget { InSync, Chosen { version: PackageVersion, sources: Vec<ComputerId>, why: Explanation },
                          NeedsDecision { reason: DecisionReason, candidates: Vec<(PackageVersion, Vec<ComputerId>)>, why: Explanation },
                          Unavailable { why: Explanation } }
@@ -178,6 +179,9 @@ pub enum PackageTarget { InSync, Chosen { version: PackageVersion, sources: Vec<
 // (D-21: DifferentClientBuild was removed; build and Interface numbers never gate a package.)
 pub struct GroupTarget { pub packages: BTreeMap<FolderKey, PackageTarget> }
 pub fn compute_target(input: &TargetInput) -> GroupTarget;
+/// Packages whose local copy is complete and held identically by an admitted peer (the new shared releases, D-29).
+pub fn shared_releases(input: &TargetInput) -> BTreeMap<FolderKey, Sha256>;
+// AmbiguityReason::UnrecognisedDiffers: differing copies of an add-on without a selected toc.
 
 pub struct PublishContext { pub group: GroupId, pub computer: ComputerId, pub enrollment: EnrollmentId,
                             pub seq: u64, pub client: ClientInfo, pub apply_report: Option<ApplyReport>,

@@ -97,11 +97,14 @@ LayoutAssessment` (core, pure). Checks, all required:
 | the install root carries the synthetic marker `.wowsync-synthetic` (first line `wowsync-synthetic/1`) **only when test mode is on** (D-28, `MarkerPolicy::Required`); by default (`NotRequired`) the marker is neither required nor consulted, and a real install has none | test mode only: `Unsupported(NotSyntheticInstall)` |
 | `.toc` mapping: `profile:wowf/2` for the recognized `wowf` client (the Forever rule, §3); `validated-plain/1` for every unfamiliar client (below) | — |
 
-For `validated-plain/1` (unfamiliar clients) a folder is **eligible** for transfer only if it
-has a plain `F.toc` and **no** suffixed candidate (`F_<S>.toc` /
-`F-<S>.toc`) at all. No such client's suffix order is known, so every folder with suffixed tocs is `Blocked
-(UnvalidatedTocMapping)` — an addon-scoped decision, never installed or
-replaced automatically (Q-20). With a single plain toc there is exactly one
+For `validated-plain/1` (unfamiliar clients) the `.toc` rule recognises a folder only
+if it has a plain `F.toc` and **no** suffixed candidate (`F_<S>.toc` /
+`F-<S>.toc`) at all: no such client's suffix order is known. Every other
+readable folder is **unrecognised** but still **eligible** (R-05, D-29): it is
+synced by content under the lineage rule of §6, never by a version label it
+cannot be trusted to have. Only unsupported names, case collisions and
+unreadable, unsafe or unstable folders are `Blocked` (`classify_folder`).
+With a single plain toc there is exactly one
 file list the client can load, so equal summary fields cannot hide
 different loaded content (R-M03). The result is
 `Supported { mapping, eligible: Vec<FolderKey>, blocked: Vec<(FolderKey, reason)>, digest: Sha256 }`
@@ -146,7 +149,14 @@ ASCII-case-insensitively, is `F.toc`, `F_<S>.toc` or `F-<S>.toc` where `<S>`
 is `[A-Za-z0-9]+`. Other `.toc` names are ignored for selection and listed in
 diagnostics.
 
-**Parse** (`parse_toc`): ≤ 256 KiB else `TooLarge`; strip UTF-8 BOM; decode
+**Parse** (`parse_toc`): a `.toc` is read from its **header** (D-29). A file of
+at most 256 KiB (`TOC_LIMIT`) is parsed whole. A longer file is parsed from the
+complete lines of its first 256 KiB only (a line cut by the window is dropped
+whole, so a cut multi-byte character never fails the UTF-8 check); the scan
+reads at most `TOC_LIMIT + 1` bytes of it but still hashes the whole file. A
+longer file whose window holds no `##` metadata line is `TooLarge` (the header
+lies beyond the window): the folder is then unrecognised, never an empty
+success. Then: strip UTF-8 BOM; decode
 UTF-8, invalid bytes → `NotUtf8` error (fail closed, never "empty"). Only lines
 starting `##` are read: `## Key: Value` (key and value trimmed; key compared
 case-insensitively). Recorded keys:
@@ -189,10 +199,15 @@ The `wowf` order comes from the TOC-format documentation (warcraft.wiki.gg
 "TOC format", read 2026-11-22) and the dev-PC folder survey; an owner client
 check stays optional (Q-3).
 
-**Compatibility gate (M-03).** Only `Selected` is evidence that the client
-would load the folder. A folder whose selection is `None`, `Ambiguous`,
-`Unvalidated` or `Error` is **never installed or replaced automatically**:
-its package becomes `NeedsDecision(NoCompatibleToc)` ([§6](#6-group-target-r-05-r-06)).
+**Compatibility gate (M-03, amended by D-29).** Only `Selected` is evidence that
+the client would load the folder and that its `## Version:` label means
+anything. A folder whose selection is `None`, `Ambiguous`, `Unvalidated` or
+`Error` is **unrecognised**: it is still synced, by content
+(`FolderState::unrecognised`, label "Unrecognised: synced by content"), and its
+ordering comes only from content lineage ([§6](#6-group-target-r-05-r-06)).
+It declares no saved variables, so **its settings are not synced** (the
+settings module reads `SavedVariables` only from a `Selected` toc).
+Unreadable, unsafe, unstable and unsupported folders stay not synced.
 
 ## 4. Version ordering (R-05)
 
@@ -324,9 +339,8 @@ candidate `c` can be chosen automatically only if all hold:
 
 | Predicate | Fails as `NeedsDecision(...)` |
 |---|---|
-| every member folder of `c` has status `Ok` and a `Selected` toc under the source member's mapping | `NoCompatibleToc` |
+| every member folder of `c` has status `Ok` (a folder without a `Selected` toc is unrecognised and still eligible, D-29) | `NoCompatibleToc` (status not `Ok` only) |
 | the source member's `client.toc_mapping` equals the local mapping | `DifferentTocMapping` |
-| no member folder is `Blocked(UnvalidatedTocMapping)` locally (§2.1) | `UnvalidatedTocMapping` |
 | `c` is **complete**: its folder set equals the package's full membership `Package.members` as established by grouping over **all** admitted observations and the local inventory (§5) — so neither leftover old parts here nor a missing part on an empty peer is possible (retry 2, R-M04) | `PartialCandidate` |
 
 **No game-build or Interface gating (Q-21, owner decision D-21; replaces the
@@ -351,7 +365,9 @@ rule.
 
 - Exactly one candidate and it is the local one → `InSync`.
 - A candidate `c` with `compare_package(c, x)` ∈ {`Same`, `Greater`} for
-  every other candidate `x` → it **dominates**. If it is eligible →
+  every other candidate `x`, **or** where the comparison is
+  `Ambiguous(UnrecognisedDiffers)` and `x` is the package's last shared
+  release (below) → it **dominates**. If it is eligible →
   `Chosen(c)`; if not → `NeedsDecision(reason)` (never fall back to a lesser
   candidate).
 - A single non-local candidate (local has none of the package's folders) is
@@ -373,6 +389,31 @@ local effective package hash must equal the chosen hash exactly
 follows).
 
 `sources` = all members holding the chosen hash, sorted by `ComputerId`.
+
+**Unrecognised add-ons and content lineage (R-05, D-29).** A folder without a
+`Selected` toc has no usable version label. `compare_package` of two differing
+copies where any compared folder is unrecognised is
+`Ambiguous(UnrecognisedDiffers)` ("unrecognised add-on: no version to compare,
+the copies differ"); identical copies are `Same`. The only ordering is lineage:
+
+- Each computer keeps a **local** record `SharedReleases`
+  (`wowsync.shared-releases`, `shared-releases.json`; never published): per
+  package key, the hash of the last release this computer held **identically**
+  with an admitted peer while its own copy was complete. It is updated on every
+  observation by `shared_releases(input)` (pure), kept when no peer matches
+  and dropped when the package disappears.
+- A copy that differs from that shared release, while the other candidate **is**
+  the shared release, is the newer one and dominates. With two or more copies
+  that each differ from it (or no shared release known, e.g. first join with
+  different copies) nothing dominates and the package is a one-time
+  `NeedsDecision(Ambiguous)` (a ChooseCopy decision; the alternatives are
+  preserved by the usual recovery rules). No clock, mtime or computer
+  preference is used.
+- Added by one computer: installed elsewhere. Removed: removal and restore
+  work exactly as for recognised add-ons (removal.md).
+- Limit: the shared release is learned only when both computers have
+  observed the same copy. A change made before that observation falls back to
+  the decision.
 Input order and duplicates never change the result: inputs are sorted by
 `(ComputerId, seq)` and deduplicated by package hash before evaluation.
 A package that a member does not have is simply not a candidate from that

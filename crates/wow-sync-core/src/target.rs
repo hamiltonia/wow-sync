@@ -4,10 +4,10 @@ use crate::admit::{MemberLatest, MemberView};
 use crate::explain::{AmbiguousCandidate, Explanation};
 use crate::hash::package_hash;
 use crate::ids::{ComputerId, GroupId, Sha256};
-use crate::inventory::{FileEntry, FolderState, FolderStatus, Inventory, TocKind};
+use crate::inventory::{FileEntry, FolderState, FolderStatus, Inventory};
 use crate::package::{
-    compare_package, group_packages, package_version, ClientInfo, Package, PackageOrder,
-    PackageVersion,
+    compare_package, group_packages, package_version, AmbiguityReason, ClientInfo, Package,
+    PackageOrder, PackageVersion,
 };
 use crate::paths::FolderKey;
 use crate::records::{CodeState, FolderTreeRecord, GroupRecord};
@@ -43,6 +43,9 @@ pub struct TargetInput<'a> {
     pub local_id: &'a ComputerId,
     pub members: &'a [MemberView],
     pub trees: &'a BTreeMap<Sha256, TreeAvail>,
+    /// The last release of each package this computer held identically with a peer (R-05
+    /// content lineage). Empty when unknown: lineage then never orders anything.
+    pub shared: &'a BTreeMap<FolderKey, Sha256>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,30 +128,17 @@ fn display_name(pv: &PackageVersion, pkg: &Package) -> String {
 
 type Ineligible = (DecisionReason, Explanation);
 
+/// A folder that is not readable, safe and stable is never a candidate. A folder without a
+/// recognised `.toc` is not a problem: it syncs by content (R-05, D-29).
 fn folder_problem(f: &FolderState) -> Option<Ineligible> {
-    if f.status != FolderStatus::Ok {
-        return Some((
+    (f.status != FolderStatus::Ok).then(|| {
+        (
             DecisionReason::NoCompatibleToc,
             Explanation::NoCompatibleToc {
                 folder: f.name.clone(),
             },
-        ));
-    }
-    match f.toc.kind {
-        TocKind::Selected => None,
-        TocKind::Unvalidated => Some((
-            DecisionReason::UnvalidatedTocMapping,
-            Explanation::UnvalidatedTocMapping {
-                folder: f.name.clone(),
-            },
-        )),
-        _ => Some((
-            DecisionReason::NoCompatibleToc,
-            Explanation::NoCompatibleToc {
-                folder: f.name.clone(),
-            },
-        )),
-    }
+        )
+    })
 }
 
 /// Eligible holders of the candidate, or the first reason it cannot be applied automatically.
@@ -159,19 +149,6 @@ fn eligible_holders(
 ) -> Result<Vec<(ComputerId, ClientInfo)>, Ineligible> {
     if let Some(p) = c.pv.folders.iter().find_map(folder_problem) {
         return Err(p);
-    }
-    if let Some(f) = input
-        .local
-        .folders
-        .iter()
-        .find(|f| pkg.members.contains(&f.key) && f.toc.kind == TocKind::Unvalidated)
-    {
-        return Err((
-            DecisionReason::UnvalidatedTocMapping,
-            Explanation::UnvalidatedTocMapping {
-                folder: f.name.clone(),
-            },
-        ));
     }
     let mut first_fail: Option<Ineligible> = None;
     let mut ok = Vec::new();
@@ -220,6 +197,41 @@ fn effective(pv: &PackageVersion) -> EffectiveTarget {
 
 pub fn compute_target(input: &TargetInput) -> GroupTarget {
     compute_inner(input, None).0
+}
+
+/// The shared-release memory after this observation (R-05 content lineage): every package whose
+/// local copy is complete and identical to the copy of an admitted peer is recorded at that
+/// release; other packages keep what was known. Entries of packages no longer seen are dropped.
+pub fn shared_releases(input: &TargetInput) -> BTreeMap<FolderKey, Sha256> {
+    let peers = valid_peers(input);
+    let peer_invs: Vec<Inventory> = peers.iter().map(|p| state_inventory(p.2)).collect();
+    let mut observations: Vec<&Inventory> = vec![input.local];
+    observations.extend(peer_invs.iter());
+    let whole = |pv: &PackageVersion| {
+        pv.folders
+            .iter()
+            .all(|f| f.status == FolderStatus::Ok && f.tree.is_some())
+    };
+    let mut out = BTreeMap::new();
+    for pkg in group_packages(&observations) {
+        if let Some(h) = input.shared.get(&pkg.key) {
+            out.insert(pkg.key.clone(), *h);
+        }
+        let Some(local) = package_version(&pkg, input.local, input.local_client) else {
+            continue;
+        };
+        if !whole(&local) {
+            continue;
+        }
+        let held_by_peer = peer_invs.iter().zip(&peers).any(|(inv, (_, _, st))| {
+            package_version(&pkg, inv, &st.client)
+                .is_some_and(|pv| whole(&pv) && pv.hash == local.hash)
+        });
+        if held_by_peer {
+            out.insert(pkg.key.clone(), local.hash);
+        }
+    }
+    out
 }
 
 /// Whether a whole source may be a candidate for a package (contracts.md §4.1 level 2, §5.3).
@@ -346,28 +358,22 @@ fn compute_inner(input: &TargetInput, screen: Option<Screen>) -> (GroupTarget, V
         let dominator = list.iter().find(|c| {
             list.iter().all(|x| {
                 x.pv.hash == c.pv.hash
-                    || matches!(
-                        compare_package(&c.pv, &x.pv),
-                        PackageOrder::Same | PackageOrder::Greater { .. }
-                    )
+                    || match compare_package(&c.pv, &x.pv) {
+                        PackageOrder::Same | PackageOrder::Greater { .. } => true,
+                        // Unrecognised content has no version: the copy that changed from the
+                        // last shared release, which the other still holds, is the newer one.
+                        PackageOrder::Ambiguous {
+                            reason: AmbiguityReason::UnrecognisedDiffers,
+                            ..
+                        } => input.shared.get(&pkg.key) == Some(&x.pv.hash),
+                        _ => false,
+                    }
             })
         });
         let target = match dominator {
             Some(c) if holds_local(c) => {
-                match c
-                    .pv
-                    .folders
-                    .iter()
-                    .filter(|f| f.status == FolderStatus::Ok)
-                    .find_map(folder_problem)
-                {
-                    // A blocked local folder is never published or replaced: say so (M2).
-                    Some((_, why)) => PackageTarget::NotSynced { why },
-                    None => {
-                        out.effective.insert(pkg.key.clone(), effective(&c.pv));
-                        PackageTarget::InSync
-                    }
-                }
+                out.effective.insert(pkg.key.clone(), effective(&c.pv));
+                PackageTarget::InSync
             }
             Some(c) => match eligible_holders(c, &pkg, input) {
                 Err((reason, why)) => PackageTarget::NeedsDecision {
@@ -1263,6 +1269,7 @@ mod contract_tests {
             local_id: &local_id,
             members: &sc.members,
             trees: &sc.trees,
+            shared: &sc.shared,
         };
         let c = compose(&input, &Ledger::new(), &Neutral, &BTreeSet::new(), &Neutral);
         assert_eq!(c.target, compute_target(&input));
@@ -1337,6 +1344,7 @@ mod contract_tests {
             local_id: &local_id,
             members: &sc.members,
             trees: &sc.trees,
+            shared: &sc.shared,
         };
         compose(&input, &Ledger::new(), fake, held, fake)
     }
@@ -1697,25 +1705,95 @@ mod tests {
         assert!(matches!(pkg(&t, "suite"), PackageTarget::Chosen { .. }));
     }
 
-    #[test]
-    fn foreign_suffix_only_candidate_not_installed() {
-        let t = Scenario::new(suite("1.0", "a"))
-            .peer(2, vec![addon_unvalidated("Suite", "2.0", "b")])
-            .target();
-        assert!(!matches!(pkg(&t, "suite"), PackageTarget::Chosen { .. }));
-        assert_eq!(reason(pkg(&t, "suite")), DecisionReason::Ambiguous);
-        let t = Scenario::new(vec![])
-            .peer(2, vec![addon_unvalidated("Suite", "2.0", "b")])
-            .target();
-        assert_eq!(reason(pkg(&t, "suite")), DecisionReason::NoCompatibleToc);
+    fn release(sc: &Scenario, key: &str) -> Sha256 {
+        let pkgs = group_packages(&[&sc.local]);
+        let p = pkgs.iter().find(|p| p.key.as_str() == key).unwrap();
+        package_version(p, &sc.local, &sc.local_client)
+            .unwrap()
+            .hash
+    }
+
+    fn unrec(tag: &str) -> Vec<crate::inventory::FolderScan> {
+        vec![crate::testkit::addon_unrecognised("Suite", tag)]
     }
 
     #[test]
-    fn unvalidated_mapping_candidate_not_installed() {
-        let t = Scenario::new(vec![addon_unvalidated("Suite", "1.0", "a")])
-            .peer(2, suite("2.0", "b"))
+    fn unrecognised_add_on_only_on_a_peer_is_installed() {
+        let t = Scenario::new(vec![]).peer(2, unrec("b")).target();
+        assert!(matches!(pkg(&t, "suite"), PackageTarget::Chosen { .. }));
+    }
+
+    #[test]
+    fn identical_unrecognised_copies_are_in_sync() {
+        let t = Scenario::new(unrec("a")).peer(2, unrec("a")).target();
+        assert_eq!(pkg(&t, "suite"), &PackageTarget::InSync);
+    }
+
+    #[test]
+    fn differing_unrecognised_copies_without_lineage_need_a_decision() {
+        let t = Scenario::new(unrec("a")).peer(2, unrec("b")).target();
+        assert_eq!(reason(pkg(&t, "suite")), DecisionReason::Ambiguous);
+    }
+
+    #[test]
+    fn unrecognised_copy_changed_here_since_the_shared_release_wins() {
+        let old = release(&Scenario::new(unrec("b")), "suite");
+        let t = Scenario::new(unrec("a"))
+            .peer(2, unrec("b"))
+            .shared_at("suite", old)
+            .target();
+        assert_eq!(pkg(&t, "suite"), &PackageTarget::InSync);
+    }
+
+    #[test]
+    fn unrecognised_copy_changed_on_the_peer_since_the_shared_release_is_installed() {
+        let old = release(&Scenario::new(unrec("a")), "suite");
+        let t = Scenario::new(unrec("a"))
+            .peer(2, unrec("b"))
+            .shared_at("suite", old)
+            .target();
+        match pkg(&t, "suite") {
+            PackageTarget::Chosen { sources, .. } => assert_eq!(sources, &vec![computer(2)]),
+            other => panic!("expected the peer's copy, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unrecognised_copies_both_changed_since_the_shared_release_need_a_decision() {
+        let old = release(&Scenario::new(unrec("old")), "suite");
+        let t = Scenario::new(unrec("a"))
+            .peer(2, unrec("b"))
+            .shared_at("suite", old)
             .target();
         assert_eq!(reason(pkg(&t, "suite")), DecisionReason::Ambiguous);
+    }
+
+    #[test]
+    fn foreign_suffix_only_copy_is_unrecognised_not_blocked() {
+        let t = Scenario::new(vec![])
+            .peer(2, vec![addon_unvalidated("Suite", "2.0", "b")])
+            .target();
+        assert!(matches!(pkg(&t, "suite"), PackageTarget::Chosen { .. }));
+        let t = Scenario::new(suite("1.0", "a"))
+            .peer(2, vec![addon_unvalidated("Suite", "2.0", "b")])
+            .target();
+        assert_eq!(reason(pkg(&t, "suite")), DecisionReason::Ambiguous);
+    }
+
+    #[test]
+    fn shared_release_is_recorded_only_when_a_peer_holds_the_same_copy() {
+        let sc = Scenario::new(unrec("a")).peer(2, unrec("a"));
+        let shared = sc.shared_after();
+        assert_eq!(
+            shared.get(&FolderKey::lossy("suite")),
+            Some(&release(&sc, "suite"))
+        );
+        let differing = Scenario::new(unrec("a")).peer(2, unrec("b"));
+        assert!(differing.shared_after().is_empty());
+        let kept = differing.shared_at("suite", release(&sc, "suite"));
+        assert_eq!(kept.shared_after().len(), 1);
+        let gone = Scenario::new(vec![]).shared_at("suite", release(&sc, "suite"));
+        assert!(gone.shared_after().is_empty());
     }
 
     fn two_part(core: &str, core_tag: &str, data: &str) -> Vec<crate::inventory::FolderScan> {
