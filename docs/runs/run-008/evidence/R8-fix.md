@@ -11,6 +11,11 @@ tray clicks at :05/:08/:10 doing nothing. The log ends at 21:24:21, so about 25 
 Also, `merge_preview` applied a result to the selected row rather than its target,
 and the auto-selected first row was the refused `_classic_beta_`.
 
+Scale evidence (R8-check, commit 33159f9): a synthetic scan of 32,200 files / 3.2 GB took
+123.5 s cold. RYZENFISH has 31k files / 3.2 GB, so its cold full hash was likely about
+2 min with no progress shown and Quit blocked behind it. This was not measured on
+RYZENFISH itself.
+
 ## Reproduction (honest)
 Isolated state D:\WoWSyncLab\R8-fix, read-only on the dev PC's `_forever_`
 (33,141 files, 102 add-ons) via a temporary release-build harness calling
@@ -65,4 +70,9 @@ New required cases: R8-fix:setup-inspection.
 ## Round 3 (RV8-11, RV8-12)
 - RV8-11: a cancelled enroll now publishes 'Setup was stopped before it finished...' (the page leaves 'Setting up' and Back returns); CancelQuit clears the abort flag and forces a fresh status read. Test: backend::keep_running_after_quit_leaves_a_stopped_setup_actionable_and_clears_the_flag (real enroll cancelled by the flag; asserts message, no enrolled_now, flag cleared, quit_ready false). The fresh-status read itself is not asserted by a test.
 - RV8-12: a failed last look in sync_once now sets the Error headline and provider_error on the returned status in the same pass; no new test.
+- Verify: offline PASS, native PASS.
+
+## Round 4 (G1, G2)
+- G2: setup draws no sheets, so a tray Quit during setup's first write opened an invisible Quit sheet and the modal guard blocked every setup action. request_quit now uses model::quit_sheet_for(w, setup_mode): in setup it never opens a sheet and goes straight to quit-when-safe (abort flag + QuitWhenSafe), so the app exits when the write completes. Test: model::a_quit_during_setup_never_opens_a_sheet_that_setup_cannot_draw (pure helper; the GUI was not driven).
+- G1: add_found_install with a chosen root now selects the first row with a .flavor.info before a refused one. Test: setup::a_chosen_root_selects_its_usable_variant_not_a_refused_one_listed_first.
 - Verify: offline PASS, native PASS.

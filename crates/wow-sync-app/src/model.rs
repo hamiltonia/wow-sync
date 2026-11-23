@@ -1340,6 +1340,17 @@ pub fn sheet_quit_text(w: &World) -> Option<String> {
     }
 }
 
+/// The Quit sheet text for a Quit request. Setup draws no sheets, so a Quit during setup
+/// never opens one: it goes straight to quit-when-safe, and the app exits once any write
+/// step in progress has finished.
+pub fn quit_sheet_for(w: &World, setup_mode: bool) -> Option<String> {
+    if setup_mode {
+        None
+    } else {
+        sheet_quit_text(w)
+    }
+}
+
 /// The accessible name of a sidebar entry.
 pub fn nav_name(p: Page, needs: usize, current: bool) -> String {
     let mut name = p.title().to_string();
@@ -1821,6 +1832,14 @@ mod tests {
         let mut w = enrolled();
         w.busy = Some(Busy::Syncing { done: 0, total: 0 });
         assert!(sheet_quit_text(&w).is_some());
+        assert!(quit_sheet_for(&w, false).is_some());
+    }
+
+    #[test]
+    fn a_quit_during_setup_never_opens_a_sheet_that_setup_cannot_draw() {
+        let mut w = enrolled();
+        w.busy = Some(Busy::Syncing { done: 0, total: 0 });
+        assert!(quit_sheet_for(&w, true).is_none());
     }
 
     #[test]

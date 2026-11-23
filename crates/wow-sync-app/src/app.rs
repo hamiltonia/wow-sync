@@ -936,7 +936,8 @@ impl Shell {
     }
 
     fn request_quit(&mut self, cx: &mut Context<Self>) {
-        match model::sheet_quit_text(&self.w) {
+        let setup_mode = !self.w.enrolled || self.setup.finished;
+        match model::quit_sheet_for(&self.w, setup_mode) {
             Some(t) => {
                 self.sheet_from = Some(self.opener.clone());
                 self.sheet = Some(Sheet::Quit(t));
