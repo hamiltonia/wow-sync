@@ -234,11 +234,20 @@ pub fn scan_folder_with_hook(
 pub struct ScanCtl {
     pub cancel: Arc<AtomicBool>,
     pub files: Arc<AtomicU64>,
+    /// Pause after each file, so tests can make a scan slow enough to interrupt. Zero otherwise.
+    pub per_file_delay_ms: u64,
 }
 
 impl ScanCtl {
     pub fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::Relaxed)
+    }
+
+    pub fn slowed(ms: u64) -> ScanCtl {
+        ScanCtl {
+            per_file_delay_ms: ms,
+            ..ScanCtl::default()
+        }
     }
 }
 
@@ -284,6 +293,9 @@ fn scan_folder_ctl(
                     sha256,
                 });
                 ctl.files.fetch_add(1, Ordering::Relaxed);
+                if ctl.per_file_delay_ms > 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(ctl.per_file_delay_ms));
+                }
             }
             Err(e) => return Some(failed(name, status_of(&e))),
         }

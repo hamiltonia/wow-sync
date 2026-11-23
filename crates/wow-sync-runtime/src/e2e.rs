@@ -400,6 +400,132 @@ mod tests {
         );
     }
 
+    fn many_addons(pc: &Pc, n: usize) {
+        for i in 0..n {
+            pc.addon(&format!("Many{i}"), "m-v1");
+        }
+    }
+
+    /// Runs `work` on this thread while another sets the cancel flag after `after`, and returns
+    /// how long `work` kept going after the flag was set.
+    fn cancelled_after<R>(
+        flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+        after: std::time::Duration,
+        work: impl FnOnce() -> R,
+    ) -> (R, std::time::Duration) {
+        let set_at = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let (f, s) = (flag.clone(), set_at.clone());
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(after);
+            *s.lock().unwrap() = Some(std::time::Instant::now());
+            f.store(true, std::sync::atomic::Ordering::Relaxed);
+        });
+        let r = work();
+        let ended = std::time::Instant::now();
+        t.join().unwrap();
+        let set = set_at.lock().unwrap().expect("the flag was set");
+        (r, ended.saturating_duration_since(set))
+    }
+
+    #[test]
+    fn quit_abandons_a_slow_sync_status_and_enroll_scan_within_a_bound() {
+        use std::time::Duration;
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        many_addons(&a, 40);
+        a.create();
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let slow = |flag: &std::sync::Arc<std::sync::atomic::AtomicBool>| ScanCtl {
+            cancel: flag.clone(),
+            ..ScanCtl::slowed(25)
+        };
+        // One scan takes about a second; a whole cycle needs several.
+        a.svc.set_read_ctl(slow(&flag));
+        let (res, late) = cancelled_after(&flag, Duration::from_millis(150), || a.svc.sync_once());
+        assert!(matches!(res, Err(ServiceError::Cancelled)), "{res:?}");
+        assert!(
+            late < Duration::from_millis(500),
+            "sync kept going {late:?}"
+        );
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        a.svc.set_read_ctl(slow(&flag));
+        let (st, late) = cancelled_after(&flag, Duration::from_millis(150), || a.svc.status());
+        assert!(st.enrolled && st.provider_error.is_none(), "{st:?}");
+        assert!(
+            late < Duration::from_millis(500),
+            "status kept going {late:?}"
+        );
+        // Nothing was lost: with the flag clear the cycle completes normally.
+        a.svc.set_read_ctl(ScanCtl::default());
+        assert!(a.svc.sync_once().is_ok());
+
+        let mut b = lab.pc("b");
+        many_addons(&b, 40);
+        let req = b.confirm_request(JoinChoice::New { name: "Two".into() });
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        b.svc.set_read_ctl(slow(&flag));
+        let (res, late) = cancelled_after(&flag, Duration::from_millis(150), || b.svc.enroll(&req));
+        assert!(matches!(res, Err(ServiceError::Cancelled)), "{res:?}");
+        assert!(
+            late < Duration::from_millis(500),
+            "enroll kept going {late:?}"
+        );
+        assert!(!b.svc.is_enrolled(), "an abandoned enroll leaves no record");
+    }
+
+    struct QuitWhenWriting {
+        flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        target: PathBuf,
+    }
+
+    impl ActivitySource for QuitWhenWriting {
+        // The apply step asks for the game's activity just before it writes.
+        fn observe(&mut self, _: &Path) -> Activity {
+            if !self.target.exists() {
+                self.flag.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            Activity::NotRunning
+        }
+    }
+
+    #[test]
+    fn a_write_in_progress_finishes_whole_even_when_quit_is_requested() {
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        a.addon("Alpha", "alpha-v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let src = QuitWhenWriting {
+            flag: flag.clone(),
+            target: b.install.addons.join("Alpha").join("main.lua"),
+        };
+        b.svc = SliceService::with_activity(b.cfg.clone(), Box::new(src)).unwrap();
+        b.svc.set_read_ctl(ScanCtl {
+            cancel: flag.clone(),
+            ..ScanCtl::default()
+        });
+        let r = synced(&mut b);
+        assert!(
+            flag.load(std::sync::atomic::Ordering::Relaxed),
+            "quit came before the write"
+        );
+        assert_eq!(
+            b.read("Alpha/main.lua").as_deref(),
+            Some("alpha-v1"),
+            "{r:?}"
+        );
+        assert_eq!(
+            b.journals(),
+            0,
+            "the write was completed, not left half done"
+        );
+        assert!(r.published.is_some() || !r.applied.is_empty(), "{r:?}");
+        assert!(matches!(b.svc.sync_once(), Err(ServiceError::Cancelled)));
+    }
+
     #[test]
     fn unfamiliar_variant_blocked_until_confirmed() {
         let lab = Lab::new();
