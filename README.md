@@ -26,6 +26,9 @@ Run-007 (D-29) published the `v0.3.0`
 
 Report: [docs/runs/run-007/REPORT.md](docs/runs/run-007/REPORT.md). The latest
 release is `v0.3.0`.
+Run-008 (D-30) is in progress: it fixes a setup hang while checking a game
+folder, and Quit not exiting during that check. Status:
+[docs/runs/run-008/HANDOFF.md](docs/runs/run-008/HANDOFF.md).
 Repository layout: [docs/REPO-MAP.md](docs/REPO-MAP.md).
 
 This repository (`hamiltonia/wow-sync`) is the permanent project home. It is not

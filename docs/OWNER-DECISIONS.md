@@ -209,6 +209,33 @@ Answers from an interactive review session with the orchestrator.
   with this decision. It includes publishing a `v0.2.0` GitHub pre-release
   after its gates pass.
 
+### D-30: Setup hang on a second PC; run-008 approved, no credit ceiling (2026-11-23)
+
+- **Trigger:** on RYZENFISH, `v0.3.0` found `G:\Games\World of Warcraft`
+  through the launcher record. When the owner chose `_forever_`, setup stayed
+  on "checking" indefinitely, and tray Quit did not exit; the owner had to end
+  the process in Task Manager.
+  - **Quit:** the log and code show that Quit waits for the backend thread,
+    which was still inside the read-only inspection.
+  - **Not the disk:** a read-only probe showed a fast NVMe drive (G:) with
+    31k files / 3.2 GB and no cloud or reparse entries. Disk speed does not
+    explain it.
+- **Approval:** the orchestrator proposed run-008 (fix and publish `v0.3.1`).
+  The owner replied "stop worrying about AIU, you have unlimited use now" and
+  ran the probe. The orchestrator records this as approval of run-008 as
+  proposed, with **no AIU ceiling**. Usage is still tracked and reported. The
+  owner may correct this reading.
+- **Scope of run-008:**
+  - find and fix the root cause of the inspection hang;
+  - Quit always exits promptly, whatever the backend is doing;
+  - a long read-only check shows progress and can be cancelled;
+  - a usable install is selected by default over a refused one;
+  - the log records when each inspection starts, how long it took, and which
+    tray item was clicked;
+  - publish `v0.3.1` after its gates pass.
+- No product-intent change; SPEC and ACCEPTANCE are unchanged. Plan:
+  [run-008 PLAN.md](runs/run-008/PLAN.md).
+
 ### D-29: Find WoW on every drive; sync everything; run-007 approved (2026-11-23)
 
 - Trigger: on a second PC, WoW at `G:\Games\World of Warcraft` was not found
@@ -481,4 +508,5 @@ phase D barrier.
 | 2026-11-21 | D-26 | Q-88 (a); Q-77 32 MiB; owner runs macOS kit; v0.1.0 Windows pre-release approved; run-005 ceiling 10,000 AIU, plan pending | `9ca8f10` |
 | 2026-11-21 | D-27 | Run-005 plan drafted and approved by owner instruction ("draft and execute") | `fe13e3d` |
 | 2026-11-22 | D-28 | Q-24 marker gate removed by default (test mode nice-to-have); D-08 amended; Q-3 working answer; run-006 10,000 AIU, plan approved | `c77d050` |
-| 2026-11-23 | D-29 | Discovery on drives A–Z with a folder picker; sync unrecognised add-ons; SPEC R-03/R-05, A-47/A-48; run-007 4,000 AIU, plan approved | this commit |
+| 2026-11-23 | D-29 | Discovery on drives A–Z with a folder picker; sync unrecognised add-ons; SPEC R-03/R-05, A-47/A-48; run-007 4,000 AIU, plan approved | `8b0dee0` |
+| 2026-11-23 | D-30 | Setup inspection hang and stuck Quit on a second PC; run-008 approved with no AIU ceiling; `v0.3.1` | this commit |
