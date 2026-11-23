@@ -101,6 +101,7 @@ Counts after the fixes: core 377, runtime 210 (+2 public_api). Verify tiers: see
 | lineage | `LineageGraph::newer` always `false` | 3 `target` tests (`...changed_here_from_the_peer_copy_wins`, `...changed_on_the_peer_is_installed...`, `a_superseded_...`), e2e `...later_edits_follow`, `a_peer_that_was_offline...` | yes |
 | publisher-held check (RV7-14) | `from_states` accepts every entry (`if true \|\| held == Some(l.hash)`); the test now has peer 3 hold v3 | `a_lineage_entry_for_a_copy_its_publisher_does_not_hold_is_ignored` fails with `Chosen` v1 instead of `NeedsDecision`; passes with the check | yes |
 | G1 carry-forward across an unstable observation | `next_lineage` does not carry the previous entry forward | `a_live_edit_that_publishes_an_unstable_observation_still_converges_without_a_decision` fails (spurious decision); the revert test did not finish within 4 minutes under the mutation and was stopped, so only the edit test is a confirmed control failure | yes |
+| G2 wait on an unstable copy | the hold in `compute_inner` is disabled (`if false && ...`) | core test `a_copy_that_is_still_changing_waits_instead_of_asking_for_a_choice` fails (`NeedsDecision`, Ambiguous). The service-level test `no_decision_is_offered_at_any_step_of_a_live_edit_while_it_is_unstable` still passed under the mutation: the lab does not reproduce the transient decision, so it is a regression guard only, not a confirmed control | partly |
 | header ended | `header_has_ended` always `true` | `cut_header_without_a_file_line_is_not_selected` | yes |
 
 ## Settings finding

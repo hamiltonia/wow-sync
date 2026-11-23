@@ -318,6 +318,20 @@ fn compute_inner(input: &TargetInput, screen: Option<Screen>) -> (GroupTarget, V
                 continue;
             }
         }
+        // A copy that is still changing or cannot be hashed has no content to order yet: wait
+        // for it to settle rather than ask for a choice (G2).
+        if cands
+            .values()
+            .any(|c| crate::lineage::is_unrecognised(&c.pv) && !crate::lineage::is_whole(&c.pv))
+        {
+            out.packages.insert(
+                pkg.key.clone(),
+                PackageTarget::Held {
+                    why: Explanation::Unstable,
+                },
+            );
+            continue;
+        }
         let list: Vec<&Cand> = cands.values().collect();
         let holds_local = |c: &Cand| c.holders.iter().any(|(id, _)| id == input.local_id);
 
@@ -1819,6 +1833,33 @@ mod tests {
             .peer(2, unrec("b"))
             .peer_lineage(2, "suite", b, &[a])
             .target();
+        assert_eq!(reason(pkg(&t, "suite")), DecisionReason::Ambiguous);
+    }
+
+    #[test]
+    fn a_copy_that_is_still_changing_waits_instead_of_asking_for_a_choice() {
+        let unstable = |t: &str| {
+            let mut s = unrec(t);
+            s[0].status = crate::inventory::ScanStatus::Unstable("changed".into());
+            s
+        };
+        // This computer's copy is mid-edit.
+        let t = Scenario::new(unstable("v2"))
+            .local_published(unrec("v1"))
+            .peer(2, unrec("v1"))
+            .target();
+        assert!(
+            matches!(pkg(&t, "suite"), PackageTarget::Held { .. }),
+            "{t:?}"
+        );
+        // A peer's latest record shows its copy unstable.
+        let t = Scenario::new(unrec("v1")).peer(2, unstable("v2")).target();
+        assert!(
+            matches!(pkg(&t, "suite"), PackageTarget::Held { .. }),
+            "{t:?}"
+        );
+        // Once settled and unrelated, the decision still appears.
+        let t = Scenario::new(unrec("v1")).peer(2, unrec("v2")).target();
         assert_eq!(reason(pkg(&t, "suite")), DecisionReason::Ambiguous);
     }
 

@@ -767,6 +767,28 @@ mod tests {
     }
 
     #[test]
+    fn no_decision_is_offered_at_any_step_of_a_live_edit_while_it_is_unstable() {
+        let lab = Lab::new();
+        let (mut a, mut b, _c) = three_at_v1(&lab);
+        with_recent_window(&mut a);
+        write_live(&a, "v2");
+        for _ in 0..3 {
+            synced(&mut a);
+            assert!(offered_kinds(&a).is_empty(), "A: {:?}", offered_kinds(&a));
+            synced(&mut b);
+            assert!(offered_kinds(&b).is_empty(), "B: {:?}", offered_kinds(&b));
+        }
+        a.install.set_old_mtimes();
+        for _ in 0..4 {
+            synced(&mut a);
+            assert!(offered_kinds(&a).is_empty(), "A: {:?}", offered_kinds(&a));
+            synced(&mut b);
+            assert!(offered_kinds(&b).is_empty(), "B: {:?}", offered_kinds(&b));
+        }
+        assert_eq!(b.read("Bare/main.lua").as_deref(), Some("v2"));
+    }
+
+    #[test]
     fn a_live_revert_through_an_unstable_observation_is_not_undone_and_asks_once() {
         let lab = Lab::new();
         let (mut a, mut b, mut c) = three_at_v1(&lab);

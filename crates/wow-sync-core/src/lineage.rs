@@ -28,6 +28,10 @@ pub fn is_unrecognised(pv: &PackageVersion) -> bool {
     pv.folders.iter().any(|f| f.toc.kind != TocKind::Selected)
 }
 
+pub(crate) fn is_whole(pv: &PackageVersion) -> bool {
+    whole(pv)
+}
+
 fn whole(pv: &PackageVersion) -> bool {
     pv.folders
         .iter()
