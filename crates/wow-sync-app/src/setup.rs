@@ -129,11 +129,20 @@ pub fn add_found_install(
             d.installs.push(crate::install_row(&found.root, v));
         }
     }
+    let in_root = |i: &crate::world::Install| same_path(&i.root, &found.root);
+    if variant.is_none() {
+        // A chosen root selects a row the check can accept before a refused one.
+        let usable = d
+            .installs
+            .iter()
+            .position(|i| in_root(i) && i.root.join(&i.folder).join(".flavor.info").is_file());
+        if let Some(at) = usable {
+            return Ok(at);
+        }
+    }
     d.installs
         .iter()
-        .position(|i| {
-            same_path(&i.root, &found.root) && variant.as_ref().is_none_or(|v| &i.folder == v)
-        })
+        .position(|i| in_root(i) && variant.as_ref().is_none_or(|v| &i.folder == v))
         .ok_or_else(|| not_a_game_folder_text(chosen))
 }
 
@@ -843,6 +852,23 @@ mod tests {
         let mut d = empty();
         apply_dropbox_choice(&mut d, &t.join("Elsewhere"));
         assert!(d.dropbox.is_some() && !d.online_only);
+    }
+
+    #[test]
+    fn a_chosen_root_selects_its_usable_variant_not_a_refused_one_listed_first() {
+        let t = lab("pickroot");
+        let wow = t.join("World of Warcraft");
+        std::fs::create_dir_all(wow.join("_classic_beta_")).unwrap();
+        std::fs::create_dir_all(wow.join("_forever_")).unwrap();
+        std::fs::write(wow.join("_forever_").join(".flavor.info"), "x").unwrap();
+        let mut d = empty();
+        let found = wow_sync_runtime::DetectedInstall {
+            root: wow.clone(),
+            variants: vec!["_classic_beta_".into(), "_forever_".into()],
+        };
+        let at = add_found_install(&mut d, &wow, Some((found, None))).unwrap();
+        assert_eq!(d.installs[at].folder, "_forever_");
+        let _ = std::fs::remove_dir_all(&t);
     }
 
     #[test]

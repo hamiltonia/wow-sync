@@ -1796,6 +1796,8 @@ tests = [
     "setup::tests::a_result_lands_only_on_its_own_row_and_an_unlisted_target_changes_nothing",
     "setup::tests::a_row_that_starts_a_new_check_drops_what_the_old_one_said",
     "backend::tests::keep_running_after_quit_leaves_a_stopped_setup_actionable_and_clears_the_flag",
+    "model::tests::a_quit_during_setup_never_opens_a_sheet_that_setup_cannot_draw",
+    "setup::tests::a_chosen_root_selects_its_usable_variant_not_a_refused_one_listed_first",
     "diag_log::tests::the_inspection_and_tray_lines_show_paths_under_the_profile_as_a_tilde",
 ]
 # <<< section: R8-fix
