@@ -1788,5 +1788,13 @@ tests = [
     "backend::tests::a_cancelled_or_replaced_inspection_never_publishes_for_the_wrong_target",
     "setup::tests::a_usable_install_is_listed_and_selected_before_a_refused_one",
     "setup::tests::long_checks_show_how_many_files_were_read",
+    "e2e::tests::quit_abandons_a_slow_sync_status_and_enroll_scan_within_a_bound",
+    "e2e::tests::a_write_in_progress_finishes_whole_even_when_quit_is_requested",
+    "backend::tests::a_check_that_ends_with_a_result_after_cancel_or_replace_publishes_nothing",
+    "backend::tests::a_check_that_panics_ends_as_an_error_and_stops_its_ticker",
+    "backend::tests::enroll_uses_only_the_digest_of_the_folder_it_was_checked_for",
+    "setup::tests::a_result_lands_only_on_its_own_row_and_an_unlisted_target_changes_nothing",
+    "setup::tests::a_row_that_starts_a_new_check_drops_what_the_old_one_said",
+    "diag_log::tests::the_inspection_and_tray_lines_show_paths_under_the_profile_as_a_tilde",
 ]
 # <<< section: R8-fix

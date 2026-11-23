@@ -233,6 +233,9 @@ pub enum ServiceError {
     /// Test mode is on and this install has no synthetic marker: syncing is blocked until test
     /// mode is turned off (D-28). Nothing was changed or un-enrolled.
     TestModeBlocked,
+    /// A read-only look at the install was abandoned because the app is quitting. Nothing was
+    /// changed by the abandoned step.
+    Cancelled,
     Provider(String),
     Local(String),
 }
@@ -258,6 +261,7 @@ impl std::fmt::Display for ServiceError {
                 "Test mode is on, and this installation does not carry the test marker, so \
                  syncing is paused. Nothing was changed; turn test mode off to continue"
             ),
+            Self::Cancelled => write!(f, "stopped before it finished; nothing was changed"),
             Self::Provider(s) => write!(f, "shared folder problem: {s}"),
             Self::Local(s) => write!(f, "local problem: {s}"),
         }
@@ -514,6 +518,9 @@ pub struct SliceService {
     /// Update checks; none until a release source is attached.
     updates: Option<crate::updates::UpdateService>,
     started_ms: i64,
+    /// Read-only scans of the install stop at the next file once its flag is set (the app is
+    /// quitting). Steps that change game files never consult it.
+    read_ctl: ScanCtl,
 }
 
 fn file_obs(r: FileRead) -> FileObs {
@@ -568,6 +575,7 @@ impl SliceService {
             notices: None,
             updates: None,
             started_ms: now_unix_ms(),
+            read_ctl: ScanCtl::default(),
         })
     }
 
@@ -1594,10 +1602,16 @@ impl SliceService {
         }
     }
 
-    fn scan(&self) -> Result<(Vec<FolderScan>, bool), ServiceError> {
-        Ok(self
-            .scan_ctl(&ScanCtl::default())?
-            .expect("a scan without a cancel request completes"))
+    /// Uses `ctl` for every read-only scan of this service: setting its cancel flag abandons the
+    /// scan at the next file.
+    pub fn set_read_ctl(&mut self, ctl: ScanCtl) {
+        self.read_ctl = ctl;
+    }
+
+    /// Whether this computer has an enrollment record (or one that cannot be read), without
+    /// looking at the add-on folders.
+    pub fn is_enrolled(&self) -> bool {
+        !matches!(self.read_enrollment(), Ok(None))
     }
 
     /// `None` = cancelled through `ctl`.
@@ -1677,9 +1691,8 @@ impl SliceService {
         &self,
         enrolled_elsewhere: bool,
     ) -> Result<(VariantVerdict, LayoutAssessment, Vec<FolderScan>, bool), ServiceError> {
-        Ok(self
-            .judge_ctl(enrolled_elsewhere, &ScanCtl::default())?
-            .expect("a judgement without a cancel request completes"))
+        self.judge_ctl(enrolled_elsewhere, &self.read_ctl)?
+            .ok_or(ServiceError::Cancelled)
     }
 
     #[allow(clippy::type_complexity)]
@@ -2034,14 +2047,24 @@ impl SliceService {
         }
     }
 
-    fn rederive_variant(&self, e: &LocalEnrollment) -> Result<ConfirmedVariant, ServiceError> {
-        let (verdict, assessment, _s, _st) = self.judge(false)?;
-        confirm_enrolled(&verdict, &assessment, &e.validation).map_err(|r| match r {
-            RefuseReason::StaleConfirmation => ServiceError::NeedsReconfirmation,
-            RefuseReason::VariantChanged => ServiceError::VariantChanged,
-            RefuseReason::NotSyntheticInstall => ServiceError::TestModeBlocked,
-            r => ServiceError::Refused(refuse_text(&r).0),
-        })
+    /// Re-judges the install once and hands back the scan it was based on, so callers need not
+    /// hash the add-ons a second time.
+    #[allow(clippy::type_complexity)]
+    fn rederive_variant(
+        &self,
+        e: &LocalEnrollment,
+        ctl: &ScanCtl,
+    ) -> Result<(ConfirmedVariant, Vec<FolderScan>, bool), ServiceError> {
+        let (verdict, assessment, scans, stable) =
+            self.judge_ctl(false, ctl)?.ok_or(ServiceError::Cancelled)?;
+        let variant =
+            confirm_enrolled(&verdict, &assessment, &e.validation).map_err(|r| match r {
+                RefuseReason::StaleConfirmation => ServiceError::NeedsReconfirmation,
+                RefuseReason::VariantChanged => ServiceError::VariantChanged,
+                RefuseReason::NotSyntheticInstall => ServiceError::TestModeBlocked,
+                r => ServiceError::Refused(refuse_text(&r).0),
+            })?;
+        Ok((variant, scans, stable))
     }
 
     fn read_members(
@@ -2124,6 +2147,11 @@ impl SliceService {
     }
 
     fn observe_world(&mut self, persist: bool) -> Result<World, ServiceError> {
+        let ctl = self.read_ctl.clone();
+        self.observe_world_ctl(persist, &ctl)
+    }
+
+    fn observe_world_ctl(&mut self, persist: bool, ctl: &ScanCtl) -> Result<World, ServiceError> {
         let enrollment = self.read_enrollment()?.ok_or(ServiceError::NotEnrolled)?;
         let computer = self.read_computer()?.ok_or(ServiceError::NotEnrolled)?;
         let provider = self.open_provider()?;
@@ -2134,8 +2162,7 @@ impl SliceService {
             decode(&bytes, SMALL as usize)
                 .map_err(|e| ServiceError::Provider(format!("group record: {e}")))?
         };
-        let variant = self.rederive_variant(&enrollment)?;
-        let (scans, stable) = self.scan()?;
+        let (variant, scans, stable) = self.rederive_variant(&enrollment, ctl)?;
         let titles = folder_titles(&scans);
         let decls = crate::settings_cycle::declaring_folders(&scans, variant.mapping());
         let inventory = build_inventory(scans, stable, &variant);
@@ -2687,6 +2714,12 @@ impl SliceService {
                 w
             }
             Err(ServiceError::NotEnrolled) => return StatusSnapshot::default(),
+            Err(ServiceError::Cancelled) => {
+                return StatusSnapshot {
+                    enrolled: true,
+                    ..Default::default()
+                }
+            }
             Err(ServiceError::VariantChanged) => {
                 self.provider_error = None;
                 return StatusSnapshot {
@@ -2712,8 +2745,12 @@ impl SliceService {
             }
             Err(ServiceError::NeedsReconfirmation) => {
                 self.provider_error = None;
-                let Some(mut preview) = self.preview(&ScanCtl::default()) else {
-                    unreachable!("a preview without a cancel request completes")
+                let ctl = self.read_ctl.clone();
+                let Some(mut preview) = self.preview(&ctl) else {
+                    return StatusSnapshot {
+                        enrolled: true,
+                        ..Default::default()
+                    };
                 };
                 preview.groups.clear();
                 return StatusSnapshot {
@@ -2757,6 +2794,7 @@ impl SliceService {
                 w
             }
             Err(ServiceError::NotEnrolled) => return Err(ServiceError::NotEnrolled),
+            Err(ServiceError::Cancelled) => return Err(ServiceError::Cancelled),
             Err(e) => {
                 self.provider_error = Some(e.to_string());
                 return Err(e);
@@ -3149,7 +3187,13 @@ impl SliceService {
                 // Re-observe: an apply changed the folders, and a peer may have moved.
                 let used = fx.effects_run();
                 drop(fx);
-                let fresh = self.observe_world(true)?;
+                let fresh = if applied_plan.is_some() || !rec.ops.is_empty() {
+                    // Game files changed: the cycle goes on to publish what it did, so this
+                    // look is not abandoned.
+                    self.observe_world_ctl(true, &ScanCtl::default())?
+                } else {
+                    self.observe_world(true)?
+                };
                 w = fresh;
                 let store = match new_report.take() {
                     // Not saved locally: still publish it from memory this cycle.
