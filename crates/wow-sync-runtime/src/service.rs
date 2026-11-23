@@ -3240,11 +3240,22 @@ impl SliceService {
         if report.crashed {
             return Ok(report);
         }
-        if let Ok(fresh) = self.observe_world(false) {
-            w = fresh;
-        }
+        let last_look = match self.observe_world(false) {
+            Ok(fresh) => {
+                w = fresh;
+                None
+            }
+            Err(ServiceError::Cancelled) => None,
+            Err(e) => Some(e.to_string()),
+        };
         self.notify_cycle(&w, &report);
         report.status = self.snapshot(&w, &area);
+        if let Some(e) = last_look {
+            // Show the failed last look in this pass, not the next one.
+            self.provider_error = Some(e.clone());
+            report.status.headline = headline_sentence(Headline::Error);
+            report.status.provider_error = Some(e);
+        }
         self.log_cycle(&report);
         Ok(report)
     }

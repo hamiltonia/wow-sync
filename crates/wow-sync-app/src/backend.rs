@@ -638,6 +638,9 @@ fn run(
                     }
                     Err(wow_sync_runtime::ServiceError::Cancelled) => {
                         crate::app::log("enrollment stopped because the app is quitting");
+                        publish(&shared, &wake, |g| {
+                            g.message = "Setup was stopped before it finished. Nothing was changed; choose Set up to try again.".into();
+                        });
                     }
                     Err(e) => {
                         crate::app::log_error(&format!("enrollment failed: {e}"));
@@ -738,6 +741,8 @@ fn run(
                 abort.store(false, Ordering::Relaxed);
                 gate.cancel();
                 publish(&shared, &wake, |g| g.quit_ready = false);
+                // A scan cut short by Quit left a blank status; read a fresh one.
+                force = true;
                 continue;
             }
             Some(Cmd::QuitWhenSafe) => {
@@ -1021,6 +1026,57 @@ mod tests {
             save_target: false,
             os_services: false,
         }
+    }
+
+    #[test]
+    fn keep_running_after_quit_leaves_a_stopped_setup_actionable_and_clears_the_flag() {
+        let (base, shared, tx, t) = lab_backend("keep");
+        let variant = t.install_root.join("_retail_");
+        std::fs::create_dir_all(variant.join("Interface").join("AddOns").join("A")).unwrap();
+        std::fs::write(
+            variant.join("Interface/AddOns/A/A.toc"),
+            "## Interface: 11508\n",
+        )
+        .unwrap();
+        std::fs::write(
+            t.install_root.join(".build.info"),
+            "Branch!STRING:0|Active!DEC:1|Product!STRING:0|Version!STRING:0\nus|1|wow|1.0.0.1\n",
+        )
+        .unwrap();
+        std::fs::write(
+            variant.join(".flavor.info"),
+            "Product Flavor!STRING:0\nwow\n",
+        )
+        .unwrap();
+        // Quit was chosen (flag set) while Set up was scanning.
+        lock(&shared).abort_reads.store(true, Ordering::Relaxed);
+        tx.send(Cmd::Enroll(
+            t.clone(),
+            EnrollRequest {
+                join: wow_sync_runtime::JoinChoice::New { name: "X".into() },
+                identity_confirmed: true,
+                scope_confirmed: true,
+                digest: None,
+                display_name: "Desk".into(),
+            },
+        ))
+        .unwrap();
+        wait_for("a message", Duration::from_secs(10), || {
+            !lock(&shared).message.is_empty()
+        });
+        assert!(
+            lock(&shared).message.contains("Setup was stopped"),
+            "{}",
+            lock(&shared).message
+        );
+        assert!(!lock(&shared).enrolled_now);
+        // Keep running: the flag is cleared and the page is actionable again.
+        tx.send(Cmd::CancelQuit).unwrap();
+        wait_for("the flag to clear", Duration::from_secs(5), || {
+            !lock(&shared).abort_reads.load(Ordering::Relaxed)
+        });
+        assert!(!lock(&shared).quit_ready);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
