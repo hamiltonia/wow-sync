@@ -141,3 +141,49 @@ resolved. RV7-10 is open and major: it should be fixed, with its e2e tests,
 before `v0.3.0` is tagged.
 
 Budget: recheck within the about-300-AIU guide; no sub-agents.
+
+## Recheck 2 (main `aba7d24`; notes at `fe2523a`)
+
+This is a focused recheck of RV7-10 to RV7-13 only. The branch was
+fast-forwarded to `aba7d24`, and `fe2523a` is an ancestor of it. All probes and
+controls were temporary edits, using synthetic content only. They have been
+reverted, and `git diff --exit-code` is clean. Baseline:
+`cargo test -q -p wow-sync-core -p wow-sync-runtime` passes 377 + 210 + 2
+tests.
+
+### Status
+
+| ID | Status | Evidence |
+|---|---|---|
+| RV7-10 | **resolved** | `TargetInput.local_prev` is now filled from `own_latest` (`service.rs:2275`). The value is filtered to this group and this computer, and the slot is chosen by the current enrollment. **Control:** with `.filter(\|_\| false)` in place of that filter, `an_author_whose_peers_are_all_offline_publishes_the_change_without_a_decision` fails (`e2e.rs:679`), and so does `a_revert_to_an_earlier_copy_is_not_undone_silently_and_asks_once` (`e2e.rs:708`). With the fix restored, both pass. **Probes:** see Q1 to Q3 below. |
+| RV7-11 | **resolved** | Anchors are only the hashes that are already in the ancestor list computed from validated graph entries and this computer's own history. Retention only changes which true ancestors survive truncation; it can never add a hash. So it cannot make a non-ancestor "newer", and it cannot pick a wrong winner. More than 32 anchors would need more than 32 peers holding distinct old copies; then `truncate` drops some, which degrades to a decision. **Control:** with anchor retention disabled (`false && held.contains(h)`), `ancestors_still_held_by_a_peer_survive_the_cap` fails (`target.rs:1850`), and so does `more_changes_than_the_lineage_cap_while_a_peer_is_offline_do_not_stall_the_rest` (`e2e.rs:726`, a decision is offered). With the fix restored, both pass. |
+| RV7-12 | **resolved in code; its test does not discriminate** (RV7-14) | **Control:** with the check disabled (`if true \|\| held == …`), `a_lineage_entry_for_a_copy_its_publisher_does_not_hold_is_ignored` still **passes**. In that test, peer 3 holds v2, which is unrelated, so the result is `Ambiguous` either way. My Recheck 1 probe uses a peer 3 that holds v3. With the fix it gives `NeedsDecision(Ambiguous)`; with the fix disabled it gives `Chosen` v1. So the code fix works, but the committed test would not catch a regression. |
+| RV7-13 | resolved | `v0.3.0.md:38-58`: the large-`.toc` text now appears once. The sync paragraph says "if copies changed independently or one went back to an older copy, you choose once for that add-on", which matches Q1. The wording "so it is recognised like any other add-on" repeats "recognised", which is a cosmetic nit only. `domain.md` §6 describes `local_prev`, the revert decision, publisher-held validation and the cap anchor, consistent with the code. |
+
+### Break attempts on `local_prev`
+
+| Probe | Result |
+|---|---|
+| Q1: exact RV7-01 scenario, then a revert | Rounds 0–7: no decisions anywhere. The round-0 transient seen in Recheck 1 is gone. c receives v2 at round 4. Then a restores v1. Over 4 rounds, a keeps v1, b and c keep v2, and **all three** are offered `Ambiguous`. Nothing is overwritten. a resolves the decision (the first copy is v1). After that, a, b and c are all at v1 with no further decisions: the group-wide choice applies everywhere. |
+| Q2: author alone, then a restart | a changes to v2 with b and c offline, syncs 3 times, restarts and syncs again. No decision. `local_prev` is re-read from the provider, not memory. When b returns, it installs v2. |
+| Q3: own record missing | After a publishes v2, every file in a's state directory is deleted. a then syncs 3 times with b offline. a keeps v2 and is offered `Ambiguous`. When b returns, b keeps v1 and is also offered `Ambiguous`. Nothing is overwritten. This is the expected safe degradation: without its own record, a's change has no published parent. |
+| First publish | `own_latest` is `None`, so behaviour is the same as before the fix: no replaced ancestor. There is nothing to replace on a first publish, so this is correct. |
+| Retired or re-enrolled | Not run as e2e (no harness helper; Q3 has the same effect). By code: the slot is selected by the current `enrollment_id`. A re-enrolled computer therefore has no `local_prev` until it publishes, and a local change made before re-enrollment becomes an unrelated copy, which gives a decision, never a silent win. A retired computer cannot publish, so its `local_prev` only affects its own view. |
+
+### New finding
+
+| ID | Severity | Location | Issue | Fix |
+|---|---|---|---|---|
+| RV7-14 | minor | `crates/wow-sync-core/src/target.rs:1826` | The RV7-12 regression test passes with the fix disabled, which does not meet A-38. Peer 3 holds an unrelated v2, so the answer is `Ambiguous` either way. | Make peer 3 hold v3 (the same copy as local). The test then gives `Chosen` v1 without the fix and `Ambiguous` with it. |
+
+Informational: a revert is offered as a decision on **every** computer, not only the
+one that reverted, and the first answer applies to all. The notes' "you choose
+once" is accurate. The release notes and `domain.md` could say "on any computer".
+
+### Recheck 2 verdict
+
+Counts: **critical 0, major 0, minor 2 open** (RV7-14, and RV7-05 still partly
+resolved from Recheck 1). RV7-10, RV7-11, RV7-12 (code) and RV7-13 are
+resolved.
+
+Budget: within the about-150-AIU guide; no sub-agents.
