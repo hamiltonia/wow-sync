@@ -9,6 +9,8 @@ use crate::{FsError, FsErrorKind};
 use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 
 pub struct ScanOptions {
     /// 512 MiB.
@@ -222,16 +224,50 @@ pub fn scan_folder_with_hook(
     opts: &ScanOptions,
     hook: &mut dyn FnMut(ScanPhase),
 ) -> ScannedFolder {
+    scan_folder_ctl(addons, name, opts, hook, &ScanCtl::default())
+        .expect("a scan without a cancel request completes")
+}
+
+/// Shared between a scan and whoever watches it: `cancel` stops the scan at the next file,
+/// `files` counts the files hashed so far (progress for a long read-only check).
+#[derive(Clone, Default)]
+pub struct ScanCtl {
+    pub cancel: Arc<AtomicBool>,
+    pub files: Arc<AtomicU64>,
+}
+
+impl ScanCtl {
+    pub fn cancelled(&self) -> bool {
+        self.cancel.load(Ordering::Relaxed)
+    }
+}
+
+/// `None` = cancelled before the folder was complete.
+fn scan_folder_ctl(
+    addons: &Root,
+    name: &str,
+    opts: &ScanOptions,
+    hook: &mut dyn FnMut(ScanPhase),
+    ctl: &ScanCtl,
+) -> Option<ScannedFolder> {
     let s1 = match snapshot_of(addons, name, opts.max_files_per_folder) {
         Ok(Some(s)) => s,
-        Ok(None) => return failed(name, ScanStatus::Unreadable("folder disappeared".into())),
-        Err(e) => return failed(name, status_of(&e)),
+        Ok(None) => {
+            return Some(failed(
+                name,
+                ScanStatus::Unreadable("folder disappeared".into()),
+            ))
+        }
+        Err(e) => return Some(failed(name, status_of(&e))),
     };
     hook(ScanPhase::AfterFirstSnapshot);
     let mut files = Vec::new();
     for (p, is_dir, _, _) in &s1.entries {
         if *is_dir {
             continue;
+        }
+        if ctl.cancelled() {
+            return None;
         }
         let rel = format!("{name}/{p}");
         let hashed = addons
@@ -241,12 +277,15 @@ pub fn scan_folder_with_hook(
                 sha256_stream(&path, &mut f, opts.max_file_bytes)
             });
         match hashed {
-            Ok((size, sha256)) => files.push(ScannedFile {
-                rel_path: p.clone(),
-                size,
-                sha256,
-            }),
-            Err(e) => return failed(name, status_of(&e)),
+            Ok((size, sha256)) => {
+                files.push(ScannedFile {
+                    rel_path: p.clone(),
+                    size,
+                    sha256,
+                });
+                ctl.files.fetch_add(1, Ordering::Relaxed);
+            }
+            Err(e) => return Some(failed(name, status_of(&e))),
         }
     }
     let mut tocs = Vec::new();
@@ -263,12 +302,12 @@ pub fn scan_folder_with_hook(
     let s2 = match snapshot_of(addons, name, opts.max_files_per_folder) {
         Ok(Some(s)) => s,
         Ok(None) => {
-            return failed(
+            return Some(failed(
                 name,
                 ScanStatus::Unstable("folder removed during scan".into()),
-            )
+            ))
         }
-        Err(e) => return failed(name, status_of(&e)),
+        Err(e) => return Some(failed(name, status_of(&e))),
     };
     let fingerprint = Some(s2.fingerprint());
     let status = if let Some(d) = s1.first_difference(&s2) {
@@ -284,13 +323,13 @@ pub fn scan_folder_with_hook(
     } else {
         ScanStatus::Ok
     };
-    ScannedFolder {
+    Some(ScannedFolder {
         name: name.to_string(),
         status,
         files,
         tocs,
         fingerprint,
-    }
+    })
 }
 
 /// Reads at most `limit + 1` bytes from the start of the file: a longer file is never loaded
@@ -330,9 +369,23 @@ pub fn scan_addons_with_hook(
     opts: &ScanOptions,
     hook: &mut dyn FnMut(&str),
 ) -> Result<AddonsScan, FsError> {
+    Ok(scan_addons_ctl(addons, opts, hook, &ScanCtl::default())?
+        .expect("a scan without a cancel request completes"))
+}
+
+/// Like `scan_addons_with_hook`, but `ctl` can cancel it (`Ok(None)`) and shows its progress.
+pub fn scan_addons_ctl(
+    addons: &Root,
+    opts: &ScanOptions,
+    hook: &mut dyn FnMut(&str),
+    ctl: &ScanCtl,
+) -> Result<Option<AddonsScan>, FsError> {
     let l1 = top_level(addons)?;
     let mut folders = Vec::new();
     for e in &l1 {
+        if ctl.cancelled() {
+            return Ok(None);
+        }
         let f = if e.reparse != ReparseKind::None || !e.is_dir {
             let why = check_entry(e, ReparsePolicy::RejectAll, &addons.path().join(&e.name))
                 .err()
@@ -341,7 +394,10 @@ pub fn scan_addons_with_hook(
             failed(&e.name, ScanStatus::Unsafe(why))
         } else {
             match check_entry(e, addons.policy(), &addons.path().join(&e.name)) {
-                Ok(()) => scan_folder(addons, &e.name, opts),
+                Ok(()) => match scan_folder_ctl(addons, &e.name, opts, &mut |_| {}, ctl) {
+                    Some(f) => f,
+                    None => return Ok(None),
+                },
                 Err(x) => failed(&e.name, status_of(&x)),
             }
         };
@@ -349,10 +405,10 @@ pub fn scan_addons_with_hook(
         folders.push(f);
     }
     let l2 = top_level(addons)?;
-    Ok(AddonsScan {
+    Ok(Some(AddonsScan {
         folders,
         listing_stable: kinds(&l1) == kinds(&l2),
-    })
+    }))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -498,6 +554,28 @@ mod tests {
 
     fn sha(b: &[u8]) -> [u8; 32] {
         Sha256::digest(b).into()
+    }
+
+    #[test]
+    fn a_cancelled_scan_stops_at_the_next_file_and_reports_progress() {
+        let (_t, _i, root) = setup();
+        let ctl = ScanCtl::default();
+        let done = scan_addons_ctl(&root, &opts(), &mut |_| {}, &ctl).unwrap();
+        assert!(done.is_some());
+        assert_eq!(ctl.files.load(Ordering::Relaxed), 3, "three files hashed");
+        let ctl = ScanCtl::default();
+        let mut hook = |p: ScanPhase| {
+            if p == ScanPhase::AfterFirstSnapshot {
+                ctl.cancel.store(true, Ordering::Relaxed);
+            }
+        };
+        assert!(scan_folder_ctl(&root, "Alpha", &opts(), &mut hook, &ctl).is_none());
+        assert_eq!(ctl.files.load(Ordering::Relaxed), 0, "no file was read");
+        let ctl = ScanCtl::default();
+        ctl.cancel.store(true, Ordering::Relaxed);
+        assert!(scan_addons_ctl(&root, &opts(), &mut |_| {}, &ctl)
+            .unwrap()
+            .is_none());
     }
 
     #[test]

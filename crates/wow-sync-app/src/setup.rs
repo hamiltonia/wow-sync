@@ -32,6 +32,29 @@ fn same_path(a: &Path, b: &Path) -> bool {
     k(a).trim_end_matches('\\') == k(b).trim_end_matches('\\')
 }
 
+/// Rows whose variant folder has a `.flavor.info` come first, so the row selected by default
+/// is one the check can accept. A refused row stays listed, with its reason, after the
+/// others; the order is otherwise kept.
+pub fn usable_first(installs: &mut [crate::world::Install]) {
+    installs.sort_by_key(|i| !i.root.join(&i.folder).join(".flavor.info").is_file());
+}
+
+/// "Checking add-ons… 12,000 files": progress of a long read-only check.
+pub fn checking_text(files: u64) -> String {
+    if files == 0 {
+        return "Checking add-ons…".into();
+    }
+    let digits = files.to_string();
+    let mut grouped = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            grouped.push(',');
+        }
+        grouped.push(c);
+    }
+    format!("Checking add-ons… {grouped} files")
+}
+
 /// Warning shown for a chosen folder Dropbox does not report. It does not block: Dropbox may
 /// be installed in an unusual way.
 pub const NOT_DROPBOX_TEXT: &str = "This folder is not a Dropbox folder that WoW Sync can see. Sync only works if every computer uses the same Dropbox folder.";
@@ -293,9 +316,21 @@ impl Shell {
                             Some(r) => div()
                                 .text_color(rgb(pal.fg(Tone::Help)))
                                 .child(SharedString::from(format!("Can't be synced. {r}"))),
-                            None if !ins.inspected => div()
-                                .text_color(rgb(pal.muted))
-                                .child("Checking this installation…"),
+                            None if !ins.inspected => {
+                                let live = self
+                                    .setup
+                                    .inspecting
+                                    .as_ref()
+                                    .filter(|(r, f, _)| *r == ins.root && *f == ins.folder);
+                                match live {
+                                    Some((_, _, n)) => div()
+                                        .text_color(rgb(pal.muted))
+                                        .child(SharedString::from(checking_text(*n))),
+                                    None => div()
+                                        .text_color(rgb(pal.muted))
+                                        .child("Not checked yet. Choose Check again."),
+                                }
+                            }
                             None if !ins.recognised => div()
                                 .text_color(rgb(pal.fg(Tone::Waiting)))
                                 .child("Not recognised yet: confirm it below"),
@@ -329,6 +364,22 @@ impl Shell {
                     )
                     .into_any_element(),
                 );
+                if let Some(ins) = d.installs.get(self.setup.install).filter(|i| !i.inspected) {
+                    let running = self
+                        .setup
+                        .inspecting
+                        .as_ref()
+                        .is_some_and(|(r, f, _)| *r == ins.root && *f == ins.folder);
+                    let (id, label, act) = if running {
+                        ("cancel-check", "Cancel check", SetupAct::CancelCheck)
+                    } else {
+                        ("check-again", "Check again", SetupAct::TryAgain)
+                    };
+                    body.push(
+                        self.btn(id, label, Bk::Secondary, Act::Setup(act), cx)
+                            .into_any_element(),
+                    );
+                }
                 if let Some(ins) = d
                     .installs
                     .get(self.setup.install)
@@ -761,6 +812,38 @@ mod tests {
         let mut d = empty();
         apply_dropbox_choice(&mut d, &t.join("Elsewhere"));
         assert!(d.dropbox.is_some() && !d.online_only);
+    }
+
+    #[test]
+    fn a_usable_install_is_listed_and_selected_before_a_refused_one() {
+        let t = lab("usable");
+        let wow = t.join("World of Warcraft");
+        std::fs::create_dir_all(wow.join("_classic_beta_")).unwrap();
+        std::fs::create_dir_all(wow.join("_forever_")).unwrap();
+        std::fs::write(wow.join("_forever_").join(".flavor.info"), "Product: wow\n").unwrap();
+        // Detection lists variant folders alphabetically, so the refused one comes first.
+        let mut rows = vec![
+            crate::install_row(&wow, "_classic_beta_"),
+            crate::install_row(&wow, "_forever_"),
+        ];
+        usable_first(&mut rows);
+        assert_eq!(rows[0].folder, "_forever_", "selected by default (row 0)");
+        assert_eq!(
+            rows[1].folder, "_classic_beta_",
+            "the refused row stays listed"
+        );
+        let _ = std::fs::remove_dir_all(&t);
+    }
+
+    #[test]
+    fn long_checks_show_how_many_files_were_read() {
+        assert_eq!(checking_text(0), "Checking add-ons…");
+        assert_eq!(checking_text(950), "Checking add-ons… 950 files");
+        assert_eq!(checking_text(12_000), "Checking add-ons… 12,000 files");
+        assert_eq!(
+            checking_text(1_234_567),
+            "Checking add-ons… 1,234,567 files"
+        );
     }
 
     #[test]

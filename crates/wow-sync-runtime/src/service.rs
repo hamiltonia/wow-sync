@@ -27,8 +27,9 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use wow_sync_adapters::fs_install::InstallArea;
 use wow_sync_adapters::fs_safe::{ReparsePolicy, Root};
+pub use wow_sync_adapters::fs_scan::ScanCtl;
 use wow_sync_adapters::fs_scan::{
-    list_variant_folders, read_variant_files, scan_addons, DirKind, FileRead, ScanOptions,
+    list_variant_folders, read_variant_files, scan_addons_ctl, DirKind, FileRead, ScanOptions,
     ScanStatus as AdScanStatus,
 };
 use wow_sync_adapters::localstate::LocalState;
@@ -1594,10 +1595,20 @@ impl SliceService {
     }
 
     fn scan(&self) -> Result<(Vec<FolderScan>, bool), ServiceError> {
+        Ok(self
+            .scan_ctl(&ScanCtl::default())?
+            .expect("a scan without a cancel request completes"))
+    }
+
+    /// `None` = cancelled through `ctl`.
+    #[allow(clippy::type_complexity)]
+    fn scan_ctl(&self, ctl: &ScanCtl) -> Result<Option<(Vec<FolderScan>, bool)>, ServiceError> {
         let root = Root::open(&self.addons_path(), ReparsePolicy::RejectAll).map_err(local)?;
         let mut opts = ScanOptions::with_defaults(now_unix_ms());
         opts.recent_ms = self.cfg.recent_ms;
-        let scan = scan_addons(&root, &opts).map_err(local)?;
+        let Some(scan) = scan_addons_ctl(&root, &opts, &mut |_| {}, ctl).map_err(local)? else {
+            return Ok(None);
+        };
         let folders = scan
             .folders
             .into_iter()
@@ -1632,7 +1643,7 @@ impl SliceService {
                 fingerprint: f.fingerprint.map(Sha256),
             })
             .collect();
-        Ok((folders, scan.listing_stable))
+        Ok(Some((folders, scan.listing_stable)))
     }
 
     fn marker_policy(&self) -> MarkerPolicy {
@@ -1666,13 +1677,28 @@ impl SliceService {
         &self,
         enrolled_elsewhere: bool,
     ) -> Result<(VariantVerdict, LayoutAssessment, Vec<FolderScan>, bool), ServiceError> {
+        Ok(self
+            .judge_ctl(enrolled_elsewhere, &ScanCtl::default())?
+            .expect("a judgement without a cancel request completes"))
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn judge_ctl(
+        &self,
+        enrolled_elsewhere: bool,
+        ctl: &ScanCtl,
+    ) -> Result<Option<(VariantVerdict, LayoutAssessment, Vec<FolderScan>, bool)>, ServiceError>
+    {
         let verdict = validate_variant(
             &self.observation(&self.cfg.variant_folder),
             self.marker_policy(),
         );
         let (scans, stable) = match &verdict {
             VariantVerdict::Refused(_) => (Vec::new(), true),
-            _ => self.scan()?,
+            _ => match self.scan_ctl(ctl)? {
+                Some(x) => x,
+                None => return Ok(None),
+            },
         };
         let assessment = match &verdict {
             VariantVerdict::Recognized(id) => assess_layout(
@@ -1691,7 +1717,7 @@ impl SliceService {
                 assess_layout(&dummy_identity(), false, &[], &OtherVariants::default())
             }
         };
-        Ok((verdict, assessment, scans, stable))
+        Ok(Some((verdict, assessment, scans, stable)))
     }
 
     fn open_provider(&self) -> Result<ProviderRoot, ServiceError> {
@@ -1736,19 +1762,26 @@ impl SliceService {
 
     /// Read-only: writes nothing locally or in the shared folder.
     pub fn inspect(&self) -> EnrollPreview {
+        self.inspect_ctl(&ScanCtl::default())
+            .expect("an inspection without a cancel request completes")
+    }
+
+    /// Like `inspect`; `None` = cancelled through `ctl`, with nothing reported.
+    pub fn inspect_ctl(&self, ctl: &ScanCtl) -> Option<EnrollPreview> {
         let enrolled = self.read_enrollment().ok().flatten().is_some();
-        let mut p = self.preview();
+        let mut p = self.preview(ctl)?;
         if enrolled {
             p.problem = Some(ServiceError::AlreadyEnrolled.to_string());
         }
-        p
+        Some(p)
     }
 
-    fn preview(&self) -> EnrollPreview {
-        let (verdict, assessment, _scans, _stable) = match self.judge(false) {
-            Ok(x) => x,
+    fn preview(&self, ctl: &ScanCtl) -> Option<EnrollPreview> {
+        let (verdict, assessment, _scans, _stable) = match self.judge_ctl(false, ctl) {
+            Ok(Some(x)) => x,
+            Ok(None) => return None,
             Err(e) => {
-                return EnrollPreview {
+                return Some(EnrollPreview {
                     kind: PreviewKind::Refused,
                     identity_line: String::new(),
                     scope_line: String::new(),
@@ -1761,7 +1794,7 @@ impl SliceService {
                     retryable: true,
                     test_mode_blocked: false,
                     disclosures: vec![],
-                }
+                })
             }
         };
         let mut p = EnrollPreview {
@@ -1786,7 +1819,7 @@ impl SliceService {
                 p.problem = Some(text);
                 p.retryable = retry;
                 p.test_mode_blocked = matches!(r, RefuseReason::NotSyntheticInstall);
-                return p;
+                return Some(p);
             }
         };
         p.kind = kind.clone();
@@ -1830,7 +1863,7 @@ impl SliceService {
                 p.test_mode_blocked = matches!(r, LayoutReason::NotSyntheticInstall);
             }
         }
-        p
+        Some(p)
     }
 
     /// Guided reconfirmation after the stored confirmation went stale (M1). Writes only the
@@ -2679,7 +2712,9 @@ impl SliceService {
             }
             Err(ServiceError::NeedsReconfirmation) => {
                 self.provider_error = None;
-                let mut preview = self.preview();
+                let Some(mut preview) = self.preview(&ScanCtl::default()) else {
+                    unreachable!("a preview without a cancel request completes")
+                };
                 preview.groups.clear();
                 return StatusSnapshot {
                     enrolled: true,

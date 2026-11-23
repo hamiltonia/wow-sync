@@ -126,6 +126,8 @@ pub enum SetupAct {
     /// Open the folder picker for the Dropbox folder (step 2).
     PickDropboxFolder,
     TryAgain,
+    /// Stop the read-only check of the selected installation.
+    CancelCheck,
     TurnOffTestMode,
     SelectInstall(usize),
     IdentityToggle,
@@ -158,6 +160,9 @@ pub struct SetupState {
     pub pick_note: Option<String>,
     /// A chosen folder is being looked at off the window thread.
     pub checking: bool,
+    /// The read-only check of an installation that is still running: its folder and how many
+    /// files it has read so far.
+    pub inspecting: Option<(std::path::PathBuf, String, u64)>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -466,7 +471,7 @@ impl Shell {
 
     /// Read what the sync thread has published and rebuild the view-model from it.
     pub fn pull(&mut self, cx: &mut Context<Self>) {
-        let (w, msg, setup_ready, quit_ready, enrolled_now, settings, preview) = {
+        let (w, msg, setup_ready, quit_ready, enrolled_now, settings, preview, inspecting) = {
             let g = backend::lock(&self.shared);
             if g.version == self.seen_version {
                 return;
@@ -517,11 +522,19 @@ impl Shell {
                 g.quit_ready,
                 g.enrolled_now,
                 g.settings,
-                g.preview.clone(),
+                g.preview.clone().zip(g.preview_for.clone()),
+                g.inspecting.as_ref().map(|i| {
+                    (
+                        i.root.clone(),
+                        i.folder.clone(),
+                        i.files.load(std::sync::atomic::Ordering::Relaxed),
+                    )
+                }),
             )
         };
         let first = !self.loaded && setup_ready;
         self.w = w;
+        self.setup.inspecting = inspecting;
         let w = &self.w;
         self.notice
             .settle(|key, release| crate::rollback_ui::request_done(w, key, release));
@@ -565,18 +578,33 @@ impl Shell {
         cx.notify();
     }
 
-    /// Folds the read-only check of the selected installation into the setup rows.
-    fn merge_preview(&mut self, preview: Option<wow_sync_runtime::EnrollPreview>) {
+    /// Folds the read-only check into the setup row of the installation it was made for, which
+    /// need not be the selected one: a late result never lands on another row.
+    fn merge_preview(
+        &mut self,
+        preview: Option<(
+            wow_sync_runtime::EnrollPreview,
+            (std::path::PathBuf, String),
+        )>,
+    ) {
         use wow_sync_runtime::PreviewKind;
-        let Some(p) = preview else {
+        let Some((p, (root, variant))) = preview else {
             self.preview_lines.clear();
             return;
         };
-        self.preview_lines = p.disclosures.clone();
         let sel = self.setup.install;
         let mut seen: Option<(String, Option<String>, Vec<String>, usize)> = None;
         if let Some(d) = self.w.setup.as_mut() {
-            if let Some(ins) = d.installs.get_mut(sel) {
+            let target = d
+                .installs
+                .iter()
+                .position(|i| i.folder == variant && i.root == root);
+            if target == Some(sel) {
+                self.preview_lines = p.disclosures.clone();
+            } else {
+                self.preview_lines.clear();
+            }
+            if let Some(ins) = target.and_then(|i| d.installs.get_mut(i)) {
                 ins.inspected = true;
                 ins.identity = if p.identity_line.is_empty() {
                     ins.folder.clone()
@@ -1077,6 +1105,9 @@ impl Shell {
                 }
             }
             SetupAct::Back => {
+                if self.setup.step == 3 {
+                    self.send(Cmd::CancelInspect);
+                }
                 self.setup.step = self.setup.step.saturating_sub(1).max(1);
                 log(&format!("setup step {} (back)", self.setup.step));
             }
@@ -1084,6 +1115,7 @@ impl Shell {
             SetupAct::PickGameFolder => self.pick_folder(true, cx),
             SetupAct::PickDropboxFolder => self.pick_folder(false, cx),
             SetupAct::TryAgain => self.inspect_selected(),
+            SetupAct::CancelCheck => self.send(Cmd::CancelInspect),
             SetupAct::TurnOffTestMode => {
                 let t = self.setup_target();
                 self.send(Cmd::SetTestMode(false, t));
@@ -1126,10 +1158,17 @@ impl Shell {
             join,
             identity_confirmed: self.setup.consent.identity,
             scope_confirmed: self.setup.consent.scope,
-            digest: backend::lock(&self.shared)
-                .preview
-                .as_ref()
-                .and_then(|p| p.digest),
+            digest: {
+                let g = backend::lock(&self.shared);
+                let for_this = g
+                    .preview_for
+                    .as_ref()
+                    .is_some_and(|(r, f)| *r == t.install_root && *f == t.variant_folder);
+                g.preview
+                    .as_ref()
+                    .filter(|_| for_this)
+                    .and_then(|p| p.digest)
+            },
             display_name: d.computer.clone(),
         };
         self.setup.working = true;
@@ -1279,11 +1318,24 @@ impl Shell {
         match e {
             TrayEv::Click => {
                 // Q-39: a left click (and a second instance's request) always opens the window.
-                log("tray left click");
+                log("tray: left click");
                 self.show();
             }
             TrayEv::Menu(id) => {
-                log("tray menu item");
+                let item = if id == t.open {
+                    "open"
+                } else if id == t.sync {
+                    "sync now"
+                } else if id == t.pause {
+                    "pause or resume"
+                } else if Some(&id) == t.needs.as_ref() {
+                    "needs attention"
+                } else if id == t.quit {
+                    "quit"
+                } else {
+                    "unknown"
+                };
+                log(&format!("tray: {item}"));
                 if id == t.open {
                     self.show();
                 } else if id == t.sync {

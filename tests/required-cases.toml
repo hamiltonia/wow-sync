@@ -1777,3 +1777,16 @@ tests = [
 
 # >>> section: R6-check
 # <<< section: R6-check
+
+# >>> section: R8-fix
+[[case]]
+id = "R8-fix:setup-inspection"
+tier = "offline"
+tests = [
+    "fs_scan::tests::a_cancelled_scan_stops_at_the_next_file_and_reports_progress",
+    "backend::tests::quit_does_not_wait_behind_a_running_read_only_inspection",
+    "backend::tests::a_cancelled_or_replaced_inspection_never_publishes_for_the_wrong_target",
+    "setup::tests::a_usable_install_is_listed_and_selected_before_a_refused_one",
+    "setup::tests::long_checks_show_how_many_files_were_read",
+]
+# <<< section: R8-fix

@@ -6,12 +6,13 @@
 use crate::features::{ActionKind, ActionResult, GroupAction};
 use crate::world::SetupData;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use wow_sync_runtime::{
     ActivityEntry, AppSettings, EnrollPreview, EnrollRequest, PauseState, QuitGate,
-    ReconfirmRequest, ServiceConfig, SliceService, StatusSnapshot, StopState,
+    ReconfirmRequest, ScanCtl, ServiceConfig, SliceService, StatusSnapshot, StopState,
 };
 
 /// Which install and shared folder a computer is set up with.
@@ -30,6 +31,8 @@ pub enum Cmd {
     CancelQuit,
     /// Read-only: describe this installation against the shared folder (setup step 4).
     Inspect(Target),
+    /// Stop the read-only check that is running, if any.
+    CancelInspect,
     /// Turn test mode on or off; the target is used only before enrollment.
     SetTestMode(bool, Option<Target>),
     Enroll(Target, EnrollRequest),
@@ -83,6 +86,21 @@ pub struct Shared {
     /// The last test-mode change: a counter so a result shows once, the mode asked for, and
     /// whether it was applied.
     pub test_mode_result: Option<(u64, bool, bool)>,
+    /// The installation `preview` describes; a preview is only used for its own target.
+    pub preview_for: Option<(PathBuf, String)>,
+    /// The read-only check that is running now, with its progress.
+    pub inspecting: Option<Inspecting>,
+    /// Identifies the check whose result may still be published; a cancelled or replaced
+    /// check finds a different value and publishes nothing.
+    pub inspect_seq: u64,
+}
+
+/// A read-only check of one installation that has not finished.
+#[derive(Clone)]
+pub struct Inspecting {
+    pub root: PathBuf,
+    pub folder: String,
+    pub files: Arc<AtomicU64>,
 }
 
 pub const TEST_MODE_FAILED: &str = "WoW Sync could not change test mode, so nothing was changed. Check that its data folder can be written to, then try again.";
@@ -313,6 +331,148 @@ fn detect_later(computer: String, shared: SharedState, wake: Sender<()>) {
         });
 }
 
+/// Runs the read-only check of an installation off the command loop, one at a time, so Quit,
+/// Back and a new selection are never queued behind a long scan. A check that was cancelled
+/// or replaced publishes nothing.
+#[derive(Default)]
+pub struct Inspector {
+    running: Option<ScanCtl>,
+    seq: u64,
+}
+
+impl Inspector {
+    pub fn start(
+        &mut self,
+        cfg: ServiceConfig,
+        t: Target,
+        shared: &SharedState,
+        wake: &Sender<()>,
+    ) {
+        if let Some(old) = self.running.take() {
+            old.cancel.store(true, Ordering::Relaxed);
+        }
+        self.seq += 1;
+        let (seq, ctl) = (self.seq, ScanCtl::default());
+        self.running = Some(ctl.clone());
+        publish(shared, wake, |g| {
+            g.preview = None;
+            g.preview_for = None;
+            g.message.clear();
+            g.inspect_seq = seq;
+            g.inspecting = Some(Inspecting {
+                root: t.install_root.clone(),
+                folder: t.variant_folder.clone(),
+                files: ctl.files.clone(),
+            });
+        });
+        let (shared, wake) = (shared.clone(), wake.clone());
+        let spawned = std::thread::Builder::new()
+            .name("inspect".into())
+            .spawn(move || run_inspect(cfg, t, ctl, seq, shared, wake));
+        if let Err(e) = spawned {
+            crate::app::log_error(&format!("inspect could not start: {e}"));
+        }
+    }
+
+    pub fn cancel(&mut self, shared: &SharedState, wake: &Sender<()>) {
+        if let Some(ctl) = self.running.take() {
+            ctl.cancel.store(true, Ordering::Relaxed);
+            publish(shared, wake, |g| {
+                g.inspect_seq = 0;
+                g.inspecting = None;
+            });
+        }
+    }
+}
+
+fn inspect_once(
+    cfg: ServiceConfig,
+    ctl: &ScanCtl,
+) -> Result<Option<EnrollPreview>, wow_sync_runtime::ServiceError> {
+    #[cfg(test)]
+    if cfg.variant_folder == "_hold_" {
+        while !ctl.cancelled() {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        return Ok(None);
+    }
+    Ok(SliceService::new(cfg)?.inspect_ctl(ctl))
+}
+
+fn run_inspect(
+    cfg: ServiceConfig,
+    t: Target,
+    ctl: ScanCtl,
+    seq: u64,
+    shared: SharedState,
+    wake: Sender<()>,
+) {
+    let place = t.install_root.join(&t.variant_folder);
+    let place = place.display();
+    crate::app::log(&format!("inspect start {place}"));
+    let started = Instant::now();
+    let ticking = Arc::new(AtomicBool::new(true));
+    {
+        let (ticking, shared, wake) = (ticking.clone(), shared.clone(), wake.clone());
+        let _ = std::thread::Builder::new()
+            .name("inspect-progress".into())
+            .spawn(move || {
+                while ticking.load(Ordering::Relaxed) {
+                    std::thread::sleep(Duration::from_millis(250));
+                    if !ticking.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    publish(&shared, &wake, |_| {});
+                }
+            });
+    }
+    let res = inspect_once(cfg, &ctl);
+    ticking.store(false, Ordering::Relaxed);
+    let ms = started.elapsed().as_millis();
+    let files = ctl.files.load(Ordering::Relaxed);
+    let result = match res {
+        Ok(Some(p)) if !ctl.cancelled() => Ok(p),
+        Ok(_) => {
+            crate::app::log(&format!("inspect cancelled {place}"));
+            return;
+        }
+        Err(e) => Err(e),
+    };
+    let mut line = None;
+    publish(&shared, &wake, |g| {
+        if g.inspect_seq != seq {
+            return;
+        }
+        g.inspecting = None;
+        match result {
+            Ok(p) => {
+                line = Some(format!(
+                    "inspect done {place} in {ms} ms: {} add-on(s) eligible, {} blocked, {files} file(s) read",
+                    p.eligible.len(),
+                    p.blocked.len()
+                ));
+                g.preview = Some(p);
+                g.preview_for = Some((t.install_root.clone(), t.variant_folder.clone()));
+                g.message.clear();
+            }
+            Err(e) => {
+                crate::app::log_error(&format!("inspect failed {place} in {ms} ms: {e}"));
+                g.preview = None;
+                g.preview_for = None;
+                g.message = e.to_string();
+            }
+        }
+    });
+    match line {
+        Some(l) => crate::app::log(&l),
+        None => {
+            if lock(&shared).inspect_seq != seq {
+                crate::app::log(&format!("inspect cancelled {place}"));
+            }
+        }
+    }
+}
+
 fn run(
     target: Option<Target>,
     setup: Option<SetupData>,
@@ -343,6 +503,7 @@ fn run(
         detect_later(opts.display_name.clone(), shared.clone(), wake.clone());
     }
     let mut gate = QuitGate::default();
+    let mut inspector = Inspector::default();
     let mut force = true;
     loop {
         let cmd = if force {
@@ -363,22 +524,15 @@ fn run(
         let mut manual = false;
         match cmd {
             Some(Cmd::Inspect(t)) => {
-                publish(&shared, &wake, |g| g.preview = None);
-                let res = SliceService::new(config_for(&opts, &t)).map(|s| s.inspect());
-                publish(&shared, &wake, |g| match res {
-                    Ok(p) => {
-                        g.preview = Some(p);
-                        g.message.clear();
-                    }
-                    Err(e) => {
-                        crate::app::log_error(&format!("inspect failed: {e}"));
-                        g.preview = None;
-                        g.message = e.to_string();
-                    }
-                });
+                inspector.start(config_for(&opts, &t), t, &shared, &wake);
+                continue;
+            }
+            Some(Cmd::CancelInspect) => {
+                inspector.cancel(&shared, &wake);
                 continue;
             }
             Some(Cmd::Enroll(t, req)) => {
+                inspector.cancel(&shared, &wake);
                 let _ = std::fs::create_dir_all(&t.shared_root);
                 let res =
                     open_service(config_for(&opts, &t), os_attach(&opts)).and_then(|mut s| {
@@ -442,15 +596,14 @@ fn run(
                         Err(_) => true,
                     };
                     // The folder is judged again, so setup shows the real state either way.
-                    let p = SliceService::new(config_for(&opts, &t)).map(|s| s.inspect());
                     publish(&shared, &wake, |g| {
-                        g.preview = p.ok();
                         g.message = if failed {
                             TEST_MODE_FAILED.into()
                         } else {
                             String::new()
                         };
                     });
+                    inspector.start(config_for(&opts, &t), t, &shared, &wake);
                 }
                 publish(&shared, &wake, |g| {
                     let seq = g.test_mode_result.as_ref().map_or(1, |r| r.0 + 1);
@@ -502,7 +655,9 @@ fn run(
                 continue;
             }
             Some(Cmd::QuitWhenSafe) => {
-                // Commands are only read between cycles, so no step is running here.
+                // A read-only check is abandoned; a sync or write step finishes first because
+                // commands are only read between steps, so none is running here.
+                inspector.cancel(&shared, &wake);
                 if gate.request() == StopState::Now {
                     publish(&shared, &wake, |g| g.quit_ready = true);
                     continue;
@@ -552,6 +707,116 @@ fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn lab_backend(tag: &str) -> (PathBuf, SharedState, Sender<Cmd>, Target) {
+        let base = std::env::temp_dir().join(format!("wowsync-r8-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(base.join("wow").join("_retail_")).unwrap();
+        // The local state rejects symlinked paths and macOS temp dirs sit behind one.
+        let base = std::fs::canonicalize(&base).unwrap();
+        let opts = BackendOptions {
+            interval: Duration::from_secs(60),
+            crash_after: None,
+            state_dir: base.join("state"),
+            display_name: "Desk".into(),
+            app_version: "0.0.0".into(),
+            recent_ms: 0,
+            save_target: false,
+            os_services: false,
+        };
+        std::fs::create_dir_all(&opts.state_dir).unwrap();
+        let t = Target {
+            install_root: base.join("wow"),
+            variant_folder: "_retail_".into(),
+            shared_root: base.join("shared"),
+        };
+        let shared: SharedState = Arc::new(Mutex::new(Shared::default()));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (wake, _woken) = std::sync::mpsc::channel();
+        spawn(
+            None,
+            Some(SetupData::default()),
+            opts,
+            rx,
+            shared.clone(),
+            wake,
+        );
+        (base, shared, tx, t)
+    }
+
+    fn held(t: &Target) -> Target {
+        Target {
+            variant_folder: "_hold_".into(),
+            ..t.clone()
+        }
+    }
+
+    fn wait_for(what: &str, limit: Duration, mut ok: impl FnMut() -> bool) -> Duration {
+        let start = Instant::now();
+        while !ok() {
+            assert!(start.elapsed() < limit, "timed out waiting for {what}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        start.elapsed()
+    }
+
+    #[test]
+    fn quit_does_not_wait_behind_a_running_read_only_inspection() {
+        let (base, shared, tx, t) = lab_backend("quit");
+        tx.send(Cmd::Inspect(held(&t))).unwrap();
+        wait_for("the check to start", Duration::from_secs(5), || {
+            lock(&shared).inspecting.is_some()
+        });
+        tx.send(Cmd::QuitWhenSafe).unwrap();
+        let took = wait_for("quit to be ready", Duration::from_secs(5), || {
+            lock(&shared).quit_ready
+        });
+        assert!(took < Duration::from_secs(5), "quit took {took:?}");
+        wait_for("the check to be abandoned", Duration::from_secs(5), || {
+            lock(&shared).inspecting.is_none()
+        });
+        let g = lock(&shared);
+        assert!(g.preview.is_none() && g.preview_for.is_none());
+        drop(g);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_cancelled_or_replaced_inspection_never_publishes_for_the_wrong_target() {
+        let (base, shared, tx, t) = lab_backend("replace");
+        tx.send(Cmd::Inspect(held(&t))).unwrap();
+        wait_for("the first check", Duration::from_secs(5), || {
+            lock(&shared).inspecting.is_some()
+        });
+        tx.send(Cmd::CancelInspect).unwrap();
+        wait_for("cancel", Duration::from_secs(5), || {
+            lock(&shared).inspecting.is_none()
+        });
+        tx.send(Cmd::Inspect(held(&t))).unwrap();
+        wait_for("the second check", Duration::from_secs(5), || {
+            lock(&shared).inspecting.is_some()
+        });
+        tx.send(Cmd::Inspect(t.clone())).unwrap();
+        wait_for("the replacing check", Duration::from_secs(5), || {
+            lock(&shared).preview.is_some()
+        });
+        let g = lock(&shared);
+        assert_eq!(
+            g.preview_for,
+            Some((t.install_root.clone(), "_retail_".to_string())),
+            "the preview belongs to the folder that was asked for last"
+        );
+        assert!(g.inspecting.is_none());
+        drop(g);
+        std::thread::sleep(Duration::from_millis(100));
+        let g = lock(&shared);
+        assert_eq!(
+            g.preview_for.as_ref().map(|p| p.1.as_str()),
+            Some("_retail_")
+        );
+        drop(g);
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn a_failed_test_mode_change_is_reported_and_never_claims_a_state() {
