@@ -224,16 +224,10 @@ mod tests {
 
     #[test]
     fn the_default_path_is_in_the_state_dir_and_the_env_overrides_it() {
-        let s = Path::new("S:\\state");
-        assert_eq!(
-            log_path(s, None),
-            PathBuf::from("S:\\state\\logs\\wow-sync.log")
-        );
+        let s = Path::new("state");
+        assert_eq!(log_path(s, None), s.join("logs").join("wow-sync.log"));
         assert_eq!(log_path(s, Some("")), log_path(s, None));
-        assert_eq!(
-            log_path(s, Some("X:\\own.log")),
-            PathBuf::from("X:\\own.log")
-        );
+        assert_eq!(log_path(s, Some("own.log")), PathBuf::from("own.log"));
     }
 
     #[test]

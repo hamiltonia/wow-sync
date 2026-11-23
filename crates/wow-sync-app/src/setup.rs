@@ -703,12 +703,10 @@ mod tests {
     fn a_chosen_dropbox_folder_keeps_the_shared_folder_inside_it() {
         let mut d = empty();
         d.online_only = true;
-        apply_dropbox_choice(&mut d, Path::new("G:\\My Dropbox"));
-        assert_eq!(d.dropbox.as_deref(), Some("G:\\My Dropbox"));
-        assert_eq!(
-            d.shared_root,
-            Some(PathBuf::from("G:\\My Dropbox\\WoW Sync"))
-        );
+        let root = Path::new("dropbox").join("My Dropbox");
+        apply_dropbox_choice(&mut d, &root);
+        assert_eq!(d.dropbox.as_deref(), root.to_str());
+        assert_eq!(d.shared_root, Some(root.join("WoW Sync")));
         assert!(!d.online_only);
     }
 }
