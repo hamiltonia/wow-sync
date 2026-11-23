@@ -23,6 +23,7 @@ pub mod inventory;
 pub mod kinds;
 pub mod layout;
 pub mod ledger;
+pub mod lineage;
 pub mod notice;
 pub mod package;
 pub mod paths;

@@ -24,6 +24,13 @@ pub enum Explanation {
     Installed {
         source: ComputerId,
     },
+    /// An unrecognised add-on replaced by the copy that descends from it (R-05, D-29).
+    ContentLineage {
+        folder: String,
+        source: ComputerId,
+        /// Short hash of the copy replaced here; `None` when this computer had none.
+        replaces: Option<String>,
+    },
     AmbiguousVersions {
         evidence: Vec<FolderEvidence>,
         candidates: Vec<AmbiguousCandidate>,
@@ -164,6 +171,15 @@ pub fn render_named(e: &Explanation, name_of: &dyn Fn(&ComputerId) -> String) ->
             )
         }
         Installed { source } => format!("added from {}", name_of(source)),
+        ContentLineage {
+            folder,
+            source,
+            replaces,
+        } => format!(
+            "{folder}: changed from the copy last shared, on {}; replaces {}",
+            name_of(source),
+            replaces.as_deref().unwrap_or("the earlier copy")
+        ),
         AmbiguousVersions {
             evidence,
             candidates,

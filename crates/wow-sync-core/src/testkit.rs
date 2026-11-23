@@ -18,8 +18,8 @@ use crate::plan::{
 };
 use crate::records::{
     decode, decode_journal, encode, AnyJournal, ApplyJournal, ApplyJournalV2, CodeState,
-    FolderTreeRecord, GroupRecord, JournalFolder, JournalPhase, MemberRecord, PendingRecord,
-    Record, RecoveryPoint, RecoveryPointV2, SettingsFileOp,
+    FolderTreeRecord, GroupRecord, JournalFolder, JournalPhase, MemberRecord, PackageLineage,
+    PendingRecord, Record, RecoveryPoint, RecoveryPointV2, SettingsFileOp,
 };
 use crate::target::{compute_target, GroupTarget, TargetInput, TreeAvail};
 use crate::toc::{IdKind, TocCandidate};
@@ -273,6 +273,7 @@ pub fn member_state(c: &ComputerId, seq: u64, inv: &Inventory) -> CodeState {
         apply_report: None,
         authority_index: None,
         features: Vec::new(),
+        lineage: Vec::new(),
     }
 }
 
@@ -344,7 +345,6 @@ pub struct Scenario {
     pub local_client: ClientInfo,
     pub members: Vec<MemberView>,
     pub trees: BTreeMap<Sha256, TreeAvail>,
-    pub shared: BTreeMap<FolderKey, Sha256>,
 }
 
 impl Scenario {
@@ -354,13 +354,32 @@ impl Scenario {
             local_client: client(BUILD),
             members: Vec::new(),
             trees: BTreeMap::new(),
-            shared: BTreeMap::new(),
         }
     }
 
-    /// Records the last shared release of `package` (R-05 content lineage).
-    pub fn shared_at(mut self, package: &str, hash: Sha256) -> Self {
-        self.shared.insert(FolderKey::lossy(package), hash);
+    /// Gives peer `n` a published lineage entry: `package` at `hash`, descended from `ancestors`.
+    pub fn peer_lineage(self, n: u8, package: &str, hash: Sha256, ancestors: &[Sha256]) -> Self {
+        let l = PackageLineage {
+            package: FolderKey::lossy(package),
+            hash,
+            ancestors: ancestors.to_vec(),
+        };
+        self.map_state(n, |s| s.lineage.push(l))
+    }
+
+    /// Marks this computer's own previously published state (what it published before its
+    /// inventory changed); its lineage descends from that copy.
+    pub fn local_published(mut self, scans: Vec<FolderScan>) -> Self {
+        let st = member_state(&computer(1), 1, &inventory(scans));
+        self.members.push(MemberView {
+            computer: computer(1),
+            enrollment: enrollment(1),
+            display_name: "PC1".into(),
+            latest: MemberLatest::Valid {
+                seq: 1,
+                state: Box::new(st),
+            },
+        });
         self
     }
 
@@ -450,21 +469,6 @@ impl Scenario {
             local_id: &computer(1),
             members: &self.members,
             trees: &self.trees,
-            shared: &self.shared,
-        })
-    }
-
-    /// The shared-release memory after observing this scenario.
-    pub fn shared_after(&self) -> BTreeMap<FolderKey, Sha256> {
-        crate::target::shared_releases(&TargetInput {
-            group: &group_record(),
-            variant: &confirmed_forever(),
-            local: &self.local,
-            local_client: &self.local_client,
-            local_id: &computer(1),
-            members: &self.members,
-            trees: &self.trees,
-            shared: &self.shared,
         })
     }
 
@@ -481,6 +485,7 @@ impl Scenario {
             apply_report: None,
             authority_index: None,
             features: Vec::new(),
+            lineage: Vec::new(),
             own_state_files: own_files
                 .iter()
                 .map(|f| f.rsplit('/').next().unwrap_or(f).to_string())

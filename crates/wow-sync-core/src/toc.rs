@@ -50,12 +50,17 @@ fn header_window(bytes: &[u8]) -> Option<&[u8]> {
 }
 
 /// Parses a `.toc` header. Bytes beyond `TOC_LIMIT` are not read for meaning: only the complete
-/// lines before the cut count. An oversized file whose window holds no `##` metadata line is
-/// `TooLarge` (its header lies beyond the window), never an empty success.
+/// lines before the cut count. A cut file is accepted only when the window shows the header has
+/// ended (a file-list line follows the `#` lines); otherwise directives may lie beyond the window
+/// and it is `TooLarge`, never an incomplete success (D-29, RV7-04).
 pub fn parse_toc(bytes: &[u8]) -> Result<TocInfo, TocError> {
     let oversized = bytes.len() > TOC_LIMIT;
     let bytes = if oversized {
-        header_window(bytes).ok_or(TocError::TooLarge)?
+        let window = header_window(bytes).ok_or(TocError::TooLarge)?;
+        if !header_has_ended(window) {
+            return Err(TocError::TooLarge);
+        }
+        window
     } else {
         bytes
     };
@@ -64,6 +69,15 @@ pub fn parse_toc(bytes: &[u8]) -> Result<TocInfo, TocError> {
         return Err(TocError::TooLarge);
     }
     Ok(info)
+}
+
+/// A line that is neither blank nor a `#` line is a file entry: the header is over.
+fn header_has_ended(window: &[u8]) -> bool {
+    let window = window.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(window);
+    window
+        .split(|b| *b == b'\n')
+        .map(|l| l.trim_ascii())
+        .any(|l| !l.is_empty() && l[0] != b'#')
 }
 
 fn parse_header(bytes: &[u8]) -> Result<TocInfo, TocError> {
@@ -481,6 +495,23 @@ mod tests {
             &TocMapping::ValidatedPlain,
         );
         assert!(matches!(sel, TocSelection::Error { .. }));
+    }
+
+    #[test]
+    fn cut_header_without_a_file_line_is_not_selected() {
+        // The window holds only directives: more of them (and the saved variables) may follow.
+        let mut b = big_toc(
+            "## Version: 1\n",
+            "## X-Filler: padding\n",
+            TOC_LIMIT + 4096,
+        );
+        b.extend_from_slice(b"## SavedVariables: Late\nMain.lua\n");
+        assert_eq!(parse_toc(&b), Err(TocError::TooLarge));
+        // A file-list line inside the window proves the header ended: the rest is file entries.
+        let mut ok = b"## Version: 1\n".to_vec();
+        ok.extend_from_slice(b"Main.lua\n");
+        ok.extend(big_toc("", "## X-Filler: padding\n", TOC_LIMIT + 4096));
+        assert_eq!(parse_toc(&ok).unwrap().version.as_deref(), Some("1"));
     }
 
     #[test]

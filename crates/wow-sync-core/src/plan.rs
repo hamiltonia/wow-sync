@@ -8,8 +8,8 @@ use crate::layout::{blob, parse_state_name, state_record, tree_record};
 use crate::package::ClientInfo;
 use crate::paths::{FolderKey, RelPath};
 use crate::records::{
-    encode, ApplyReport, AuthorityIndexHead, CodeState, FolderTreeRecord, OpKind, PendingRecord,
-    SettingsFileOp, SettingsRoot,
+    encode, ApplyReport, AuthorityIndexHead, CodeState, FolderTreeRecord, OpKind, PackageLineage,
+    PendingRecord, SettingsFileOp, SettingsRoot,
 };
 use crate::target::{GroupTarget, PackageTarget};
 use crate::variant::ConfirmedVariant;
@@ -76,6 +76,8 @@ pub struct PublishContext {
     pub apply_report: Option<ApplyReport>,
     pub authority_index: Option<AuthorityIndexHead>,
     pub features: Vec<String>,
+    /// The package ancestry to publish (`lineage::next_lineage`).
+    pub lineage: Vec<PackageLineage>,
     pub own_state_files: Vec<String>,
 }
 
@@ -150,6 +152,7 @@ pub fn plan_publish(inv: &Inventory, ctx: &PublishContext) -> Result<PublishPlan
         apply_report: ctx.apply_report.clone(),
         authority_index: ctx.authority_index,
         features: ctx.features.clone(),
+        lineage: ctx.lineage.clone(),
     };
     let mut seqs = own;
     seqs.push(ctx.seq);

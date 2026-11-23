@@ -154,9 +154,10 @@ at most 256 KiB (`TOC_LIMIT`) is parsed whole. A longer file is parsed from the
 complete lines of its first 256 KiB only (a line cut by the window is dropped
 whole, so a cut multi-byte character never fails the UTF-8 check); the scan
 reads at most `TOC_LIMIT + 1` bytes of it but still hashes the whole file. A
-longer file whose window holds no `##` metadata line is `TooLarge` (the header
-lies beyond the window): the folder is then unrecognised, never an empty
-success. Then: strip UTF-8 BOM; decode
+longer file whose window holds no `##` metadata line, or whose window never shows
+the header ending (no non-blank, non-`#` line, so the header may continue beyond
+the window), is `TooLarge`: the folder is then unrecognised, never an empty
+or partial success. Then: strip UTF-8 BOM; decode
 UTF-8, invalid bytes → `NotUtf8` error (fail closed, never "empty"). Only lines
 starting `##` are read: `## Key: Value` (key and value trimmed; key compared
 case-insensitively). Recorded keys:
@@ -396,24 +397,36 @@ copies where any compared folder is unrecognised is
 `Ambiguous(UnrecognisedDiffers)` ("unrecognised add-on: no version to compare,
 the copies differ"); identical copies are `Same`. The only ordering is lineage:
 
-- Each computer keeps a **local** record `SharedReleases`
-  (`wowsync.shared-releases`, `shared-releases.json`; never published): per
-  package key, the hash of the last release this computer held **identically**
-  with an admitted peer while its own copy was complete. It is updated on every
-  observation by `shared_releases(input)` (pure), kept when no peer matches
-  and dropped when the package disappears.
-- A copy that differs from that shared release, while the other candidate **is**
-  the shared release, is the newer one and dominates. With two or more copies
-  that each differ from it (or no shared release known, e.g. first join with
-  different copies) nothing dominates and the package is a one-time
-  `NeedsDecision(Ambiguous)` (a ChooseCopy decision; the alternatives are
-  preserved by the usual recovery rules). No clock, mtime or computer
-  preference is used.
+- Each computer **publishes** lineage in its `code-state/1` record
+  (`lineage: [PackageLineage { package, hash, ancestors }]`, additive, omitted
+  when empty). For every unrecognised, complete package it holds, it publishes
+  the current package hash and up to `MAX_ANCESTORS` (32) ancestors, newest
+  first: the hash its **own previous published state** held for that package
+  (the tree it replaced), then everything the admitted records already know as
+  ancestors of the replaced and the new hash. `next_lineage` (pure) builds it;
+  the runtime passes it in `PublishContext.lineage`.
+- Every computer builds the same `LineageGraph` from the admitted states (peers
+  and its own latest). Copy X is **newer** than Y only if Y is reachable from X
+  through published ancestors and X is not reachable from Y. A copy that is an
+  ancestor of the group's current copy therefore never wins again; an offline
+  peer returning with it has its copy replaced (recovery copy kept as for any
+  replacement). The newer copy dominates the package.
+- Unrelated copies (no ancestry either way, e.g. first join with different
+  copies, both sides changed, or a peer that publishes no lineage) and
+  mutually-descended copies (a revert) do not dominate: the package is a
+  one-time `NeedsDecision(Ambiguous)` (a ChooseCopy decision; the alternatives
+  are preserved by the usual recovery rules). After a decision the chosen copy
+  is published with the replaced copy as an ancestor, and the live
+  `code-choice` keeps record the losing hash as considered, so the loser cannot
+  return from an offline peer. No clock, mtime, local file or computer
+  preference decides.
+- A package mixing recognised and unrecognised folders first checks the
+  recognised folders' version evidence; if it contradicts the lineage order the
+  package is a `MembersDisagree` decision (never a lineage win).
 - Added by one computer: installed elsewhere. Removed: removal and restore
   work exactly as for recognised add-ons (removal.md).
-- Limit: the shared release is learned only when both computers have
-  observed the same copy. A change made before that observation falls back to
-  the decision.
+- Limit: peers that published their state before this feature carry no
+  lineage, so their copies count as unrelated and need one decision.
 Input order and duplicates never change the result: inputs are sorted by
 `(ComputerId, seq)` and deduplicated by package hash before evaluation.
 A package that a member does not have is simply not a candidate from that

@@ -512,10 +512,6 @@ mod tests {
         b.join(&g);
         converge(&mut a, &mut b);
         assert_eq!(b.read("Bare/main.lua").as_deref(), Some("v1"));
-        assert!(
-            b.cfg.state_dir.join("shared-releases.json").exists(),
-            "the shared release is remembered locally"
-        );
         a.bare("Bare", "v2");
         converge(&mut a, &mut b);
         assert_eq!(a.read("Bare/main.lua").as_deref(), Some("v2"));
@@ -524,6 +520,152 @@ mod tests {
             Some("v2"),
             "the copy changed since the shared release wins without a question"
         );
+        assert!(offered_kinds(&a).is_empty() && offered_kinds(&b).is_empty());
+        assert!(
+            recovery_holds(&b, "v1"),
+            "the replaced copy is kept for recovery like any replacement"
+        );
+    }
+
+    fn recovery_holds(pc: &Pc, content: &str) -> bool {
+        has_file(
+            &pc.install.variant_dir.join(".wowsync").join("recovery"),
+            "main.lua",
+            content.as_bytes(),
+        )
+    }
+
+    fn decide_first_copy(pc: &mut Pc) {
+        use wow_sync_core::decision::{DecisionId, OptionLabel};
+        let item = pc.svc.offered_decisions()[0].clone();
+        let option = item
+            .options
+            .iter()
+            .find(|o| matches!(o.label, OptionLabel::Release { .. }))
+            .expect("a copy option")
+            .id;
+        pc.svc
+            .command(Command::Decide {
+                item: DecisionId(item.scope.clone()),
+                option,
+                shown: item.evidence,
+            })
+            .unwrap();
+    }
+
+    fn three_at_v1(lab: &Lab) -> (Pc, Pc, Pc) {
+        let (mut a, mut b, mut c) = (lab.pc("a"), lab.pc("b"), lab.pc("c"));
+        a.bare("Bare", "v1");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        c.join(&g);
+        for _ in 0..4 {
+            synced(&mut a);
+            synced(&mut b);
+            synced(&mut c);
+        }
+        for pc in [&a, &b, &c] {
+            assert_eq!(pc.read("Bare/main.lua").as_deref(), Some("v1"));
+        }
+        (a, b, c)
+    }
+
+    #[test]
+    fn a_peer_that_was_offline_while_the_group_moved_on_is_replaced_not_obeyed() {
+        let lab = Lab::new();
+        let (mut a, mut b, mut c) = three_at_v1(&lab);
+        a.bare("Bare", "v2");
+        for _ in 0..4 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        assert_eq!(b.read("Bare/main.lua").as_deref(), Some("v2"));
+        // c has not synced: its v1 state is still published. The group must not go back to it.
+        for _ in 0..3 {
+            synced(&mut a);
+            synced(&mut b);
+            assert_eq!(a.read("Bare/main.lua").as_deref(), Some("v2"));
+            assert_eq!(b.read("Bare/main.lua").as_deref(), Some("v2"));
+            assert!(offered_kinds(&a).is_empty() && offered_kinds(&b).is_empty());
+        }
+        for _ in 0..4 {
+            synced(&mut c);
+            synced(&mut a);
+            synced(&mut b);
+        }
+        for pc in [&a, &b, &c] {
+            assert_eq!(pc.read("Bare/main.lua").as_deref(), Some("v2"));
+            assert!(offered_kinds(pc).is_empty(), "{:?}", offered_kinds(pc));
+        }
+        assert!(recovery_holds(&c, "v1"), "c's replaced copy is kept");
+    }
+
+    #[test]
+    fn a_returning_peer_with_a_changed_copy_gets_one_decision_and_nothing_is_overwritten() {
+        let lab = Lab::new();
+        let (mut a, mut b, mut c) = three_at_v1(&lab);
+        a.bare("Bare", "v2");
+        for _ in 0..4 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        c.bare("Bare", "c-local");
+        for _ in 0..4 {
+            synced(&mut c);
+            synced(&mut a);
+            synced(&mut b);
+        }
+        assert_eq!(c.read("Bare/main.lua").as_deref(), Some("c-local"));
+        assert_eq!(a.read("Bare/main.lua").as_deref(), Some("v2"));
+        assert_eq!(b.read("Bare/main.lua").as_deref(), Some("v2"));
+        for pc in [&a, &b, &c] {
+            assert_eq!(
+                offered_kinds(pc),
+                vec![wow_sync_core::decision::DecisionKind::Ambiguous]
+            );
+        }
+    }
+
+    #[test]
+    fn a_copy_that_lost_a_decision_cannot_come_back_from_an_offline_peer() {
+        let lab = Lab::new();
+        let (mut a, mut b, mut c) = three_at_v1(&lab);
+        a.bare("Bare", "from-a");
+        b.bare("Bare", "from-b");
+        for _ in 0..3 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        assert_eq!(
+            offered_kinds(&a),
+            vec![wow_sync_core::decision::DecisionKind::Ambiguous]
+        );
+        decide_first_copy(&mut a);
+        // b goes offline with its copy still published; c comes back at v1.
+        for _ in 0..4 {
+            synced(&mut a);
+            synced(&mut c);
+        }
+        let winner = a.read("Bare/main.lua").unwrap();
+        assert_eq!(c.read("Bare/main.lua").as_deref(), Some(winner.as_str()));
+        assert!(offered_kinds(&c).is_empty(), "{:?}", offered_kinds(&c));
+        for _ in 0..4 {
+            synced(&mut b);
+            synced(&mut a);
+            synced(&mut c);
+        }
+        let loser = if winner == "from-a" {
+            "from-b"
+        } else {
+            "from-a"
+        };
+        for pc in [&a, &b, &c] {
+            assert_eq!(pc.read("Bare/main.lua").as_deref(), Some(winner.as_str()));
+            assert!(offered_kinds(pc).is_empty(), "{:?}", offered_kinds(pc));
+        }
+        let holder = if loser == "from-b" { &b } else { &a };
+        assert!(recovery_holds(holder, loser), "the losing copy is kept");
     }
 
     #[test]
@@ -541,6 +683,13 @@ mod tests {
         converge(&mut a, &mut b);
         assert_eq!(a.read("Bare/main.lua").as_deref(), Some("from-a"));
         assert_eq!(b.read("Bare/main.lua").as_deref(), Some("from-b"));
+        for pc in [&a, &b] {
+            assert_eq!(
+                offered_kinds(pc),
+                vec![wow_sync_core::decision::DecisionKind::Ambiguous]
+            );
+        }
+        assert!(!recovery_holds(&a, "from-b") && !recovery_holds(&b, "from-a"));
         let r = synced(&mut b);
         assert!(
             r.status
@@ -564,6 +713,11 @@ mod tests {
         converge(&mut a, &mut b);
         assert_eq!(a.read("Bare/main.lua").as_deref(), Some("from-a"));
         assert_eq!(b.read("Bare/main.lua").as_deref(), Some("from-b"));
+        assert_eq!(
+            offered_kinds(&b),
+            vec![wow_sync_core::decision::DecisionKind::Ambiguous]
+        );
+        assert!(!recovery_holds(&a, "from-b") && !recovery_holds(&b, "from-a"));
     }
 
     #[test]

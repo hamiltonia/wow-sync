@@ -164,7 +164,12 @@ of immutable index chunks:
   `sha256(bytes)`. Written write-if-absent like records.
 - `code-state/1` gains two additive fields (old readers ignore them):
   `authority_index: { "head": "<chunk hash>", "total": <ref count> }` and
-  `features: [<capability>]` (§1.13).
+  `features: [<capability>]` (§1.13). A third additive field, `lineage:
+  [{ "package": <folder key>, "hash": <package hash>, "ancestors": [<package
+  hash>] }]` (omitted when empty; at most 32 ancestors per entry, newest first,
+  no duplicate packages), publishes the parent links of unrecognised packages
+  (domain.md §6, R-05 as amended by D-29). It needs no `features` entry: a
+  reader that ignores it sees the copies as unrelated and asks.
 - Grow-only per enrollment. To add refs, the writer either appends a new
   chunk whose `prev` is the old head, or, when the head chunk is not full,
   writes a **replacement** chunk with the same `prev` holding the old head's
@@ -1011,7 +1016,7 @@ Phase C renames it:
 
 | Reason | Cause | Options |
 |---|---|---|
-| `Ambiguous` | copies cannot be ordered but differ (domain.md §6); for an unrecognised add-on (`AmbiguityReason::UnrecognisedDiffers`) when no content lineage orders them. Decided with the local `wowsync.shared-releases` record (`SharedReleases { group_id, packages: key → shared hash }`, never published) | one **Keep this copy** per distinct copy; **Decide later** |
+| `Ambiguous` | copies cannot be ordered but differ (domain.md §6); for an unrecognised add-on (`AmbiguityReason::UnrecognisedDiffers`) when published lineage does not order them (unrelated, mutual, or contradicted by recognised-folder version evidence). Lineage is `code-state/1.lineage` (`PackageLineage { package, hash, ancestors }`, §1.6), never local memory | one **Keep this copy** per distinct copy; **Decide later** |
 | `PartialCandidate` | one copy of a version lacks folders another has | **Keep the complete copy**; **Keep the smaller copy**; **Decide later** |
 | `ChoicesDiffer`, `RollbackTargetsDiffer` | §4.4 | one option per constrained content; **Decide later** |
 | `RecoveredUnavailable` | a live recovered rollback target has no source left (rollback.md §3.1) | one **Use <version>** per available non-rejected candidate; **Decide later** |

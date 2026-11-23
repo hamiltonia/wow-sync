@@ -66,7 +66,7 @@ use wow_sync_core::plan::{Activity, ApplyPlan, PackageApply};
 use wow_sync_core::records::{
     decode, decode_tree, encode, AdmissionWatermarks, ApplyJournal, ApplyReport, BasisEntry,
     CodeState, GroupRecord, LocalComputer, LocalEnrollment, MemberRecord, PendingReport,
-    RecordError, RecoveryPoint, RootFormat, SharedReleases,
+    RecordError, RecoveryPoint, RootFormat,
 };
 use wow_sync_core::reject::{build_lift, LiftError, RejectBehaviour};
 use wow_sync_core::removal::known_summary;
@@ -81,7 +81,7 @@ use wow_sync_core::status::{
     render_block, render_headline, render_member, render_result, Headline, StatusInput, StatusView,
 };
 use wow_sync_core::target::{
-    compose, package_copies, shared_releases, GroupTarget, PackageCopies, TargetInput, TreeAvail,
+    compose, package_copies, GroupTarget, PackageCopies, TargetInput, TreeAvail,
 };
 use wow_sync_core::toc::TocCandidate;
 use wow_sync_core::variant::{
@@ -2243,14 +2243,6 @@ impl SliceService {
             RemovalBehaviour::new(&self.plane.ledger, &group.group_id, &self.plane.members)
                 .with_inventory(inventory.clone(), enrollment.next_seq);
         let constraints = Constraints::for_derived(&derived);
-        let shared_before = match self.state.read("shared-releases.json", SMALL * 16) {
-            Ok(Some(b)) => decode::<SharedReleases>(&b, (SMALL * 16) as usize)
-                .ok()
-                .filter(|r| r.group_id == group.group_id)
-                .map(|r| r.to_map())
-                .unwrap_or_default(),
-            _ => BTreeMap::new(),
-        };
         let input = TargetInput {
             group: &group,
             variant: &variant,
@@ -2259,20 +2251,7 @@ impl SliceService {
             local_id: &computer.computer_id,
             members: &views,
             trees: &trees,
-            shared: &shared_before,
         };
-        let shared_after = shared_releases(&input);
-        if persist && shared_after != shared_before {
-            self.state
-                .write_atomic(
-                    "shared-releases.json",
-                    &encode(&SharedReleases::from_map(
-                        group.group_id.clone(),
-                        &shared_after,
-                    )),
-                )
-                .map_err(local)?;
-        }
         let target = compose(
             &input,
             &self.plane.ledger,
@@ -3441,6 +3420,24 @@ impl SliceService {
         }
         let (_, seq) = own_publish_slot(&w.own_states, enrollment, w.enrollment.next_seq);
         let published_report = apply_rep.is_some();
+        let peer_states: Vec<&CodeState> = w
+            .views
+            .iter()
+            .filter(|m| m.computer != *me)
+            .filter_map(|m| match &m.latest {
+                MemberLatest::Valid { state, .. } if state.computer_id == m.computer => {
+                    Some(&**state)
+                }
+                _ => None,
+            })
+            .collect();
+        let client = Self::client_info(&w.variant);
+        let lineage = wow_sync_core::lineage::next_lineage(
+            &publishable,
+            &client,
+            w.own_latest.as_ref(),
+            &peer_states,
+        );
         let mut ctx = PublishContext {
             group: group_id.clone(),
             computer: me.clone(),
@@ -3449,11 +3446,12 @@ impl SliceService {
             app_version: cfg.app_version.clone(),
             now_unix_ms: now_unix_ms() as u64,
             seq,
-            client: Self::client_info(&w.variant),
+            client,
             apply_report: apply_rep,
             own_state_files: w.own_states.clone(),
             authority_index: index_head,
             features,
+            lineage,
         };
         let plan = match plan_publish(&publishable, &ctx) {
             Ok(p) => p,
