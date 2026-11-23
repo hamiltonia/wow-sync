@@ -162,9 +162,31 @@ pub fn take_visibility_request() -> Option<bool> {
 
 pub use imp::{local_offset_minutes, set_visible, show_requested, single_instance};
 
+/// Opens a folder in the system file manager. Returns false when it is not a folder or the
+/// file manager could not be started. The path is passed as one argument, never to a shell.
+pub fn open_folder(path: &std::path::Path) -> bool {
+    if !path.is_dir() {
+        return false;
+    }
+    #[cfg(windows)]
+    let opener = "explorer.exe";
+    #[cfg(target_os = "macos")]
+    let opener = "open";
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    let opener = "xdg-open";
+    std::process::Command::new(opener).arg(path).spawn().is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_missing_folder_is_not_opened() {
+        assert!(!open_folder(std::path::Path::new(
+            "Z:\\wow-sync\\no\\such\\folder"
+        )));
+    }
 
     #[test]
     fn a_visibility_request_is_taken_once_and_the_latest_wins() {

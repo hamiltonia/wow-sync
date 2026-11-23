@@ -107,6 +107,10 @@ pub enum Act {
     Setup(SetupAct),
     Reconfirm(ReconfAct),
     CopyVersion,
+    /// Open this instance's data (state) folder in the file manager.
+    OpenDataFolder,
+    /// Open the shared folder in the file manager.
+    OpenSharedFolder,
     DismissNotice,
     /// A group command from a feature screen, sent to the sync thread as it is.
     Group(crate::features::GroupAction),
@@ -117,6 +121,10 @@ pub enum SetupAct {
     Next,
     Back,
     ChooseFolder,
+    /// Open the folder picker for the game folder (step 3).
+    PickGameFolder,
+    /// Open the folder picker for the Dropbox folder (step 2).
+    PickDropboxFolder,
     TryAgain,
     TurnOffTestMode,
     SelectInstall(usize),
@@ -146,6 +154,8 @@ pub struct SetupState {
     pub group_name: String,
     pub working: bool,
     pub finished: bool,
+    /// Why the last folder a person chose was not accepted.
+    pub pick_note: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -194,6 +204,8 @@ pub struct Shell {
     pub message: String,
     seen_group_result: u64,
     seen_test_mode: u64,
+    /// The last blocked-add-on list written to the log, so each check does not repeat it.
+    logged_preview: String,
     pub diag: crate::about_ui::DiagState,
     pub preview_lines: Vec<String>,
     pub app_version: String,
@@ -248,16 +260,15 @@ pub fn act_label(act: &Act) -> String {
 }
 
 pub fn log(msg: &str) {
-    if let Ok(path) = std::env::var("WOWSYNC_LOG") {
-        use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-        {
-            let _ = writeln!(f, "pid={} {}", std::process::id(), msg);
-        }
-    }
+    crate::diag_log::write(crate::diag_log::Level::Info, msg);
+}
+
+pub fn log_warn(msg: &str) {
+    crate::diag_log::write(crate::diag_log::Level::Warn, msg);
+}
+
+pub fn log_error(msg: &str) {
+    crate::diag_log::write(crate::diag_log::Level::Error, msg);
 }
 
 #[cfg(windows)]
@@ -302,6 +313,7 @@ impl Shell {
             message: String::new(),
             seen_group_result: 0,
             seen_test_mode: 0,
+            logged_preview: String::new(),
             diag: Default::default(),
             preview_lines: Vec::new(),
             app_version,
@@ -560,6 +572,7 @@ impl Shell {
         };
         self.preview_lines = p.disclosures.clone();
         let sel = self.setup.install;
+        let mut seen: Option<(String, Option<String>, Vec<String>, usize)> = None;
         if let Some(d) = self.w.setup.as_mut() {
             if let Some(ins) = d.installs.get_mut(sel) {
                 ins.inspected = true;
@@ -575,6 +588,12 @@ impl Shell {
                 ins.test_mode_blocked = p.test_mode_blocked;
                 ins.eligible = p.eligible.clone();
                 ins.blocked = p.blocked.clone();
+                seen = Some((
+                    ins.folder.clone(),
+                    ins.refused.clone(),
+                    ins.blocked.clone(),
+                    ins.eligible.len(),
+                ));
             }
             d.groups = p
                 .groups
@@ -585,6 +604,22 @@ impl Shell {
                     identity: g.product.clone(),
                 })
                 .collect();
+        }
+        if let Some((folder, refused, blocked, eligible)) = seen {
+            let sig = format!("{folder}|{refused:?}|{blocked:?}|{eligible}");
+            if sig != self.logged_preview {
+                self.logged_preview = sig;
+                log(&format!(
+                    "inspected {folder}: {eligible} add-on(s) eligible, {} blocked",
+                    blocked.len()
+                ));
+                if let Some(r) = refused {
+                    log_warn(&format!("installation {folder} refused: {r}"));
+                }
+                for b in blocked {
+                    log_warn(&format!("blocked add-on {b}"));
+                }
+            }
         }
     }
 
@@ -763,9 +798,25 @@ impl Shell {
                 self.notice
                     .show(self.page, "The close explanation will show next time.");
             }
-            Act::Setup(a) => self.setup_act(a),
+            Act::Setup(a) => self.setup_act(a, cx),
             Act::Reconfirm(a) => self.reconf_act(a),
             Act::CopyVersion => self.copied = true,
+            Act::OpenDataFolder => {
+                let ok = crate::diag_log::state_dir().is_some_and(|d| win::open_folder(&d));
+                if !ok {
+                    log_warn("could not open the data folder");
+                    self.notice
+                        .show(self.page, "The data folder could not be opened.");
+                }
+            }
+            Act::OpenSharedFolder => {
+                let p = std::path::PathBuf::from(&self.w.shared_label);
+                if !win::open_folder(&p) {
+                    log_warn("could not open the shared folder");
+                    self.notice
+                        .show(self.page, "The shared folder could not be opened.");
+                }
+            }
             Act::DismissNotice => self.notice.dismiss(),
             Act::Group(a) => match crate::features::gate(&self.w, a.kind()) {
                 Ok(()) => {
@@ -908,11 +959,88 @@ impl Shell {
         }
     }
 
-    fn setup_act(&mut self, a: SetupAct) {
+    /// Asks for a folder with the system dialog. Nothing is read or changed until the choice
+    /// has been checked by `folder_picked`.
+    fn pick_folder(&mut self, game: bool, cx: &mut Context<Self>) {
+        let prompt = if game {
+            "Choose the World of Warcraft folder"
+        } else {
+            "Choose your Dropbox folder"
+        };
+        log(&format!(
+            "folder picker opened for {}",
+            if game { "the game" } else { "Dropbox" }
+        ));
+        let rx = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some(prompt.into()),
+        });
+        cx.spawn(async move |this, cx| {
+            let chosen = match rx.await {
+                Ok(Ok(Some(v))) => v.into_iter().next(),
+                _ => None,
+            };
+            this.update(cx, |s, cx| {
+                match chosen {
+                    Some(p) => s.folder_picked(game, p),
+                    None => log("folder picker closed without a choice"),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Takes the person's folder into setup. A game folder joins the list and is then checked
+    /// like any other; it is never trusted because it was chosen by hand.
+    pub fn folder_picked(&mut self, game: bool, path: std::path::PathBuf) {
+        self.setup.pick_note = None;
+        let Some(d) = self.w.setup.as_mut() else {
+            return;
+        };
+        if game {
+            match crate::setup::add_chosen_install(d, &path) {
+                Ok(i) => {
+                    log(&format!(
+                        "game folder chosen: {} (accepted)",
+                        path.display()
+                    ));
+                    self.setup_act_select(i);
+                }
+                Err(note) => {
+                    log_warn(&format!(
+                        "game folder chosen: {} (not a game folder)",
+                        path.display()
+                    ));
+                    self.setup.pick_note = Some(note);
+                }
+            }
+        } else {
+            crate::setup::apply_dropbox_choice(d, &path);
+            self.setup.folder_chosen = false;
+            log(&format!("Dropbox folder chosen: {}", path.display()));
+        }
+        self.pending_focus = Some("@content".into());
+    }
+
+    fn setup_act_select(&mut self, i: usize) {
+        self.setup.install = i;
+        self.setup.consent.clear();
+        if let Some(ins) = self.w.setup.as_mut().and_then(|d| d.installs.get_mut(i)) {
+            ins.inspected = false;
+        }
+        self.inspect_selected();
+    }
+
+    fn setup_act(&mut self, a: SetupAct, cx: &mut Context<Self>) {
         match a {
             SetupAct::Next => {
                 if self.setup.step < 6 {
                     self.setup.step += 1;
+                    log(&format!("setup step {}", self.setup.step));
                     if self.setup.step == 3 {
                         self.inspect_selected();
                     }
@@ -920,22 +1048,18 @@ impl Shell {
             }
             SetupAct::Back => {
                 self.setup.step = self.setup.step.saturating_sub(1).max(1);
+                log(&format!("setup step {} (back)", self.setup.step));
             }
             SetupAct::ChooseFolder => self.setup.folder_chosen = true,
+            SetupAct::PickGameFolder => self.pick_folder(true, cx),
+            SetupAct::PickDropboxFolder => self.pick_folder(false, cx),
             SetupAct::TryAgain => self.inspect_selected(),
             SetupAct::TurnOffTestMode => {
                 let t = self.setup_target();
                 self.send(Cmd::SetTestMode(false, t));
                 self.inspect_selected();
             }
-            SetupAct::SelectInstall(i) => {
-                self.setup.install = i;
-                self.setup.consent.clear();
-                if let Some(ins) = self.w.setup.as_mut().and_then(|d| d.installs.get_mut(i)) {
-                    ins.inspected = false;
-                }
-                self.inspect_selected();
-            }
+            SetupAct::SelectInstall(i) => self.setup_act_select(i),
             SetupAct::IdentityToggle => self.setup.consent.identity = !self.setup.consent.identity,
             SetupAct::ScopeToggle => self.setup.consent.scope = !self.setup.consent.scope,
             SetupAct::CreateGroup => self.setup.group = Some(None),

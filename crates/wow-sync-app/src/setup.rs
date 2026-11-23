@@ -3,8 +3,10 @@
 use crate::app::{Act, Bk, ReconfAct, SetupAct, Shell};
 use crate::theme::Tone;
 use crate::ui::{icon, u};
+use crate::world::SetupData;
 use gpui::accesskit::Role;
 use gpui::{div, prelude::*, rgb, AnyElement, Context, FontWeight, SharedString};
+use std::path::Path;
 
 const STEPS: [&str; 6] = [
     "Welcome",
@@ -14,6 +16,51 @@ const STEPS: [&str; 6] = [
     "Sync group",
     "Review and set up",
 ];
+
+pub const NOT_FOUND_TEXT: &str = "World of Warcraft was not found automatically. Choose the folder where it is installed (it contains folders like _retail_ or _forever_).";
+
+/// Shown when a chosen folder is neither an install root nor a variant folder.
+pub fn not_a_game_folder_text(path: &Path) -> String {
+    format!(
+        "{} is not a World of Warcraft folder. Choose the folder where it is installed (it contains folders like _retail_ or _forever_).",
+        path.display()
+    )
+}
+
+fn same_path(a: &Path, b: &Path) -> bool {
+    let k = |p: &Path| p.to_string_lossy().to_lowercase().replace('/', "\\");
+    k(a).trim_end_matches('\\') == k(b).trim_end_matches('\\')
+}
+
+/// Adds the game folder a person chose to the list, as an install root or as one of its
+/// `_variant_` folders, and returns the row to select. The row is only a candidate: it still
+/// goes through the read-only check and the identity and scope confirmation.
+pub fn add_chosen_install(d: &mut SetupData, chosen: &Path) -> Result<usize, String> {
+    let (found, variant) = wow_sync_runtime::install_from_choice(chosen)
+        .ok_or_else(|| not_a_game_folder_text(chosen))?;
+    for v in &found.variants {
+        if !d
+            .installs
+            .iter()
+            .any(|i| same_path(&i.root, &found.root) && &i.folder == v)
+        {
+            d.installs.push(crate::install_row(&found.root, v));
+        }
+    }
+    d.installs
+        .iter()
+        .position(|i| {
+            same_path(&i.root, &found.root) && variant.as_ref().is_none_or(|v| &i.folder == v)
+        })
+        .ok_or_else(|| not_a_game_folder_text(chosen))
+}
+
+/// Uses a Dropbox folder the person chose. The shared folder stays `<Dropbox>\WoW Sync`.
+pub fn apply_dropbox_choice(d: &mut SetupData, chosen: &Path) {
+    d.dropbox = Some(chosen.display().to_string());
+    d.shared_root = Some(chosen.join("WoW Sync"));
+    d.online_only = false;
+}
 
 impl Shell {
     /// Consent needs both the exact game version and the add-on list; scope alone is not enough.
@@ -80,16 +127,26 @@ impl Shell {
             }
             2 => match (&d.dropbox, d.online_only) {
                 (None, _) => {
-                    body.push(div().child("Dropbox was not found on this computer. Install Dropbox and sign in, then try again.").into_any_element());
+                    body.push(div().child("Dropbox was not found on this computer. Install Dropbox and sign in, then try again. If Dropbox is somewhere unusual, choose its folder.").into_any_element());
                     body.push(
-                        self.btn(
-                            "try-again",
-                            "Try again",
-                            Bk::Secondary,
-                            Act::Setup(SetupAct::TryAgain),
-                            cx,
-                        )
-                        .into_any_element(),
+                        div()
+                            .flex()
+                            .gap(u(10.))
+                            .child(self.btn(
+                                "try-again",
+                                "Try again",
+                                Bk::Secondary,
+                                Act::Setup(SetupAct::TryAgain),
+                                cx,
+                            ))
+                            .child(self.btn(
+                                "pick-dropbox",
+                                "Choose your Dropbox folder…",
+                                Bk::Secondary,
+                                Act::Setup(SetupAct::PickDropboxFolder),
+                                cx,
+                            ))
+                            .into_any_element(),
                     );
                 }
                 (Some(p), true) => {
@@ -193,6 +250,41 @@ impl Shell {
                         });
                     body.push(row.into_any_element());
                 }
+                if d.installs.is_empty() {
+                    body.push(
+                        div()
+                            .id("no-installs")
+                            .role(Role::Status)
+                            .aria_label(SharedString::from(NOT_FOUND_TEXT))
+                            .child(NOT_FOUND_TEXT)
+                            .into_any_element(),
+                    );
+                }
+                if let Some(note) = self.setup.pick_note.clone() {
+                    body.push(
+                        div()
+                            .id("pick-note")
+                            .role(Role::Alert)
+                            .aria_label(SharedString::from(note.clone()))
+                            .text_color(rgb(pal.fg(Tone::Help)))
+                            .child(SharedString::from(note))
+                            .into_any_element(),
+                    );
+                }
+                body.push(
+                    self.btn(
+                        "pick-game",
+                        "Choose folder…",
+                        if d.installs.is_empty() {
+                            Bk::Primary
+                        } else {
+                            Bk::Secondary
+                        },
+                        Act::Setup(SetupAct::PickGameFolder),
+                        cx,
+                    )
+                    .into_any_element(),
+                );
                 if let Some(ins) = d
                     .installs
                     .get(self.setup.install)
@@ -533,5 +625,90 @@ impl Shell {
 
     pub fn body_col_pub(&self) -> gpui::Div {
         div().flex().flex_col().gap(u(14.)).max_w(u(880.))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn lab(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("wowsync-setup-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn empty() -> SetupData {
+        SetupData::default()
+    }
+
+    #[test]
+    fn the_empty_state_says_what_to_do_in_plain_words() {
+        assert_eq!(
+            NOT_FOUND_TEXT,
+            "World of Warcraft was not found automatically. Choose the folder where it is installed (it contains folders like _retail_ or _forever_)."
+        );
+        let p = PathBuf::from("G:\\Stuff");
+        let t = not_a_game_folder_text(&p);
+        assert!(t.starts_with("G:\\Stuff is not a World of Warcraft folder."));
+        assert!(t.contains("_retail_ or _forever_"));
+    }
+
+    #[test]
+    fn a_chosen_install_root_adds_its_variants_and_selects_the_first() {
+        let t = lab("root");
+        let wow = t.join("World of Warcraft");
+        std::fs::create_dir_all(wow.join("_classic_era_")).unwrap();
+        std::fs::create_dir_all(wow.join("_forever_")).unwrap();
+        let mut d = empty();
+        let i = add_chosen_install(&mut d, &wow).unwrap();
+        assert_eq!(d.installs.len(), 2);
+        assert_eq!(d.installs[i].folder, "_classic_era_");
+        assert_eq!(d.installs[i].root, wow);
+        assert!(!d.installs[i].inspected, "the choice is only a candidate");
+        let _ = std::fs::remove_dir_all(&t);
+    }
+
+    #[test]
+    fn a_chosen_variant_folder_uses_its_parent_and_selects_that_variant() {
+        let t = lab("variant");
+        let wow = t.join("World of Warcraft");
+        std::fs::create_dir_all(wow.join("_classic_era_")).unwrap();
+        std::fs::create_dir_all(wow.join("_forever_")).unwrap();
+        let mut d = empty();
+        let i = add_chosen_install(&mut d, &wow.join("_forever_")).unwrap();
+        assert_eq!(d.installs[i].folder, "_forever_");
+        assert_eq!(d.installs[i].root, wow);
+        let again = add_chosen_install(&mut d, &wow.join("_forever_")).unwrap();
+        assert_eq!((again, d.installs.len()), (i, 2), "no duplicate rows");
+        let _ = std::fs::remove_dir_all(&t);
+    }
+
+    #[test]
+    fn a_folder_with_no_game_in_it_is_refused_with_its_path() {
+        let t = lab("refuse");
+        std::fs::create_dir_all(t.join("Data")).unwrap();
+        let mut d = empty();
+        let e = add_chosen_install(&mut d, &t).unwrap_err();
+        assert!(e.contains(&t.display().to_string()) && e.contains("not a World of Warcraft"));
+        assert!(add_chosen_install(&mut d, &t.join("missing")).is_err());
+        assert!(add_chosen_install(&mut d, &t.join("Data")).is_err());
+        assert!(d.installs.is_empty());
+        let _ = std::fs::remove_dir_all(&t);
+    }
+
+    #[test]
+    fn a_chosen_dropbox_folder_keeps_the_shared_folder_inside_it() {
+        let mut d = empty();
+        d.online_only = true;
+        apply_dropbox_choice(&mut d, Path::new("G:\\My Dropbox"));
+        assert_eq!(d.dropbox.as_deref(), Some("G:\\My Dropbox"));
+        assert_eq!(
+            d.shared_root,
+            Some(PathBuf::from("G:\\My Dropbox\\WoW Sync"))
+        );
+        assert!(!d.online_only);
     }
 }

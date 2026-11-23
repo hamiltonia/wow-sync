@@ -27,6 +27,41 @@ pub fn subdir_names(root: &Path) -> Vec<String> {
         .collect()
 }
 
+/// Letters of the local fixed drives (never network, removable or optical ones, so a dead
+/// share cannot stall detection). Empty off Windows.
+#[cfg(windows)]
+pub fn fixed_drive_letters() -> Vec<char> {
+    use windows_sys::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives};
+    const DRIVE_FIXED: u32 = 3;
+    // SAFETY: both calls only read system state; the root string is NUL-terminated.
+    let mask = unsafe { GetLogicalDrives() };
+    (0..26u32)
+        .filter(|i| mask & (1 << i) != 0)
+        .map(|i| (b'A' + i as u8) as char)
+        .filter(|c| {
+            let root: Vec<u16> = format!("{c}:\\").encode_utf16().chain([0]).collect();
+            unsafe { GetDriveTypeW(root.as_ptr()) == DRIVE_FIXED }
+        })
+        .collect()
+}
+
+#[cfg(not(windows))]
+pub fn fixed_drive_letters() -> Vec<char> {
+    Vec::new()
+}
+
+/// The bytes of a plain file of at most `limit` bytes, as untrusted data. `None` when it is
+/// absent, unreadable, not a regular file or larger than the limit.
+pub fn read_bytes_bounded(path: &Path, limit: u64) -> Option<Vec<u8>> {
+    let f = std::fs::File::open(path).ok()?;
+    if !f.metadata().ok()?.is_file() {
+        return None;
+    }
+    let mut b = Vec::new();
+    f.take(limit + 1).read_to_end(&mut b).ok()?;
+    (b.len() as u64 <= limit).then_some(b)
+}
+
 /// The text of a plain file of at most `limit` bytes. `None` when it is absent, unreadable,
 /// not a regular file or larger than the limit.
 pub fn read_text_bounded(path: &Path, limit: u64) -> Option<String> {
@@ -59,6 +94,25 @@ mod tests {
             read_text_bounded(t.path(), 100).is_none(),
             "a directory is not text"
         );
+    }
+
+    #[test]
+    fn bounded_byte_read_keeps_arbitrary_bytes_and_refuses_oversize() {
+        let t = TempDir::new();
+        let p = t.join("product.db");
+        std::fs::write(&p, [0u8, 255, 7, 0, 1]).unwrap();
+        assert_eq!(read_bytes_bounded(&p, 5), Some(vec![0u8, 255, 7, 0, 1]));
+        assert!(read_bytes_bounded(&p, 4).is_none());
+        assert!(read_bytes_bounded(&t.join("missing"), 5).is_none());
+        assert!(read_bytes_bounded(t.path(), 5).is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_system_drive_is_a_fixed_drive() {
+        let sys = std::env::var("SystemDrive").unwrap_or_default();
+        let letter = sys.chars().next().unwrap().to_ascii_uppercase();
+        assert!(fixed_drive_letters().contains(&letter));
     }
 
     #[test]
