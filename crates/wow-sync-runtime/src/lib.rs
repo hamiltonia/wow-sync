@@ -43,7 +43,8 @@ pub use restore_flow::{RestoreProgress, RestoreState, RestoreWait};
 pub use rollback_flow::{RollbackOutcome, RollbackOutcomeKind, RollbackRefusal};
 pub use service::{
     AppliedLine, EnrollPreview, EnrollRequest, GroupInfo, JoinChoice, PackageLine, PreviewKind,
-    ReconfirmRequest, ServiceConfig, ServiceError, SliceService, StatusSnapshot, SyncReport,
+    ReconfirmRequest, ScanCtl, ServiceConfig, ServiceError, SliceService, StatusSnapshot,
+    SyncReport,
 };
 pub use settings_cycle::{
     HeadChoice, PausedFolder, SettingsHistoryEntry, SettingsSnapshot, SettingsUnitRow,

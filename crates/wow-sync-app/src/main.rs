@@ -170,7 +170,7 @@ fn detect(computer: &str) -> SetupData {
             p.result.word()
         ));
     }
-    let installs: Vec<Install> = found
+    let mut installs: Vec<Install> = found
         .installs
         .iter()
         .flat_map(|d| {
@@ -180,6 +180,7 @@ fn detect(computer: &str) -> SetupData {
                 .collect::<Vec<_>>()
         })
         .collect();
+    setup::usable_first(&mut installs);
     app::log(&format!(
         "game detection: {} install row(s) from {} probe(s)",
         installs.len(),
