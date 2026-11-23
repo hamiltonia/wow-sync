@@ -43,3 +43,66 @@ owner/orchestrator acceptance with corrected release notes (RV8-02), before the
 setup step 3, the fix does what it claims. Quit no longer waits behind the
 check (proven by mutation M1), repeated checks cancel instead of queuing, and
 results are bound to their target.
+
+## Recheck (5500dec)
+
+Rechecked R8-fix round 2 (worker commit `0fa31fb`, merged as `5500dec`) after
+`git merge main` in this worktree (merge `8d43a33`). Environment: Windows dev
+PC, synthetic lab data only under `D:\WoWSyncLab\R8-review`. No real `_forever_`
+data, `D:\WoWSyncDemo` or running instance was touched.
+
+### What was run
+
+- New tests, unmodified tree: `cargo test -p wow-sync-runtime --lib -- e2e::tests::quit_abandons e2e::tests::a_write_in_progress` passed (2/2).
+  `cargo test -p wow-sync-app --bins -- backend::tests setup::tests diag_log::tests` passed (25/25).
+- Mutations. Each was applied to one file, the named tests were run, and the file was restored with `git checkout`.
+
+| # | Mutation | Test run | Result |
+|---|---|---|---|
+| M4 | `judge` uses `ScanCtl::default()` instead of `read_ctl` (`service.rs:1694`) | `e2e::quit_abandons_a_slow_sync_status_and_enroll_scan_within_a_bound` | **FAILED** (caught) |
+| M5 | The post-apply re-observe is made cancellable (`service.rs:3193` → `observe_world(true)`) | `e2e::a_write_in_progress_finishes_whole_even_when_quit_is_requested` | **FAILED** (caught) |
+| M6 | The `inspect_seq != seq` publish guard is removed (`backend.rs:518-520`) | `backend::a_check_that_ends_with_a_result_after_cancel_or_replace_publishes_nothing` | **FAILED** (caught) |
+| M7 | `catch_unwind` is removed (`backend.rs:499`) | `backend::a_check_that_panics_ends_as_an_error_and_stops_its_ticker` | **FAILED** (caught) |
+| M8 | The `StopTicker` drop guard is removed (`backend.rs:484`) | same | passed: not caught. The guard is redundant while `catch_unwind` holds, because the explicit `ticking.store(false)` at `:505` still runs. See RV8-14. |
+| M9 | `fold_preview` matches on folder only, ignoring root (`setup.rs`) | `setup::a_result_lands_only_on_its_own_row…` | **FAILED** (caught) |
+| M10 | `digest_for` stops checking the target (`backend.rs:106`) | `backend::enroll_uses_only_the_digest_of_the_folder_it_was_checked_for` | **FAILED** (caught) |
+| M11 | `start_checking` keeps `refused` (`world.rs`) | `setup::a_row_that_starts_a_new_check_drops_what_the_old_one_said` | **FAILED** (caught) |
+
+- Scan-count probe: a temporary test in `e2e.rs` (since reverted) counted `ScanCtl.files` against one `status()` scan of 30 synthetic add-ons:
+  - A steady-state `sync_once()` reads 180 files, which is **3 scans**.
+  - An apply pass reads 60 counted files plus one post-apply scan on an uncounted default ctl, which is also **3 scans**.
+  - The backend no longer rescans for status after a successful pass (`refresh_with(r.status)`).
+  - Round 1 measured about 12 scans per pass. The release notes' "about 4" is therefore conservative.
+- Process incident (no product effect): the first mutation attempt used .NET relative paths, which resolve against the process directory `D:\GitHub\wow-sync` and not this worktree. Mutations M4, M5 and M6 were therefore briefly written to the **main checkout's** working tree (`backend.rs`, `service.rs`). They were found with `git status` and `git diff`, confirmed to be only those three lines, and reverted with `git checkout --`. The main checkout is clean again, and nothing was committed, built or run from there. All mutation results above come from the corrected rerun inside this worktree.
+
+### Status of round-1 findings
+
+| ID | Status | Basis |
+|---|---|---|
+| RV8-01 (major) | **Resolved** | Quit sets the shared `abort_reads` flag in the UI thread before the command is queued (`app.rs:879-881`). The backend's `read_ctl` carries that flag into the service and into enroll (`backend.rs:559-562`, `:618`). `judge`, `observe_world` and the status preview stop at the next file and return `Cancelled`. That covers enroll, sync's first and last look, status, commands, reconfirm and diagnostics. The e2e test bounds each of sync, status and enroll to under 500 ms after the flag (M4 shows it detects the regression). The scans that still cannot be cancelled are all bounded: (a) the one post-apply re-observe, by design, so a cycle that changed game files publishes; (b) a single file's hash; (c) directory walks in `snapshot_of`. So Quit waits for at most one in-progress write step plus one scan (warm about 0.45 s per 6k files; cold on RYZENFISH it could be tens of seconds, but only straight after an apply that has just warmed the cache). Writes stay atomic and inline. Cancellation is checked only during reads, before the cycle's first write (`plane.save` and `admission.json` come after the first look) or after its last game-file change (M5 shows the write test detects it). |
+| RV8-02 (minor) | **Resolved** | Notes now say only a write in progress delays Quit, and that a cycle that wrote still publishes; this matches the code. "About 4 scans" is accurate as an upper estimate (probe: 3). |
+| RV8-03 (minor) | **Resolved** | `_late_` test detects removal of the seq guard (M6). The separate `!ctl.cancelled()` guard was dropped; cancel already resets `inspect_seq`, so seq alone is sufficient (`backend.rs:402-410`). |
+| RV8-04 (minor) | **Resolved** (helpers) | `fold_preview` and `digest_for` are tested and the tests detect mutation (M9, M10). Both call sites (`app.rs:612`, `:1171`, `:1688-1691`) now use the helpers. The GUI glue in `app.rs` still has no test (see RV8-14). |
+| RV8-05 (minor) | **Resolved** | Every re-check path in `app.rs` now goes through `inspect_selected()` (`:1103` select / Next, `:1113`, `:1127` Try again, `:1132` Turn off test mode). That function calls `start_checking()` and clears `preview` and `preview_for`. `mark_checking_rows()` (`:582-594`) re-applies "checking" after every publish while `inspecting` names the row, so the row shows progress and Cancel and offers no Next. `setup.inspecting` drives the call. The test-mode path for an unenrolled PC starts its check in the backend (`backend.rs:690`), and that path is covered by `mark_checking_rows` too. |
+| RV8-06 (minor) | **Resolved** | `catch_unwind` turns a panic into an error, and `StopTicker` and `Ended` drop guards are added. A spawn failure clears `inspecting` and shows a message (`backend.rs:388-395`). M7 shows the panic test detects the regression. |
+| RV8-07 (note) | **Resolved** | `setup_panel` keys on `digest_for(setup_target())`. |
+| RV8-08 (note) | Unchanged | The root cause is still plausible rather than proven, and the fix now covers both hypotheses for enroll and sync as well. |
+| RV8-09 (note) | **Resolved** | The new test proves that profile paths on the `inspect …` lines become `~`, and that `tray:` lines stay as they are. No new class of data is logged. The new log lines (`sync cycle stopped…`, `enrollment stopped…`) contain no paths. |
+
+### New findings
+
+| ID | Severity | Location | Finding | How to reproduce |
+|---|---|---|---|---|
+| RV8-11 | minor | `backend.rs:639-641`; `app.rs:546-552`, `:1852`; `service.rs:2715-2720`; `backend.rs:280-286` | **Keep running right after Quit can leave stale UI.** Two cases: (a) A cancelled enroll only logs a line, with no message and no `enrolled_now`. `setup.working` therefore stays `true`, so **Set up** stays busy and **Back** is hidden (`:1852`) until restart. (b) If the flag cancels a `status()` call mid-scan, an empty `StatusSnapshot{enrolled:true}` (blank headline) is published. After Keep running nothing refreshes it until the next scheduled pass. In both cases no data is wrong and nothing is written. The window is narrow: Keep running has to land between `begin_quit` and the backend's next `quit_ready`, which usually follows within one file read. A UI that shows the quit sheet longer (for example while waiting on a write) makes it reachable. Fix: on `Cancelled` from enroll, publish a neutral message (or clear `working` on `CancelQuit`). On `CancelQuit`, set `force = true` so a fresh status is read. | Lab: slow the enroll scan (for example `ScanCtl::slowed`), click **Set up**, choose Quit, then **Keep running** before the app exits. The setup page stays at "Setting up…". |
+| RV8-12 | note | `service.rs:3242-3247`; `backend.rs:774-779` | **Reusing the status result instead of rescanning cannot drive a wrong sync decision.** `r.status` is UI-only. The loop decides from `is_enrolled()`, the pause state and `sync_once`, and every cycle observes the world again before it plans. One behaviour changed. The pre-existing `if let Ok(fresh) = observe_world(false)` fallback silently keeps the post-apply `w` when the final look fails, and that `w` is never older than this cycle. Previously the follow-up `refresh()` would have shown that error at once. Now the pass shows the slightly older snapshot, and the error appears on the next pass. Error paths (`Err(e)` from `sync_once`) still call `refresh`, so VariantChanged, NeedsReconfirmation and TestModeBlocked are still shown immediately. | Code reading. |
+| RV8-13 | note | `service.rs:3189-3195`, `:264` | **Cancellation after ledger-only writes.** In a cycle that applied nothing (`applied_plan` none, `rec.ops` empty) but wrote removal steps, a kept-settle or a pending report, the post-apply look is cancellable. Quit there skips `publish_step`. Each write was already atomic and durable, and the next cycle republishes, so this equals a crash between steps (Q-29 allows it). `ServiceError::Cancelled`'s text "nothing was changed" is not literally true in that one case. Only the log line "sync cycle stopped because the app is quitting" is emitted, though, and the user never sees that text. | Code reading. |
+| RV8-14 | note | `backend.rs:484`, `:505`; `app.rs` | **Test gaps that are not defects.** (a) `StopTicker` is defence in depth: it only matters if code between `catch_unwind` and `:505` panics, so no test catches its removal (M8). (b) The `app.rs` glue (`inspect_selected`, `mark_checking_rows`, `merge_preview` → `fold_preview`, the enroll and `setup_panel` `digest_for` calls) has no automated test, because the GUI has no test harness. Removing one of those calls would not fail a test. The helpers themselves are covered. | M8 above; `rg "fn inspect_selected\|fn mark_checking_rows" crates/wow-sync-app/src/app.rs`. |
+
+### Recheck verdict
+
+**No critical or major findings remain open.** RV8-01 is resolved. Quit
+abandons every read-only scan within about one file. It waits at most for a write
+step already in progress plus one post-apply scan, and that write finishes whole.
+The new tests detect each guarded regression (M4–M7, M9–M11). RV8-02 to RV8-07
+and RV8-09 are resolved, and RV8-08 stays a note. The new findings are one minor
+UI-staleness issue (RV8-11) and three notes (RV8-12 to RV8-14). None blocks v0.3.1.
