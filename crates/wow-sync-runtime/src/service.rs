@@ -3248,7 +3248,13 @@ impl SliceService {
                 let fresh = if applied_plan.is_some() || !rec.ops.is_empty() {
                     // Game files changed: the cycle goes on to publish what it did, so this
                     // look is not abandoned.
-                    self.observe_world_ctl(true, &ScanCtl::default())?
+                    // Not cancellable, but still uses the hash cache: files just written are too recent
+                    // for the cache to trust and are re-read.
+                    let keep = ScanCtl {
+                        cache: self.read_ctl.cache.clone(),
+                        ..ScanCtl::default()
+                    };
+                    self.observe_world_ctl(true, &keep)?
                 } else {
                     self.observe_world(true)?
                 };

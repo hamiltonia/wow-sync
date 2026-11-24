@@ -388,10 +388,10 @@ fn guarded<T>(
 }
 
 /// How long to wait before trying a pass again after an internal error.
-fn fault_retry() -> Duration {
+fn fault_retry(state_dir: &Path) -> Duration {
     #[cfg(test)]
     {
-        let ms = tests::FAULT_RETRY_MS.load(Ordering::Relaxed);
+        let ms = tests::retry_ms(state_dir);
         if ms > 0 {
             return Duration::from_millis(ms);
         }
@@ -731,8 +731,11 @@ fn run(
     };
     let open = |t: &Target| -> Result<SliceService, wow_sync_runtime::ServiceError> {
         let mut s = open_service(config_for(&opts, t), os_attach(&opts))?;
+        // Every service, however it is opened, gets the hash cache, quit cancel and command
+        // interrupt.
+        s.set_read_ctl(read_ctl(t));
         #[cfg(test)]
-        tests::OPENS.fetch_add(1, Ordering::Relaxed);
+        tests::count_open(&opts.state_dir);
         s.inject_crash_after(opts.crash_after);
         Ok(s)
     };
@@ -808,7 +811,7 @@ fn run(
             let next = scheduled.then(|| now_ms() + opts.interval.as_millis() as i64);
             publish(&shared, &wake, |g| g.next_check_ms = next);
             let wait = if lock(&shared).fault.is_some() {
-                fault_retry() * (1 << fault_streak.min(2))
+                fault_retry(&opts.state_dir) * (1 << fault_streak.min(2))
             } else {
                 fault_streak = 0;
                 opts.interval
@@ -843,12 +846,10 @@ fn run(
                     continue;
                 }
                 let _ = std::fs::create_dir_all(&t.shared_root);
-                let res =
-                    open_service(config_for(&opts, &t), os_attach(&opts)).and_then(|mut s| {
-                        s.set_read_ctl(read_ctl(&t));
-                        s.enroll(&req)?;
-                        Ok(s)
-                    });
+                let res = open(&t).and_then(|mut s| {
+                    s.enroll(&req)?;
+                    Ok(s)
+                });
                 match res {
                     Ok(mut s) => {
                         if opts.save_target {
@@ -983,6 +984,8 @@ fn run(
                 match cache.borrow().as_ref() {
                     Some(c) => {
                         c.request_full();
+                        #[cfg(test)]
+                        tests::count_full(&opts.state_dir);
                         crate::app::log(
                             "check all files requested: the next pass re-reads every add-on file",
                         );
@@ -1094,8 +1097,8 @@ fn run(
             #[cfg(test)]
             {
                 let mut hook = tests::PANIC_NEXT_PASS.lock().unwrap();
-                if hook.as_deref() == Some(opts.state_dir.as_path()) {
-                    *hook = None;
+                if let Some(i) = hook.iter().position(|p| *p == opts.state_dir) {
+                    hook.remove(i);
                     drop(hook);
                     panic!("injected test panic");
                 }
@@ -1448,31 +1451,149 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    pub(super) static PANIC_NEXT_PASS: Mutex<Option<PathBuf>> = Mutex::new(None);
-    pub(super) static FAULT_RETRY_MS: AtomicU64 = AtomicU64::new(0);
-    pub(super) static OPENS: AtomicU64 = AtomicU64::new(0);
+    pub(super) static PANIC_NEXT_PASS: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+    // Per state folder, so tests running in parallel cannot change each other's timing or counts.
+    static RETRY_MS: Mutex<Vec<(PathBuf, u64)>> = Mutex::new(Vec::new());
+    static OPENS: Mutex<Vec<(PathBuf, u64)>> = Mutex::new(Vec::new());
+
+    fn slot(v: &mut Vec<(PathBuf, u64)>, k: &Path) -> usize {
+        v.iter().position(|(p, _)| p == k).unwrap_or_else(|| {
+            v.push((k.to_path_buf(), 0));
+            v.len() - 1
+        })
+    }
+
+    pub(super) fn retry_ms(k: &Path) -> u64 {
+        let mut v = RETRY_MS.lock().unwrap();
+        let i = slot(&mut v, k);
+        v[i].1
+    }
+
+    fn set_retry(base: &Path, ms: u64) {
+        let mut v = RETRY_MS.lock().unwrap();
+        let i = slot(&mut v, &base.join("state"));
+        v[i].1 = ms;
+    }
+
+    static FULLS: Mutex<Vec<(PathBuf, u64)>> = Mutex::new(Vec::new());
+
+    pub(super) fn count_full(k: &Path) {
+        let mut v = FULLS.lock().unwrap();
+        let i = slot(&mut v, k);
+        v[i].1 += 1;
+    }
+
+    pub(super) fn count_open(k: &Path) {
+        let mut v = OPENS.lock().unwrap();
+        let i = slot(&mut v, k);
+        v[i].1 += 1;
+    }
+
+    fn opens(base: &Path) -> u64 {
+        let mut v = OPENS.lock().unwrap();
+        let i = slot(&mut v, &base.join("state"));
+        v[i].1
+    }
+
+    fn panic_next_pass(base: &Path) {
+        PANIC_NEXT_PASS.lock().unwrap().push(base.join("state"));
+    }
+
+    fn cache_files(base: &Path) -> usize {
+        std::fs::read_dir(base.join("state"))
+            .map(|d| {
+                d.flatten()
+                    .filter(|e| e.file_name().to_string_lossy().starts_with("hashcache-"))
+                    .count()
+            })
+            .unwrap_or(0)
+    }
+
+    fn clear_caches(base: &Path) {
+        for e in std::fs::read_dir(base.join("state")).unwrap().flatten() {
+            if e.file_name().to_string_lossy().starts_with("hashcache-") {
+                std::fs::remove_file(e.path()).unwrap();
+            }
+        }
+    }
 
     #[test]
-    fn after_a_panic_the_service_is_reopened_from_disk() {
-        let (base, shared, tx, _t) = enrolled_lab("reopen");
-        FAULT_RETRY_MS.store(1000, Ordering::Relaxed);
+    fn a_service_opened_from_a_saved_enrollment_or_after_a_panic_still_uses_the_hash_cache() {
+        let (base, shared1, tx1, t) = enrolled_lab("ctlrestart");
         wait_for("the first pass", Duration::from_secs(20), || {
+            let g = lock(&shared1);
+            !g.busy && g.snapshot.detail.is_some()
+        });
+        assert!(cache_files(&base) > 0, "enroll path writes the cache");
+        tx1.send(Cmd::QuitWhenSafe).unwrap();
+        wait_for("quit", Duration::from_secs(10), || {
+            lock(&shared1).quit_ready
+        });
+        drop(tx1);
+        clear_caches(&base);
+        let mut opts = lab_opts(&base);
+        opts.state_dir = base.join("state");
+        let shared: SharedState = Arc::new(Mutex::new(Shared::default()));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (wake, _w) = std::sync::mpsc::channel();
+        set_retry(&base, 500);
+        spawn(Some(t.clone()), None, opts, rx, shared.clone(), wake);
+        wait_for("restart pass", Duration::from_secs(20), || {
             let g = lock(&shared);
             !g.busy && g.snapshot.detail.is_some()
         });
-        let before = OPENS.load(Ordering::Relaxed);
-        *PANIC_NEXT_PASS.lock().unwrap() = Some(base.join("state"));
+        assert!(cache_files(&base) > 0, "restart path writes the cache");
+        // Check all files must find the cache after a restart.
+        tx.send(Cmd::CheckAllFiles).unwrap();
+        wait_for("check all files", Duration::from_secs(10), || {
+            FULLS
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(p, n)| *p == base.join("state") && *n > 0)
+        });
+        wait_for("its pass", Duration::from_secs(20), || !lock(&shared).busy);
+        clear_caches(&base);
+        panic_next_pass(&base);
         tx.send(Cmd::SyncNow).unwrap();
         wait_for("the fault", Duration::from_secs(10), || {
             lock(&shared).fault.is_some()
         });
-        assert!(OPENS.load(Ordering::Relaxed) > before, "service reopened");
+        wait_for("the retry", Duration::from_secs(20), || {
+            lock(&shared).fault.is_none()
+        });
+        wait_for("the cache again", Duration::from_secs(20), || {
+            cache_files(&base) > 0
+        });
+        tx.send(Cmd::QuitWhenSafe).unwrap();
+        wait_for("quit", Duration::from_secs(10), || lock(&shared).quit_ready);
+        set_retry(&base, 0);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn after_a_panic_the_service_is_reopened_from_disk() {
+        let (base, shared, tx, _t) = enrolled_lab("reopen");
+        set_retry(&base, 1000);
+        wait_for("the first pass", Duration::from_secs(20), || {
+            let g = lock(&shared);
+            !g.busy && g.snapshot.detail.is_some()
+        });
+        let before = opens(&base);
+        panic_next_pass(&base);
+        tx.send(Cmd::SyncNow).unwrap();
+        wait_for("the fault", Duration::from_secs(10), || {
+            lock(&shared).fault.is_some()
+        });
+        wait_for("the reopen", Duration::from_secs(10), || {
+            opens(&base) > before
+        });
         wait_for("the retry", Duration::from_secs(20), || {
             lock(&shared).fault.is_none()
         });
         tx.send(Cmd::QuitWhenSafe).unwrap();
         wait_for("quit", Duration::from_secs(10), || lock(&shared).quit_ready);
-        FAULT_RETRY_MS.store(0, Ordering::Relaxed);
+        set_retry(&base, 0);
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -1555,12 +1676,12 @@ mod tests {
     #[test]
     fn a_panic_in_a_pass_is_shown_keeps_commands_working_and_is_retried() {
         let (base, shared, tx, _t) = enrolled_lab("faultpass");
-        FAULT_RETRY_MS.store(2000, Ordering::Relaxed);
+        set_retry(&base, 2000);
         wait_for("the first pass", Duration::from_secs(20), || {
             let g = lock(&shared);
             !g.busy && g.snapshot.detail.is_some()
         });
-        *PANIC_NEXT_PASS.lock().unwrap() = Some(base.join("state"));
+        panic_next_pass(&base);
         tx.send(Cmd::SyncNow).unwrap();
         wait_for("the fault", Duration::from_secs(10), || {
             lock(&shared).fault.is_some()
@@ -1574,7 +1695,7 @@ mod tests {
         );
         tx.send(Cmd::QuitWhenSafe).unwrap();
         wait_for("quit", Duration::from_secs(10), || lock(&shared).quit_ready);
-        FAULT_RETRY_MS.store(0, Ordering::Relaxed);
+        set_retry(&base, 0);
         let _ = std::fs::remove_dir_all(&base);
     }
 
