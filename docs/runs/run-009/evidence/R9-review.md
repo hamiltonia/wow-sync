@@ -152,3 +152,52 @@ files" recovery action after any restart. It stays **major** and
 release-blocking. The fix is unchanged: call `set_read_ctl(read_ctl(t))`
 inside the `open` closure. Tests should cover restart, then cache use, Quit
 promptness and Check all files.
+
+## Recheck 2 (main 1ad56af)
+
+Rechecked on 2026-11-24 at `main` `1ad56af`, which includes:
+- R9-decide `95fdb84`: RV9-11, RV9-12 and G1 (commands read through the cache,
+  ledger-only commands reuse the last scan).
+- R9-app `cc8caa4` and `a2513b8`: RV9-13 (scan options on every open), G2
+  (Quit sheet above the scroll) and RV9-10 (notes).
+
+The `R9-review` worktree was merged with main. Mutations were temporary and
+reverted, and `git status` was clean before the commit. All data was
+synthetic. The remaining click latency (`recovery_rows` re-hashing, upload not
+yielding) is with R9-decide round 6 and is not re-reported here.
+
+### What was run
+
+| Check | Result |
+|---|---|
+| `cargo test -p wow-sync-runtime --lib -- a_paused_answer_stays_hidden a_command_reads_through diagnostics_and_ledger_only an_answer_kept_while_paused` | PASS 4/4 |
+| M3: `hide_answered` made a no-op | `a_paused_answer_stays_hidden_after_a_pass_and_is_not_offered_after_the_resume_pass` **fails**, so the guard is now exercised |
+| M4: drop the pre-settle `hide_scopes(&mut w, &answered)` in `sync_once` | the same test **fails**, so the RV9-11 fix is exercised |
+| M5: remove `s.set_read_ctl(read_ctl(t))` from the backend `open` closure | `a_service_opened_from_a_saved_enrollment_or_after_a_panic_still_uses_the_hash_cache` **fails**, so the RV9-13 fix is exercised |
+| M6: a `routine` scan clears the full-check flag again (`hash_cache.rs` `finish`) | `a_command_reads_through_the_hash_cache_and_leaves_a_pending_full_check_for_the_pass` **fails**, so a command no longer consumes "Check all files" |
+| `cargo test -p wow-sync-app --bin wow-sync -- a_service_opened_from_a_saved the_quit_sheet_is_outside` (unmutated, in the M5 run) | The quit-sheet structure test passes. It is a source-text test. |
+
+### Per finding
+
+| ID | Status | Severity | Notes |
+|---|---|---|---|
+| RV9-10 | **open** | minor | `docs/release/v0.3.2.md`. Line 43 contains a literal `\n` ("between\n  tries"). The stale "Known limits" bullet ("…described in the R9-decide notes", line 81–82) is still there. The new bullet "Live GUI behaviour of the quit confirmation and memory … were checked by the independent reviewer" claims a check that has not been reported for `1ad56af` (R9-check's G2 evidence is from `7101088`, the failing build). Reword it, or wait for R9-check. |
+| RV9-11 | **closed** | — | `sync_once` hides the scopes queued **before** `settle_kept` (`service.rs` ~2932–2935). M4 shows the test catches a regression. |
+| RV9-12 | **closed** | — | The new test runs a pass while paused and asserts the item is hidden. M3 shows it exercises `hide_answered`. |
+| RV9-13 | **closed** | — | (b) The service is now constructed in `backend.rs` `open` (~733, sets `read_ctl`), used for start-up, open retry, panic reopen and Enroll (~849). Other `SliceService::new` calls: `backend.rs:600/606` is the Inspector, which uses its own `ctl` with a separate `HashCache`, so it is unaffected. `backend.rs:914` is a temporary service for `SetTestMode` before setup; that command does not scan. The rest are test-only (`:1373`, `:1650`, `:1846`). The post-apply observation now keeps the cache (not cancellable, by design). M5 confirms the test. |
+| RV9-14 | **closed for the main view; see RV9-16** | — | `content_view` now renders the sheet in an outer `flex_col`, above the `content-scroll` element, which has `min_h_0`. Entry points that render through `content_view`: tray Quit and the in-app "Quit WoW Sync" (`Act::Quit` → `request_quit`), window close or Ctrl+W (`request_close` → FirstClose or Quit), and the boot `sheet` hook. In **setup mode** `request_quit` never opens a sheet (`quit_sheet_for(.., true)` → `None` → `begin_quit`), so Quit during setup is fine. The structure test only reads source text, so a live UIA check of `1ad56af` is still needed (R9-check). |
+| RV9-15 | **new** | minor | (a) A pending **Check all files** can be lost silently. `request_full` sets an in-memory `AtomicBool` on the `HashCache` instance. Every `open` calls `read_ctl`, which calls `HashCache::open` and creates a **new** instance with `full = false` (`hash_cache.rs` 54–75, `backend.rs` 722–739). If the forced pass after the click panics (reopen), or the app quits or restarts before a complete non-routine scan, the request is dropped. The log line says "the next pass re-reads every add-on file" and nothing tells the owner it did not happen. Commands no longer drop it (M6), and a cancelled pass keeps it (`finish(false, ..)`). Fix: carry the flag across reopen (keep the `Arc<HashCache>` across `open`), or persist it. |
+| RV9-16 | **new (pre-existing)** | **major** | (c) The FirstClose sheet is invisible on the **setup "This computer is set up" screen**. After enrollment `setup.finished = true` (`app.rs:572`), so `setup_mode` is true and `render` uses `setup_view`, which never renders `sheet_view` (`app.rs` ~1754/1786; `setup.rs:199`). `request_close` (`app.rs:1020–1033`) does not check setup mode: `w.enrolled && !first_close_done` sets `Sheet::FirstClose`. From then on `do_act` (`app.rs:744`) ignores every non-sheet action, including **Finish and open WoW Sync**. Another close does nothing (`if self.sheet.is_some() { return }`), and nothing visible changes. Recoverable only by pressing Esc (`escape` → `SheetCancel`) or tray Quit, neither of which is indicated. The same shape exists at `64830b1` (`app.rs` 939/958), so it was not introduced by this run. Every fresh install with `first_close_seen = false` meets this the first time the owner closes the window on the finish screen. Reproduce (GUI): fresh state, finish setup, click the window's X on "This computer is set up", then click **Finish and open WoW Sync**. Nothing happens. Fix: render the sheet in `setup_view` as well, or make `request_close` in setup mode either hide the window or first leave the finish screen. Add a UIA check. |
+| RV9-17 | note | note | (a) Can stale local evidence write a wrong record? No path found. Ledger-only commands that reuse `last_scan` (`Retire`, `AllowAgain`, `SetSettingsPolicy`, and `ReEnroll`) build their records from the ledger, `derived` and members, not from `w.inventory` (`service.rs` ~1225–1300, `re_enroll` ~1571). Standing comes from the freshly re-read ledger. Commands that need local evidence (`Decide`, `KeepOnThisComputer`, remove/restore and others) scan through the cache with `routine` set: the same D-31 trust as a pass (RV9-06), and too-recent files are re-hashed. Diagnostics fingerprints may come from the last scan. That scan is complete, so it is merely older and never mixed. `last_scan` is updated only by complete scans of the same service, so it cannot belong to another root or variant. Residual: the variant judgement inside a reused observation also uses the last scan, so a ledger-only command issued just after a variant change is not refused as VariantChanged. Its record does not touch game files. |
+
+### Recheck 2 verdict
+
+**Release-blocking: yes**, on RV9-16, a major finding that predates run-009. It
+blocks every action on the first close after setup, and the only way out is
+Esc or tray Quit, neither shown. If the orchestrator accepts it as a known
+issue because it predates run-009, nothing else in this run is
+release-blocking.
+
+RV9-11, 12, 13 and 14 are closed (RV9-14 still needs a live UIA check by
+R9-check). RV9-10 is still open (minor). RV9-15 (a lost Check all files) is a
+new minor finding, and RV9-17 is a note. No critical findings.
