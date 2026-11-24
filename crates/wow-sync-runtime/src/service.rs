@@ -524,6 +524,10 @@ pub struct SliceService {
     /// Read-only scans of the install stop at the next file once its flag is set (the app is
     /// quitting). Steps that change game files never consult it.
     read_ctl: ScanCtl,
+    /// The newest complete local scan, for commands that need no fresh local evidence.
+    last_scan: std::sync::Mutex<Option<(Vec<FolderScan>, bool)>>,
+    /// Set for one observation: answer from last_scan instead of reading the install.
+    reuse_scan: std::sync::atomic::AtomicBool,
 }
 
 fn file_obs(r: FileRead) -> FileObs {
@@ -579,6 +583,8 @@ impl SliceService {
             updates: None,
             started_ms: now_unix_ms(),
             read_ctl: ScanCtl::default(),
+            last_scan: Default::default(),
+            reuse_scan: Default::default(),
         })
     }
 
@@ -802,12 +808,13 @@ impl SliceService {
     }
 
     fn diagnostics_command(&mut self, cmd: &Command) -> Result<CommandOutcome, CommandError> {
-        let snap = self.status();
+        // Diagnostics need no fresh local evidence: both looks below use the newest complete scan.
+        let snap = self.status_with(true);
         let wants_fingerprints = matches!(
             cmd,
             Command::ExportDiagnostics { options } if options.include_fingerprints
         );
-        let fingerprints = match self.observe_world(false) {
+        let fingerprints = match self.observe_for_command(true) {
             Ok(w) if wants_fingerprints => crate::diag::fingerprints_from(&snap, &w.inventory),
             _ => Default::default(),
         };
@@ -955,8 +962,14 @@ impl SliceService {
         if cmd == Command::ReEnroll {
             return self.re_enroll();
         }
+        // Commands that only touch the ledger answer from the newest complete scan; the others
+        // look again through the hash cache (no full read, a pending full check stays queued).
+        let ledger_only = matches!(
+            cmd,
+            Command::Retire { .. } | Command::AllowAgain { .. } | Command::SetSettingsPolicy { .. }
+        );
         let mut w = self
-            .observe_world(false)
+            .observe_for_command(ledger_only)
             .map_err(|e| CommandError::Service(e.to_string()))?;
         self.hide_answered(&mut w);
         let provider = self
@@ -1557,7 +1570,7 @@ impl SliceService {
     /// enrollment stays retired and its records stay valid.
     fn re_enroll(&mut self) -> Result<CommandOutcome, CommandError> {
         let svc = |e: &dyn std::fmt::Display| CommandError::Service(e.to_string());
-        let w = self.observe_world(false).map_err(|e| svc(&e))?;
+        let w = self.observe_for_command(true).map_err(|e| svc(&e))?;
         if w.standing == OwnStanding::Active {
             return Ok(CommandOutcome::NothingToDo);
         }
@@ -1682,6 +1695,24 @@ impl SliceService {
     /// `None` = cancelled through `ctl`.
     #[allow(clippy::type_complexity)]
     fn scan_ctl(&self, ctl: &ScanCtl) -> Result<Option<(Vec<FolderScan>, bool)>, ServiceError> {
+        if self.reuse_scan.load(std::sync::atomic::Ordering::Relaxed) {
+            let last = self
+                .last_scan
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            if last.is_some() {
+                return Ok(last);
+            }
+        }
+        let scanned = self.scan_install(ctl)?;
+        if let Some(s) = &scanned {
+            *self.last_scan.lock().unwrap_or_else(|e| e.into_inner()) = Some(s.clone());
+        }
+        Ok(scanned)
+    }
+
+    fn scan_install(&self, ctl: &ScanCtl) -> Result<Option<(Vec<FolderScan>, bool)>, ServiceError> {
         let root = Root::open(&self.addons_path(), ReparsePolicy::RejectAll).map_err(local)?;
         let mut opts = ScanOptions::with_defaults(now_unix_ms());
         opts.recent_ms = self.cfg.recent_ms;
@@ -2214,6 +2245,24 @@ impl SliceService {
     fn observe_world(&mut self, persist: bool) -> Result<World, ServiceError> {
         let ctl = self.read_ctl.clone();
         self.observe_world_ctl(persist, &ctl)
+    }
+
+    /// The observation that answers a user command or a status request: it never does a full
+    /// read (the hash cache serves unchanged files, size and mtime per D-31) and leaves a
+    /// pending `check all files` request for the next pass. `reuse_local` answers from the
+    /// newest complete scan without touching the install, for commands that need no fresh
+    /// local evidence.
+    fn observe_for_command(&mut self, reuse_local: bool) -> Result<World, ServiceError> {
+        let ctl = ScanCtl {
+            routine: true,
+            ..self.read_ctl.clone()
+        };
+        self.reuse_scan
+            .store(reuse_local, std::sync::atomic::Ordering::Relaxed);
+        let w = self.observe_world_ctl(false, &ctl);
+        self.reuse_scan
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        w
     }
 
     fn observe_world_ctl(&mut self, persist: bool, ctl: &ScanCtl) -> Result<World, ServiceError> {
@@ -2762,7 +2811,12 @@ impl SliceService {
 
     /// Read-only view of the current state.
     pub fn status(&mut self) -> StatusSnapshot {
-        let mut s = self.status_inner();
+        self.status_with(false)
+    }
+
+    /// `reuse_local`: answer from the newest complete scan instead of reading the install.
+    fn status_with(&mut self, reuse_local: bool) -> StatusSnapshot {
+        let mut s = self.status_inner(reuse_local);
         s.test_mode = self.test_mode();
         s
     }
@@ -2772,8 +2826,8 @@ impl SliceService {
         crate::control::test_mode(&self.state)
     }
 
-    fn status_inner(&mut self) -> StatusSnapshot {
-        let w = match self.observe_world(false) {
+    fn status_inner(&mut self, reuse_local: bool) -> StatusSnapshot {
+        let w = match self.observe_for_command(reuse_local) {
             Ok(w) => {
                 self.provider_error = None;
                 w

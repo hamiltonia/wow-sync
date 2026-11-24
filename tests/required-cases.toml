@@ -1852,5 +1852,7 @@ tests = [
     "e2e::tests::a_stale_answer_after_a_peer_settled_the_conflict_writes_nothing",
     "e2e::tests::an_answer_kept_while_paused_is_written_once_and_not_offered_again",
     "e2e::tests::a_paused_answer_stays_hidden_after_a_pass_and_is_not_offered_after_the_resume_pass",
+    "e2e::tests::a_command_reads_through_the_hash_cache_and_leaves_a_pending_full_check_for_the_pass",
+    "e2e::tests::diagnostics_and_ledger_only_commands_answer_from_the_last_scan",
 ]
 # <<< section: R9-decide

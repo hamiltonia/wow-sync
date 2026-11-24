@@ -100,3 +100,18 @@ App hook: none; treat DecideError::Changed as "refresh".
 - Mutation results (temporary, restored; git diff shows only the intended change):
   - M1 hide_scopes made a no-op: the new test FAILS ("a pass while paused re-offered the answered item").
   - M2 pre-settle hiding removed: the new test FAILS ("the pass that wrote the answer listed it once more").
+
+## Round 5: command dispatch no longer re-scans (G1)
+
+Root cause: `Command` dispatch, `status()` and diagnostics each called `observe_world`, a full scan with the pass's read control (interrupt disarmed by then). Files whose cache entry was missing were re-hashed, a pending "check all files" request made every file a miss, and a complete command scan cleared that request. Diagnostics scanned twice (`status()` plus its own look).
+
+Fix
+- `ScanCtl.routine` (adapters): a routine read uses the hash cache without honouring a pending full request and does not clear it (`HashCache::lookup/finish` take the flag). Unchanged files are hits (size + mtime, D-31); the request stays for the next pass.
+- `observe_for_command(reuse_local)` in `service.rs` is used by `command()`, `status()`, diagnostics and `re_enroll`. With `reuse_local` it answers from the newest complete scan and does not touch the install: ExportDiagnostics/SavePreviewedDiagnostics (one look, not two), Retire, AllowAgain, SetSettingsPolicy, ReEnroll. Every other command, including Decide, re-reads peers' ledger records and looks at local files only through the cache, so RV9-01 stays closed and a changed local file still changes the evidence token (-> `Changed`).
+- Cost: one extra copy of the last scan (file paths + hashes) is held in memory.
+
+Tests (each fails with the mutation `routine: false` + no reuse; run and restored)
+- `e2e::tests::a_command_reads_through_the_hash_cache_and_leaves_a_pending_full_check_for_the_pass`: zero cache misses during status and Decide; the full request is still pending after them and cleared by the next pass.
+- `e2e::tests::diagnostics_and_ledger_only_commands_answer_from_the_last_scan`: cache hits+misses unchanged across ExportDiagnostics and AllowAgain.
+
+Not measured: the live 1 s gate on a 3 GB tree (needs the owner's/checker's BigLab); changed files in a command's look are still hashed once. backend.rs untouched.

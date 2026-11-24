@@ -240,6 +240,9 @@ pub struct ScanCtl {
     pub cache: Option<Arc<crate::hash_cache::HashCache>>,
     /// A user command waiting for the sync thread; only honoured while rmed.
     pub interrupt: Option<Interrupt>,
+    /// A read made to answer a user command: it uses the cache, never re-reads everything for a
+    /// pending "check all files" and leaves that request for the next pass.
+    pub routine: bool,
 }
 
 /// Lets a user command stop a read-only scan so it is answered at once; the scan is repeated
@@ -297,7 +300,7 @@ fn scan_folder_ctl(
         }
         let rel = format!("{name}/{p}");
         if let Some(c) = &ctl.cache {
-            if let Some(sha256) = c.lookup(&rel, *snap_size, *mtime) {
+            if let Some(sha256) = c.lookup(&rel, *snap_size, *mtime, ctl.routine) {
                 files.push(ScannedFile {
                     rel_path: p.clone(),
                     size: *snap_size,
@@ -432,7 +435,7 @@ pub fn scan_addons_ctl(
     }
     let res = scan_addons_pass(addons, opts, hook, ctl);
     if let Some(c) = &ctl.cache {
-        c.finish(matches!(res, Ok(Some(_))));
+        c.finish(matches!(res, Ok(Some(_))), ctl.routine);
     }
     res
 }
