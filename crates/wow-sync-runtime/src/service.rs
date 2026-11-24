@@ -3840,6 +3840,22 @@ impl SliceService {
         self.progress.clone()
     }
 
+    pub fn history(&self, limit: usize) -> Vec<crate::history::HistoryItem> {
+        crate::history::history(&self.state, limit)
+    }
+
+    pub fn changes_by_pass(&self, limit: usize) -> Vec<crate::history::PassGroup> {
+        crate::history::changes_by_pass(&self.state, limit)
+    }
+
+    pub fn package_changes(
+        &self,
+        package: &str,
+        limit: usize,
+    ) -> Vec<crate::history::ChangeRecord> {
+        crate::history::changes_for_package(&self.state, package, limit)
+    }
+
     pub fn activity_log(&self, limit: usize) -> Vec<crate::control::ActivityEntry> {
         crate::control::read_activity(&self.state, limit)
     }
