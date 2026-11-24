@@ -209,6 +209,40 @@ Answers from an interactive review session with the orchestrator.
   with this decision. It includes publishing a `v0.2.0` GitHub pre-release
   after its gates pass.
 
+### D-32: Visibility into what changed; faster idle passes; run-010 approved (2026-11-24)
+
+- **Trigger:** live use of `v0.3.2` on RYZENFISH and LENOVOFISH.
+  - RYZENFISH gained a new Hide Anything build (43 files) and about 1.8 GB of
+    Spoken add-ons. The owner picked RYZENFISH's copy there.
+  - LENOVOFISH then spent about 7.5 min (15:28–15:35 local) staging and
+    installing those add-ons. All that time the tray still said "Waiting for
+    your decision on 1 add-on", the log had no lines, and nothing showed what
+    was arriving, from where, or how far along it was. The owner believed it
+    was stuck.
+  - The Activity page records only "hideanything applied": no source
+    computer, no version change, no file or size change, no reason.
+  - A pass where every file is a cache hit still takes 19–110 s and reports
+    about 108k reused files for roughly 36k installed files, which suggests
+    repeated scans per pass.
+- **Owner direction:** "there needs to be a lot more visibility into what
+  changed."
+- **Approval:** the owner approved run-010 ("yes, continue"). There is no AIU
+  ceiling (as in D-30 and D-31); usage is tracked.
+- **Scope of run-010:**
+  1. A durable, readable change history: for every add-on or settings change
+     applied, removed, rolled back or published, show what changed, from
+     which computer, the old and new version, file and size changes, and why.
+  2. Live progress during a pass: phase, current add-on, counts and bytes,
+     and an incoming-changes summary. No stale headline while work runs.
+  3. Log lines for pass phases and each package applied, without profile
+     paths or names.
+  4. Idle passes scan each file at most once, and do not re-read files the
+     app just installed. Target (approved as part of this plan): an
+     unchanged pass on the real `_forever_` at least 3× faster than `v0.3.2`.
+  5. Background memory stays within 100 MiB during a large apply.
+  6. Publish `v0.3.3`.
+- SPEC and ACCEPTANCE are unchanged. Plan:
+  [run-010 PLAN.md](runs/run-010/PLAN.md).
 ### D-31: Live sync problems on two PCs; lighter re-checks; run-009 approved (2026-11-24)
 
 - **Trigger:** live use of `v0.3.1` on RYZENFISH and LENOVOFISH.
