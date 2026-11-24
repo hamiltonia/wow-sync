@@ -119,3 +119,22 @@ D-30/RV8-01 on the owner's normal start path. RV9-01, 02, 03, 04, 05 and 07 are
 closed. RV9-10 is partly closed (minor). New minor findings: RV9-11 (one-pass
 stale offer, refused on click) and RV9-12 (`hide_answered` untested). RV9-06 is
 accepted. No critical findings.
+
+### Addendum: relayed from R9-check (G2)
+
+R9-check reported this on the real-copy lab at `7101088` (their evidence,
+not mine). Scroll App settings to the bottom, then click Quit while a sync is
+busy. The Quit sheet is prepended at the top of the same scroller, and the
+scroll position is not reset. "Quit when safe" ends up off-screen (UIA
+y=-1021) while the sheet makes every other action modal-blocked. The process
+was still running more than 48 s later. Scrolling up revealed the button.
+
+Code reading confirms the cause. `app.rs` ~2216–2234 (`content_view`) adds
+`sheet_view` as the first child of the `content-scroll` `overflow_y_scroll`
+div, with no scroll reset or pinned overlay. The same placement already
+exists at `64830b1` (`app.rs` 2156–2167). It is pre-existing, not introduced
+by run-009.
+
+| ID | Status | Severity | Notes |
+|---|---|---|---|
+| RV9-14 | **new (pre-existing)** | **major** (per R9-check G2) | A modal sheet can be off-screen while it blocks every action, so Quit gives no visible confirmation. It is recoverable by scrolling. Fix: render the sheet outside the scroller (pinned), or scroll `content-scroll` to the top when a sheet opens. Add a UIA or layout check that the sheet's default button is within the viewport. |
