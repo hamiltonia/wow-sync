@@ -69,3 +69,53 @@ was started outside test harnesses. `D:\WoWSyncDemo`, real `_forever_` and
 
 The kept_copy panic fix, the index hardening, kept_by_rival for keep-vs-keep,
 and the hash cache are acceptable. Their minor caveats are listed above.
+
+## Recheck (main 7101088)
+
+Rechecked on 2026-11-24 at `main` `7101088`. That commit includes round 3:
+R9-decide `708b0ef` (RV9-01, RV9-04) and R9-app `e7d4e57` (RV9-02, 03, 05, 07,
+10). The `R9-review` worktree was fast-forwarded to `7101088` and the original
+probes were re-run. Every probe and mutation was temporary and reverted, and
+`git status` was clean before the commit. All data was synthetic, from the
+test labs. No live instance, `D:\WoWSyncDemo` or Dropbox was used.
+
+### What was run
+
+| Check | Result |
+|---|---|
+| Probe 1: same shape as before (A decides, then B answers its stale item) | B → `Err(Decide(Changed))`. B's records stayed at 2→2. After 4 rounds A and B offer `[]`. **Fixed.** |
+| Probe 3: B answers while paused (`Kept`), runs one pass while paused, answers again, resumes, then runs one pass | While paused, the item is hidden after the command and after a pass. A second answer → `Changed`. After the **first** resume pass B still lists `[ChoicesDiffer]`; the record was written that pass (2→3). Clicking that listed item → `Changed`. After the rounds A and B offer `[]` and have 3 records. Safe. See RV9-11. |
+| Mutation M1: `hide_answered` returns at once (no-op), with probe 3 | `an_answer_kept_while_paused_is_written_once_and_not_offered_again` and `a_stale_answer_after_a_peer_settled_the_conflict_writes_nothing` both **still pass**. Probe 3 now shows the item offered while paused, and **two more** `Kept` answers are accepted. After resume B has 5 records, and A and B offer `[ChoicesDiffer]` again. So `hide_answered` is needed but no worker test exercises it. See RV9-12. |
+| Mutation M2: `resume_excludes_a_live_keep` returns `false` | `a_live_resume_excluding_what_a_concurrent_keep_pins_is_a_conflict_not_a_silent_winner` **fails** at line 537. The RV9-04 core test is exercised. |
+| Probe 4 (core, `decide_tests.rs`): the worker's Resume + concurrent Keep ledger, then `decision_items` with copies 1.0 and 2.0 | `choices_conflict = true`. Neither copy is excluded. One `ChoicesDiffer` item with options `[Release 1.0, Release 2.0, KeepOnThisComputer]`, so it is answerable, not "Decide later" only. Deciding option 0 gives `choices_conflict = false` and one live choice. The existing keep-vs-keep world (`conflicting_world`) gives a hook result of `false`, so it is unchanged. |
+| Probe 2 / worker test `a_saved_target_without_a_loadable_enrollment_offers_setup_and_does_not_enroll` (same steps as probe 2) | PASS: setup offered, `enrolled_now = false`, LOST_ENROLLMENT message. |
+| Probe 5 (app `backend.rs`): enroll, quit, delete `state\hashcache-*.txt`, restart with the saved target, two passes, quit | After the first run: `["hashcache-c750a1a00856a988.txt"]`. After the restart and two passes: **`[]`**, with `enrolled = true`. The restarted service runs without the hash cache. See RV9-13. |
+| `cargo test -p wow-sync-app --bin wow-sync -- a_saved_target_without after_a_panic checking_does_not_hide`; `cargo test -p wow-sync-adapters --lib hash_cache` | PASS 3/3; PASS 2/2 |
+
+### Per finding
+
+| ID | Status | Severity | Notes |
+|---|---|---|---|
+| RV9-01 | **closed** | — | `service.rs` Command::Decide no longer falls back to `self.offered`. An item missing from the fresh offers returns `Changed`. Probes 1 and 3 confirm this. The leftovers are RV9-11 and RV9-12. |
+| RV9-02 | **closed** | — | `enrolled_at_start` requires `enrollment_loads()`, or the file to exist if the service did not open. A lost enrollment shows setup (`report_lost`, `detect_later(.., false)`). (c) Open-failure retry, by code reading: the retry happens only while a fault is set and `!abort`. The wait is `fault_retry() × 1/2/4` (5/10/20 min), and `fault_streak` rises only on a timeout. There is no tight loop, but any command that wakes `recv_timeout` (for example a Group action) also triggers an immediate open attempt (note). A successful open clears the fault, or shows setup if the enrollment does not load. A failed open keeps the fault and shows the error text, so "will try again" is now true. Edge: when the open fails **and** `enrollment.json` is missing, the open error text is replaced by LOST_ENROLLMENT and there is no retry. Setup is still offered (note). No automated test (disclosed). |
+| RV9-03 | **closed** | — | `checking` now also requires an empty headline, no provider error and no reconfirmation. Tested. |
+| RV9-04 | **closed** | — | (b) Probe 4: the new ChoicesDiffer has both releases plus Keep on this computer. Deciding it clears the conflict. `resume_excludes_a_live_keep` considers only non-Keep live choices, so the owner's two keep-vs-keep records cannot trigger it, and their item is unchanged. A resume that **covers** an older keep (the worker test's "a resume alone") is not a conflict. Residual: an old *Resume* that is still live on the owner's group, plus a concurrent keep of a copy it excludes, now raises a decision. That is intended. |
+| RV9-05 | **closed** | — | 12 MiB map budget by estimated cost, 16 MiB file read cap, and old-scope caches pruned at start and at enroll. The transient rendered string at save is ≤ the file size. Memory on a real tree was not measured (disclosed). |
+| RV9-06 | accepted | minor | Unchanged. The worker records it as accepted under D-31. |
+| RV9-07 | **closed** | note | (d) After a caught panic in a pass or a Group command, the service is rebuilt from disk (`svc = open(t).ok()`), so half-updated memory is discarded. Locks: `InstallLock` and the state locks are file handles held in RAII values, so unwinding closes them. `SliceService::new` takes no exclusive lock, and the old value is dropped after the new one is built, without conflict (tested). Publishing: provider writes are per-record and the pass is abandoned at the panic, so what is on disk equals what a crash leaves. That case is handled by `recover_interrupted` and the crash-injection tests. Pre-existing residual: in `command()` the seq is reserved only **after** the record write (`service.rs` ~1454–1459). A panic or I/O error between them can reuse an issuer seq. A real crash has the same window (note). Each reopen re-runs `attach_os_services` (notifier and update service); the old service is dropped (note). **But see RV9-13:** the reopened service has no read control. |
+| RV9-08 | note | note | Unchanged. |
+| RV9-09 | note | note | Unchanged. |
+| RV9-10 | **partly closed** | minor | The new notes state the conflict and stale-click fixes and the 5/10/20 min retries. "Known limits" still says "The decision and choice fixes of this release are described in the R9-decide notes", which is now stale and contradicts the new bullets. |
+| RV9-11 | **new** | minor | Probe 3: after the resume pass that writes the queued answer, the same item is listed once more. `settle_kept` writes the record after the offers were computed from the pre-write ledger, and `hide_answered` then finds an empty queue. A click is refused as `Changed` and the item disappears next pass, so this is cosmetic. It is still a visible stale offer on the owner's "Decide" page for one pass interval. |
+| RV9-12 | **new** | minor | (a) `hide_answered` is not exercised. With it made a no-op (M1), both round-3 e2e tests still pass, because the paused test syncs twice before asserting. Without it, a second and third answer while paused are each accepted as `Kept`, and after resume the group is back in `ChoicesDiffer` with 5 records. The code is correct today, but the guard is untested. Suggested test: pause, answer, run `sync_once`, then assert the item is not offered and that a second answer is refused. |
+| RV9-13 | **new** | **major** | `backend.rs` ~722–738 and ~741 (`open` closure), ~1044, ~963, ~1108. Round 3 replaced the start-up open with an `open` closure that never calls `s.set_read_ctl(read_ctl(t))`. Only the setup Enroll path (~848) still sets it. So on **every normal restart** of an enrolled computer, and after every panic reopen or open retry, the service runs with `ScanCtl::default()`. That means: (1) no hash cache, so every pass re-hashes the whole tree, which undoes D-31 / PLAN goal 1 on the owner's machine (measured round 1: 6926 ms cold vs 150 ms cached); (2) no `abort` cancel, so Quit waits for read-only scans again (the RV8-01 / D-30 regression); (3) no `interrupt`, so commands wait for whole passes. Probe 5 reproduces (1): the cache file is never re-created after a restart. (2) and (3) follow from the same missing `ScanCtl` (code reading). Worker tests use `enrolled_lab`, which enrolls through `Cmd::Enroll`, so they never exercise the saved-target path. Fix: call `set_read_ctl(read_ctl(t))` inside `open`, and add a restart test that asserts the cache is used or Quit is prompt. |
+
+### Recheck verdict
+
+**Release-blocking: yes.** One new **major** finding, RV9-13: a restart, a
+reopen after a panic, or an open retry leaves the service without the hash
+cache, Quit cancellation and command interrupt. It regresses D-31 and
+D-30/RV8-01 on the owner's normal start path. RV9-01, 02, 03, 04, 05 and 07 are
+closed. RV9-10 is partly closed (minor). New minor findings: RV9-11 (one-pass
+stale offer, refused on click) and RV9-12 (`hide_answered` untested). RV9-06 is
+accepted. No critical findings.
