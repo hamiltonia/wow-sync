@@ -430,7 +430,10 @@ impl World {
         let mut w = World::empty(i.app_version);
         let s = i.snap;
         w.enrolled = s.enrolled;
-        w.checking = s.detail.is_none();
+        w.checking = s.detail.is_none()
+            && s.headline.is_empty()
+            && s.provider_error.is_none()
+            && s.reconfirm.is_none();
         w.setup = i.setup;
         w.computer = s.computer_name.clone();
         w.group = s.group_name.clone();
@@ -569,6 +572,30 @@ mod tests {
         w.confirm_enrolled(true);
         assert!(w.enrolled);
         assert_ne!(crate::model::headline(&w).text, "Set up this computer");
+    }
+
+    #[test]
+    fn checking_does_not_hide_a_provider_error() {
+        let mut snap = StatusSnapshot::default();
+        let inputs = |snap: &StatusSnapshot| {
+            World::from_snapshot(Inputs {
+                snap,
+                paused_since_ms: None,
+                pause_damaged: false,
+                activity: &[],
+                syncing: false,
+                last_check_ms: None,
+                next_check_ms: None,
+                setup: None,
+                app_version: "1.2.3",
+            })
+        };
+        assert!(inputs(&snap).checking);
+        snap.provider_error = Some("The shared folder is missing".into());
+        assert!(!inputs(&snap).checking);
+        snap.provider_error = None;
+        snap.headline = "Something needs attention".into();
+        assert!(!inputs(&snap).checking);
     }
 
     #[test]

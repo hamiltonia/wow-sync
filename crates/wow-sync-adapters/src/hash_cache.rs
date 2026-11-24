@@ -11,10 +11,17 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 const MAGIC: &str = "wowsync.hashcache/1";
-/// More entries than any supported install holds (the folder limit is 100 000 files per
-/// add-on); beyond it new files are simply hashed every time.
-const MAX_ENTRIES: usize = 400_000;
-const MAX_FILE_BYTES: u64 = 96 * 1024 * 1024;
+/// The cache's own memory budget. The background process may use 100 MiB in all, so the map
+/// stays far below that: with the per-entry estimate below this holds about 60 000 files, more
+/// than a large retail AddOns folder; beyond it new files are simply hashed every time.
+const MAX_BYTES: usize = 12 * 1024 * 1024;
+/// A full file is at most about as large as the map it fills.
+const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
+
+/// Estimated heap cost of one entry: the key string, the entry and the table slot.
+fn entry_cost(key: &str) -> usize {
+    key.len() + 16 + std::mem::size_of::<String>() + std::mem::size_of::<Entry>() + 16
+}
 
 struct Entry {
     size: u64,
@@ -26,6 +33,7 @@ struct Entry {
 #[derive(Default)]
 struct Inner {
     map: HashMap<String, Entry>,
+    bytes: usize,
     generation: u64,
     dirty: bool,
 }
@@ -56,6 +64,7 @@ impl HashCache {
             dir: state_dir.to_path_buf(),
             file,
             inner: Mutex::new(Inner {
+                bytes: map.keys().map(|k| entry_cost(k)).sum(),
                 map,
                 generation: 0,
                 dirty: false,
@@ -64,6 +73,28 @@ impl HashCache {
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
         })
+    }
+
+    /// Deletes the caches of other roots or variants: only the one for `scope` is in use.
+    pub fn prune_stale(state_dir: &Path, scope: &str) -> usize {
+        let tag = crate::hex(&Sha256::digest(scope.as_bytes())[..8]);
+        let keep = format!("hashcache-{tag}.txt");
+        let Ok(dir) = std::fs::read_dir(state_dir) else {
+            return 0;
+        };
+        let mut removed = 0;
+        for e in dir.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let is_cache = name.starts_with("hashcache-") && name.ends_with(".txt");
+            if is_cache
+                && name != keep
+                && e.file_type().is_ok_and(|t| t.is_file())
+                && std::fs::remove_file(e.path()).is_ok()
+            {
+                removed += 1;
+            }
+        }
+        removed
     }
 
     /// The next complete scan re-reads every file and replaces the cached hashes.
@@ -120,8 +151,13 @@ impl HashCache {
         }
         let mut g = self.lock();
         let generation = g.generation;
-        if g.map.len() >= MAX_ENTRIES && !g.map.contains_key(key) {
+        let cost = entry_cost(key);
+        let known = g.map.contains_key(key);
+        if !known && g.bytes + cost > MAX_BYTES {
             return;
+        }
+        if !known {
+            g.bytes += cost;
         }
         g.map.insert(
             key.to_string(),
@@ -145,6 +181,7 @@ impl HashCache {
                 let before = g.map.len();
                 g.map.retain(|_, e| e.generation == generation);
                 if g.map.len() != before {
+                    g.bytes = g.map.keys().map(|k| entry_cost(k)).sum();
                     g.dirty = true;
                 }
                 self.full.store(false, Ordering::Relaxed);
@@ -187,6 +224,7 @@ fn parse(text: &str) -> HashMap<String, Entry> {
         return HashMap::new();
     }
     let mut map = HashMap::new();
+    let mut bytes = 0usize;
     for line in lines {
         let mut p = line.splitn(4, '\t');
         let (Some(size), Some(mtime), Some(hex), Some(key)) =
@@ -199,7 +237,8 @@ fn parse(text: &str) -> HashMap<String, Entry> {
         else {
             return HashMap::new();
         };
-        if map.len() >= MAX_ENTRIES {
+        bytes += entry_cost(key);
+        if bytes > MAX_BYTES {
             break;
         }
         map.insert(
@@ -224,4 +263,53 @@ fn unhex(s: &str) -> Option<[u8; 32]> {
         *o = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).ok()?;
     }
     Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_map_stays_within_its_memory_budget_and_a_full_file_reloads_within_the_read_cap() {
+        let dir = std::env::temp_dir().join(format!("wowsync-hc-cap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let c = HashCache::open(&dir, "scope");
+        for i in 0..400_000u32 {
+            c.store(
+                &format!("AddOns/SomeAddon/Libs/Sub/File{i:06}.lua"),
+                1,
+                i as i128,
+                [1; 32],
+            );
+        }
+        let held = c.lock().bytes;
+        assert!(held <= MAX_BYTES, "{held}");
+        assert!(c.len() > 40_000 && c.len() < 400_000, "{}", c.len());
+        c.begin();
+        c.finish(false);
+        let file = std::fs::metadata(dir.join(&c.file)).unwrap().len();
+        assert!(file <= MAX_FILE_BYTES, "{file}");
+        let reopened = HashCache::open(&dir, "scope");
+        assert_eq!(reopened.len(), c.len());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn caches_of_roots_no_longer_in_use_are_removed_and_the_active_one_is_kept() {
+        let dir = std::env::temp_dir().join(format!("wowsync-hc-prune-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        for scope in ["old-root|_retail_", "active|_retail_"] {
+            let c = HashCache::open(&dir, scope);
+            c.store("a", 1, 1, [2; 32]);
+            c.finish(false);
+        }
+        std::fs::write(dir.join("enrollment.json"), b"{}").unwrap();
+        assert_eq!(HashCache::prune_stale(&dir, "active|_retail_"), 1);
+        assert_eq!(HashCache::open(&dir, "active|_retail_").len(), 1);
+        assert_eq!(HashCache::open(&dir, "old-root|_retail_").len(), 0);
+        assert!(dir.join("enrollment.json").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

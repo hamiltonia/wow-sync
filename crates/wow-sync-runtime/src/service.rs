@@ -1666,6 +1666,11 @@ impl SliceService {
         !matches!(self.read_enrollment(), Ok(None))
     }
 
+    /// True only when the saved enrollment exists and loads.
+    pub fn enrollment_loads(&self) -> bool {
+        matches!(self.read_enrollment(), Ok(Some(_)))
+    }
+
     /// `None` = cancelled through `ctl`.
     #[allow(clippy::type_complexity)]
     fn scan_ctl(&self, ctl: &ScanCtl) -> Result<Option<(Vec<FolderScan>, bool)>, ServiceError> {

@@ -257,6 +257,8 @@ fn save_target(state_dir: &Path, t: &Target) {
 }
 
 /// Plain-language text for a refused setup or reconfirmation; never the internal reason name.
+pub const LOST_ENROLLMENT: &str = "This computer's saved setup could not be loaded, so it is not syncing. Set it up again below; nothing was deleted.";
+
 pub const ALREADY_SET_UP: &str =
     "This computer is already set up, so no second setup was made. Your settings are unchanged.";
 
@@ -471,14 +473,26 @@ fn os_attach(o: &BackendOptions) -> Option<Attach> {
         .then_some(SliceService::attach_os_services as Attach)
 }
 
+/// The saved setup is gone or unreadable: say so and offer setup, instead of waiting forever.
+fn report_lost(shared: &SharedState, wake: &Sender<()>, computer: &str) {
+    crate::app::log_warn("saved setup could not be loaded; showing setup");
+    publish(shared, wake, |g| {
+        g.fault = None;
+        g.enrolled_now = false;
+        g.snapshot.enrolled = false;
+        g.message = LOST_ENROLLMENT.into();
+    });
+    detect_later(computer.to_string(), shared.clone(), wake.clone(), false);
+}
+
 /// Looks for the game and Dropbox off the sync thread, once the first status has been read,
 /// and only for a computer that is not set up. An enrolled computer never pays for the
 /// all-drives search, so sync starts as soon as it is ready.
-fn detect_later(computer: String, shared: SharedState, wake: Sender<()>) {
+fn detect_later(computer: String, shared: SharedState, wake: Sender<()>, wait_for_status: bool) {
     let _ = std::thread::Builder::new()
         .name("wow-sync-detect".into())
         .spawn(move || {
-            for _ in 0..300 {
+            for _ in 0..if wait_for_status { 300 } else { 0 } {
                 let g = lock(&shared);
                 if !g.snapshot.headline.is_empty() {
                     if g.snapshot.enrolled {
@@ -715,41 +729,66 @@ fn run(
             ..ScanCtl::default()
         }
     };
+    let open = |t: &Target| -> Result<SliceService, wow_sync_runtime::ServiceError> {
+        let mut s = open_service(config_for(&opts, t), os_attach(&opts))?;
+        #[cfg(test)]
+        tests::OPENS.fetch_add(1, Ordering::Relaxed);
+        s.inject_crash_after(opts.crash_after);
+        Ok(s)
+    };
     let mut svc: Option<SliceService> = None;
-    // A saved target means this computer is enrolled: the window shows the main view while the
-    // first pass reads, never setup.
+    // The target the service is for; it changes only when setup finishes.
+    let mut active: Option<Target> = target.clone();
     let saved = target.is_some() && setup.is_none();
+    let mut open_failed = false;
     if let Some(t) = &target {
-        match open_service(config_for(&opts, t), os_attach(&opts)) {
-            Ok(mut s) => {
-                s.set_read_ctl(read_ctl(t));
-                s.inject_crash_after(opts.crash_after);
-                svc = Some(s);
-            }
+        wow_sync_runtime::HashCache::prune_stale(&opts.state_dir, &cache_scope(t));
+        match open(t) {
+            Ok(s) => svc = Some(s),
             Err(e) => {
                 crate::app::log_error(&format!("could not open the sync service: {e}"));
-                publish(&shared, &wake, |g| {
-                    g.message = e.to_string();
-                    if saved {
-                        g.fault = Some("opening the sync service".into());
-                    }
-                })
+                open_failed = true;
+                publish(&shared, &wake, |g| g.message = e.to_string());
             }
         }
     }
+    // "Enrolled at start" only when the saved enrollment really loads. If the service could
+    // not be opened, the saved enrollment file decides, and the open is retried below.
+    let enrolled_at_start = saved
+        && match &svc {
+            Some(s) => s.enrollment_loads(),
+            None => opts.state_dir.join("enrollment.json").is_file(),
+        };
+    let lost = saved && !enrolled_at_start;
     publish(&shared, &wake, |g| {
         g.setup = setup.clone();
         g.started = true;
         g.shared_root = target.as_ref().map(|t| t.shared_root.clone());
-        if saved {
+        if enrolled_at_start {
             g.enrolled_now = true;
             g.snapshot.enrolled = true;
             g.snapshot.computer_name = opts.display_name.clone();
+            if open_failed {
+                g.fault = Some("opening the sync service".into());
+            }
+        }
+        if lost {
+            g.message = LOST_ENROLLMENT.into();
         }
     });
-    if setup.is_none() {
-        detect_later(opts.display_name.clone(), shared.clone(), wake.clone());
+    if lost {
+        crate::app::log_warn("saved setup could not be loaded; showing setup");
     }
+    if setup.is_none() && !enrolled_at_start {
+        detect_later(
+            opts.display_name.clone(),
+            shared.clone(),
+            wake.clone(),
+            !lost,
+        );
+    }
+    // Consecutive failed retries since the fault appeared; the delay doubles up to 4x.
+    let mut fault_streak: u32 = 0;
     let mut gate = QuitGate::default();
     let mut inspector = Inspector::default();
     let mut force = true;
@@ -769,14 +808,20 @@ fn run(
             let next = scheduled.then(|| now_ms() + opts.interval.as_millis() as i64);
             publish(&shared, &wake, |g| g.next_check_ms = next);
             let wait = if lock(&shared).fault.is_some() {
-                fault_retry()
+                fault_retry() * (1 << fault_streak.min(2))
             } else {
+                fault_streak = 0;
                 opts.interval
             };
             match rx.recv_timeout(wait) {
                 Err(RecvTimeoutError::Disconnected) => return,
                 Ok(c) => Some(c),
-                Err(RecvTimeoutError::Timeout) => None,
+                Err(RecvTimeoutError::Timeout) => {
+                    if lock(&shared).fault.is_some() {
+                        fault_streak += 1;
+                    }
+                    None
+                }
             }
         };
         force = false;
@@ -792,7 +837,7 @@ fn run(
             }
             Some(Cmd::Enroll(t, req)) => {
                 inspector.cancel(&shared, &wake);
-                if svc.as_ref().is_some_and(|s| s.is_enrolled()) {
+                if svc.as_ref().is_some_and(|s| s.enrollment_loads()) {
                     crate::app::log_warn("enrollment refused: this computer is already set up");
                     publish(&shared, &wake, |g| g.message = ALREADY_SET_UP.into());
                     continue;
@@ -809,11 +854,14 @@ fn run(
                         if opts.save_target {
                             save_target(&opts.state_dir, &t);
                         }
+                        wow_sync_runtime::HashCache::prune_stale(&opts.state_dir, &cache_scope(&t));
+                        active = Some(t.clone());
                         s.inject_crash_after(opts.crash_after);
                         refresh(&mut s, &shared, &wake, false);
                         svc = Some(s);
                         publish(&shared, &wake, |g| {
                             g.message.clear();
+                            g.fault = None;
                             g.enrolled_now = true;
                             g.shared_root = Some(t.shared_root.clone());
                         });
@@ -891,12 +939,13 @@ fn run(
             }
             Some(Cmd::Group(a)) => {
                 if let Some(s) = svc.as_mut() {
-                    let result = guarded("handling a command", &shared, &wake, || dispatch(s, &a))
-                        .unwrap_or_else(|| {
-                            ActionResult::Failed(
-                                "WoW Sync hit an internal error and could not finish that. Export diagnostics and report it.".into(),
-                            )
-                        });
+                    let done = guarded("handling a command", &shared, &wake, || dispatch(s, &a));
+                    let panicked = done.is_none();
+                    let result = done.unwrap_or_else(|| {
+                        ActionResult::Failed(
+                            "WoW Sync hit an internal error and could not finish that. Export diagnostics and report it.".into(),
+                        )
+                    });
                     let kind = a.kind();
                     let subject = a.subject();
                     publish(&shared, &wake, |g| {
@@ -908,7 +957,14 @@ fn run(
                             result,
                         });
                     });
-                    refresh(s, &shared, &wake, false);
+                    // A panic may have left the in-memory state half-updated: start again
+                    // from what is on disk.
+                    if panicked {
+                        svc = active.as_ref().and_then(|t| open(t).ok());
+                    }
+                    if let Some(s) = svc.as_mut() {
+                        refresh(s, &shared, &wake, false);
+                    }
                 } else {
                     crate::app::log_warn(&format!("{:?}: not done, sync is not set up", a.kind()));
                     publish(&shared, &wake, |g| {
@@ -981,8 +1037,39 @@ fn run(
             }
             None => {}
         }
+        if svc.is_none() {
+            let retry = lock(&shared).fault.is_some() && !abort.load(Ordering::Relaxed);
+            let Some(t) = active.clone().filter(|_| retry) else {
+                continue;
+            };
+            match open(&t) {
+                Ok(s) => {
+                    crate::app::log("the sync service opened on a retry");
+                    let loads = s.enrollment_loads();
+                    svc = Some(s);
+                    if loads {
+                        fault_streak = 0;
+                        publish(&shared, &wake, |g| {
+                            g.fault = None;
+                            g.message.clear();
+                        });
+                        force = true;
+                    } else {
+                        report_lost(&shared, &wake, &opts.display_name);
+                    }
+                }
+                Err(e) => {
+                    crate::app::log_error(&format!("could not open the sync service: {e}"));
+                    publish(&shared, &wake, |g| g.message = e.to_string());
+                }
+            }
+            continue;
+        }
         let Some(s) = svc.as_mut() else { continue };
         if !s.is_enrolled() {
+            if lock(&shared).enrolled_now {
+                report_lost(&shared, &wake, &opts.display_name);
+            }
             continue;
         }
         if s.pause_state().holds_sync() && !manual {
@@ -1017,6 +1104,8 @@ fn run(
         });
         interrupt.armed.store(false, Ordering::Relaxed);
         let Some(res) = res else {
+            // Start again from what is on disk, not from half-updated memory.
+            svc = active.as_ref().and_then(|t| open(t).ok());
             publish(&shared, &wake, |g| g.busy = false);
             if gate.end_step() {
                 publish(&shared, &wake, |g| g.quit_ready = true);
@@ -1361,6 +1450,60 @@ mod tests {
 
     pub(super) static PANIC_NEXT_PASS: Mutex<Option<PathBuf>> = Mutex::new(None);
     pub(super) static FAULT_RETRY_MS: AtomicU64 = AtomicU64::new(0);
+    pub(super) static OPENS: AtomicU64 = AtomicU64::new(0);
+
+    #[test]
+    fn after_a_panic_the_service_is_reopened_from_disk() {
+        let (base, shared, tx, _t) = enrolled_lab("reopen");
+        FAULT_RETRY_MS.store(1000, Ordering::Relaxed);
+        wait_for("the first pass", Duration::from_secs(20), || {
+            let g = lock(&shared);
+            !g.busy && g.snapshot.detail.is_some()
+        });
+        let before = OPENS.load(Ordering::Relaxed);
+        *PANIC_NEXT_PASS.lock().unwrap() = Some(base.join("state"));
+        tx.send(Cmd::SyncNow).unwrap();
+        wait_for("the fault", Duration::from_secs(10), || {
+            lock(&shared).fault.is_some()
+        });
+        assert!(OPENS.load(Ordering::Relaxed) > before, "service reopened");
+        wait_for("the retry", Duration::from_secs(20), || {
+            lock(&shared).fault.is_none()
+        });
+        tx.send(Cmd::QuitWhenSafe).unwrap();
+        wait_for("quit", Duration::from_secs(10), || lock(&shared).quit_ready);
+        FAULT_RETRY_MS.store(0, Ordering::Relaxed);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_saved_target_without_a_loadable_enrollment_offers_setup_and_does_not_enroll() {
+        let (base, shared1, tx1, t) = enrolled_lab("lostenr");
+        wait_for("the first pass", Duration::from_secs(20), || {
+            !lock(&shared1).busy
+        });
+        tx1.send(Cmd::QuitWhenSafe).unwrap();
+        wait_for("quit", Duration::from_secs(10), || {
+            lock(&shared1).quit_ready
+        });
+        drop(tx1);
+        std::fs::remove_file(base.join("state").join("enrollment.json")).unwrap();
+        let mut opts = lab_opts(&base);
+        opts.state_dir = base.join("state");
+        let shared: SharedState = Arc::new(Mutex::new(Shared::default()));
+        let (_tx, rx) = std::sync::mpsc::channel();
+        let (wake, _w) = std::sync::mpsc::channel();
+        spawn(Some(t.clone()), None, opts, rx, shared.clone(), wake);
+        wait_for("setup offered", Duration::from_secs(20), || {
+            lock(&shared).setup.is_some()
+        });
+        let g = lock(&shared);
+        assert!(!g.enrolled_now && !g.snapshot.enrolled);
+        assert_eq!(g.message, LOST_ENROLLMENT);
+        drop(g);
+        assert!(!base.join("state").join("enrollment.json").exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     fn install_files(t: &Target) {
         let variant = t.install_root.join("_retail_");
