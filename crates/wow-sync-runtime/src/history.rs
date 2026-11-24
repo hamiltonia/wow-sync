@@ -100,6 +100,8 @@ pub struct ChangeRecord {
     pub paths: Vec<String>,
     /// How many further paths were not listed.
     pub paths_more: u32,
+    /// Duration of this package's apply, in milliseconds (0 for older records).
+    pub ms: u32,
 }
 
 /// One pass's records, summarised for the Activity page.
@@ -181,8 +183,11 @@ pub struct ProgressEvent {
     /// Packages that just started applying; the app drops their stale
     /// "Waiting for your decision" text.
     pub decision_satisfied: Vec<String>,
+    /// Set on the event emitted the moment a package's record is written.
+    pub completed: Option<ChangeRecord>,
 }
 
+/// Each pass emits a first event with phase Scanning and items_done 0.
 /// Cloneable progress stream. The service emits; the app subscribes. Emission never blocks:
 /// subscribers whose receiver was dropped are removed.
 #[derive(Clone, Default)]
