@@ -955,7 +955,7 @@ id = "R4-integrate:control-commands-decide-retire-allow-again"
 tier = "offline"
 tests = [
     "e2e::tests::retire_command_writes_a_retirement_and_a_retired_computer_is_refused",
-    "e2e::tests::decide_command_is_checked_for_freshness_and_kept_while_paused",
+    "e2e::tests::an_answer_kept_while_paused_is_written_once_and_not_offered_again",
     "e2e::tests::allow_again_lifts_only_an_active_rejection",
 ]
 
@@ -1836,5 +1836,8 @@ tests = [
     "e2e::tests::mutually_excluding_keeps_are_decided_once_and_a_second_click_is_refused",
     "decide_tests::a_keep_whose_release_no_copy_holds_still_builds_its_item_without_panicking",
     "e2e::tests::the_holder_of_one_mutually_excluded_copy_syncs_offers_both_and_converges_when_it_decides",
+    "decide_tests::a_live_resume_excluding_what_a_concurrent_keep_pins_is_a_conflict_not_a_silent_winner",
+    "e2e::tests::a_stale_answer_after_a_peer_settled_the_conflict_writes_nothing",
+    "e2e::tests::an_answer_kept_while_paused_is_written_once_and_not_offered_again",
 ]
 # <<< section: R9-decide

@@ -62,6 +62,11 @@ impl ConstraintHooks for ChoiceBehaviour {
     fn rejected(&self, l: &Ledger, p: &Package, s: &Source) -> ScopeMatch {
         Neutral.rejected(l, p, s)
     }
+    fn choices_conflict(&self, l: &Ledger, p: &Package) -> bool {
+        self.valid
+            .as_ref()
+            .is_some_and(|v| ChoiceView::new(l, v).resume_excludes_a_live_keep(p))
+    }
 }
 
 struct Node<'a> {
@@ -232,6 +237,28 @@ impl<'a> ChoiceView<'a> {
             }
         }
         verdict
+    }
+
+    /// A live resume whose exclusion names a release that a live keep over p pins: competing
+    /// intentional choices, which are never merged, so the owner must decide.
+    pub fn resume_excludes_a_live_keep(&self, p: &Package) -> bool {
+        self.nodes.iter().any(|n| {
+            let Some(c) = n.choice.filter(|c| c.action != ChoiceAction::Keep) else {
+                return false;
+            };
+            let live_here = p.members.iter().any(|f| {
+                c.folders.contains(f) && self.live_choices(f).iter().any(|(h, _)| *h == n.hash)
+            });
+            live_here
+                && self.exclude_of(c).iter().any(|e| {
+                    let trees: Vec<(FolderKey, Sha256)> =
+                        e.folders.iter().map(|t| (t.key.clone(), t.tree)).collect();
+                    e.scope
+                        .iter()
+                        .any(|k| p.members.contains(k) && c.folders.contains(k))
+                        && self.kept_by_rival(p, n.hash, &Release::new(&e.scope, &trees))
+                })
+        })
     }
 
     /// Whether another live keep over `p` pins the release `entry` excludes. Two competing live

@@ -41,11 +41,13 @@ use wow_sync_core::admit::{
     admit_member_states, apply_barrier, newest_state_name, MemberLatest, MemberObs, MemberView,
     StateFileObs,
 };
-use wow_sync_core::authority::{AuthorityRecord, Retired};
+use wow_sync_core::authority::{decode_authority, AuthorityRecord, Retired};
 use wow_sync_core::decide::decision_items;
 use wow_sync_core::decide::{DecideBehaviour, Standing};
 use wow_sync_core::decision::CycleCx;
-use wow_sync_core::decision::{DecideOutcome, DecisionEffect, DecisionId, FreshEvidence};
+use wow_sync_core::decision::{
+    DecideError, DecideOutcome, DecisionEffect, DecisionId, DecisionScope, FreshEvidence,
+};
 use wow_sync_core::exec::{
     apply_report, recover_interrupted, run_apply, run_publish, ApplyEffects, PublishOutcome,
 };
@@ -860,6 +862,28 @@ impl SliceService {
         self.settings_cap = cap;
     }
 
+    /// Drops the offers this computer already answered with a record kept for later (paused or
+    /// held): offering them again would let a second answer conflict with the first.
+    fn hide_answered(&self, w: &mut World) {
+        let queued: Vec<Vec<FolderKey>> = KeptQueue::load(&self.state, &w.group.group_id)
+            .items()
+            .iter()
+            .filter_map(|k| decode_authority(&k.bytes, &k.hash).ok())
+            .filter_map(|r| match r {
+                AuthorityRecord::CodeChoice(c) => Some(c.folders),
+                _ => None,
+            })
+            .collect();
+        w.offers.retain(|(i, _)| match &i.scope {
+            DecisionScope::Folders(f) => {
+                let mut f = f.clone();
+                f.sort();
+                !queued.contains(&f)
+            }
+            _ => true,
+        });
+    }
+
     /// Replaces the offered decisions. The set is what `Command::Decide` is judged against, so
     /// an item whose evidence changed since the owner saw it is refused as changed.
     pub fn offer_decisions(
@@ -923,9 +947,10 @@ impl SliceService {
         if cmd == Command::ReEnroll {
             return self.re_enroll();
         }
-        let w = self
+        let mut w = self
             .observe_world(false)
             .map_err(|e| CommandError::Service(e.to_string()))?;
+        self.hide_answered(&mut w);
         let provider = self
             .open_provider()
             .map_err(|e| CommandError::Service(e.to_string()))?;
@@ -1153,35 +1178,24 @@ impl SliceService {
                     option,
                     shown,
                 } => {
-                    let behaviour = DecideBehaviour::new(self.offered.1.clone(), Standing::Active);
-                    let fresh = FreshEvidence {
-                        items: self.offered.0.clone(),
+                    // Judged against what the group says now (ledger just reloaded from the
+                    // provider, peers' records included): an item that no longer exists, or whose
+                    // evidence changed, is stale. There is no fallback to the cached offers.
+                    let Some((now, plans)) = w
+                        .offers
+                        .iter()
+                        .find(|(i, _)| DecisionId(i.scope.clone()) == item)
+                    else {
+                        return Err(CommandError::Decide(DecideError::Changed));
                     };
-                    let outcome = match behaviour.decide(&item, &option, &shown, &fresh) {
-                        DecideOutcome::Effect(_) => {
-                            // Judge again against what the group says now: an answer for a
-                            // conflict that this computer or a peer already settled is stale,
-                            // and the effect comes from a plan built over the current ledger.
-                            match w
-                                .offers
-                                .iter()
-                                .find(|(i, _)| DecisionId(i.scope.clone()) == item)
-                            {
-                                Some((now, plans)) => {
-                                    DecideBehaviour::new(plans.clone(), Standing::Active).decide(
-                                        &item,
-                                        &option,
-                                        &shown,
-                                        &FreshEvidence {
-                                            items: vec![now.clone()],
-                                        },
-                                    )
-                                }
-                                None => behaviour.decide(&item, &option, &shown, &fresh),
-                            }
-                        }
-                        refused => refused,
-                    };
+                    let outcome = DecideBehaviour::new(plans.clone(), Standing::Active).decide(
+                        &item,
+                        &option,
+                        &shown,
+                        &FreshEvidence {
+                            items: vec![now.clone()],
+                        },
+                    );
                     match outcome {
                         DecideOutcome::Effect(e) => e,
                         DecideOutcome::Refused(why) => return Err(CommandError::Decide(why)),
@@ -2849,6 +2863,7 @@ impl SliceService {
         let mut journals_remaining = false;
         self.last_blocks.clear();
         self.settle_kept(&w, &provider);
+        self.hide_answered(&mut w);
         if w.standing == OwnStanding::Active {
             let (items, plans): (Vec<_>, Vec<_>) =
                 std::mem::take(&mut w.offers).into_iter().unzip();

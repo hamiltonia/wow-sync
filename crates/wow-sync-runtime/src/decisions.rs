@@ -78,6 +78,9 @@ impl wow_sync_core::hooks::ConstraintHooks for Constraints {
     ) -> wow_sync_core::target::ScopeMatch {
         self.reject.rejected(l, p, s)
     }
+    fn choices_conflict(&self, l: &Ledger, p: &wow_sync_core::package::Package) -> bool {
+        self.choice.choices_conflict(l, p)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

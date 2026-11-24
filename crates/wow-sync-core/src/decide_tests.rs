@@ -473,3 +473,77 @@ fn a_keep_whose_release_no_copy_holds_still_builds_its_item_without_panicking() 
         assert!(new_version_item(v, &cx, &cs, &bad).is_err());
     });
 }
+
+#[test]
+fn a_live_resume_excluding_what_a_concurrent_keep_pins_is_a_conflict_not_a_silent_winner() {
+    // Run-009 round 3 (RV9-04): competing intentional choices are never merged.
+    use crate::choice::{build_resume, ChoiceBehaviour};
+    use crate::hooks::ConstraintHooks;
+    use crate::kinds::ChoiceReason;
+    let invs: Vec<Inventory> = ["1.0", "2.0"].iter().map(|v| inv2(v, v)).collect();
+    let p = pkg(&["alpha", "beta"]);
+    let vs: Vec<PackageVersion> = invs.iter().map(|i| pv(&p, i)).collect();
+    let scope = [key("alpha"), key("beta")];
+    let shown = [
+        CopyEntry::new(entry_folders(&vs[0]), vec![]),
+        CopyEntry::new(entry_folders(&vs[1]), vec![]),
+    ];
+    let mut env = Env::new();
+    let g = group_id();
+    let cx = env.cx(&g, 1);
+    let keep0 = env
+        .view(|v| {
+            crate::choice::build_keep(
+                v,
+                &cx,
+                ChoiceReason::Ambiguous,
+                &scope,
+                &shown[0],
+                &shown,
+                &Source::from_inventory(&invs[0]),
+            )
+        })
+        .unwrap();
+    env.add(&keep0);
+    let cx = env.cx(&g, 1);
+    let resume = env
+        .view(|v| build_resume(v, &cx, ChoiceReason::Ambiguous, &scope, &[]))
+        .unwrap();
+    assert!(resume.exclude.iter().any(|e| e.package_hash == vs[1].hash));
+    let rival = {
+        let empty = Env::new();
+        let cx = env.cx(&g, 2);
+        empty
+            .view(|v| {
+                crate::choice::build_keep(
+                    v,
+                    &cx,
+                    ChoiceReason::Ambiguous,
+                    &scope,
+                    &shown[1],
+                    &shown[1..],
+                    &Source::from_inventory(&invs[1]),
+                )
+            })
+            .unwrap()
+    };
+    let hook = |env: &Env| ChoiceBehaviour::for_derived(&derive_all(env));
+    env.add(&resume);
+    assert!(
+        !hook(&env).choices_conflict(&env.ledger, &p),
+        "a resume alone conflicts with nothing"
+    );
+    env.add(&rival);
+    assert!(
+        hook(&env).choices_conflict(&env.ledger, &p),
+        "the concurrent keep of the excluded copy needs an owner decision"
+    );
+}
+
+fn derive_all(env: &Env) -> crate::ledger::Derived {
+    crate::ledger::derive(
+        &env.ledger,
+        &group_id(),
+        &crate::choice_tests::members(&[1, 2, 3]),
+    )
+}

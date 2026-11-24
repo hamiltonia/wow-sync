@@ -77,3 +77,18 @@ for any live keep whose release no copy holds (Q-88).
 - `e2e::tests::the_holder_of_one_mutually_excluded_copy_syncs_offers_both_and_converges_when_it_decides`
   (three synthetic computers, real record shape, decided from the holder of one copy; all converge
   and none still shows a decision).
+
+## Round 3: stale Decide and Resume-vs-Keep (RV9-01, RV9-04)
+
+Root causes
+- RV9-01: Command::Decide (service.rs) fell back to the cached self.offered plan when the fresh observation no longer held the item, so a peer's settlement was ignored and a record with a stale issued_at_seq was written (ChoicesDiffer again). An answer made while paused stayed in the offers after resume.
+- RV9-04: kept_by_rival let a live Keep silently beat a live Resume's exclusion; competing intentional choices must not be merged.
+
+Fixes
+- Decide re-reads the ledger from the provider (observe_world) and judges only against the fresh offers; a missing item or different evidence token returns DecideError::Changed. No stale fallback.
+- hide_answered removes offers whose scope matches a queued (paused) answer, in command and in sync_once; the answered item is also dropped after a successful Decide.
+- New hook ConstraintHooks::choices_conflict (ChoiceView::resume_excludes_a_live_keep); pply_constraints raises ChoicesDiffer for it. xcluded stays lenient so both copies remain listed.
+
+Tests: 2e::tests::a_stale_answer_after_a_peer_settled_the_conflict_writes_nothing (fails without the service.rs fix: record written instead of Changed), 2e::tests::an_answer_kept_while_paused_is_written_once_and_not_offered_again, decide_tests::a_live_resume_excluding_what_a_concurrent_keep_pins_is_a_conflict_not_a_silent_winner. The old synthetic-offer test decide_command_is_checked_for_freshness_and_kept_while_paused was replaced because Decide now only accepts items present in the fresh world; unknown option, stale token and paused cases are covered by the new paused test.
+
+App hook: none; treat DecideError::Changed as "refresh".
