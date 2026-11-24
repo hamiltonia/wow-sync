@@ -1822,5 +1822,7 @@ tier = "offline"
 tests = [
     "decide_tests::conflicting_keeps_do_not_hide_each_others_copies_and_a_choice_supersedes_both",
     "e2e::tests::mutually_excluding_keeps_are_decided_once_and_a_second_click_is_refused",
+    "decide_tests::a_keep_whose_release_no_copy_holds_still_builds_its_item_without_panicking",
+    "e2e::tests::the_holder_of_one_mutually_excluded_copy_syncs_offers_both_and_converges_when_it_decides",
 ]
 # <<< section: R9-decide

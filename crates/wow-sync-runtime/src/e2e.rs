@@ -6064,6 +6064,62 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn the_holder_of_one_mutually_excluded_copy_syncs_offers_both_and_converges_when_it_decides() {
+        // Run 009 round 2: RYZENFISH held one copy, LENOVOFISH the other; each keep excluded the
+        // other copy and the kept copy was absent from the list, which panicked every pass.
+        use wow_sync_core::decision::{DecisionId, DecisionKind, OptionLabel};
+        let lab = Lab::new();
+        let (mut a, mut b, mut c, g) = alpha_v2_published(&lab);
+        put_mutual_keep_of_alpha(&lab, &g, &a, &b);
+        put_mutual_keep_of_alpha(&lab, &g, &b, &a);
+        for _ in 0..4 {
+            synced(&mut b);
+            synced(&mut c);
+            synced(&mut a);
+        }
+        let item = b
+            .svc
+            .offered_decisions()
+            .iter()
+            .find(|i| i.reason == DecisionKind::ChoicesDiffer)
+            .expect("the holder of one copy is offered the conflict")
+            .clone();
+        let labels = item
+            .options
+            .iter()
+            .filter(|o| matches!(o.label, OptionLabel::Release { .. }))
+            .count();
+        assert_eq!(labels, 2, "{:?}", item.options);
+        let mine = item
+            .options
+            .iter()
+            .find(|o| matches!(o.label, OptionLabel::Release { .. }))
+            .unwrap()
+            .id;
+        b.svc
+            .command(Command::Decide {
+                item: DecisionId(item.scope.clone()),
+                option: mine,
+                shown: item.evidence,
+            })
+            .unwrap();
+        for _ in 0..5 {
+            synced(&mut b);
+            synced(&mut c);
+            synced(&mut a);
+        }
+        let want = b.read("Alpha/main.lua");
+        assert_eq!(a.read("Alpha/main.lua"), want);
+        assert_eq!(c.read("Alpha/main.lua"), want);
+        for pc in [&a, &b, &c] {
+            assert!(
+                !offered_kinds(pc).contains(&DecisionKind::ChoicesDiffer),
+                "{:?}",
+                offered_kinds(pc)
+            );
+        }
+    }
     fn name_of(pc: &mut Pc) -> String {
         pc.svc.status().computer_name
     }

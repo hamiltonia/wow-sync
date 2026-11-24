@@ -392,15 +392,20 @@ impl NewVersion {
             .iter()
             .copied()
             .filter(|i| {
-                let h = &copies[*i].holders;
-                !h.is_empty() && h.iter().all(|e| &e.computer_id == own)
+                copies.get(*i).is_some_and(|c| {
+                    !c.holders.is_empty() && c.holders.iter().all(|e| &e.computer_id == own)
+                })
             })
             .collect()
     }
 
-    /// The kept copy, from the copies passed to `new_versions` or the stand-in.
-    pub fn kept_copy<'a>(&'a self, copies: &'a [Copy]) -> &'a Copy {
-        self.absent_kept.as_ref().unwrap_or(&copies[self.kept])
+    /// The kept copy, from the copies passed to `new_versions` or the stand-in; `None` when the
+    /// indexes do not belong to `copies`.
+    pub fn kept_copy<'a>(&'a self, copies: &'a [Copy]) -> Option<&'a Copy> {
+        match &self.absent_kept {
+            Some(c) => Some(c),
+            None => copies.get(self.kept),
+        }
     }
 }
 
