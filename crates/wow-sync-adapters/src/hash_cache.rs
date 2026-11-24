@@ -299,7 +299,8 @@ mod tests {
 
     #[test]
     fn the_map_stays_within_its_memory_budget_and_a_full_file_reloads_within_the_read_cap() {
-        let dir = std::env::temp_dir().join(format!("wowsync-hc-cap-{}", std::process::id()));
+        let tmp = crate::testkit::TempDir::new();
+        let dir = tmp.path().to_path_buf();
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let c = HashCache::open(&dir, "scope");
@@ -325,7 +326,8 @@ mod tests {
 
     #[test]
     fn a_check_all_files_request_survives_a_reopen_until_a_full_pass_completes() {
-        let dir = std::env::temp_dir().join(format!("wowsync-hc-full-{}", std::process::id()));
+        let tmp = crate::testkit::TempDir::new();
+        let dir = tmp.path().to_path_buf();
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let c = HashCache::open(&dir, "scope");
@@ -354,7 +356,8 @@ mod tests {
 
     #[test]
     fn caches_of_roots_no_longer_in_use_are_removed_and_the_active_one_is_kept() {
-        let dir = std::env::temp_dir().join(format!("wowsync-hc-prune-{}", std::process::id()));
+        let tmp = crate::testkit::TempDir::new();
+        let dir = tmp.path().to_path_buf();
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         for scope in ["old-root|_retail_", "active|_retail_"] {

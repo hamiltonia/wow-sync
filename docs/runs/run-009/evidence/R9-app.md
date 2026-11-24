@@ -51,3 +51,8 @@ Not done: live GUI check of the restart on the owner's machine; the core panic i
 - RV9-16: `request_close` now uses pure `close_step`. In setup mode (not enrolled, or the finished-setup screen) it hides straight to the tray, the same as the existing not-enrolled branch, because only the main view draws sheets. The first-close notice is still shown on the first close from the main view. Test `app::close_tests::closing_the_set_up_screen_hides_without_a_sheet_the_setup_pages_cannot_draw` covers the decision table; no GUI run.
 - RV9-15: the request is persisted as `hashcache-<tag>.full` in the state folder (written by `request_full`, removed when a complete non-routine pass finishes, read in `HashCache::open`; `prune_stale` also removes stale markers). Only hash_cache.rs changed; service.rs untouched. Test `hash_cache::tests::a_check_all_files_request_survives_a_reopen_until_a_full_pass_completes` (reopen, routine pass, cancelled pass keep it; full pass clears it).
 - RV9-10: release notes: literal `\n` removed, stale R9-decide bullet removed, reviewer-checked claim replaced with what was not measured; bullets added for the two fixes above.
+
+## Round 6
+
+- macOS CI failure of three hash_cache tests (run 45492591447): test assumption, not a product bug. The tests used `std::env::temp_dir()`, which on macOS is under `/var` (a symlink to `/private/var`); `LocalState::open_at` rejects symlinked paths (`ReparsePolicy::RejectAll`), so the cache never loaded or saved. Tests now use `testkit::TempDir` (canonicalised, as other adapter tests do). Product code unchanged; cache tag and prune comparisons do not involve paths. The panic text was not retrieved from the log (xtask hides it); the cause is by reading the code, proven by the macOS CI result below.
+
