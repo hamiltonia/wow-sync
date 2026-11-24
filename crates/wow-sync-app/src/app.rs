@@ -508,6 +508,7 @@ impl Shell {
                 app_version: &self.app_version,
             });
             w.confirm_enrolled(g.enrolled_now);
+            w.fault = g.fault.clone();
             w.shared_label = g
                 .shared_root
                 .as_ref()

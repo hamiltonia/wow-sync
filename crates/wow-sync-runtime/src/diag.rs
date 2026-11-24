@@ -251,6 +251,7 @@ pub fn input_from(
                         .seen_locally_at
                         .map(|t| ((now_unix_ms - t).max(0) / 3_600_000) as u32),
                     watermark_seq: 0,
+                    app_version: m.app_version.clone(),
                     display_name: m.name.clone(),
                 })
                 .collect::<Vec<_>>()

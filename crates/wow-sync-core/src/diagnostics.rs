@@ -194,6 +194,8 @@ pub struct ComputerRow {
     pub report: ReportState,
     pub last_report_age_hours: Option<u32>,
     pub watermark_seq: u64,
+    /// The app version that peer last reported, when known.
+    pub app_version: Option<String>,
     /// Where the alias would have come from. Never read: aliases are assigned by position.
     pub display_name: String,
 }
@@ -412,6 +414,21 @@ fn clip(s: &str) -> &str {
     &s[..end]
 }
 
+/// A peer's app version as plain text; anything that is not a short version string is "unknown".
+fn version_text(v: Option<&str>) -> String {
+    match v {
+        Some(s)
+            if !s.is_empty()
+                && s.len() <= 32
+                && s.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')) =>
+        {
+            s.to_string()
+        }
+        _ => "unknown".into(),
+    }
+}
+
 fn on_off(b: bool) -> &'static str {
     if b {
         "on"
@@ -558,12 +575,13 @@ fn build_inner(
             .map(|h| format!("{h}h"))
             .unwrap_or_else(|| "none".into());
         format!(
-            "{}: enrollment={} retired={} report={} last_report_age={age} watermark_seq={}",
+            "{}: enrollment={} retired={} report={} last_report_age={age} watermark_seq={} app_version={}",
             aliases[i],
             c.enrollment.label(),
             on_off(c.enrollment == EnrollmentState::Retired),
             c.report.label(),
-            c.watermark_seq
+            c.watermark_seq,
+            version_text(c.app_version.as_deref())
         )
     });
 
@@ -775,6 +793,7 @@ mod tests {
             report: ReportState::Current,
             last_report_age_hours: Some(3),
             watermark_seq: 12,
+            app_version: Some("0.3.2".into()),
             display_name: name.into(),
         }
     }
@@ -843,6 +862,9 @@ mod tests {
         assert!(at.windows(2).all(|p| p[0] < p[1]), "fixed section order");
         assert!(t.contains("<install-1>: kind=forever identity=verified addons=2"));
         assert!(t.contains("This computer: enrollment=active"));
+        assert!(t.contains("watermark_seq=12 app_version=0.3.2"));
+        assert_eq!(version_text(Some("C:\\Users\\me")), "unknown");
+        assert_eq!(version_text(None), "unknown");
         assert!(t.contains("Computer A: ") && t.contains("Computer B: "));
         assert!(t.contains("2023-11-14T22:13Z kind=applied computer=Computer A"));
         assert!(t.contains("Io(PermissionDenied, 5)"));

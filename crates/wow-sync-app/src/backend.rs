@@ -147,6 +147,8 @@ pub struct Shared {
     pub quit_ready: bool,
     pub setup: Option<SetupData>,
     pub enrolled_now: bool,
+    /// Set when the sync thread caught a panic: the phase it was in. Cleared by a good pass.
+    pub fault: Option<String>,
     pub shared_root: Option<PathBuf>,
     /// What core currently offers the owner to decide (typed; the app renders the words).
     pub decisions: Vec<wow_sync_core::decision::DecisionItem>,
@@ -255,6 +257,9 @@ fn save_target(state_dir: &Path, t: &Target) {
 }
 
 /// Plain-language text for a refused setup or reconfirmation; never the internal reason name.
+pub const ALREADY_SET_UP: &str =
+    "This computer is already set up, so no second setup was made. Your settings are unchanged.";
+
 fn humane(e: &wow_sync_runtime::ServiceError) -> String {
     let raw = match e {
         wow_sync_runtime::ServiceError::Refused(s) => s.clone(),
@@ -354,11 +359,51 @@ fn log_status_changes(st: &StatusSnapshot) {
     }
 }
 
+/// Runs one phase so that a panic in it cannot end the sync thread: the panic is logged, the
+/// phase is published as a fault the window shows, and the caller gets `None`.
+fn guarded<T>(
+    phase: &str,
+    shared: &SharedState,
+    wake: &Sender<()>,
+    f: impl FnOnce() -> T,
+) -> Option<T> {
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+        Ok(v) => Some(v),
+        Err(p) => {
+            let why = p
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| p.downcast_ref::<String>().cloned())
+                .unwrap_or_default();
+            crate::app::log_error(&format!("internal error while {phase}: {why}"));
+            publish(shared, wake, |g| {
+                g.fault = Some(phase.to_string());
+                g.busy = false;
+            });
+            None
+        }
+    }
+}
+
+/// How long to wait before trying a pass again after an internal error.
+fn fault_retry() -> Duration {
+    #[cfg(test)]
+    {
+        let ms = tests::FAULT_RETRY_MS.load(Ordering::Relaxed);
+        if ms > 0 {
+            return Duration::from_millis(ms);
+        }
+    }
+    Duration::from_secs(300)
+}
+
 fn refresh(svc: &mut SliceService, shared: &SharedState, wake: &Sender<()>, checked: bool) {
     if lock(shared).abort_reads.load(Ordering::Relaxed) {
         return;
     }
-    let st = svc.status();
+    let Some(st) = guarded("reading the add-on status", shared, wake, || svc.status()) else {
+        return;
+    };
     refresh_with(svc, shared, wake, checked, st);
 }
 
@@ -671,6 +716,9 @@ fn run(
         }
     };
     let mut svc: Option<SliceService> = None;
+    // A saved target means this computer is enrolled: the window shows the main view while the
+    // first pass reads, never setup.
+    let saved = target.is_some() && setup.is_none();
     if let Some(t) = &target {
         match open_service(config_for(&opts, t), os_attach(&opts)) {
             Ok(mut s) => {
@@ -680,7 +728,12 @@ fn run(
             }
             Err(e) => {
                 crate::app::log_error(&format!("could not open the sync service: {e}"));
-                publish(&shared, &wake, |g| g.message = e.to_string())
+                publish(&shared, &wake, |g| {
+                    g.message = e.to_string();
+                    if saved {
+                        g.fault = Some("opening the sync service".into());
+                    }
+                })
             }
         }
     }
@@ -688,6 +741,11 @@ fn run(
         g.setup = setup.clone();
         g.started = true;
         g.shared_root = target.as_ref().map(|t| t.shared_root.clone());
+        if saved {
+            g.enrolled_now = true;
+            g.snapshot.enrolled = true;
+            g.snapshot.computer_name = opts.display_name.clone();
+        }
     });
     if setup.is_none() {
         detect_later(opts.display_name.clone(), shared.clone(), wake.clone());
@@ -710,7 +768,11 @@ fn run(
                 .is_some_and(|s| !s.pause_state().holds_sync() && s.is_enrolled());
             let next = scheduled.then(|| now_ms() + opts.interval.as_millis() as i64);
             publish(&shared, &wake, |g| g.next_check_ms = next);
-            match rx.recv_timeout(opts.interval) {
+            match rx.recv_timeout(if lock(&shared).fault.is_some() {
+                fault_retry()
+            } else {
+                opts.interval
+            }) {
                 Err(RecvTimeoutError::Disconnected) => return,
                 Ok(c) => Some(c),
                 Err(RecvTimeoutError::Timeout) => None,
@@ -729,6 +791,11 @@ fn run(
             }
             Some(Cmd::Enroll(t, req)) => {
                 inspector.cancel(&shared, &wake);
+                if svc.as_ref().is_some_and(|s| s.is_enrolled()) {
+                    crate::app::log_warn("enrollment refused: this computer is already set up");
+                    publish(&shared, &wake, |g| g.message = ALREADY_SET_UP.into());
+                    continue;
+                }
                 let _ = std::fs::create_dir_all(&t.shared_root);
                 let res =
                     open_service(config_for(&opts, &t), os_attach(&opts)).and_then(|mut s| {
@@ -823,7 +890,12 @@ fn run(
             }
             Some(Cmd::Group(a)) => {
                 if let Some(s) = svc.as_mut() {
-                    let result = dispatch(s, &a);
+                    let result = guarded("handling a command", &shared, &wake, || dispatch(s, &a))
+                        .unwrap_or_else(|| {
+                            ActionResult::Failed(
+                                "WoW Sync hit an internal error and could not finish that. Export diagnostics and report it.".into(),
+                            )
+                        });
                     let kind = a.kind();
                     let subject = a.subject();
                     publish(&shared, &wake, |g| {
@@ -930,8 +1002,26 @@ fn run(
         publish(&shared, &wake, |g| g.busy = true);
         interrupt.armed.store(true, Ordering::Relaxed);
         let pass_started = Instant::now();
-        let res = s.sync_once();
+        let res = guarded("running a sync pass", &shared, &wake, || {
+            #[cfg(test)]
+            {
+                let mut hook = tests::PANIC_NEXT_PASS.lock().unwrap();
+                if hook.as_deref() == Some(opts.state_dir.as_path()) {
+                    *hook = None;
+                    drop(hook);
+                    panic!("injected test panic");
+                }
+            }
+            s.sync_once()
+        });
         interrupt.armed.store(false, Ordering::Relaxed);
+        let Some(res) = res else {
+            publish(&shared, &wake, |g| g.busy = false);
+            if gate.end_step() {
+                publish(&shared, &wake, |g| g.quit_ready = true);
+            }
+            continue;
+        };
         let crashed = matches!(&res, Ok(r) if r.crashed);
         if crashed {
             let _ = s.set_paused(true);
@@ -952,13 +1042,19 @@ fn run(
         }
         match res {
             Ok(r) if !r.crashed && !abort.load(Ordering::Relaxed) => {
-                publish(&shared, &wake, |g| g.message.clear());
+                publish(&shared, &wake, |g| {
+                    g.message.clear();
+                    g.fault = None;
+                });
                 let mut st = r.status;
                 st.test_mode = s.test_mode();
                 refresh_with(s, &shared, &wake, true, st);
             }
             Ok(_) => {
-                publish(&shared, &wake, |g| g.message.clear());
+                publish(&shared, &wake, |g| {
+                    g.message.clear();
+                    g.fault = None;
+                });
                 refresh(s, &shared, &wake, true);
             }
             Err(wow_sync_runtime::ServiceError::Cancelled) if abort.load(Ordering::Relaxed) => {
@@ -1258,6 +1354,128 @@ mod tests {
             !lock(&shared).abort_reads.load(Ordering::Relaxed)
         });
         assert!(!lock(&shared).quit_ready);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    pub(super) static PANIC_NEXT_PASS: Mutex<Option<PathBuf>> = Mutex::new(None);
+    pub(super) static FAULT_RETRY_MS: AtomicU64 = AtomicU64::new(0);
+
+    fn install_files(t: &Target) {
+        let variant = t.install_root.join("_retail_");
+        std::fs::create_dir_all(variant.join("Interface").join("AddOns").join("A")).unwrap();
+        std::fs::write(
+            variant.join("Interface/AddOns/A/A.toc"),
+            "## Interface: 11508\n",
+        )
+        .unwrap();
+        std::fs::write(
+            t.install_root.join(".build.info"),
+            "Branch!STRING:0|Active!DEC:1|Product!STRING:0|Version!STRING:0\nus|1|wow|1.0.0.1\n",
+        )
+        .unwrap();
+        std::fs::write(
+            variant.join(".flavor.info"),
+            "Product Flavor!STRING:0\nwow\n",
+        )
+        .unwrap();
+    }
+
+    fn enroll_req(base: &Path, t: &Target) -> EnrollRequest {
+        let digest = SliceService::new(config_for(&lab_opts(base), t))
+            .unwrap()
+            .inspect()
+            .digest;
+        EnrollRequest {
+            join: wow_sync_runtime::JoinChoice::New { name: "X".into() },
+            identity_confirmed: true,
+            scope_confirmed: true,
+            digest,
+            display_name: "Desk".into(),
+        }
+    }
+
+    fn enrolled_lab(tag: &str) -> (PathBuf, SharedState, Sender<Cmd>, Target) {
+        let (base, shared, tx, t) = lab_backend(tag);
+        install_files(&t);
+        tx.send(Cmd::Enroll(t.clone(), enroll_req(&base, &t)))
+            .unwrap();
+        wait_for("enrollment", Duration::from_secs(20), || {
+            let g = lock(&shared);
+            g.enrolled_now || !g.message.is_empty()
+        });
+        assert!(lock(&shared).enrolled_now, "{}", lock(&shared).message);
+        (base, shared, tx, t)
+    }
+
+    #[test]
+    fn a_panic_in_a_pass_is_shown_keeps_commands_working_and_is_retried() {
+        let (base, shared, tx, _t) = enrolled_lab("panic");
+        FAULT_RETRY_MS.store(2000, Ordering::Relaxed);
+        wait_for("the first pass", Duration::from_secs(20), || {
+            let g = lock(&shared);
+            !g.busy && g.snapshot.detail.is_some()
+        });
+        *PANIC_NEXT_PASS.lock().unwrap() = Some(base.join("state"));
+        tx.send(Cmd::SyncNow).unwrap();
+        wait_for("the fault", Duration::from_secs(10), || {
+            lock(&shared).fault.is_some()
+        });
+        assert_eq!(lock(&shared).fault.as_deref(), Some("running a sync pass"));
+        assert!(!lock(&shared).busy);
+        wait_for(
+            "the retry to clear the fault",
+            Duration::from_secs(20),
+            || lock(&shared).fault.is_none(),
+        );
+        tx.send(Cmd::QuitWhenSafe).unwrap();
+        wait_for("quit", Duration::from_secs(10), || lock(&shared).quit_ready);
+        FAULT_RETRY_MS.store(0, Ordering::Relaxed);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn setup_finishing_for_an_enrolled_computer_is_refused_not_repeated() {
+        let (base, shared, tx, t) = enrolled_lab("twice");
+        wait_for("the first pass", Duration::from_secs(20), || {
+            !lock(&shared).busy
+        });
+        lock(&shared).message.clear();
+        tx.send(Cmd::Enroll(t.clone(), enroll_req(&base, &t)))
+            .unwrap();
+        wait_for("a message", Duration::from_secs(10), || {
+            !lock(&shared).message.is_empty()
+        });
+        assert_eq!(lock(&shared).message, ALREADY_SET_UP);
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_restart_with_a_saved_enrollment_shows_the_main_view_not_setup() {
+        let (base, shared1, tx1, t) = enrolled_lab("restart");
+        wait_for("the first pass", Duration::from_secs(20), || {
+            !lock(&shared1).busy
+        });
+        tx1.send(Cmd::QuitWhenSafe).unwrap();
+        wait_for("quit", Duration::from_secs(10), || {
+            lock(&shared1).quit_ready
+        });
+        drop(tx1);
+        let mut opts = lab_opts(&base);
+        opts.state_dir = base.join("state");
+        let shared: SharedState = Arc::new(Mutex::new(Shared::default()));
+        let (_tx, rx) = std::sync::mpsc::channel();
+        let (wake, _w) = std::sync::mpsc::channel();
+        spawn(Some(t.clone()), None, opts, rx, shared.clone(), wake);
+        wait_for("started", Duration::from_secs(10), || lock(&shared).started);
+        let g = lock(&shared);
+        assert!(g.enrolled_now, "a saved enrollment is never shown as setup");
+        assert!(g.setup.is_none());
+        let mut w = crate::world::World::empty("0.0.0");
+        w.confirm_enrolled(g.enrolled_now);
+        w.checking = true;
+        drop(g);
+        assert!(w.enrolled);
+        assert_eq!(crate::model::headline(&w).text, "Checking add-ons…");
         let _ = std::fs::remove_dir_all(&base);
     }
 

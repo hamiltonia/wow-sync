@@ -1815,6 +1815,18 @@ tests = [
     "computers_ui::tests::a_peer_on_another_version_is_called_out_and_a_matching_one_is_not",
 ]
 # <<< section: R9-app
+# >>> section: R9-app-round2
+[[case]]
+id = "R9-app:startup-and-panic-resilience"
+tier = "offline"
+tests = [
+    "backend::tests::a_restart_with_a_saved_enrollment_shows_the_main_view_not_setup",
+    "backend::tests::a_panic_in_a_pass_is_shown_keeps_commands_working_and_is_retried",
+    "backend::tests::setup_finishing_for_an_enrolled_computer_is_refused_not_repeated",
+    "model::tests::a_first_pass_in_progress_reads_checking_and_an_internal_error_is_never_silent",
+    "diagnostics::tests::export_has_the_documented_shape",
+]
+# <<< section: R9-app-round2
 # >>> section: R9-decide
 [[case]]
 id = "R9-decide:conflicting-keeps"

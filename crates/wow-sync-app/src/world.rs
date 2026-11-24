@@ -265,6 +265,10 @@ pub struct World {
     pub variant_folder: String,
     pub shared_label: String,
     pub view: StatusView,
+    /// Enrolled, but the first status has not been read yet.
+    pub checking: bool,
+    /// The sync thread hit an internal error in this phase and is retrying.
+    pub fault: Option<String>,
 }
 
 /// The real inputs besides the snapshot.
@@ -410,6 +414,8 @@ impl World {
             variant_folder: String::new(),
             shared_label: String::new(),
             view: placeholder_view(),
+            checking: false,
+            fault: None,
         }
     }
 
@@ -424,6 +430,7 @@ impl World {
         let mut w = World::empty(i.app_version);
         let s = i.snap;
         w.enrolled = s.enrolled;
+        w.checking = s.detail.is_none();
         w.setup = i.setup;
         w.computer = s.computer_name.clone();
         w.group = s.group_name.clone();
