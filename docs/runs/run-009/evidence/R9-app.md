@@ -29,3 +29,11 @@ Not done: live GUI latency/memory runs; e2e that other packages apply while one 
 | Diagnostics peer version | passed (unit) | `app_version=` per computer row; non-version text reads `unknown`. |
 
 Not done: live GUI check of the restart on the owner's machine; the core panic itself is R9-decide's.
+## Round 3
+
+- RV9-02: enrolled at start only if enrollment loads (nrollment_loads); otherwise LOST_ENROLLMENT message plus setup; open failures retry with 5/10/20 min backoff. Test: lost-enrollment test. Open-fail retry has no automated test.
+- RV9-03: checking excludes headline/provider/reconfirm. Test: world::tests::checking_does_not_hide_a_provider_error.
+- RV9-05: cache cap 12 MiB (measured 167 B/entry, 34k files ~6 MB); stale caches pruned. 2 tests.
+- RV9-07: service reopened after a caught panic. Test: after_a_panic_the_service_is_reopened_from_disk.
+- RV9-10: release notes rewritten. RV9-06 accepted (D-31).
+- Not run: live GUI, RSS on a real tree, new restart timing.
