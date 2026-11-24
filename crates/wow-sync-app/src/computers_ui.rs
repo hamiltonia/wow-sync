@@ -161,6 +161,19 @@ pub fn allow_again(w: &World, row: &AllowAgainRow) -> Result<GroupAction, String
     })
 }
 
+/// A peer running a different WoW Sync version than this computer, in words. Versions are
+/// compared as text: any difference is shown, none is ordered.
+pub fn version_skew(w: &World, peer: usize) -> Option<String> {
+    let p = w.peers.get(peer)?;
+    let mine = w.update.current.as_str();
+    if p.app.is_empty() || p.app == mine || mine.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{} runs WoW Sync {}; this computer runs {mine}. Update every computer to the same version so they behave alike.",
+        p.name, p.app
+    ))
+}
 /// Retired computers keep history but have no status dot.
 pub fn retired_line(c: &crate::features::RetiredComputer) -> String {
     format!("{}. History kept.", retired_by(&c.on, &c.by))
@@ -197,6 +210,18 @@ mod tests {
             },
         ));
         w
+    }
+
+    #[test]
+    fn a_peer_on_another_version_is_called_out_and_a_matching_one_is_not() {
+        let mut w = world(Some(60));
+        w.update.current = "0.3.2".into();
+        assert_eq!(version_skew(&w, 0), None, "not reported");
+        w.peers[0].app = "0.3.1".into();
+        let s = version_skew(&w, 0).unwrap();
+        assert!(s.contains("Den PC runs WoW Sync 0.3.1") && s.contains("this computer runs 0.3.2"));
+        w.peers[0].app = "0.3.2".into();
+        assert_eq!(version_skew(&w, 0), None);
     }
 
     #[test]

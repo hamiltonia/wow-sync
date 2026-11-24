@@ -236,11 +236,28 @@ pub struct ScanCtl {
     pub files: Arc<AtomicU64>,
     /// Pause after each file, so tests can make a scan slow enough to interrupt. Zero otherwise.
     pub per_file_delay_ms: u64,
+    /// Hash cache of this install (D-31); `None` re-reads every file.
+    pub cache: Option<Arc<crate::hash_cache::HashCache>>,
+    /// A user command waiting for the sync thread; only honoured while rmed.
+    pub interrupt: Option<Interrupt>,
+}
+
+/// Lets a user command stop a read-only scan so it is answered at once; the scan is repeated
+/// afterwards and, with the hash cache, resumes where it was.
+#[derive(Clone, Default)]
+pub struct Interrupt {
+    /// True only while a sync pass is reading.
+    pub armed: Arc<AtomicBool>,
+    /// Set by whoever queues a command.
+    pub pending: Arc<AtomicBool>,
 }
 
 impl ScanCtl {
     pub fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::Relaxed)
+            || self.interrupt.as_ref().is_some_and(|i| {
+                i.armed.load(Ordering::Relaxed) && i.pending.load(Ordering::Relaxed)
+            })
     }
 
     pub fn slowed(ms: u64) -> ScanCtl {
@@ -271,7 +288,7 @@ fn scan_folder_ctl(
     };
     hook(ScanPhase::AfterFirstSnapshot);
     let mut files = Vec::new();
-    for (p, is_dir, _, _) in &s1.entries {
+    for (p, is_dir, snap_size, mtime) in &s1.entries {
         if *is_dir {
             continue;
         }
@@ -279,6 +296,17 @@ fn scan_folder_ctl(
             return None;
         }
         let rel = format!("{name}/{p}");
+        if let Some(c) = &ctl.cache {
+            if let Some(sha256) = c.lookup(&rel, *snap_size, *mtime) {
+                files.push(ScannedFile {
+                    rel_path: p.clone(),
+                    size: *snap_size,
+                    sha256,
+                });
+                ctl.files.fetch_add(1, Ordering::Relaxed);
+                continue;
+            }
+        }
         let hashed = addons
             .open_read(&rel, opts.max_file_bytes)
             .and_then(|mut f| {
@@ -287,6 +315,13 @@ fn scan_folder_ctl(
             });
         match hashed {
             Ok((size, sha256)) => {
+                if let Some(c) = &ctl.cache {
+                    let settled = *mtime != 0
+                        && *mtime < (opts.now_unix_ms as i128 - opts.recent_ms as i128) * 1_000_000;
+                    if settled && size == *snap_size {
+                        c.store(&rel, size, *mtime, sha256);
+                    }
+                }
                 files.push(ScannedFile {
                     rel_path: p.clone(),
                     size,
@@ -387,6 +422,22 @@ pub fn scan_addons_with_hook(
 
 /// Like `scan_addons_with_hook`, but `ctl` can cancel it (`Ok(None)`) and shows its progress.
 pub fn scan_addons_ctl(
+    addons: &Root,
+    opts: &ScanOptions,
+    hook: &mut dyn FnMut(&str),
+    ctl: &ScanCtl,
+) -> Result<Option<AddonsScan>, FsError> {
+    if let Some(c) = &ctl.cache {
+        c.begin();
+    }
+    let res = scan_addons_pass(addons, opts, hook, ctl);
+    if let Some(c) = &ctl.cache {
+        c.finish(matches!(res, Ok(Some(_))));
+    }
+    res
+}
+
+fn scan_addons_pass(
     addons: &Root,
     opts: &ScanOptions,
     hook: &mut dyn FnMut(&str),
@@ -588,6 +639,104 @@ mod tests {
         assert!(scan_addons_ctl(&root, &opts(), &mut |_| {}, &ctl)
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn a_cache_skips_unchanged_files_and_rereads_changed_ones() {
+        let (t, inst, root) = setup();
+        let state = t.path().join("state");
+        std::fs::create_dir_all(&state).unwrap();
+        let cache = crate::hash_cache::HashCache::open(&state, "scope");
+        let ctl = ScanCtl {
+            cache: Some(cache.clone()),
+            ..ScanCtl::default()
+        };
+        let first = scan_addons_ctl(&root, &opts(), &mut |_| {}, &ctl)
+            .unwrap()
+            .unwrap();
+        let counts = || {
+            (
+                cache.hits.swap(0, Ordering::Relaxed),
+                cache.misses.swap(0, Ordering::Relaxed),
+            )
+        };
+        assert_eq!(counts(), (0, 3), "the first pass reads everything");
+        let second = scan_addons_ctl(&root, &opts(), &mut |_| {}, &ctl)
+            .unwrap()
+            .unwrap();
+        assert_eq!(counts(), (3, 0), "the second pass reads nothing");
+        assert_eq!(first, second);
+
+        // Same size, new content and mtime: only that file is read again.
+        let p = inst.addons.join("Alpha").join("a.lua");
+        std::fs::write(&p, b"uno").unwrap();
+        set_mtime(&p, SystemTime::now() - Duration::from_secs(50));
+        let third = scan_addons_ctl(&root, &opts(), &mut |_| {}, &ctl)
+            .unwrap()
+            .unwrap();
+        assert_eq!(counts(), (2, 1));
+        let a = third.folders[0]
+            .files
+            .iter()
+            .find(|f| f.rel_path == "a.lua")
+            .unwrap();
+        assert_eq!(a.sha256, sha(b"uno"));
+
+        // The cache survives a restart; "check all files" reads everything once.
+        let reopened = crate::hash_cache::HashCache::open(&state, "scope");
+        assert_eq!(reopened.len(), 3);
+        let ctl = ScanCtl {
+            cache: Some(reopened.clone()),
+            ..ScanCtl::default()
+        };
+        scan_addons_ctl(&root, &opts(), &mut |_| {}, &ctl).unwrap();
+        assert_eq!(reopened.hits.swap(0, Ordering::Relaxed), 3);
+        reopened.request_full();
+        scan_addons_ctl(&root, &opts(), &mut |_| {}, &ctl).unwrap();
+        assert_eq!(reopened.misses.swap(0, Ordering::Relaxed), 3);
+        assert!(!reopened.full_requested());
+
+        // A deleted file drops out of the cache.
+        std::fs::remove_file(inst.addons.join("Alpha").join("sub").join("b.lua")).unwrap();
+        scan_addons_ctl(&root, &opts(), &mut |_| {}, &ctl).unwrap();
+        assert_eq!(crate::hash_cache::HashCache::open(&state, "scope").len(), 2);
+    }
+
+    #[test]
+    fn a_recently_modified_file_is_never_cached() {
+        let (t, _i, root) = setup_fresh();
+        let state = t.path().join("state");
+        std::fs::create_dir_all(&state).unwrap();
+        let cache = crate::hash_cache::HashCache::open(&state, "fresh");
+        let ctl = ScanCtl {
+            cache: Some(cache.clone()),
+            ..ScanCtl::default()
+        };
+        let now = ScanOptions::with_defaults(
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as i64,
+        );
+        scan_addons_ctl(&root, &now, &mut |_| {}, &ctl).unwrap();
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn a_pending_command_stops_a_scan_only_while_it_is_armed() {
+        let (_t, _i, root) = setup_fresh();
+        let int = Interrupt::default();
+        let ctl = ScanCtl {
+            interrupt: Some(int.clone()),
+            ..ScanCtl::default()
+        };
+        int.pending.store(true, Ordering::Relaxed);
+        assert!(!ctl.cancelled(), "a status read is never interrupted");
+        assert!(scan_addons_ctl(&root, &opts(), &mut |_| {}, &ctl).is_ok());
+        int.armed.store(true, Ordering::Relaxed);
+        assert!(ctl.cancelled());
+        let r = scan_addons_ctl(&root, &opts(), &mut |_| {}, &ctl);
+        assert!(r.is_err(), "{r:?}");
     }
 
     #[test]

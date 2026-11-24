@@ -49,6 +49,8 @@ pub struct PackageRow {
     pub awaiting: Vec<String>,
     pub confirmed_by: Vec<String>,
     pub candidates: Vec<CandidateRow>,
+    /// Computers that publish this package but whose files have not arrived here (Unavailable).
+    pub waiting_on: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -297,6 +299,27 @@ pub fn build_package_rows(i: &DetailInput) -> Vec<PackageRow> {
             Some(n) => format!("{} {n}", render_named(why, &name_of)),
             None => render_named(why, &name_of),
         };
+        let waiting_on = if *status == PackageStatus::Unavailable {
+            let wanted: Vec<&Sha256> = match why {
+                Explanation::NotAvailableYet { missing } => missing.iter().collect(),
+                Explanation::TreeCorrupt { tree } => vec![tree],
+                _ => Vec::new(),
+            };
+            i.views
+                .iter()
+                .filter(|v| &v.computer != i.this_id)
+                .filter(|v| match &v.latest {
+                    MemberLatest::Valid { state, .. } => state
+                        .folders
+                        .iter()
+                        .any(|f| f.tree.as_ref().is_some_and(|t| wanted.contains(&t))),
+                    _ => false,
+                })
+                .map(|v| name_of(&v.computer))
+                .collect()
+        } else {
+            Vec::new()
+        };
         rows.push(PackageRow {
             key: key.to_string(),
             title,
@@ -310,6 +333,7 @@ pub fn build_package_rows(i: &DetailInput) -> Vec<PackageRow> {
             awaiting,
             confirmed_by: confirmed_ids.iter().map(&name_of).collect(),
             candidates,
+            waiting_on,
         });
     }
     rows
@@ -928,6 +952,7 @@ mod tests {
             awaiting: Vec::new(),
             confirmed_by: Vec::new(),
             candidates: Vec::new(),
+            waiting_on: Vec::new(),
         }
     }
 

@@ -42,6 +42,8 @@ pub enum Cmd {
     SaveToggles(wow_sync_runtime::AppToggles),
     /// A group command from a feature screen; its result is published for the screen to show.
     Group(GroupAction),
+    /// Re-read every add-on file once, ignoring the hash cache ("Check all files").
+    CheckAllFiles,
 }
 
 /// The outcome of the last group command, with a counter so a screen shows each result once.
@@ -56,7 +58,69 @@ pub struct GroupResult {
 /// Runs a group action on the service. The one place the app turns a screen's choice into a
 /// runtime command.
 pub fn dispatch(svc: &mut SliceService, a: &GroupAction) -> ActionResult {
-    ActionResult::from_outcome(svc.command(a.to_command()))
+    let started = Instant::now();
+    let out = svc.command(a.to_command());
+    let (ok, line) = group_log_line(a.kind(), &out);
+    let ms = started.elapsed().as_millis();
+    if ok {
+        crate::app::log(&format!("{line} ({ms} ms)"));
+    } else {
+        crate::app::log_warn(&format!("{line} ({ms} ms)"));
+    }
+    ActionResult::from_outcome(out)
+}
+
+/// One log line for what a group command did: its kind, whether it was accepted or refused and
+/// why, and the hash of a record it wrote. Never a path, name or file content.
+pub fn group_log_line(
+    kind: ActionKind,
+    out: &Result<wow_sync_runtime::CommandOutcome, wow_sync_runtime::CommandError>,
+) -> (bool, String) {
+    use wow_sync_runtime::{CommandError as E, CommandOutcome as O};
+    let short = |h: &wow_sync_core::ids::Sha256| h.to_string().chars().take(12).collect::<String>();
+    match out {
+        Ok(O::Written(h)) => (
+            true,
+            format!("{kind:?}: accepted, wrote record {}", short(h)),
+        ),
+        Ok(O::Kept) => (
+            true,
+            format!("{kind:?}: accepted, kept until publishing resumes"),
+        ),
+        Ok(O::Local(_) | O::Recorded) => (
+            true,
+            format!("{kind:?}: accepted, changed only this computer"),
+        ),
+        Ok(O::ReEnrolled) => (true, format!("{kind:?}: accepted, joined again")),
+        Ok(O::NothingToDo) => (true, format!("{kind:?}: nothing to do")),
+        Ok(O::UpdateCheck(_)) => (true, format!("{kind:?}: update check requested")),
+        Ok(O::Exported(e)) => (
+            true,
+            format!("{kind:?}: ok, {} line(s) of text", e.text.lines().count()),
+        ),
+        Err(E::Decide(e)) => (false, format!("{kind:?}: refused, {e:?}")),
+        Err(E::Export(_)) => (false, format!("{kind:?}: refused or could not be saved")),
+        Err(E::Service(_)) => (
+            false,
+            format!("{kind:?}: the sync service could not do that"),
+        ),
+        Err(E::Rollback(r)) => (false, format!("{kind:?}: refused, {r:?}")),
+        Err(E::Settings(e)) => (false, format!("{kind:?}: refused, {e:?}")),
+        Err(E::NotAllowed) => (
+            false,
+            format!("{kind:?}: refused, this computer cannot publish"),
+        ),
+        Err(E::UpdatesUnavailable) => (false, format!("{kind:?}: updates not available")),
+        Err(other) => (false, format!("{kind:?}: refused, {}", variant_name(other))),
+    }
+}
+
+fn variant_name(e: &wow_sync_runtime::CommandError) -> String {
+    let d = format!("{e:?}");
+    d.split(['(', ' ', '{'])
+        .next()
+        .unwrap_or("error")
+        .to_string()
 }
 
 #[derive(Default)]
@@ -98,6 +162,9 @@ pub struct Shared {
     /// Set by the window the moment Quit is chosen, before the sync thread can read the
     /// command: read-only scans of the install stop at the next file. Never stops a write.
     pub abort_reads: Arc<AtomicBool>,
+    /// Set by the window each time it queues a command, so a sync pass that is only reading
+    /// stops at the next file and the command is answered at once.
+    pub command_pending: Arc<AtomicBool>,
 }
 
 impl Shared {
@@ -148,6 +215,11 @@ pub struct BackendOptions {
     pub save_target: bool,
     /// Attach the real notifier and the update source (not in developer mode).
     pub os_services: bool,
+}
+
+/// The hash cache is kept per installation: install root and variant folder.
+fn cache_scope(t: &Target) -> String {
+    format!("{}|{}", t.install_root.display(), t.variant_folder)
 }
 
 const CONFIG_FILE: &str = "target.txt";
@@ -315,6 +387,19 @@ fn refresh_with(
     });
 }
 
+/// Publishes the saved pause state at once, so a click shows its effect without waiting for a
+/// status read or a pass.
+fn publish_pause(svc: &SliceService, shared: &SharedState, wake: &Sender<()>) {
+    let pause = svc.pause_state();
+    publish(shared, wake, |g| {
+        g.paused_since = match pause {
+            PauseState::Paused { since_ms } => Some(since_ms),
+            _ => None,
+        };
+        g.pause_damaged = pause == PauseState::Damaged;
+    });
+}
+
 type Attach = fn(&mut SliceService) -> Result<(), wow_sync_runtime::ServiceError>;
 
 /// Opens the service and, when `attach` is given, attaches the OS notifier and update source.
@@ -381,7 +466,16 @@ impl Inspector {
             old.cancel.store(true, Ordering::Relaxed);
         }
         self.seq += 1;
-        let (seq, ctl) = (self.seq, ScanCtl::default());
+        let (seq, ctl) = (
+            self.seq,
+            ScanCtl {
+                cache: Some(wow_sync_runtime::HashCache::open(
+                    &cfg.state_dir,
+                    &cache_scope(&t),
+                )),
+                ..ScanCtl::default()
+            },
+        );
         self.running = Some(ctl.clone());
         publish(shared, wake, |g| {
             g.preview = None;
@@ -557,15 +651,26 @@ fn run(
     wake: Sender<()>,
 ) {
     let abort = lock(&shared).abort_reads.clone();
-    let read_ctl = || ScanCtl {
-        cancel: abort.clone(),
-        ..ScanCtl::default()
+    let interrupt = wow_sync_runtime::Interrupt {
+        armed: Arc::new(AtomicBool::new(false)),
+        pending: lock(&shared).command_pending.clone(),
+    };
+    let cache: std::cell::RefCell<Option<Arc<wow_sync_runtime::HashCache>>> = Default::default();
+    let read_ctl = |t: &Target| {
+        let c = wow_sync_runtime::HashCache::open(&opts.state_dir, &cache_scope(t));
+        *cache.borrow_mut() = Some(c.clone());
+        ScanCtl {
+            cancel: abort.clone(),
+            cache: Some(c),
+            interrupt: Some(interrupt.clone()),
+            ..ScanCtl::default()
+        }
     };
     let mut svc: Option<SliceService> = None;
     if let Some(t) = &target {
         match open_service(config_for(&opts, t), os_attach(&opts)) {
             Ok(mut s) => {
-                s.set_read_ctl(read_ctl());
+                s.set_read_ctl(read_ctl(t));
                 s.inject_crash_after(opts.crash_after);
                 svc = Some(s);
             }
@@ -586,8 +691,14 @@ fn run(
     let mut gate = QuitGate::default();
     let mut inspector = Inspector::default();
     let mut force = true;
+    let mut carried: Option<Cmd> = None;
     loop {
-        let cmd = if force {
+        // A command that arrived during a pass, or while it ran, is answered before any
+        // further pass starts.
+        let queued = carried.take().or_else(|| rx.try_recv().ok());
+        let cmd = if queued.is_some() {
+            queued
+        } else if force {
             None
         } else {
             let scheduled = svc
@@ -617,7 +728,7 @@ fn run(
                 let _ = std::fs::create_dir_all(&t.shared_root);
                 let res =
                     open_service(config_for(&opts, &t), os_attach(&opts)).and_then(|mut s| {
-                        s.set_read_ctl(read_ctl());
+                        s.set_read_ctl(read_ctl(&t));
                         s.enroll(&req)?;
                         Ok(s)
                     });
@@ -721,19 +832,54 @@ fn run(
                         });
                     });
                     refresh(s, &shared, &wake, false);
+                } else {
+                    crate::app::log_warn(&format!("{:?}: not done, sync is not set up", a.kind()));
+                    publish(&shared, &wake, |g| {
+                        let seq = g.group_result.as_ref().map_or(1, |r| r.seq + 1);
+                        g.group_result = Some(GroupResult {
+                            seq,
+                            kind: a.kind(),
+                            subject: None,
+                            result: ActionResult::Failed("this computer is not set up yet".into()),
+                        });
+                    });
                 }
                 continue;
             }
+            Some(Cmd::CheckAllFiles) => {
+                match cache.borrow().as_ref() {
+                    Some(c) => {
+                        c.request_full();
+                        crate::app::log(
+                            "check all files requested: the next pass re-reads every add-on file",
+                        );
+                    }
+                    None => crate::app::log_warn("check all files: nothing is set up to check"),
+                }
+                manual = true;
+            }
             Some(Cmd::Pause) => {
                 if let Some(s) = svc.as_mut() {
-                    let _ = s.set_paused(true);
+                    match s.set_paused(true) {
+                        Ok(()) => crate::app::log("pause: syncing paused"),
+                        Err(e) => {
+                            crate::app::log_warn(&format!("pause: could not save it ({e:?})"))
+                        }
+                    }
+                    publish_pause(s, &shared, &wake);
                     refresh(s, &shared, &wake, false);
                 }
                 continue;
             }
             Some(Cmd::Resume) => {
                 if let Some(s) = svc.as_ref() {
-                    let _ = s.set_paused(false);
+                    match s.set_paused(false) {
+                        Ok(()) => crate::app::log("resume: syncing resumed"),
+                        Err(e) => {
+                            crate::app::log_warn(&format!("resume: could not save it ({e:?})"))
+                        }
+                    }
+                    publish_pause(s, &shared, &wake);
                 }
             }
             Some(Cmd::SyncNow) => manual = true,
@@ -766,14 +912,39 @@ fn run(
             refresh(s, &shared, &wake, false);
             continue;
         }
+        // From here until the read-only part of the pass is over, a new command stops the scan
+        // (the cache keeps what it hashed) and is answered before the pass starts again.
+        interrupt.pending.store(false, Ordering::Relaxed);
+        if let Ok(c) = rx.try_recv() {
+            carried = Some(c);
+            force = true;
+            continue;
+        }
         if !gate.begin_step() {
             continue;
         }
         publish(&shared, &wake, |g| g.busy = true);
+        interrupt.armed.store(true, Ordering::Relaxed);
+        let pass_started = Instant::now();
         let res = s.sync_once();
+        interrupt.armed.store(false, Ordering::Relaxed);
         let crashed = matches!(&res, Ok(r) if r.crashed);
         if crashed {
             let _ = s.set_paused(true);
+        }
+        if res.is_ok() {
+            if let Some(c) = cache.borrow().as_ref() {
+                let (reused, read) = (
+                    c.hits.swap(0, Ordering::Relaxed),
+                    c.misses.swap(0, Ordering::Relaxed),
+                );
+                let ms = pass_started.elapsed().as_millis();
+                if read > 0 || ms > 2000 {
+                    crate::app::log(&format!(
+                        "sync pass took {ms} ms: {reused} file(s) reused from the hash cache, {read} read"
+                    ));
+                }
+            }
         }
         match res {
             Ok(r) if !r.crashed && !abort.load(Ordering::Relaxed) => {
@@ -786,8 +957,15 @@ fn run(
                 publish(&shared, &wake, |g| g.message.clear());
                 refresh(s, &shared, &wake, true);
             }
-            Err(wow_sync_runtime::ServiceError::Cancelled) => {
+            Err(wow_sync_runtime::ServiceError::Cancelled) if abort.load(Ordering::Relaxed) => {
                 crate::app::log("sync cycle stopped because the app is quitting");
+            }
+            Err(wow_sync_runtime::ServiceError::Cancelled) => {
+                crate::app::log(&format!(
+                    "sync pass paused after {} ms to answer a command; it starts again right after",
+                    pass_started.elapsed().as_millis()
+                ));
+                force = true;
             }
             Err(e) => {
                 crate::app::log_error(&format!("sync cycle failed: {e}"));
@@ -1119,6 +1297,17 @@ mod tests {
             "an empty field is not a target"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn every_group_result_gets_a_log_line_without_paths() {
+        use wow_sync_runtime::{CommandError as E, CommandOutcome as O};
+        let (ok, l) = group_log_line(ActionKind::Pause, &Ok(O::NothingToDo));
+        assert!(ok && l.contains("nothing to do"), "{l}");
+        let (ok, l) = group_log_line(ActionKind::Pause, &Err(E::NotAllowed));
+        assert!(!ok && l.contains("refused"), "{l}");
+        let (ok, l) = group_log_line(ActionKind::Pause, &Err(E::UpdatesUnavailable));
+        assert!(!ok && !l.contains('\\') && !l.contains('/'), "{l}");
     }
 
     static ATTACHED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);

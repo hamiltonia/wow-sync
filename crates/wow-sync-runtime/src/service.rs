@@ -27,11 +27,12 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use wow_sync_adapters::fs_install::InstallArea;
 use wow_sync_adapters::fs_safe::{ReparsePolicy, Root};
-pub use wow_sync_adapters::fs_scan::ScanCtl;
 use wow_sync_adapters::fs_scan::{
     list_variant_folders, read_variant_files, scan_addons_ctl, DirKind, FileRead, ScanOptions,
     ScanStatus as AdScanStatus,
 };
+pub use wow_sync_adapters::fs_scan::{Interrupt, ScanCtl};
+pub use wow_sync_adapters::hash_cache::HashCache;
 use wow_sync_adapters::localstate::LocalState;
 use wow_sync_adapters::provider::{EntryState, ProviderRoot};
 use wow_sync_adapters::sysinfo::{now_unix_ms, random_id_hex};

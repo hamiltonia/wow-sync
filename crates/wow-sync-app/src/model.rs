@@ -212,6 +212,42 @@ pub fn headline_sub(w: &World) -> Option<String> {
         .map(|p| crate::removed_ui::plain(&p.text))
 }
 
+/// Seconds an unavailable add-on may wait before the headline stops promising it will arrive.
+const UNAVAILABLE_GRACE_SECS: u64 = 30 * 60;
+
+fn unavailable_sentence(w: &World) -> Option<String> {
+    let un: Vec<&crate::world::Addon> = w
+        .addons
+        .iter()
+        .filter(|a| a.kind == crate::world::Kind::Unavailable)
+        .collect();
+    let first = un.first()?;
+    let mut who: Vec<&str> = un
+        .iter()
+        .flat_map(|a| a.waiting_on.iter().map(String::as_str))
+        .collect();
+    who.sort_unstable();
+    who.dedup();
+    let overdue = un
+        .iter()
+        .any(|a| a.waiting_secs.is_some_and(|s| s >= UNAVAILABLE_GRACE_SECS));
+    let what = if un.len() == 1 {
+        first.title.clone()
+    } else {
+        format!("{} add-ons", un.len())
+    };
+    Some(match (who.as_slice(), overdue) {
+        ([], false) => format!("Waiting for the shared files for {what} to arrive"),
+        ([], true) => format!(
+            "The shared files for {what} have not arrived. Open WoW Sync on the computer that shares them"
+        ),
+        (names, false) => format!("Waiting for {} to finish sharing {what}", names.join(", ")),
+        (names, true) => format!(
+            "{} has not finished sharing {what}. Open WoW Sync on it and let it sync",
+            names.join(", ")
+        ),
+    })
+}
 fn waiting_sentence(w: &World) -> String {
     if w.view.blocks.contains(&PlanBlock::GameRunning) {
         return match removing(w) {
@@ -221,17 +257,6 @@ fn waiting_sentence(w: &World) -> String {
                 plural(n, "add-on", "add-ons")
             ),
         };
-    }
-    let unavailable = w
-        .view
-        .packages
-        .iter()
-        .any(|(_, s, _)| *s == PackageStatus::Unavailable);
-    if unavailable {
-        return "Waiting for Dropbox to finish downloading".into();
-    }
-    if w.view.blocks.contains(&PlanBlock::Unstable) {
-        return "Waiting for add-on files to stop changing".into();
     }
     let n = w
         .view
@@ -244,6 +269,12 @@ fn waiting_sentence(w: &World) -> String {
             "Waiting for your decision on {}",
             plural(n, "add-on", "add-ons")
         );
+    }
+    if let Some(s) = unavailable_sentence(w) {
+        return s;
+    }
+    if w.view.blocks.contains(&PlanBlock::Unstable) {
+        return "Waiting for add-on files to stop changing".into();
     }
     "Waiting".into()
 }
@@ -391,7 +422,9 @@ pub fn status_label(w: &World, s: &PackageStatus) -> Label {
         PackageStatus::Blocked(_) => label("Waiting", Tone::Waiting, Icon::Hourglass),
         PackageStatus::Removing => label("Removing", Tone::Working, Icon::Sync),
         PackageStatus::Held => label("Waiting", Tone::Waiting, Icon::Hourglass),
-        PackageStatus::Unavailable => label("Waiting for Dropbox", Tone::Waiting, Icon::Hourglass),
+        PackageStatus::Unavailable => {
+            label("Waiting for shared files", Tone::Waiting, Icon::Hourglass)
+        }
         PackageStatus::Interrupted => label("Update interrupted", Tone::Waiting, Icon::Hourglass),
         PackageStatus::NeedsDecision(_) => label("Needs your decision", Tone::Help, Icon::Alert),
         PackageStatus::NeedsHelp(_) => label("Needs help", Tone::Help, Icon::Alert),
@@ -1594,6 +1627,8 @@ mod tests {
             why: String::new(),
             next: wow_sync_core::view::NextAction::CloseGame,
             awaiting: vec![],
+            waiting_on: vec![],
+            waiting_secs: None,
         };
         let all = [
             R::Ambiguous,
@@ -1611,6 +1646,40 @@ mod tests {
             }
             assert!(seen.insert(text), "{r:?} wording is not distinct");
         }
+    }
+
+    #[test]
+    fn an_unavailable_add_on_names_who_has_not_shared_and_stops_promising_downloads() {
+        let mut w = enrolled();
+        w.addons.push(Addon {
+            key: "questie".into(),
+            title: "Questie".into(),
+            version: String::new(),
+            target_version: None,
+            folders: vec![],
+            kind: Kind::Unavailable,
+            candidates: vec![],
+            why: String::new(),
+            next: wow_sync_core::view::NextAction::CloseGame,
+            awaiting: vec![],
+            waiting_on: vec!["Lenovo".into()],
+            waiting_secs: Some(60),
+        });
+        let t = unavailable_sentence(&w).unwrap();
+        assert_eq!(t, "Waiting for Lenovo to finish sharing Questie");
+        assert!(!t.contains("Dropbox"));
+        w.addons[0].waiting_secs = Some(UNAVAILABLE_GRACE_SECS);
+        let t = unavailable_sentence(&w).unwrap();
+        assert!(
+            t.starts_with("Lenovo has not finished sharing Questie"),
+            "{t}"
+        );
+        w.addons[0].waiting_on.clear();
+        assert!(unavailable_sentence(&w)
+            .unwrap()
+            .contains("have not arrived"));
+        w.addons[0].kind = Kind::InSync;
+        assert_eq!(unavailable_sentence(&w), None);
     }
 
     #[test]
@@ -1688,6 +1757,7 @@ mod tests {
             sources: vec![],
             folders: vec![],
             awaiting: vec![],
+            waiting_on: vec![],
             confirmed_by: vec![],
             candidates: vec![],
         };
@@ -1760,6 +1830,8 @@ mod tests {
             why: String::new(),
             next: wow_sync_core::view::NextAction::Nothing,
             awaiting: vec![],
+            waiting_on: vec![],
+            waiting_secs: None,
         };
         let text = decision_reason(&w, &a, DecisionReason::Ambiguous);
         assert!(text.contains("(1.0.0 and not available)"), "{text}");
