@@ -209,6 +209,51 @@ Answers from an interactive review session with the orchestrator.
   with this decision. It includes publishing a `v0.2.0` GitHub pre-release
   after its gates pass.
 
+### D-31: Live sync problems on two PCs; lighter re-checks; run-009 approved (2026-11-24)
+
+- **Trigger:** live use of `v0.3.1` on RYZENFISH and LENOVOFISH.
+  - For about 15 h, RYZENFISH said "Waiting for Dropbox to finish downloading".
+    The cause was LENOVOFISH still running `v0.2.0`. It had published a
+    QuestieDB tree reference whose tree file was never uploaded. The headline
+    mislabelled this, and the owner had no way to see which add-on or
+    computer was at fault.
+  - Clicks (Decide, Pause, Export diagnostics → Preview) seemed to do nothing.
+    The backend reads commands only between sync passes, and each pass
+    re-hashed about 3.2 GB (~45 s).
+  - Hide Anything (both copies labelled 1.10.0, different content) needed a
+    decision. The owner's two clicks at 08:42 and 08:44 were both recorded,
+    from the same computer, as two keeps that conflict and that do not know
+    each other. The app then raises "choices differ", builds no options for
+    it, and the page shows only "Decide later".
+  - Neither the results of clicks nor what they did is logged.
+- **Owner direction on file checks:** "it's a very low probability that
+  addon's will be touched directly, I would make it optional or just remove
+  it."
+  - The orchestrator's reading: routine passes stop re-reading unchanged
+    files. A file whose size and modification time are unchanged since it
+    was last hashed keeps its recorded hash; a full re-read becomes an
+    optional, owner-started check.
+  - Content hashes are still computed for new or changed files, because
+    blobs, trees and copy decisions depend on them.
+  - Modification time is used only as a "did this file change" hint. It is
+    never evidence that one copy is newer (SPEC is unchanged in that respect).
+- **Approval:** the owner approved run-009 as proposed. There is no AIU
+  ceiling (as in D-30), and usage is tracked.
+- **Scope of run-009:**
+  1. Choices that conflict offer a pick between the copies, and the pick
+     covers both records.
+  2. One computer does not record a second choice that conflicts with its own
+     earlier one from stale evidence.
+  3. Clicks respond at once and are not queued behind a full pass.
+  4. A blocked add-on is named in the headline with an honest reason, and
+     other add-ons keep syncing.
+  5. Click results are logged.
+  6. The hash cache, with an optional full check.
+  7. Computers in a group running different app versions are shown.
+  8. Publish `v0.3.2`.
+- SPEC gains one sentence on change detection. ACCEPTANCE is unchanged. Plan:
+  [run-009 PLAN.md](runs/run-009/PLAN.md).
+
 ### D-30: Setup hang on a second PC; run-008 approved, no credit ceiling (2026-11-23)
 
 - **Trigger:** on RYZENFISH, `v0.3.0` found `G:\Games\World of Warcraft`
@@ -509,4 +554,5 @@ phase D barrier.
 | 2026-11-21 | D-27 | Run-005 plan drafted and approved by owner instruction ("draft and execute") | `fe13e3d` |
 | 2026-11-22 | D-28 | Q-24 marker gate removed by default (test mode nice-to-have); D-08 amended; Q-3 working answer; run-006 10,000 AIU, plan approved | `c77d050` |
 | 2026-11-23 | D-29 | Discovery on drives A–Z with a folder picker; sync unrecognised add-ons; SPEC R-03/R-05, A-47/A-48; run-007 4,000 AIU, plan approved | `8b0dee0` |
-| 2026-11-23 | D-30 | Setup inspection hang and stuck Quit on a second PC; run-008 approved with no AIU ceiling; `v0.3.1` | this commit |
+| 2026-11-23 | D-30 | Setup inspection hang and stuck Quit on a second PC; run-008 approved with no AIU ceiling; `v0.3.1` | `ff938da` |
+| 2026-11-24 | D-31 | Live sync fixes (conflicting choices, click lag, headline, logging), hash cache with optional full check; run-009 approved with no AIU ceiling; `v0.3.2` | this commit |

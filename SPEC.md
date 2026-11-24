@@ -145,7 +145,9 @@ ordering are demonstrable. Keep a reviewable explanation of the evidence and
 chosen result. Identical content should converge without unnecessary replacement.
 
 Do not use file modification time, computer clock or an arbitrary machine
-preference as proof of a newer release. Version labels, channels, manual edits,
+preference as proof of a newer release. A file's size and modification time
+may be used only to skip re-reading a file that has not changed since it was
+last hashed. A full re-read is an optional check the user starts (D-31). Version labels, channels, manual edits,
 multi-folder packages and identical labels with different contents can be
 ambiguous. If ordering cannot be established, require a decision for that addon
 and continue safe work elsewhere.

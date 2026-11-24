@@ -33,6 +33,10 @@ checking a large add-on folder: the check now shows progress and can be
 cancelled, and Quit always exits (after any write in progress). Report:
 [docs/runs/run-008/REPORT.md](docs/runs/run-008/REPORT.md). The latest release
 is `v0.3.1`.
+Run-009 (D-31) is active, targeting `v0.3.2`. It covers conflicting choices
+that could not be resolved, click lag, a misleading "waiting for Dropbox"
+headline, logging of click results, and re-reading only changed files. Plan:
+[docs/runs/run-009/PLAN.md](docs/runs/run-009/PLAN.md).
 Repository layout: [docs/REPO-MAP.md](docs/REPO-MAP.md).
 
 This repository (`hamiltonia/wow-sync`) is the permanent project home. It is not
