@@ -1306,17 +1306,17 @@ mod tests {
     #[test]
     fn every_group_result_gets_a_log_line_without_paths() {
         use wow_sync_runtime::{CommandError as E, CommandOutcome as O};
-        let (ok, l) = group_log_line(ActionKind::Pause, &Ok(O::NothingToDo));
+        let (ok, l) = group_log_line(ActionKind::Decide, &Ok(O::NothingToDo));
         assert!(ok && l.contains("nothing to do"), "{l}");
-        let (ok, l) = group_log_line(ActionKind::Pause, &Err(E::NotAllowed));
+        let (ok, l) = group_log_line(ActionKind::Decide, &Err(E::NotAllowed));
         assert!(!ok && l.contains("refused"), "{l}");
         let stale = Err(E::Decide(wow_sync_core::decision::DecideError::Changed));
-        let (ok, l) = group_log_line(ActionKind::Pause, &stale);
+        let (ok, l) = group_log_line(ActionKind::Decide, &stale);
         assert!(
             !ok && l.contains("out of date") && l.contains("refreshed"),
             "{l}"
         );
-        let (ok, l) = group_log_line(ActionKind::Pause, &Err(E::UpdatesUnavailable));
+        let (ok, l) = group_log_line(ActionKind::Decide, &Err(E::UpdatesUnavailable));
         assert!(!ok && !l.contains('\\') && !l.contains('/'), "{l}");
     }
 

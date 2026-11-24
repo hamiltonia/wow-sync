@@ -736,7 +736,7 @@ mod tests {
         int.armed.store(true, Ordering::Relaxed);
         assert!(ctl.cancelled());
         let r = scan_addons_ctl(&root, &opts(), &mut |_| {}, &ctl);
-        assert!(r.is_err(), "{r:?}");
+        assert!(matches!(r, Ok(None)), "cancelled: {r:?}");
     }
 
     #[test]
