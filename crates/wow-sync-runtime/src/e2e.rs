@@ -5971,6 +5971,99 @@ mod tests {
         assert!(item.options.len() >= 2, "a choice is offered, none made");
     }
 
+    /// A keep of `owner`'s Alpha that lists `rival`'s Alpha as considered and excluded, written
+    /// without knowing any other record: the shape of the owner's real conflict (run 009).
+    fn put_mutual_keep_of_alpha(lab: &Lab, g: &GroupId, owner: &Pc, rival: &Pc) -> Sha256 {
+        use wow_sync_core::choice::{build_keep, ChoiceView, CopyEntry, WriteCx};
+        use wow_sync_core::kinds::{ChoiceReason, ManifestFolder};
+        use wow_sync_core::ledger::Ledger;
+        use wow_sync_core::target::Source;
+        let (oc, _) = pc_ids(owner);
+        let entry = |pc: &Pc| {
+            let f = alpha_folder(lab, g, pc);
+            CopyEntry::new(
+                vec![ManifestFolder {
+                    key: f.key.clone(),
+                    name: f.name.clone(),
+                    tree: f.tree.unwrap(),
+                }],
+                vec![pc_ids(pc).1],
+            )
+        };
+        let (mine, theirs) = (entry(owner), entry(rival));
+        let ledger = Ledger::new();
+        let view = ChoiceView::new(&ledger, &Default::default());
+        let keep = build_keep(
+            &view,
+            &WriteCx {
+                group: g,
+                issuer: issuer_of(owner),
+                now_unix_ms: 5,
+            },
+            ChoiceReason::Ambiguous,
+            &[alpha_folder(lab, g, owner).key],
+            &mine,
+            &[mine.clone(), theirs],
+            &Source::from_state(&latest_state(lab, g, owner), true),
+        )
+        .unwrap();
+        put_authority(lab, g, &oc, &AuthorityRecord::CodeChoice(keep))
+    }
+
+    #[test]
+    fn mutually_excluding_keeps_are_decided_once_and_a_second_click_is_refused() {
+        // Run 009 R9-decide: each keep excluded the other's copy, so no option was offered;
+        // and a second click on the old view must never write a record unaware of the first.
+        use wow_sync_core::decision::{DecideError, DecisionId, DecisionKind, OptionLabel};
+        let lab = Lab::new();
+        let (mut a, mut b, _c, g) = alpha_v2_published(&lab);
+        put_mutual_keep_of_alpha(&lab, &g, &a, &b);
+        put_mutual_keep_of_alpha(&lab, &g, &b, &a);
+        for _ in 0..3 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        let item = a
+            .svc
+            .offered_decisions()
+            .iter()
+            .find(|i| i.reason == DecisionKind::ChoicesDiffer)
+            .expect("the conflict offers a decision")
+            .clone();
+        let copies: Vec<_> = item
+            .options
+            .iter()
+            .filter(|o| matches!(o.label, OptionLabel::Release { .. }))
+            .map(|o| o.id)
+            .collect();
+        assert_eq!(copies.len(), 2, "a keep of each copy: {:?}", item.options);
+        let answer = |option| Command::Decide {
+            item: DecisionId(item.scope.clone()),
+            option,
+            shown: item.evidence,
+        };
+        let before = authority_files(&lab, &g, &pc_ids(&a).0).len();
+        a.svc.command(answer(copies[0])).unwrap();
+        assert_eq!(
+            a.svc.command(answer(copies[1])),
+            Err(CommandError::Decide(DecideError::Changed)),
+            "the first answer already settled this item"
+        );
+        assert_eq!(authority_files(&lab, &g, &pc_ids(&a).0).len(), before + 1);
+        for _ in 0..4 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        let (ra, rb) = (a.read("Alpha/main.lua"), b.read("Alpha/main.lua"));
+        assert_eq!(ra, rb, "both computers converge on the chosen copy");
+        for pc in [&a, &b] {
+            assert!(
+                !offered_kinds(pc).contains(&DecisionKind::ChoicesDiffer),
+                "{:?}",
+                offered_kinds(pc)
+            );
+        }
+    }
     fn name_of(pc: &mut Pc) -> String {
         pc.svc.status().computer_name
     }

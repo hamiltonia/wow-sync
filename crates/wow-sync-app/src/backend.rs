@@ -98,6 +98,10 @@ pub fn group_log_line(
             true,
             format!("{kind:?}: ok, {} line(s) of text", e.text.lines().count()),
         ),
+        Err(E::Decide(wow_sync_core::decision::DecideError::Changed)) => (
+            false,
+            format!("{kind:?}: refused, the choice was out of date and the list was refreshed"),
+        ),
         Err(E::Decide(e)) => (false, format!("{kind:?}: refused, {e:?}")),
         Err(E::Export(_)) => (false, format!("{kind:?}: refused or could not be saved")),
         Err(E::Service(_)) => (
@@ -1306,6 +1310,12 @@ mod tests {
         assert!(ok && l.contains("nothing to do"), "{l}");
         let (ok, l) = group_log_line(ActionKind::Pause, &Err(E::NotAllowed));
         assert!(!ok && l.contains("refused"), "{l}");
+        let stale = Err(E::Decide(wow_sync_core::decision::DecideError::Changed));
+        let (ok, l) = group_log_line(ActionKind::Pause, &stale);
+        assert!(
+            !ok && l.contains("out of date") && l.contains("refreshed"),
+            "{l}"
+        );
         let (ok, l) = group_log_line(ActionKind::Pause, &Err(E::UpdatesUnavailable));
         assert!(!ok && !l.contains('\\') && !l.contains('/'), "{l}");
     }

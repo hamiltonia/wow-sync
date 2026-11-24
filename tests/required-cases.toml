@@ -1815,3 +1815,12 @@ tests = [
     "computers_ui::tests::a_peer_on_another_version_is_called_out_and_a_matching_one_is_not",
 ]
 # <<< section: R9-app
+# >>> section: R9-decide
+[[case]]
+id = "R9-decide:conflicting-keeps"
+tier = "offline"
+tests = [
+    "decide_tests::conflicting_keeps_do_not_hide_each_others_copies_and_a_choice_supersedes_both",
+    "e2e::tests::mutually_excluding_keeps_are_decided_once_and_a_second_click_is_refused",
+]
+# <<< section: R9-decide
