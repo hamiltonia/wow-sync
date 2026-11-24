@@ -5203,6 +5203,49 @@ mod tests {
     }
 
     #[test]
+    fn a_paused_answer_stays_hidden_after_a_pass_and_is_not_offered_after_the_resume_pass() {
+        // Run 009 round 4 (RV9-12, RV9-11): fails when `hide_answered` is disabled.
+        use wow_sync_core::decision::{DecideError, DecisionId, DecisionKind};
+        let lab = Lab::new();
+        let (mut a, mut b, g, item, copies) = conflicted_pair(&lab);
+        let answer = |option| Command::Decide {
+            item: DecisionId(item.scope.clone()),
+            option,
+            shown: item.evidence,
+        };
+        let before = authority_files(&lab, &g, &pc_ids(&b).0).len();
+        b.svc.set_paused(true).unwrap();
+        assert_eq!(b.svc.command(answer(copies[0])), Ok(CommandOutcome::Kept));
+        assert!(!offered_kinds(&b).contains(&DecisionKind::ChoicesDiffer));
+        synced(&mut b);
+        assert!(
+            !offered_kinds(&b).contains(&DecisionKind::ChoicesDiffer),
+            "a pass while paused re-offered the answered item"
+        );
+        for option in [copies[1], copies[0]] {
+            assert_eq!(
+                b.svc.command(answer(option)),
+                Err(CommandError::Decide(DecideError::Changed))
+            );
+        }
+        b.svc.set_paused(false).unwrap();
+        synced(&mut b);
+        assert!(
+            !offered_kinds(&b).contains(&DecisionKind::ChoicesDiffer),
+            "the pass that wrote the answer listed it once more"
+        );
+        assert_eq!(authority_files(&lab, &g, &pc_ids(&b).0).len(), before + 1);
+        for _ in 0..4 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        for pc in [&a, &b] {
+            assert!(!offered_kinds(pc).contains(&DecisionKind::ChoicesDiffer));
+        }
+        assert_eq!(a.read("Alpha/main.lua"), b.read("Alpha/main.lua"));
+    }
+
+    #[test]
     fn allow_again_lifts_only_an_active_rejection() {
         use wow_sync_core::hash::package_hash;
         use wow_sync_core::kinds::{

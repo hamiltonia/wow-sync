@@ -92,3 +92,11 @@ Fixes
 Tests: 2e::tests::a_stale_answer_after_a_peer_settled_the_conflict_writes_nothing (fails without the service.rs fix: record written instead of Changed), 2e::tests::an_answer_kept_while_paused_is_written_once_and_not_offered_again, decide_tests::a_live_resume_excluding_what_a_concurrent_keep_pins_is_a_conflict_not_a_silent_winner. The old synthetic-offer test decide_command_is_checked_for_freshness_and_kept_while_paused was replaced because Decide now only accepts items present in the fresh world; unknown option, stale token and paused cases are covered by the new paused test.
 
 App hook: none; treat DecideError::Changed as "refresh".
+
+## Round 4: untested guard and one-pass re-offer (RV9-12, RV9-11)
+
+- RV9-12: new 2e::tests::a_paused_answer_stays_hidden_after_a_pass_and_is_not_offered_after_the_resume_pass follows the reviewer's probe: pause, answer (Kept), run a pass while paused, assert the item is not offered and two more answers are refused as Changed, then resume, one pass, assert one extra record.
+- RV9-11: sync_once now captures the queued answer scopes before settle_kept writes them and hides those scopes from that pass's offers (queued_scopes / hide_scopes); previously the queue was already empty when hide_answered ran, so the item showed for one more pass. Clean, no behaviour change otherwise.
+- Mutation results (temporary, restored; git diff shows only the intended change):
+  - M1 hide_scopes made a no-op: the new test FAILS ("a pass while paused re-offered the answered item").
+  - M2 pre-settle hiding removed: the new test FAILS ("the pass that wrote the answer listed it once more").

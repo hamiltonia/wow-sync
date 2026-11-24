@@ -865,7 +865,12 @@ impl SliceService {
     /// Drops the offers this computer already answered with a record kept for later (paused or
     /// held): offering them again would let a second answer conflict with the first.
     fn hide_answered(&self, w: &mut World) {
-        let queued: Vec<Vec<FolderKey>> = KeptQueue::load(&self.state, &w.group.group_id)
+        let queued = self.queued_scopes(&w.group.group_id);
+        Self::hide_scopes(w, &queued);
+    }
+
+    fn queued_scopes(&self, gid: &GroupId) -> Vec<Vec<FolderKey>> {
+        KeptQueue::load(&self.state, gid)
             .items()
             .iter()
             .filter_map(|k| decode_authority(&k.bytes, &k.hash).ok())
@@ -873,12 +878,15 @@ impl SliceService {
                 AuthorityRecord::CodeChoice(c) => Some(c.folders),
                 _ => None,
             })
-            .collect();
+            .collect()
+    }
+
+    fn hide_scopes(w: &mut World, scopes: &[Vec<FolderKey>]) {
         w.offers.retain(|(i, _)| match &i.scope {
             DecisionScope::Folders(f) => {
                 let mut f = f.clone();
                 f.sort();
-                !queued.contains(&f)
+                !scopes.contains(&f)
             }
             _ => true,
         });
@@ -2867,7 +2875,9 @@ impl SliceService {
         let mut new_report = None;
         let mut journals_remaining = false;
         self.last_blocks.clear();
+        let answered = self.queued_scopes(&w.group.group_id);
         self.settle_kept(&w, &provider);
+        Self::hide_scopes(&mut w, &answered);
         self.hide_answered(&mut w);
         if w.standing == OwnStanding::Active {
             let (items, plans): (Vec<_>, Vec<_>) =
