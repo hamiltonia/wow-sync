@@ -2223,16 +2223,13 @@ impl Shell {
             .id("content-scroll")
             .flex_1()
             .min_w_0()
-            .h_full()
+            .min_h_0()
             .overflow_y_scroll()
             .p(u(20.))
             .flex()
             .flex_col()
             .gap(u(14.));
         let _ = width;
-        if let Some(s) = sheet {
-            col = col.child(s);
-        }
         for b in banners.drain(..) {
             col = col.child(b);
         }
@@ -2272,13 +2269,19 @@ impl Shell {
             );
         }
         col = col.child(page);
-        div()
+        // The quit/first-close confirmation sits above the scrolled page, not inside it, so it
+        // is visible however far the page is scrolled.
+        let mut outer = div()
             .flex_1()
             .min_w_0()
             .h_full()
             .bg(rgb(pal.bg))
-            .child(col)
-            .into_any_element()
+            .flex()
+            .flex_col();
+        if let Some(s) = sheet {
+            outer = outer.child(div().px(u(20.)).pt(u(20.)).child(s));
+        }
+        outer.child(col).into_any_element()
     }
 
     fn sheet_view(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -2336,6 +2339,24 @@ impl Shell {
 #[cfg(test)]
 mod log_tests {
     use super::*;
+
+    /// Structure test only: gpui has no headless layout here, so this reads the source of
+    /// `content_view` and checks the sheet is placed outside the scrolled element. It does
+    /// not prove pixel positions; the live check is a UIA rectangle of Quit when safe.
+    #[test]
+    fn the_quit_sheet_is_outside_the_scrolled_content() {
+        let src = include_str!("app.rs");
+        let start = src.find("fn content_view").unwrap();
+        let body = &src[start..src[start..].find("fn sheet_view").unwrap() + start];
+        let scroll = body.find("overflow_y_scroll").unwrap();
+        let sheet_child = body.find("child(s)").unwrap();
+        let page_child = body.find("col.child(page)").unwrap();
+        assert!(
+            sheet_child > page_child && sheet_child > scroll,
+            "the sheet is added to the outer container after the scroll column is built"
+        );
+        assert!(!body.contains("col = col.child(s)"));
+    }
     use crate::features::GroupAction;
     use wow_sync_core::ids::Sha256;
 

@@ -1839,6 +1839,15 @@ tests = [
     "hash_cache::tests::caches_of_roots_no_longer_in_use_are_removed_and_the_active_one_is_kept",
 ]
 # <<< section: R9-app-round3
+# >>> section: R9-app-round4
+[[case]]
+id = "R9-app:round4-service-options-and-quit-sheet"
+tier = "offline"
+tests = [
+    "backend::tests::a_service_opened_from_a_saved_enrollment_or_after_a_panic_still_uses_the_hash_cache",
+    "app::log_tests::the_quit_sheet_is_outside_the_scrolled_content",
+]
+# <<< section: R9-app-round4
 # >>> section: R9-decide
 [[case]]
 id = "R9-decide:conflicting-keeps"
