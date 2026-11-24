@@ -138,8 +138,8 @@ not strand the user's quit request behind a confirmation they cannot see.
 **G1 and G2 are resolved by independent GUI reproduction.** This supersedes
 the historical failure verdict above for source
 `f1fe1e9aeb10eb2715eb5341ace9a4b4a5465322` (R8-fix round 4, `362d317`).
-**Artifact verification remains BLOCKED:** no dispatch for this SHA was
-available when the recheck finished.
+**Artifact verification now PASS:** the initially missing dispatch was verified
+in the artifact follow-up below. No open findings or artifact blocker remain.
 
 Same Windows/UIA environment and boundaries as the first pass. Rebuilt with
 `cargo build --release -p wow-sync-app` after putting cargo on PATH: PASS,
@@ -155,7 +155,7 @@ directories. No real-data enrollment, writes, or default-state instance access.
 | Check 2: read-only Quit regression | **PASS** | Live 8,001-file synthetic check (819,200,000 payload bytes), Cancel check visible and Next disabled. Tray Quit exited PID 20880 in **164 ms**, with `inspect cancelled`. |
 | Check 3: progress / cancellation regression | **PASS** | PID 20916 window capture showed “Checking add-ons… **357 files**”, Cancel check and disabled Next. Back returned to step 2 within a **265 ms** observation window and cancelled the scan. Next restarted; explicit Cancel restored Check again/disabled Next. Restart then root replacement cancelled the old scan and completed the new one-file check in **20 ms**. The old row stayed unchecked and the new row selected/ready, including after another 3 s. |
 | Verification tiers | **PASS** | Independently reran `cargo xtask verify --tier offline` (all six checks PASS) and `--tier native` (PASS). |
-| New dispatch artifact | **BLOCKED / NOT RUN** | Repeated `gh run list --workflow release.yml --limit 1` throughout the recheck still returned successful run **45285544216**, head **1d94a78**, created 23:04:28Z—not the candidate. `gh api repos/hamiltonia/wow-sync/commits/main --jq .sha` confirmed remote main is **f1fe1e9**. No matching artifact was downloaded or credited; the earlier artifact smoke does not verify this candidate. |
+| New dispatch artifact | **PASS** | Successful release run **45293621382**, head **f1fe1e9aeb10eb2715eb5341ace9a4b4a5465322**, downloaded with `gh run download 45293621382 -D D:\WoWSyncLab\R8-check\artifact`. ZIP SHA-256 matched its supplied checksum. Extracted executable opened setup without `--dev`, completed real `_forever_` read-only inspection in **5,899 ms** (102 eligible add-ons, 33,141 files), enabled Next, handled PID-verified tray Open and exited on tray Quit in **179 ms**. PID 10888; no enrollment. |
 
 The write-completion timing uses **journal retirement**, the observable
 transaction-completion boundary, rather than a guessed last-file timestamp or
@@ -172,3 +172,17 @@ its PID-verified tray menu (207 ms). Other cleanup Quit latencies were 238 ms
 was needed. Lab installs, group/provider, states, logs, watcher/UIA scripts and
 window capture were removed. No new findings, product-code edits, test
 assertion changes, push, merge, or subst drive.
+
+### Artifact follow-up (2026-11-23, 16:25 PST)
+
+`gh run view 45293621382 --json status,conclusion,headSha` returned completed /
+success and the exact candidate SHA above. ZIP:
+`be6db4e814bc4aa608731b67bf36b63dc36a088a9cb213b5c0da92767e210a4b`;
+executable:
+`d2851219d51a4a5bcacbfad0acb345b9dbdb790ee0f2dc915fc8aa64cb5b1a62`.
+UI Automation drove setup using fresh `--state
+D:\WoWSyncLab\R8-check\rc6-artifact` and a lab `WOWSYNC_LOG`. The real variant
+remained read-only; setup stopped at step 3. Matching inspect start/done/duration
+and `tray: open` / `tray: quit` were observed. PID **10888** exited normally and
+was confirmed absent; no lab-scoped process remained. Download, extraction,
+state, log and automation script were removed. No new findings.
