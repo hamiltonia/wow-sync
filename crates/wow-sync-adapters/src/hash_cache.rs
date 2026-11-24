@@ -41,6 +41,7 @@ struct Inner {
 pub struct HashCache {
     dir: std::path::PathBuf,
     file: String,
+    marker: String,
     inner: Mutex<Inner>,
     /// Set until a complete scan has re-read everything ("Check all files").
     full: AtomicBool,
@@ -54,6 +55,11 @@ impl HashCache {
     pub fn open(state_dir: &Path, scope: &str) -> Arc<HashCache> {
         let tag = crate::hex(&Sha256::digest(scope.as_bytes())[..8]);
         let file = format!("hashcache-{tag}.txt");
+        let marker = format!("hashcache-{tag}.full");
+        let pending = LocalState::open_at(state_dir)
+            .ok()
+            .and_then(|s| s.read(&marker, 16).ok().flatten())
+            .is_some();
         let map = LocalState::open_at(state_dir)
             .ok()
             .and_then(|s| s.read(&file, MAX_FILE_BYTES).ok().flatten())
@@ -63,13 +69,14 @@ impl HashCache {
         Arc::new(HashCache {
             dir: state_dir.to_path_buf(),
             file,
+            marker,
             inner: Mutex::new(Inner {
                 bytes: map.keys().map(|k| entry_cost(k)).sum(),
                 map,
                 generation: 0,
                 dirty: false,
             }),
-            full: AtomicBool::new(false),
+            full: AtomicBool::new(pending),
             hits: AtomicU64::new(0),
             misses: AtomicU64::new(0),
         })
@@ -78,16 +85,20 @@ impl HashCache {
     /// Deletes the caches of other roots or variants: only the one for `scope` is in use.
     pub fn prune_stale(state_dir: &Path, scope: &str) -> usize {
         let tag = crate::hex(&Sha256::digest(scope.as_bytes())[..8]);
-        let keep = format!("hashcache-{tag}.txt");
+        let keep = [
+            format!("hashcache-{tag}.txt"),
+            format!("hashcache-{tag}.full"),
+        ];
         let Ok(dir) = std::fs::read_dir(state_dir) else {
             return 0;
         };
         let mut removed = 0;
         for e in dir.flatten() {
             let name = e.file_name().to_string_lossy().into_owned();
-            let is_cache = name.starts_with("hashcache-") && name.ends_with(".txt");
+            let is_cache = name.starts_with("hashcache-")
+                && (name.ends_with(".txt") || name.ends_with(".full"));
             if is_cache
-                && name != keep
+                && !keep.contains(&name)
                 && e.file_type().is_ok_and(|t| t.is_file())
                 && std::fs::remove_file(e.path()).is_ok()
             {
@@ -100,6 +111,10 @@ impl HashCache {
     /// The next complete scan re-reads every file and replaces the cached hashes.
     pub fn request_full(&self) {
         self.full.store(true, Ordering::Relaxed);
+        // Kept on disk so a restart, quit or reopen before the full pass ends does not lose it.
+        if let Ok(s) = LocalState::open_at(&self.dir) {
+            let _ = s.write_atomic(&self.marker, b"1");
+        }
     }
 
     pub fn full_requested(&self) -> bool {
@@ -194,6 +209,9 @@ impl HashCache {
                 }
                 if !routine {
                     self.full.store(false, Ordering::Relaxed);
+                    if let Ok(s) = LocalState::open_at(&self.dir) {
+                        let _ = s.remove(&self.marker);
+                    }
                 }
             }
             if !g.dirty {
@@ -302,6 +320,35 @@ mod tests {
         assert!(file <= MAX_FILE_BYTES, "{file}");
         let reopened = HashCache::open(&dir, "scope");
         assert_eq!(reopened.len(), c.len());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_check_all_files_request_survives_a_reopen_until_a_full_pass_completes() {
+        let dir = std::env::temp_dir().join(format!("wowsync-hc-full-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let c = HashCache::open(&dir, "scope");
+        assert!(!c.full_requested());
+        c.request_full();
+        let again = HashCache::open(&dir, "scope");
+        assert!(again.full_requested());
+        again.begin();
+        again.finish(true, true);
+        assert!(
+            HashCache::open(&dir, "scope").full_requested(),
+            "a routine pass keeps it"
+        );
+        again.begin();
+        again.finish(false, false);
+        assert!(
+            HashCache::open(&dir, "scope").full_requested(),
+            "a cancelled pass keeps it"
+        );
+        again.begin();
+        again.finish(true, false);
+        assert!(!again.full_requested());
+        assert!(!HashCache::open(&dir, "scope").full_requested());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
