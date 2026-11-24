@@ -5203,6 +5203,117 @@ mod tests {
     }
 
     #[test]
+    fn a_paused_answer_stays_hidden_after_a_pass_and_is_not_offered_after_the_resume_pass() {
+        // Run 009 round 4 (RV9-12, RV9-11): fails when `hide_answered` is disabled.
+        use wow_sync_core::decision::{DecideError, DecisionId, DecisionKind};
+        let lab = Lab::new();
+        let (mut a, mut b, g, item, copies) = conflicted_pair(&lab);
+        let answer = |option| Command::Decide {
+            item: DecisionId(item.scope.clone()),
+            option,
+            shown: item.evidence,
+        };
+        let before = authority_files(&lab, &g, &pc_ids(&b).0).len();
+        b.svc.set_paused(true).unwrap();
+        assert_eq!(b.svc.command(answer(copies[0])), Ok(CommandOutcome::Kept));
+        assert!(!offered_kinds(&b).contains(&DecisionKind::ChoicesDiffer));
+        synced(&mut b);
+        assert!(
+            !offered_kinds(&b).contains(&DecisionKind::ChoicesDiffer),
+            "a pass while paused re-offered the answered item"
+        );
+        for option in [copies[1], copies[0]] {
+            assert_eq!(
+                b.svc.command(answer(option)),
+                Err(CommandError::Decide(DecideError::Changed))
+            );
+        }
+        b.svc.set_paused(false).unwrap();
+        synced(&mut b);
+        assert!(
+            !offered_kinds(&b).contains(&DecisionKind::ChoicesDiffer),
+            "the pass that wrote the answer listed it once more"
+        );
+        assert_eq!(authority_files(&lab, &g, &pc_ids(&b).0).len(), before + 1);
+        for _ in 0..4 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        for pc in [&a, &b] {
+            assert!(!offered_kinds(pc).contains(&DecisionKind::ChoicesDiffer));
+        }
+        assert_eq!(a.read("Alpha/main.lua"), b.read("Alpha/main.lua"));
+    }
+
+    #[test]
+    fn a_command_reads_through_the_hash_cache_and_leaves_a_pending_full_check_for_the_pass() {
+        // Run 009 round 5 (G1): command dispatch must not re-hash unchanged files, and must not
+        // consume a pending "check all files" request.
+        use std::sync::atomic::Ordering::Relaxed;
+        use wow_sync_core::decision::DecisionId;
+        let lab = Lab::new();
+        let (_a, mut b, _g, item, copies) = conflicted_pair(&lab);
+        let cache = crate::HashCache::open(&b.cfg.state_dir, "round5");
+        b.svc.set_read_ctl(ScanCtl {
+            cache: Some(cache.clone()),
+            ..ScanCtl::default()
+        });
+        synced(&mut b);
+        synced(&mut b);
+        assert!(!cache.is_empty(), "the pass filled the cache");
+        let (h0, m0) = (cache.hits.load(Relaxed), cache.misses.load(Relaxed));
+        b.svc.status();
+        assert_eq!(cache.misses.load(Relaxed), m0, "status re-hashed a file");
+        assert!(cache.hits.load(Relaxed) > h0);
+        cache.request_full();
+        let m1 = cache.misses.load(Relaxed);
+        b.svc.status();
+        b.svc
+            .command(Command::Decide {
+                item: DecisionId(item.scope.clone()),
+                option: copies[0],
+                shown: item.evidence,
+            })
+            .unwrap();
+        assert_eq!(cache.misses.load(Relaxed), m1, "a command re-hashed a file");
+        assert!(cache.full_requested(), "a command consumed the full check");
+        synced(&mut b);
+        assert!(!cache.full_requested(), "the next pass did the full check");
+        assert!(cache.misses.load(Relaxed) > m1);
+    }
+
+    #[test]
+    fn diagnostics_and_ledger_only_commands_answer_from_the_last_scan() {
+        // Run 009 round 5 (G1): no local read at all, not even a cached one.
+        use std::sync::atomic::Ordering::Relaxed;
+        use wow_sync_core::diagnostics::ExportOptions;
+        let lab = Lab::new();
+        let (_a, mut b, _g, _item, _copies) = conflicted_pair(&lab);
+        let cache = crate::HashCache::open(&b.cfg.state_dir, "round5b");
+        b.svc.set_read_ctl(ScanCtl {
+            cache: Some(cache.clone()),
+            ..ScanCtl::default()
+        });
+        synced(&mut b);
+        synced(&mut b);
+        let looked = |c: &crate::HashCache| c.hits.load(Relaxed) + c.misses.load(Relaxed);
+        let before = looked(&cache);
+        let out = b.svc.command(Command::ExportDiagnostics {
+            options: ExportOptions {
+                include_fingerprints: true,
+                ..Default::default()
+            },
+        });
+        assert!(out.is_ok(), "{out:?}");
+        assert_eq!(looked(&cache), before, "diagnostics read the install again");
+        let _ = b.svc.command(Command::AllowAgain { rejections: vec![] });
+        assert_eq!(
+            looked(&cache),
+            before,
+            "a ledger-only command read the install"
+        );
+    }
+    #[test]
     fn allow_again_lifts_only_an_active_rejection() {
         use wow_sync_core::hash::package_hash;
         use wow_sync_core::kinds::{

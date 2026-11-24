@@ -122,8 +122,15 @@ impl HashCache {
         self.lock().generation += 1;
     }
 
-    pub(crate) fn lookup(&self, key: &str, size: u64, mtime_ns: i128) -> Option<[u8; 32]> {
-        if self.full_requested() {
+    /// `routine`: a read for a user command, which never acts on the "check all files" request.
+    pub(crate) fn lookup(
+        &self,
+        key: &str,
+        size: u64,
+        mtime_ns: i128,
+        routine: bool,
+    ) -> Option<[u8; 32]> {
+        if !routine && self.full_requested() {
             self.misses.fetch_add(1, Ordering::Relaxed);
             return None;
         }
@@ -173,7 +180,8 @@ impl HashCache {
 
     /// Ends a scan: a complete scan drops entries for files it did not see, then the cache is
     /// saved if it changed. A cancelled scan keeps what it hashed so the next one continues.
-    pub(crate) fn finish(&self, complete: bool) {
+    /// A `routine` scan leaves a pending "check all files" request for the next pass.
+    pub(crate) fn finish(&self, complete: bool, routine: bool) {
         let text = {
             let mut g = self.lock();
             if complete {
@@ -184,7 +192,9 @@ impl HashCache {
                     g.bytes = g.map.keys().map(|k| entry_cost(k)).sum();
                     g.dirty = true;
                 }
-                self.full.store(false, Ordering::Relaxed);
+                if !routine {
+                    self.full.store(false, Ordering::Relaxed);
+                }
             }
             if !g.dirty {
                 return;
@@ -287,7 +297,7 @@ mod tests {
         assert!(held <= MAX_BYTES, "{held}");
         assert!(c.len() > 40_000 && c.len() < 400_000, "{}", c.len());
         c.begin();
-        c.finish(false);
+        c.finish(false, false);
         let file = std::fs::metadata(dir.join(&c.file)).unwrap().len();
         assert!(file <= MAX_FILE_BYTES, "{file}");
         let reopened = HashCache::open(&dir, "scope");
@@ -303,7 +313,7 @@ mod tests {
         for scope in ["old-root|_retail_", "active|_retail_"] {
             let c = HashCache::open(&dir, scope);
             c.store("a", 1, 1, [2; 32]);
-            c.finish(false);
+            c.finish(false, false);
         }
         std::fs::write(dir.join("enrollment.json"), b"{}").unwrap();
         assert_eq!(HashCache::prune_stale(&dir, "active|_retail_"), 1);
