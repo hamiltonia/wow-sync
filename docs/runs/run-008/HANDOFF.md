@@ -1,14 +1,14 @@
 # Run 008 handoff
 
-Status: **R8-fix running** (2026-11-23). Approval: D-30. Plan:
-[PLAN.md](PLAN.md).
+Status: **closed** (2026-11-23). `v0.3.1` is published. Report:
+[REPORT.md](REPORT.md).
 
-| ID | Status | Branch / SHA |
+| ID | Status | Merged |
 |---|---|---|
-| R8-fix | running | `run008/R8-fix` |
-| R8-review | waiting for R8-fix | |
-| R8-check | waiting for R8-fix and the dispatch build | |
+| R8-fix | done (4 rounds) | `ab89d62`, `5500dec`, worker commit `832c73f`, `362d317` |
+| R8-review | done; no open critical or major findings | evidence `2a8910d`, `4012fdd` |
+| R8-check | PASS after recheck | evidence `33159f9`, `be8c0e9`, `65ede22` |
 
-A fresh orchestrator resumes from this table. Read the evidence files, check
-each branch with `git log main..run008/<ID>`, and merge with `--no-ff` after
-both verify tiers pass.
+**Next:**
+- The owner retries `v0.3.1` setup on RYZENFISH and shares the log.
+- Any further work needs a new approval.

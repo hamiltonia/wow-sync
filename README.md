@@ -26,9 +26,13 @@ Run-007 (D-29) published the `v0.3.0`
 
 Report: [docs/runs/run-007/REPORT.md](docs/runs/run-007/REPORT.md). The latest
 release is `v0.3.0`.
-Run-008 (D-30) is in progress: it fixes a setup hang while checking a game
-folder, and Quit not exiting during that check. Status:
-[docs/runs/run-008/HANDOFF.md](docs/runs/run-008/HANDOFF.md).
+Run-008 (D-30) published the `v0.3.1`
+[pre-release](https://github.com/hamiltonia/wow-sync/releases/tag/v0.3.1)
+([notes](docs/release/v0.3.1.md)). It fixes setup appearing to hang while
+checking a large add-on folder: the check now shows progress and can be
+cancelled, and Quit always exits (after any write in progress). Report:
+[docs/runs/run-008/REPORT.md](docs/runs/run-008/REPORT.md). The latest release
+is `v0.3.1`.
 Repository layout: [docs/REPO-MAP.md](docs/REPO-MAP.md).
 
 This repository (`hamiltonia/wow-sync`) is the permanent project home. It is not
