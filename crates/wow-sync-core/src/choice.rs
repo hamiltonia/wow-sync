@@ -222,7 +222,9 @@ impl<'a> ChoiceView<'a> {
                 }
                 let trees: Vec<(FolderKey, Sha256)> =
                     e.folders.iter().map(|t| (t.key.clone(), t.tree)).collect();
-                match same_release(s, &Release::new(&e.scope, &trees)) {
+                let entry = Release::new(&e.scope, &trees);
+                match same_release(s, &entry) {
+                    ScopeMatch::Same if self.kept_by_rival(p, node.hash, &entry) => {}
                     ScopeMatch::Same => return ScopeMatch::Same,
                     ScopeMatch::Unknown => verdict = ScopeMatch::Unknown,
                     ScopeMatch::Different => {}
@@ -232,6 +234,33 @@ impl<'a> ChoiceView<'a> {
         verdict
     }
 
+    /// Whether another live keep over `p` pins the release `entry` excludes. Two competing live
+    /// keeps each exclude the other's copy; neither exclusion may hide the copy the other keeps,
+    /// or the conflict would have nothing left to choose between.
+    fn kept_by_rival(&self, p: &Package, own: Sha256, entry: &Release) -> bool {
+        self.nodes.iter().any(|n| {
+            let Some(c) = n.choice else { return false };
+            let Some(keep) = c.keep.as_ref().filter(|_| c.action == ChoiceAction::Keep) else {
+                return false;
+            };
+            if n.hash == own {
+                return false;
+            }
+            let live_here = p.members.iter().any(|f| {
+                c.folders.contains(f) && self.live_choices(f).iter().any(|(h, _)| *h == n.hash)
+            });
+            let trees: Vec<(FolderKey, Sha256)> = keep
+                .folders
+                .iter()
+                .map(|m| (m.key.clone(), m.tree))
+                .collect();
+            live_here
+                && same_release(
+                    &Source::from_release(&Release::new(&c.folders, &trees)),
+                    entry,
+                ) == ScopeMatch::Same
+        })
+    }
     /// The live keeps' constraints for `f`. A resume imposes none.
     pub fn constraints(&self, f: &FolderKey) -> Vec<Constraint> {
         self.live_choices(f)
