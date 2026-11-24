@@ -1495,3 +1495,64 @@ mod v2 {
         }
     }
 }
+
+/// Wraps the fake and asks publishing to stop once `put_budget` objects went up.
+struct YieldAfter {
+    inner: FakeEffects,
+    put_budget: usize,
+}
+
+impl PublishEffects for YieldAfter {
+    fn stat_object(&mut self, rel: &str) -> Result<ObjectStat, EffectError> {
+        self.inner.stat_object(rel)
+    }
+    fn hash_object(&mut self, rel: &str) -> Result<Sha256, EffectError> {
+        self.inner.hash_object(rel)
+    }
+    fn put_object(&mut self, obj: &ObjectRef) -> Result<(u64, i128), EffectError> {
+        if self.put_budget == 0 {
+            return Err(EffectError::new(
+                EffectErrorKind::Yielded,
+                "command waiting",
+            ));
+        }
+        self.put_budget -= 1;
+        self.inner.put_object(obj)
+    }
+    fn observe_source(&mut self, folder: &str) -> Result<Option<SlotObs>, EffectError> {
+        self.inner.observe_source(folder)
+    }
+    fn write_record(&mut self, rel: &str, bytes: &[u8]) -> Result<(), EffectError> {
+        self.inner.write_record(rel, bytes)
+    }
+    fn remove_own_record(&mut self, rel: &str) -> Result<(), EffectError> {
+        self.inner.remove_own_record(rel)
+    }
+}
+
+#[test]
+fn publishing_yields_between_objects_without_a_state_record_and_resumes() {
+    let sc = Scenario::new(vec![addon("Suite", Some("1.0"), "a")]);
+    let plan = plan_publish(&sc.local, &sc.publish_ctx(1, &[])).unwrap();
+    assert!(plan.objects.len() >= 2, "needs more than one object");
+    let mut inner = FakeEffects::new();
+    inner.set_live_from(&sc.local);
+    let mut fx = YieldAfter {
+        inner,
+        put_budget: 1,
+    };
+    let mut ctx = sc.publish_ctx(1, &[]);
+    assert_eq!(
+        run_publish(&plan, &mut ctx, &mut fx),
+        PublishOutcome::Yielded
+    );
+    assert!(
+        !fx.inner.records.contains_key(&plan.state_path),
+        "the state record is written last, so a yield leaves nothing half-published"
+    );
+    fx.put_budget = usize::MAX;
+    let mut ctx = sc.publish_ctx(1, &[]);
+    let out = run_publish(&plan, &mut ctx, &mut fx);
+    assert!(matches!(out, PublishOutcome::Published { .. }), "{out:?}");
+    assert!(fx.inner.records.contains_key(&plan.state_path));
+}

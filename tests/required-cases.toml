@@ -1863,5 +1863,8 @@ tests = [
     "e2e::tests::a_paused_answer_stays_hidden_after_a_pass_and_is_not_offered_after_the_resume_pass",
     "e2e::tests::a_command_reads_through_the_hash_cache_and_leaves_a_pending_full_check_for_the_pass",
     "e2e::tests::diagnostics_and_ledger_only_commands_answer_from_the_last_scan",
+    "effects::tests::recovery_copies_are_read_in_full_once_and_again_only_after_they_change",
+    "effects::tests::publishing_stops_at_the_next_object_when_a_command_is_waiting",
+    "exec::tests::publishing_yields_between_objects_without_a_state_record_and_resumes",
 ]
 # <<< section: R9-decide

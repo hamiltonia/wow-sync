@@ -118,6 +118,8 @@ pub struct RealEffects<'a> {
     // The hash computed by the immediately preceding `stat_object`; never reused later.
     just_hashed: Option<(String, Sha256)>,
     pending: Option<PendingSink<'a>>,
+    /// Publishing stops between objects when this says a command (or Quit) is waiting.
+    yield_to: Option<wow_sync_adapters::fs_scan::ScanCtl>,
 }
 
 impl<'a> RealEffects<'a> {
@@ -144,6 +146,23 @@ impl<'a> RealEffects<'a> {
             lock: None,
             just_hashed: None,
             pending: None,
+            yield_to: None,
+        }
+    }
+
+    /// Lets a waiting command stop an upload at the next object boundary.
+    pub(crate) fn yielding_to(mut self, ctl: wow_sync_adapters::fs_scan::ScanCtl) -> Self {
+        self.yield_to = Some(ctl);
+        self
+    }
+
+    fn check_yield(&self) -> Result<(), EffectError> {
+        match &self.yield_to {
+            Some(c) if c.cancelled() => Err(EffectError::new(
+                EffectErrorKind::Yielded,
+                "stopped for a waiting command",
+            )),
+            _ => Ok(()),
         }
     }
 
@@ -279,6 +298,69 @@ pub(crate) struct LocalPoint {
     pub version: Option<String>,
 }
 
+type VerifiedKey = (std::path::PathBuf, String, String, String);
+type VerifiedMap = std::sync::Mutex<std::collections::HashMap<VerifiedKey, ([u8; 32], Sha256)>>;
+
+/// Recovery copies that already hashed to their recorded tree, with the folder fingerprint
+/// (every path, size and mtime) they had then. A copy is never rewritten after it is set aside, so
+/// an unchanged fingerprint spares re-reading all of its files on every status.
+fn verified_copies() -> &'static VerifiedMap {
+    static CACHE: std::sync::OnceLock<VerifiedMap> = std::sync::OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+// How many recovery copies were read in full; the cost this cache exists to avoid.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static RECOVERY_COPIES_HASHED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Whether the held copy still hashes to its tree: verified, never trusted from the metadata, but
+/// re-read only when its files changed since the last successful check.
+fn held_copy_matches(
+    area: &InstallArea,
+    variant_dir: &std::path::Path,
+    pkg: &str,
+    op: &str,
+    folder: &str,
+    slot: AdSlot<'_>,
+    tree: &Sha256,
+) -> bool {
+    let key: VerifiedKey = (
+        variant_dir.to_path_buf(),
+        pkg.to_string(),
+        op.to_string(),
+        folder.to_string(),
+    );
+    let fingerprint = match area.snapshot_slot(slot) {
+        Ok(Some(s)) => Some(s.fingerprint()),
+        _ => None,
+    };
+    if let Some(fp) = fingerprint {
+        let known = verified_copies().lock().unwrap_or_else(|e| e.into_inner());
+        if known.get(&key).is_some_and(|(f, t)| *f == fp && t == tree) {
+            return true;
+        }
+    }
+    #[cfg(test)]
+    RECOVERY_COPIES_HASHED.with(|c| c.set(c.get() + 1));
+    let Ok(Some(files)) = area.hash_slot(slot) else {
+        return false;
+    };
+    let Ok(mut files) = entries(files) else {
+        return false;
+    };
+    files.sort_by(|a, b| a.path.as_str().as_bytes().cmp(b.path.as_str().as_bytes()));
+    let ok = tree_hash(&files) == *tree;
+    if let (true, Some(fp)) = (ok, fingerprint) {
+        verified_copies()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key, (fp, *tree));
+    }
+    ok
+}
+
 pub(crate) fn local_points(variant_dir: &std::path::Path) -> Vec<LocalPoint> {
     let mut out = Vec::new();
     let Ok(area) = InstallArea::open(variant_dir) else {
@@ -313,13 +395,7 @@ pub(crate) fn local_points(variant_dir: &std::path::Path) -> Vec<LocalPoint> {
                     op: &op,
                     folder: &t.name,
                 };
-                let held = match area.hash_slot(slot) {
-                    Ok(Some(files)) => entries(files).ok(),
-                    _ => None,
-                };
-                let Some(mut files) = held else { break };
-                files.sort_by(|a, b| a.path.as_str().as_bytes().cmp(b.path.as_str().as_bytes()));
-                if tree_hash(&files) != t.tree {
+                if !held_copy_matches(&area, variant_dir, &pkg.name, &op, &t.name, slot, &t.tree) {
                     break;
                 }
                 folders.push((key, t.name.clone(), t.tree));
@@ -364,6 +440,7 @@ pub(crate) fn local_points(variant_dir: &std::path::Path) -> Vec<LocalPoint> {
 
 impl PublishEffects for RealEffects<'_> {
     fn stat_object(&mut self, rel: &str) -> Result<ObjectStat, EffectError> {
+        self.check_yield()?;
         self.just_hashed = None;
         match self
             .provider
@@ -401,6 +478,7 @@ impl PublishEffects for RealEffects<'_> {
     }
 
     fn put_object(&mut self, obj: &ObjectRef) -> Result<(u64, i128), EffectError> {
+        self.check_yield()?;
         match &obj.source {
             ObjectSource::Folder { folder, path } => {
                 let src = self
@@ -1160,5 +1238,71 @@ mod tests {
                 lab.leftovers()
             );
         }
+    }
+
+    #[test]
+    fn recovery_copies_are_read_in_full_once_and_again_only_after_they_change() {
+        let lab = Lab::new();
+        let plan = lab.plan(OpKind::Apply);
+        let (mut act, _h) = ScriptedActivity::new(Activity::NotRunning);
+        run_apply(&plan, &mut lab.fx(&mut act));
+        let read = || RECOVERY_COPIES_HASHED.with(|c| c.get());
+        let first = local_points(&lab.inst.variant_dir);
+        assert!(!first.is_empty(), "the apply set a copy aside");
+        let after_first = read();
+        assert!(after_first > 0, "the first look verifies the copy");
+        assert_eq!(local_points(&lab.inst.variant_dir).len(), first.len());
+        assert_eq!(read(), after_first, "an unchanged copy is not read again");
+
+        let held = lab.inst.variant_dir.join(".wowsync").join("recovery");
+        let mut files = Vec::new();
+        let mut dirs = vec![held];
+        while let Some(d) = dirs.pop() {
+            for e in std::fs::read_dir(d).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    dirs.push(p);
+                } else if p.extension().is_some_and(|x| x == "lua") {
+                    files.push(p);
+                }
+            }
+        }
+        assert!(!files.is_empty());
+        std::fs::write(&files[0], b"tampered, different length").unwrap();
+        assert!(
+            local_points(&lab.inst.variant_dir).len() < first.len(),
+            "a changed copy no longer verifies and is not listed"
+        );
+        assert!(read() > after_first, "a changed copy is read again");
+    }
+
+    #[test]
+    fn publishing_stops_at_the_next_object_when_a_command_is_waiting() {
+        let lab = Lab::new();
+        let ctl = wow_sync_adapters::fs_scan::ScanCtl::default();
+        let (mut act, _h) = ScriptedActivity::new(Activity::NotRunning);
+        let mut fx = lab.fx(&mut act).yielding_to(ctl.clone());
+        fn yielded<T>(e: Result<T, EffectError>) -> bool {
+            matches!(e, Err(e) if e.kind == EffectErrorKind::Yielded)
+        }
+        assert!(
+            !yielded(fx.stat_object("objects/none")),
+            "not asked to stop"
+        );
+        ctl.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(yielded(fx.stat_object("objects/none")));
+        let obj = wow_sync_core::plan::ObjectRef {
+            rel: "objects/none".into(),
+            kind: wow_sync_core::plan::ObjectKind::Blob,
+            expect: sha256(b"x"),
+            source: wow_sync_core::plan::ObjectSource::Bytes(b"x".to_vec()),
+        };
+        assert!(yielded(fx.put_object(&obj)));
+        ctl.cancel
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        assert!(matches!(
+            fx.stat_object("objects/none"),
+            Ok(ObjectStat::Missing)
+        ));
     }
 }

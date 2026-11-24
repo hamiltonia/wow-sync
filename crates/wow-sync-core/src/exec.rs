@@ -83,6 +83,8 @@ pub enum EffectErrorKind {
     Unsafe,
     Io,
     Crashed,
+    /// A waiting user command asked the pass to stop at a safe point; nothing is half-done.
+    Yielded,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -200,9 +202,15 @@ pub fn check_object(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PublishOutcome {
-    Published { state_path: String, uploaded: u32 },
+    Published {
+        state_path: String,
+        uploaded: u32,
+    },
     Aborted(PlanBlock),
     Failed(String),
+    /// Stopped between objects for a waiting command; no state record was written, and the
+    /// objects already in place are reused by the next attempt.
+    Yielded,
 }
 
 pub fn run_publish(
@@ -216,9 +224,13 @@ pub fn run_publish(
         match check_object(fx, &o.rel, &o.expect) {
             Ok(ObjectCheck::VerifiedOk) => continue,
             Ok(_) => {}
+            Err(e) if e.kind == EffectErrorKind::Yielded => return PublishOutcome::Yielded,
             Err(e) => return PublishOutcome::Failed(format!("checking {}: {e}", o.rel)),
         }
         if let Err(e) = fx.put_object(o) {
+            if e.kind == EffectErrorKind::Yielded {
+                return PublishOutcome::Yielded;
+            }
             return PublishOutcome::Failed(format!("uploading {}: {e}", o.rel));
         }
         uploaded += 1;
