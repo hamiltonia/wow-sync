@@ -1017,19 +1017,22 @@ impl Shell {
         }
     }
 
+    /// Closes the window like the setup pages do: straight to the tray. The sheets are only drawn
+    /// by the main view, so none may be opened while the setup pages are showing.
     pub fn request_close(&mut self, cx: &mut Context<Self>) {
         log("close requested");
         if self.sheet.is_some() {
             return;
         }
-        if self.w.enrolled && !self.first_close_done {
-            self.sheet_from = Some(self.opener.clone());
-            self.sheet = Some(Sheet::FirstClose);
-            cx.notify();
-        } else if self.w.enrolled && self.closing_quits {
-            self.request_quit(cx);
-        } else {
-            self.hide();
+        let setup_mode = !self.w.enrolled || self.setup.finished;
+        match close_step(setup_mode, self.first_close_done, self.closing_quits) {
+            CloseStep::FirstCloseSheet => {
+                self.sheet_from = Some(self.opener.clone());
+                self.sheet = Some(Sheet::FirstClose);
+                cx.notify();
+            }
+            CloseStep::Quit => self.request_quit(cx),
+            CloseStep::Hide => self.hide(),
         }
     }
 
@@ -2384,5 +2387,38 @@ mod log_tests {
         let l = act_label(&g);
         assert_eq!(l, "Group Rollback");
         assert!(!l.contains("SecretAddon"));
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum CloseStep {
+    FirstCloseSheet,
+    Quit,
+    Hide,
+}
+
+fn close_step(setup_mode: bool, first_close_done: bool, closing_quits: bool) -> CloseStep {
+    match (setup_mode, first_close_done, closing_quits) {
+        (true, _, _) => CloseStep::Hide,
+        (false, false, _) => CloseStep::FirstCloseSheet,
+        (false, true, true) => CloseStep::Quit,
+        (false, true, false) => CloseStep::Hide,
+    }
+}
+
+#[cfg(test)]
+mod close_tests {
+    use super::*;
+
+    #[test]
+    fn closing_the_set_up_screen_hides_without_a_sheet_the_setup_pages_cannot_draw() {
+        for done in [false, true] {
+            for quits in [false, true] {
+                assert_eq!(close_step(true, done, quits), CloseStep::Hide);
+            }
+        }
+        assert_eq!(close_step(false, false, false), CloseStep::FirstCloseSheet);
+        assert_eq!(close_step(false, true, true), CloseStep::Quit);
+        assert_eq!(close_step(false, true, false), CloseStep::Hide);
     }
 }

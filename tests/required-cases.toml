@@ -1848,6 +1848,15 @@ tests = [
     "app::log_tests::the_quit_sheet_is_outside_the_scrolled_content",
 ]
 # <<< section: R9-app-round4
+# >>> section: R9-app-round5
+[[case]]
+id = "R9-app:round5-close-and-check-all-persist"
+tier = "offline"
+tests = [
+    "app::close_tests::closing_the_set_up_screen_hides_without_a_sheet_the_setup_pages_cannot_draw",
+    "hash_cache::tests::a_check_all_files_request_survives_a_reopen_until_a_full_pass_completes",
+]
+# <<< section: R9-app-round5
 # >>> section: R9-decide
 [[case]]
 id = "R9-decide:conflicting-keeps"
