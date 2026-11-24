@@ -5283,6 +5283,81 @@ mod tests {
     }
 
     #[test]
+    fn a_decision_looks_again_only_at_its_own_folders() {
+        // Run 009 round 7 (G1): a large unrelated folder whose mtimes changed is not re-hashed
+        // by Decide, while a change inside the decided folder still makes the answer stale.
+        use std::sync::atomic::Ordering::Relaxed;
+        use wow_sync_core::decision::{DecideError, DecisionId};
+        let lab = Lab::new();
+        let (_a, mut b, _g, item, copies) = conflicted_pair(&lab);
+        let cache = crate::HashCache::open(&b.cfg.state_dir, "round7");
+        b.svc.set_read_ctl(ScanCtl {
+            cache: Some(cache.clone()),
+            ..ScanCtl::default()
+        });
+        let big = b.install.addons.join("Unrelated");
+        std::fs::create_dir_all(&big).unwrap();
+        std::fs::write(big.join("Unrelated.toc"), "## T\nf0.lua\n").unwrap();
+        for i in 0..60 {
+            std::fs::write(big.join(format!("f{i}.lua")), vec![b'x'; 4096]).unwrap();
+        }
+        b.install.set_old_mtimes();
+        synced(&mut b);
+        synced(&mut b);
+        let answer = |item: &wow_sync_core::decision::DecisionItem| Command::Decide {
+            item: DecisionId(item.scope.clone()),
+            option: copies[0],
+            shown: item.evidence,
+        };
+        let item = b
+            .svc
+            .offered_decisions()
+            .iter()
+            .find(|i| i.scope == item.scope)
+            .expect("still offered")
+            .clone();
+        // Same bytes, new mtimes: only a re-read would notice.
+        for i in 0..60 {
+            std::fs::write(big.join(format!("f{i}.lua")), vec![b'x'; 4096]).unwrap();
+        }
+        let (h0, m0) = (cache.hits.load(Relaxed), cache.misses.load(Relaxed));
+        let mut stale = item.clone();
+        stale.evidence = wow_sync_core::decision::EvidenceToken(sha256(b"older view"));
+        assert_eq!(
+            b.svc.command(answer(&stale)),
+            Err(CommandError::Decide(DecideError::Changed))
+        );
+        assert!(
+            cache.misses.load(Relaxed) < m0 + 60,
+            "the unrelated folder was re-hashed: {} new misses",
+            cache.misses.load(Relaxed) - m0
+        );
+        assert!(
+            cache.hits.load(Relaxed) > h0,
+            "the decided folder is read through the cache"
+        );
+        assert!(b.svc.command(answer(&item)).is_ok());
+        assert!(
+            cache.misses.load(Relaxed) < m0 + 60,
+            "deciding re-hashed the unrelated folder"
+        );
+    }
+
+    #[test]
+    fn a_change_inside_the_decided_folder_still_makes_the_answer_stale() {
+        use wow_sync_core::decision::{DecideError, DecisionId};
+        let lab = Lab::new();
+        let (_a, mut b, _g, item, copies) = conflicted_pair(&lab);
+        b.addon("Alpha", "alpha-v9");
+        let r = b.svc.command(Command::Decide {
+            item: DecisionId(item.scope.clone()),
+            option: copies[0],
+            shown: item.evidence,
+        });
+        assert_eq!(r, Err(CommandError::Decide(DecideError::Changed)), "{r:?}");
+    }
+
+    #[test]
     fn diagnostics_and_ledger_only_commands_answer_from_the_last_scan() {
         // Run 009 round 5 (G1): no local read at all, not even a cached one.
         use std::sync::atomic::Ordering::Relaxed;

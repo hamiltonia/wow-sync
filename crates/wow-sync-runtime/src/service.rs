@@ -971,8 +971,17 @@ impl SliceService {
             cmd,
             Command::Retire { .. } | Command::AllowAgain { .. } | Command::SetSettingsPolicy { .. }
         );
+        // A decision looks again only at the folders it is about: its evidence covers nothing
+        // else, so the rest of the tree comes from the newest complete scan.
+        let only = match &cmd {
+            Command::Decide {
+                item: DecisionId(DecisionScope::Folders(keys)),
+                ..
+            } => Some(keys.iter().map(|k| k.as_str().to_string()).collect()),
+            _ => None,
+        };
         let mut w = self
-            .observe_for_command(ledger_only)
+            .observe_for_command_in(ledger_only, only)
             .map_err(|e| CommandError::Service(e.to_string()))?;
         self.hide_answered(&mut w);
         let provider = self
@@ -1719,10 +1728,28 @@ impl SliceService {
         let root = Root::open(&self.addons_path(), ReparsePolicy::RejectAll).map_err(local)?;
         let mut opts = ScanOptions::with_defaults(now_unix_ms());
         opts.recent_ms = self.cfg.recent_ms;
+        let only = ctl.only.is_some();
+        let last = if only {
+            self.last_scan
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone()
+        } else {
+            None
+        };
+        if only && last.is_none() {
+            // Nothing to carry over: read everything.
+            let full = ScanCtl {
+                only: None,
+                ..ctl.clone()
+            };
+            return self.scan_install(&full);
+        }
         let Some(scan) = scan_addons_ctl(&root, &opts, &mut |_| {}, ctl).map_err(local)? else {
             return Ok(None);
         };
-        let folders = scan
+        let listing = scan.listing.clone();
+        let mut folders: Vec<FolderScan> = scan
             .folders
             .into_iter()
             .map(|f| FolderScan {
@@ -1756,6 +1783,30 @@ impl SliceService {
                 fingerprint: f.fingerprint.map(Sha256),
             })
             .collect();
+        if let Some((carried, _)) = last {
+            // Folders outside the scope keep what the last complete scan saw, in listing order.
+            let mut merged = Vec::with_capacity(listing.len());
+            for name in &listing {
+                let fresh = folders
+                    .iter()
+                    .position(|f| f.name.eq_ignore_ascii_case(name));
+                match fresh {
+                    Some(i) => merged.push(folders.swap_remove(i)),
+                    None => match carried.iter().find(|f| f.name == *name) {
+                        Some(f) => merged.push(f.clone()),
+                        // A folder that appeared since: read everything.
+                        None => {
+                            let full = ScanCtl {
+                                only: None,
+                                ..ctl.clone()
+                            };
+                            return self.scan_install(&full);
+                        }
+                    },
+                }
+            }
+            folders = merged;
+        }
         Ok(Some((folders, scan.listing_stable)))
     }
 
@@ -2256,8 +2307,19 @@ impl SliceService {
     /// newest complete scan without touching the install, for commands that need no fresh
     /// local evidence.
     fn observe_for_command(&mut self, reuse_local: bool) -> Result<World, ServiceError> {
+        self.observe_for_command_in(reuse_local, None)
+    }
+
+    /// Like observe_for_command; with only, just those folders are looked at again and the
+    /// rest come from the newest complete scan.
+    fn observe_for_command_in(
+        &mut self,
+        reuse_local: bool,
+        only: Option<Vec<String>>,
+    ) -> Result<World, ServiceError> {
         let ctl = ScanCtl {
             routine: true,
+            only: only.map(std::sync::Arc::new),
             ..self.read_ctl.clone()
         };
         self.reuse_scan

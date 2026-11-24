@@ -135,3 +135,17 @@ Not measured: the live 1 s gate on a 3 GB tree (needs the owner's/checker's BigL
 - `status()` idle: 90 ms, again 86 ms (1.39 s with no hash cache installed, which is the production-less case)
 - `ExportDiagnostics` idle: 64 ms; right after SyncNow: 55 ms
 Not measured here: click-to-result while the backend thread is mid-pass, because it needs the app's armed interrupt (R9-app's harness); the mechanism is tested at unit level above. The gate of about 1 s holds for these paths; the in-pass wait is bounded by one object copy as described.
+
+## Round 7: Decide looks again only at its own folders (G1 remainder)
+
+**Cause.** Decide's fresh local observation re-read every cache-missed file of the whole tree, including folders the decision is not about (R9-check: 2,209 ms with a 32x100 MiB lab whose mtimes changed).
+
+**Fix.** A decision with a folder scope (`DecisionScope::Folders`) now observes with `ScanCtl::only` set to those folders (`service.rs`, `observe_for_command_in`; `fs_scan.rs`, `scan_addons_pass`). Other folders are listed but not read; the service merges them from the newest complete scan in listing order (`scan_install`). If there is no earlier scan, or a folder appeared since, it falls back to the full cache-backed look. A partial scan does not prune the hash cache (`finish` is told it is not complete). Settings-scoped decisions keep the full cache-backed look.
+
+**Why narrowing is safe.** The evidence token (`decide.rs` `evidence_token`) covers the item's scope, reason, reach, options and a basis made of ledger record hashes and the release hashes of the item's own copies. Nothing from other folders is in it, and the item is looked up by scope in the fresh offers, so the unrelated folders cannot change it. A change inside a decided folder is still read (through the cache), changes the copies' hashes and gives `Changed`. The ledger and peers' records are still reloaded from the provider, so RV9-01 stays closed (its tests pass unchanged).
+
+**Tests** (both in `required-cases.toml`):
+- `e2e::tests::a_decision_looks_again_only_at_its_own_folders`: 60 unrelated files rewritten with new mtimes; Decide causes no new cache misses, the decided folder is read through the cache. Mutation: with the scoping disabled it fails ("the unrelated folder was re-hashed: 60 new misses"); restored.
+- `e2e::tests::a_change_inside_the_decided_folder_still_makes_the_answer_stale`: editing the decided folder gives `DecideError::Changed`.
+
+**Measured** (release, in-process, 1,500 unrelated files, 384 MB, mtimes changed, bytes unchanged): Decide 80 ms; the unscoped cache-backed look (`status()`) on the same state 2.45 s. Not measured through the app's backend thread.
