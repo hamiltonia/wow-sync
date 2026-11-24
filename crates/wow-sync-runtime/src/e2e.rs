@@ -5081,107 +5081,125 @@ mod tests {
         assert_eq!(read_wtf(&b, "Alpha"), None);
     }
 
-    fn two_option_item(
-        key: &wow_sync_core::paths::FolderKey,
-        write: AuthorityRecord,
-        basis: &[u8],
+    /// Both computers hold a keep of their own copy and have synced until each offers the conflict.
+    fn conflicted_pair(
+        lab: &Lab,
     ) -> (
+        Pc,
+        Pc,
+        GroupId,
         wow_sync_core::decision::DecisionItem,
-        wow_sync_core::decide::Plans,
+        Vec<wow_sync_core::decision::OptionId>,
     ) {
-        use wow_sync_core::decide::{build_item, PlannedOption};
-        use wow_sync_core::decision::*;
-        let opt = |id: u32, label| DecisionOption {
-            id: OptionId(id),
-            label,
-            holders: vec![],
-            consequence: Consequence::default(),
-            warning: None,
-        };
-        build_item(
-            DecisionScope::Folders(vec![key.clone()]),
-            DecisionKind::ChoicesDiffer,
-            DecisionReach::Group,
-            vec![
-                PlannedOption {
-                    option: opt(0, OptionLabel::KeepOnThisComputer),
-                    effect: DecisionEffect::Local(LocalResolution::Dismiss(sha256(b"x"))),
-                },
-                PlannedOption {
-                    option: opt(1, OptionLabel::RemoveEverywhere),
-                    effect: DecisionEffect::Write(Box::new(write)),
-                },
-            ],
-            &[sha256(basis)],
-        )
+        use wow_sync_core::decision::{DecisionKind, OptionLabel};
+        let (mut a, mut b, _c, g) = alpha_v2_published(lab);
+        put_mutual_keep_of_alpha(lab, &g, &a, &b);
+        put_mutual_keep_of_alpha(lab, &g, &b, &a);
+        for _ in 0..3 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        let item = b
+            .svc
+            .offered_decisions()
+            .iter()
+            .find(|i| i.reason == DecisionKind::ChoicesDiffer)
+            .expect("the conflict is offered")
+            .clone();
+        let copies = item
+            .options
+            .iter()
+            .filter(|o| matches!(o.label, OptionLabel::Release { .. }))
+            .map(|o| o.id)
+            .collect();
+        (a, b, g, item, copies)
     }
 
     #[test]
-    fn decide_command_is_checked_for_freshness_and_kept_while_paused() {
-        use wow_sync_core::decision::{DecideError, DecisionId, LocalResolution, OptionId};
+    fn a_stale_answer_after_a_peer_settled_the_conflict_writes_nothing() {
+        // Run 009 round 3 (RV9-01): B answered an old view after A had already decided.
+        use wow_sync_core::decision::{DecideError, DecisionId, DecisionKind};
         let lab = Lab::new();
-        let (mut a, b, _c, g) = alpha_v2_published(&lab);
-        let (ac, _) = pc_ids(&a);
-        let key = alpha_folder(&lab, &g, &a).key;
-        let write = AuthorityRecord::Retirement(Retirement {
-            group_id: g.clone(),
-            issuer: issuer_of(&a),
-            retired: ref_of(&b),
-            cutoff_seq: 0,
-            was_settings_master: false,
-            retirements_known: vec![],
-            written_unix_ms: 1,
-        });
-        let (item, plans) = two_option_item(&key, write.clone(), b"basis-1");
-        let id = DecisionId(item.scope.clone());
-        a.svc.offer_decisions(vec![item.clone()], plans);
-        let out = a
+        let (mut a, mut b, g, item, copies) = conflicted_pair(&lab);
+        let answer = |option| Command::Decide {
+            item: DecisionId(item.scope.clone()),
+            option,
+            shown: item.evidence,
+        };
+        let a_item = a
             .svc
+            .offered_decisions()
+            .iter()
+            .find(|i| i.reason == DecisionKind::ChoicesDiffer)
+            .expect("A is offered the conflict too")
+            .clone();
+        a.svc
             .command(Command::Decide {
-                item: id.clone(),
-                option: OptionId(0),
-                shown: item.evidence,
+                item: DecisionId(a_item.scope.clone()),
+                option: a_item.options[0].id,
+                shown: a_item.evidence,
             })
             .unwrap();
+        synced(&mut a);
+        let before = authority_files(&lab, &g, &pc_ids(&b).0).len();
         assert_eq!(
-            out,
-            CommandOutcome::Local(LocalResolution::Dismiss(sha256(b"x")))
+            b.svc.command(answer(copies[1])),
+            Err(CommandError::Decide(DecideError::Changed))
         );
-        // The evidence changed after the owner looked: nothing is written.
-        let (newer, plans) = two_option_item(&key, write, b"basis-2");
-        assert_ne!(newer.evidence, item.evidence);
-        a.svc.offer_decisions(vec![newer.clone()], plans);
-        let stale = Command::Decide {
-            item: id.clone(),
-            option: OptionId(1),
+        assert_eq!(authority_files(&lab, &g, &pc_ids(&b).0).len(), before);
+        for _ in 0..4 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        assert_eq!(a.read("Alpha/main.lua"), b.read("Alpha/main.lua"));
+        for pc in [&a, &b] {
+            assert!(!offered_kinds(pc).contains(&DecisionKind::ChoicesDiffer));
+        }
+    }
+
+    #[test]
+    fn an_answer_kept_while_paused_is_written_once_and_not_offered_again() {
+        // Run 009 round 3 (RV9-01): the paused answer must not leave the item offered.
+        use wow_sync_core::decision::{DecideError, DecisionId, DecisionKind, OptionId};
+        let lab = Lab::new();
+        let (mut a, mut b, g, item, copies) = conflicted_pair(&lab);
+        let answer = |option| Command::Decide {
+            item: DecisionId(item.scope.clone()),
+            option,
             shown: item.evidence,
         };
         assert_eq!(
-            a.svc.command(stale),
-            Err(CommandError::Decide(DecideError::Changed))
-        );
-        assert_eq!(
-            a.svc.command(Command::Decide {
-                item: id.clone(),
-                option: OptionId(9),
-                shown: newer.evidence,
-            }),
+            b.svc.command(answer(OptionId(99))),
             Err(CommandError::Decide(DecideError::UnknownOption))
         );
-        assert!(authority_files(&lab, &g, &ac).is_empty());
-        // Paused: the answer is kept, then written once syncing resumes.
-        a.svc.set_paused(true).unwrap();
-        let fresh = Command::Decide {
-            item: id,
-            option: OptionId(1),
-            shown: newer.evidence,
+        let stale = Command::Decide {
+            item: DecisionId(item.scope.clone()),
+            option: copies[0],
+            shown: wow_sync_core::decision::EvidenceToken(sha256(b"older view")),
         };
-        assert_eq!(a.svc.command(fresh), Ok(CommandOutcome::Kept));
-        assert!(authority_files(&lab, &g, &ac).is_empty());
-        a.svc.set_paused(false).unwrap();
-        synced(&mut a);
-        let files = authority_files(&lab, &g, &ac);
-        assert_eq!(files.len(), 1, "{files:?}");
+        assert_eq!(
+            b.svc.command(stale),
+            Err(CommandError::Decide(DecideError::Changed))
+        );
+        let before = authority_files(&lab, &g, &pc_ids(&b).0).len();
+        b.svc.set_paused(true).unwrap();
+        assert_eq!(b.svc.command(answer(copies[0])), Ok(CommandOutcome::Kept));
+        assert_eq!(authority_files(&lab, &g, &pc_ids(&b).0).len(), before);
+        b.svc.set_paused(false).unwrap();
+        synced(&mut b);
+        synced(&mut b);
+        assert_eq!(authority_files(&lab, &g, &pc_ids(&b).0).len(), before + 1);
+        assert!(!offered_kinds(&b).contains(&DecisionKind::ChoicesDiffer));
+        assert_eq!(
+            b.svc.command(answer(copies[1])),
+            Err(CommandError::Decide(DecideError::Changed))
+        );
+        for _ in 0..4 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        assert_eq!(a.read("Alpha/main.lua"), b.read("Alpha/main.lua"));
+        assert_eq!(authority_files(&lab, &g, &pc_ids(&b).0).len(), before + 1);
     }
 
     #[test]

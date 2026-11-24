@@ -29,6 +29,11 @@ pub trait ConstraintHooks {
     fn live_constraints(&self, l: &Ledger, f: &FolderKey) -> Vec<Constraint>;
     fn excluded(&self, l: &Ledger, p: &Package, s: &Source) -> ScopeMatch;
     fn rejected(&self, l: &Ledger, p: &Package, s: &Source) -> ScopeMatch;
+    /// Live choices of different kinds that cannot both stand (a resume excluding what a keep
+    /// pins): a decision, never a silent winner.
+    fn choices_conflict(&self, _l: &Ledger, _p: &Package) -> bool {
+        false
+    }
 }
 
 /// Filled in `settings.rs`.

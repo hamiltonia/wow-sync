@@ -922,6 +922,9 @@ fn apply_constraints(
             }
         }
     }
+    if differ.is_none() && constraints.choices_conflict(ledger, pkg) {
+        differ = Some(DecisionReason::ChoicesDiffer);
+    }
     if let Some(reason) = differ {
         target.packages.insert(
             pkg.key.clone(),
