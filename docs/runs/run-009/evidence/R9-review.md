@@ -201,3 +201,71 @@ release-blocking.
 RV9-11, 12, 13 and 14 are closed (RV9-14 still needs a live UIA check by
 R9-check). RV9-10 is still open (minor). RV9-15 (a lost Check all files) is a
 new minor finding, and RV9-17 is a note. No critical findings.
+
+
+## Recheck 3 (main f95def1)
+
+Fast-forwarded to f95def1. Reviewed `git diff 1ad56af..f95def1`: R9-app round 5 (RV9-15, RV9-16, RV9-10) and R9-decide round 6 (recovery_rows cache, one diagnostics read, publishing yields between objects).
+
+Tests run in this worktree, all passing:
+- `recovery_copies_are_read_in_full_once_and_again_only_after_they_change`
+- `publishing_stops_at_the_next_object_when_a_command_is_waiting`
+- `publishing_yields_between_objects_without_a_state_record_and_resumes` (core)
+- `closing_the_set_up_screen_hides_without_a_sheet_the_setup_pages_cannot_draw`
+- `a_check_all_files_request_survives_a_reopen_until_a_full_pass_completes` (adapters)
+
+Mutations, each reverted afterwards (`git status` clean):
+- **M7:** made `check_yield` never yield. The yield test FAILS, so the yield is exercised.
+- **M8:** made the recovery cache ignore the fingerprint. The recovery cache test FAILS, so the cache invalidation is exercised.
+
+### (a) Yielded publish
+
+The state record cannot reference objects that were not uploaded:
+- `run_publish` (`core/exec.rs:216-245`) checks and puts every object first. It re-checks the source fingerprints and writes the state record last.
+- `Yielded` from `check_object`/`stat_object` or `put_object` returns before `write_record`.
+- The yield test is entered at the start of each `stat_object`/`put_object` (`effects.rs:442,480`), never during a copy. No partial object results, and the provider's put stays temp+verify+rename.
+- Objects uploaded before a yield are content-addressed and unreferenced. On the next pass they are re-planned, `check_object` returns `VerifiedOk`, and they are skipped.
+- A pending apply report is not marked published (`service.rs:3720`), so it goes out with the next publication.
+
+On sequence numbers: none is ever reused, but a yield uses one up.
+- `next_seq = seq + 1` is persisted before `run_publish` (`service.rs:3688-3693`).
+- Every Yielded pass therefore leaves a gap. This is the same behaviour as the existing `Failed`/`Aborted` paths, and `own_publish_slot_never_reuses_a_number` covers it.
+- See RV9-18.
+
+### (b) Recovery cache and D-31
+
+`held_copy_matches` (`effects.rs:320-362`) trusts a copy again only if its folder fingerprint (every path, size and mtime) and its tree are unchanged since the last full hash. So a tampered copy with the same size and mtime can still be listed as a recovery row. That is the risk D-31 accepts for change detection.
+
+Restore does not rely on the cache:
+- **Choosing the release:** rollback picks `r0` through `local_points` (`rollback_flow.rs:190`).
+- **Reading the file list:** the list comes from the shared tree record, or from `local_release` (`effects.rs:242-283`), which re-hashes the held copy in full with no cache.
+- **Staging:** `stage_folder` and `stage_from_recovery` stage every file through `area.stage_file(..., sha256, size)`, which rejects a hash mismatch.
+- **After install:** `verify_slots` checks the tree.
+
+A tampered copy is therefore listed but cannot be restored. The restore fails safely and installs nothing.
+
+The cache is a process-wide static that is never evicted. It holds one small entry per held copy, so memory is negligible.
+
+**Conclusion:** within D-31, no finding.
+
+### (c) RV9-16: closing the setup screen
+
+`request_close` (`app.rs:1020-1037`) with `close_step` now returns `Hide` whenever setup mode is true (`!enrolled || setup.finished`), and no sheet is set. In detail:
+- **Reopening:** Open or a click from the tray calls `show()`, which redraws the same setup or finish page. No sheet remains set, so `do_act` does not block Finish.
+- **First-close explanation:** `first_close_done` is untouched, so the explanation still appears on the first close from the main view.
+- **Tray Quit:** in setup mode this still goes `request_quit`, then `begin_quit` with no sheet. That path is unchanged.
+- **Pre-enrollment close:** closing before enrollment was already `Hide`, so that behaviour is unchanged.
+
+This is verified by the code path and the unit test. A live GUI check of close then reopen then Finish is still owed by R9-check.
+
+### Per-finding status
+
+| ID | Severity | Status | Notes |
+|---|---|---|---|
+| RV9-10 | minor | **closed** | `v0.3.2.md`: the literal `\n` is gone, the stale "R9-decide notes" bullet is removed, and the reviewer claim is replaced by "were not measured by this change's tests". |
+| RV9-15 | minor | **closed** | A `.full` marker is written atomically and read at `open`, and is cleared only by a complete non-routine pass (`hash_cache.rs`). Test passes. |
+| RV9-16 | major | **closed (code)** | The setup close hides with no sheet. Reopen and Finish work by the code path. Live UIA check owed by R9-check. |
+| RV9-18 | note | new | A yielded publish uses up a seq. No seq is reused, and gaps already occur on Failed/Aborted publishes. Continuous commands could delay publication indefinitely, because each queued command yields the next pass's upload. That needs a user clicking faster than one object uploads, so it is not a practical starvation. |
+| RV9-19 | note | new | `Shared::abort_reads` doc (`backend.rs:168-169`) says it "Never stops a write". Quit now also stops an upload at the next object boundary, through the same `read_ctl.cancel`. That is safe (no record is written), but the comment is now inaccurate. |
+
+**Verdict:** no open critical or major findings, so nothing in this review blocks release. Owed outside this review: a live GUI check of RV9-14/RV9-16 by R9-check.
