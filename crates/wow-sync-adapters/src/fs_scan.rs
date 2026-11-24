@@ -112,7 +112,10 @@ pub struct ScannedFolder {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AddonsScan {
+    /// Only the folders that were scanned; with ScanCtl::only that is a subset of listing.
     pub folders: Vec<ScannedFolder>,
+    /// Every top-level name, in listing order, scanned or not.
+    pub listing: Vec<String>,
     pub listing_stable: bool,
 }
 
@@ -243,6 +246,9 @@ pub struct ScanCtl {
     /// A read made to answer a user command: it uses the cache, never re-reads everything for a
     /// pending "check all files" and leaves that request for the next pass.
     pub routine: bool,
+    /// Scan only these folders (compared case-insensitively); the rest are listed, not read. The
+    /// hash cache is not pruned by such a partial scan.
+    pub only: Option<Arc<Vec<String>>>,
 }
 
 /// Lets a user command stop a read-only scan so it is answered at once; the scan is repeated
@@ -435,7 +441,10 @@ pub fn scan_addons_ctl(
     }
     let res = scan_addons_pass(addons, opts, hook, ctl);
     if let Some(c) = &ctl.cache {
-        c.finish(matches!(res, Ok(Some(_))), ctl.routine);
+        c.finish(
+            matches!(res, Ok(Some(_))) && ctl.only.is_none(),
+            ctl.routine,
+        );
     }
     res
 }
@@ -451,6 +460,11 @@ fn scan_addons_pass(
     for e in &l1 {
         if ctl.cancelled() {
             return Ok(None);
+        }
+        if let Some(only) = &ctl.only {
+            if !only.iter().any(|n| n.eq_ignore_ascii_case(&e.name)) {
+                continue;
+            }
         }
         let f = if e.reparse != ReparseKind::None || !e.is_dir {
             let why = check_entry(e, ReparsePolicy::RejectAll, &addons.path().join(&e.name))
@@ -470,9 +484,11 @@ fn scan_addons_pass(
         hook(&e.name);
         folders.push(f);
     }
+    let listing = l1.iter().map(|e| e.name.clone()).collect();
     let l2 = top_level(addons)?;
     Ok(Some(AddonsScan {
         folders,
+        listing,
         listing_stable: kinds(&l1) == kinds(&l2),
     }))
 }
