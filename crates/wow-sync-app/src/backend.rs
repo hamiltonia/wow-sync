@@ -388,10 +388,10 @@ fn guarded<T>(
 }
 
 /// How long to wait before trying a pass again after an internal error.
-fn fault_retry(state_dir: &Path) -> Duration {
+fn fault_retry(_state_dir: &Path) -> Duration {
     #[cfg(test)]
     {
-        let ms = tests::retry_ms(state_dir);
+        let ms = tests::retry_ms(_state_dir);
         if ms > 0 {
             return Duration::from_millis(ms);
         }
