@@ -380,6 +380,8 @@ mod tests {
             why: String::new(),
             next: wow_sync_core::view::NextAction::Nothing,
             awaiting: vec![],
+            waiting_on: vec![],
+            waiting_secs: None,
         });
         let v = installed_version(&w, "details");
         assert_eq!(v.as_deref(), Some("2.0.0"));

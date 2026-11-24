@@ -576,6 +576,9 @@ impl Shell {
                 know.push(self.muted(format!("and {} more", n - 8)).into_any_element());
             }
         }
+        if let Some(s) = crate::computers_ui::version_skew(&self.w, i) {
+            know.push(self.muted(s).into_any_element());
+        }
         know.push(self.muted(format!("This is what {} last reported. What it has right now is not known until it reports again.", peer.name)).into_any_element());
         let mut details: Vec<AnyElement> = vec![self
             .disclosure("computer-details", "Details", cx)
@@ -2153,17 +2156,26 @@ impl Shell {
         );
         col = col.child(self.panel("Startup", vec![signin.into_any_element(), self.muted("WoW Sync starts only when you open it. Starting at sign-in is not available yet.").into_any_element()]));
         let paused = self.w.is_paused();
-        let pb = self.btn(
-            "as-pause",
-            if paused {
-                "Resume syncing"
-            } else {
-                "Pause syncing"
-            },
-            Bk::Secondary,
-            Act::TogglePause,
-            cx,
-        );
+        let pb = if self.pause_in_flight() {
+            self.btn_off(
+                "as-pause",
+                if paused { "Resuming…" } else { "Pausing…" },
+                "your last click is being applied",
+                cx,
+            )
+        } else {
+            self.btn(
+                "as-pause",
+                if paused {
+                    "Resume syncing"
+                } else {
+                    "Pause syncing"
+                },
+                Bk::Secondary,
+                Act::TogglePause,
+                cx,
+            )
+        };
         let sn = if !paused && self.w.busy.is_none() && self.w.enrolled {
             self.btn("as-sync", "Sync now", Bk::Secondary, Act::SyncNow, cx)
         } else {
@@ -2171,6 +2183,22 @@ impl Shell {
                 "as-sync",
                 "Sync now",
                 "unavailable while paused or syncing",
+                cx,
+            )
+        };
+        let ca = if self.w.enrolled {
+            self.btn(
+                "as-check-all",
+                "Check all files",
+                Bk::Secondary,
+                Act::CheckAllFiles,
+                cx,
+            )
+        } else {
+            self.btn_off(
+                "as-check-all",
+                "Check all files",
+                "set this computer up first",
                 cx,
             )
         };
@@ -2193,6 +2221,9 @@ impl Shell {
                         .gap(u(10.))
                         .child(pb)
                         .child(sn)
+                        .child(ca)
+                        .into_any_element(),
+                    self.muted("Routine checks only re-read add-on files that are new or changed. Check all files re-reads every one once, for example after restoring a backup.")
                         .into_any_element(),
                 ],
         ));

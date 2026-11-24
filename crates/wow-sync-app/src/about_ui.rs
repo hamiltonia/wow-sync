@@ -281,7 +281,7 @@ mod tests {
         );
         assert!(d.preview.is_none());
         let other = crate::features::result_text(ActionKind::Decide, &r);
-        assert!(other.starts_with("Something changed while you were choosing"));
+        assert!(other.starts_with("This choice is out of date"));
     }
 
     #[test]

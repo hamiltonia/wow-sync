@@ -1802,6 +1802,19 @@ tests = [
 ]
 # <<< section: R8-fix
 
+# >>> section: R9-app
+[[case]]
+id = "R9-app:responsive-honest-app"
+tier = "offline"
+tests = [
+    "fs_scan::tests::a_cache_skips_unchanged_files_and_rereads_changed_ones",
+    "fs_scan::tests::a_recently_modified_file_is_never_cached",
+    "fs_scan::tests::a_pending_command_stops_a_scan_only_while_it_is_armed",
+    "backend::tests::every_group_result_gets_a_log_line_without_paths",
+    "model::tests::an_unavailable_add_on_names_who_has_not_shared_and_stops_promising_downloads",
+    "computers_ui::tests::a_peer_on_another_version_is_called_out_and_a_matching_one_is_not",
+]
+# <<< section: R9-app
 # >>> section: R9-decide
 [[case]]
 id = "R9-decide:conflicting-keeps"

@@ -83,6 +83,8 @@ pub enum Act {
     Nav(Page),
     Back,
     SyncNow,
+    /// Re-read every add-on file once, ignoring the hash cache.
+    CheckAllFiles,
     TogglePause,
     SetFilter(Filter),
     SetActFilter(u8),
@@ -210,6 +212,12 @@ pub struct Shell {
     pub loaded: bool,
     pub message: String,
     seen_group_result: u64,
+    /// A group action is on its way to the sync thread; further ones wait for its result.
+    group_pending: bool,
+    /// A pause or resume has been sent and not yet seen applied: what was asked for, and when.
+    pause_pending: Option<(bool, std::time::Instant)>,
+    /// When each add-on was first seen unavailable in this run; kept only while it stays so.
+    unavailable_since: std::collections::BTreeMap<String, std::time::Instant>,
     seen_test_mode: u64,
     /// The last blocked-add-on list written to the log, so each check does not repeat it.
     logged_preview: String,
@@ -319,6 +327,9 @@ impl Shell {
             loaded: false,
             message: String::new(),
             seen_group_result: 0,
+            group_pending: false,
+            pause_pending: None,
+            unavailable_since: Default::default(),
             seen_test_mode: 0,
             logged_preview: String::new(),
             diag: Default::default(),
@@ -464,8 +475,15 @@ impl Shell {
     }
 
     pub fn send(&self, c: Cmd) {
+        let wakes_pass = !matches!(c, Cmd::SyncNow | Cmd::QuitWhenSafe);
         if let Some(tx) = &self.tx {
             let _ = tx.send(c);
+            if wakes_pass {
+                // After the send, so a command is never missed by the pass it should stop.
+                backend::lock(&self.shared)
+                    .command_pending
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
         }
     }
 
@@ -502,6 +520,7 @@ impl Shell {
             if let Some(r) = &g.group_result {
                 if r.seq != self.seen_group_result {
                     self.seen_group_result = r.seq;
+                    self.group_pending = false;
                     self.diag.absorb(r.kind, &r.result);
                     let text =
                         crate::features::result_text_named(r.kind, &r.result, r.subject.as_deref());
@@ -534,6 +553,10 @@ impl Shell {
         };
         let first = !self.loaded && setup_ready;
         self.w = w;
+        self.track_unavailable();
+        if self.pause_in_flight() && self.pause_pending.is_some_and(|(want, _)| want) {
+            self.w.busy = Some(Busy::Pausing);
+        }
         self.setup.inspecting = inspecting;
         let w = &self.w;
         self.notice
@@ -749,6 +772,15 @@ impl Shell {
             Act::Back => self.back(),
             Act::SyncNow => self.sync_now(cx),
             Act::TogglePause => self.toggle_pause(cx),
+            Act::CheckAllFiles => {
+                if self.w.enrolled {
+                    self.send(Cmd::CheckAllFiles);
+                    self.notice.show(
+                        self.page,
+                        "Checking every add-on file. This can take a minute; syncing carries on meanwhile.",
+                    );
+                }
+            }
             Act::SetFilter(f) => self.filter = f,
             Act::SetActFilter(f) => self.act_filter = f,
             Act::OpenAddon(k) => self.open(Page::Addons, Detail::Addon(k)),
@@ -849,6 +881,7 @@ impl Shell {
                 }
             }
             Act::DismissNotice => self.notice.dismiss(),
+            Act::Group(_) if self.group_pending => {}
             Act::Group(a) => match crate::features::gate(&self.w, a.kind()) {
                 Ok(()) => {
                     let scope = match &a {
@@ -858,6 +891,8 @@ impl Shell {
                         _ => None,
                     };
                     self.notice.action_started(self.page, scope);
+                    self.notice.result(self.page, "Working on it…");
+                    self.group_pending = true;
                     self.send(Cmd::Group(a))
                 }
                 Err(why) => self.notice.show(self.page, why),
@@ -924,14 +959,45 @@ impl Shell {
         self.send(Cmd::SyncNow);
     }
 
+    /// Whether a pause or resume click is still waiting to be applied. A click that never shows
+    /// up (the sync thread is gone) stops counting after a few seconds.
+    pub(crate) fn pause_in_flight(&self) -> bool {
+        matches!(self.pause_pending, Some((want, at))
+            if self.w.is_paused() != want && at.elapsed() < std::time::Duration::from_secs(20))
+    }
+
+    fn track_unavailable(&mut self) {
+        let now = std::time::Instant::now();
+        let live: Vec<String> = self
+            .w
+            .addons
+            .iter()
+            .filter(|a| a.kind == crate::world::Kind::Unavailable)
+            .map(|a| a.key.clone())
+            .collect();
+        self.unavailable_since.retain(|k, _| live.contains(k));
+        for k in live {
+            self.unavailable_since.entry(k).or_insert(now);
+        }
+        for a in self.w.addons.iter_mut() {
+            a.waiting_secs = self
+                .unavailable_since
+                .get(&a.key)
+                .map(|t| t.elapsed().as_secs());
+        }
+    }
+
     fn toggle_pause(&mut self, _cx: &mut Context<Self>) {
-        if self.w.is_paused() {
-            self.send(Cmd::Resume);
-        } else {
-            if self.w.busy.is_some() {
-                self.w.busy = Some(Busy::Pausing);
-            }
+        if self.pause_in_flight() {
+            return;
+        }
+        let want = !self.w.is_paused();
+        self.pause_pending = Some((want, std::time::Instant::now()));
+        if want {
+            self.w.busy = Some(Busy::Pausing);
             self.send(Cmd::Pause);
+        } else {
+            self.send(Cmd::Resume);
         }
     }
 

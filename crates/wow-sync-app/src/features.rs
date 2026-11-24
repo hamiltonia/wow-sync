@@ -479,7 +479,7 @@ pub fn result_text_named(kind: ActionKind, r: &ActionResult, subject: Option<&st
                 .into()
         }
         ActionResult::Changed => {
-            "Something changed while you were choosing. Nothing was saved. Look at the new choices and choose again."
+            "This choice is out of date: the list was refreshed. Nothing was saved. Look at the new choices and choose again."
                 .into()
         }
         ActionResult::NotAvailable => {

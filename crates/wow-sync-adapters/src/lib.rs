@@ -8,6 +8,7 @@ pub mod authority_store;
 pub mod fs_install;
 pub mod fs_safe;
 pub mod fs_scan;
+pub mod hash_cache;
 pub mod localstate;
 pub mod notify;
 pub mod probe;

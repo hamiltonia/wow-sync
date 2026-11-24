@@ -42,9 +42,9 @@ pub use notices::{CycleOutcome, DataAtRisk, NoticeRunner, RiskKind};
 pub use restore_flow::{RestoreProgress, RestoreState, RestoreWait};
 pub use rollback_flow::{RollbackOutcome, RollbackOutcomeKind, RollbackRefusal};
 pub use service::{
-    AppliedLine, EnrollPreview, EnrollRequest, GroupInfo, JoinChoice, PackageLine, PreviewKind,
-    ReconfirmRequest, ScanCtl, ServiceConfig, ServiceError, SliceService, StatusSnapshot,
-    SyncReport,
+    AppliedLine, EnrollPreview, EnrollRequest, GroupInfo, HashCache, Interrupt, JoinChoice,
+    PackageLine, PreviewKind, ReconfirmRequest, ScanCtl, ServiceConfig, ServiceError, SliceService,
+    StatusSnapshot, SyncReport,
 };
 pub use settings_cycle::{
     HeadChoice, PausedFolder, SettingsHistoryEntry, SettingsSnapshot, SettingsUnitRow,

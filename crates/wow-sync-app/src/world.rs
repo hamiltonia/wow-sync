@@ -140,6 +140,10 @@ pub struct Addon {
     pub next: NextAction,
     /// Computers that have not yet reported applying this package.
     pub awaiting: Vec<String>,
+    /// Computers that publish this add-on but whose files have not reached this one.
+    pub waiting_on: Vec<String>,
+    /// Seconds this add-on has been unavailable in this run.
+    pub waiting_secs: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -496,6 +500,8 @@ impl World {
                     why: p.sentence.clone(),
                     next: p.next,
                     awaiting: p.awaiting.clone(),
+                    waiting_on: p.waiting_on.clone(),
+                    waiting_secs: None,
                 })
                 .collect();
         } else {
