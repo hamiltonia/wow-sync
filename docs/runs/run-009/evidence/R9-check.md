@@ -2,6 +2,12 @@
 
 ## Verdict
 
+**Latest: `104d238` requested targeted rechecks PASS.** Its unrelated
+Decide completed in 129 ms during the exact invalidated-BigLab case that
+failed on f95def1. Initial-upload clicks and G3 restart smoke also pass.
+The broader f95def1 matrix below remains historical evidence; it was not
+silently treated as a fresh full 1–14/memory matrix on 104d238.
+
 **Artifact `7e4a43d`: FAIL — G1 (major), command completion latency.**
 The window gives immediate feedback, but Decide and diagnostics Preview
 still perform a multi-second scan inside the command. This is not a claim
@@ -488,3 +494,339 @@ artifact **7 requested rechecks PASS**, full additional latency sequence
 **NOT RUN**, and new major findings **G2/G3**. Fix/reverify the findings
 before declaring this candidate release-ready; passing unit suites does not
 supersede these packaged-app observations.
+
+## Final recheck f95def1
+
+Requested by the orchestrator after the preceding evidence was committed.
+Same worker, branch, machine, display scaling and protected-data rules.
+No product changes, nested agents, real enrollment or owner-process actions.
+The previously removed lab was recreated for this independent recheck.
+
+### Package and environment
+
+Waited for release dispatch **45485437850** to complete successfully before
+downloading/running it. Its Windows build job passed; the pre-release
+publishing job was **skipped**, not run by this worker.
+
+```text
+head/build_commit: f95def1363cd5d3407e6ac1bc6adb60d42d4314b
+ZIP SHA-256, matched supplied .sha256:
+e9165d5b13d07accd7eeb2c5c749258087085544ed18134c52b01c556f481c33
+packaged wow-sync.exe SHA-256:
+e5140b3129c2c2ea3dd4efd3de5a48b26ac2f1350e589ee8735e5df9df796da9
+```
+
+Commands used:
+
+```powershell
+gh run watch 45485437850 --exit-status
+gh run download 45485437850 --dir D:\WoWSyncLab\R9-check\artifact
+```
+
+All GUI checks ran the extracted package with explicit lab `--state`.
+Synthetic conflict computers and saved-state restart checks used normal
+non-developer mode. First-enrollment/initial-upload fixtures used `--dev`
+solely to preselect an explicit **synthetic** install/provider and avoid
+selecting real discovery results; the actual setup, enrollment, transfer,
+GUI and command paths were exercised. Runtime hooks were not used to fake
+latency or completion.
+
+For the deterministic idle/post-Sync/routine matrix, the lab's automatic
+interval was 60,000 ms; explicit Sync now initiated the measured passes.
+The final never-used first-enrollment fixture used the normal 5,000 ms
+interval. Hash stability used the normal 2,000 ms window, with settled
+synthetic mtimes.
+
+### Results
+
+| Requested item | Result | Actual evidence |
+|---|---|---|
+| G1: idle | **PASS** | With 3.35 GB BigLab installed and cached: Decide **93 ms**, Preview **110 ms**. |
+| G1: right after Sync now | **PASS** | Decide **112 ms**; Preview **152 ms**. Preview had Syncing visible at invocation. The cached pass had already finished at the Decide invocation, so that measurement is not called a during-pass case. |
+| G1: routine BigLab pass | **FAIL — G1 remains** | Both had Syncing visible. Preview **144 ms**; unrelated HideAnything Decide **2,209 ms**, despite **13 ms** UIA feedback. Its dispatch took **2,093 ms**. See the controlled invalidation reproduction below. |
+| G1: FIRST pass / initial upload after enroll | **PASS** | Never-used install/provider/state: Preview **196 ms**, Decide **131 ms**, Syncing visible at both clicks, **zero own published code-state files** before either command. Decide followed an explicit Sync now to resume the initial upload after Preview yielded it; this is initial-upload evidence, not a claim that both ran inside one uninterrupted `sync_once`. |
+| G2: bottom-scrolled busy Quit | **PASS** | Quit confirmation reached in **119 ms**. Quit when safe UIA rect **1617,419,188,53**, wholly inside window **489,196,1582,1136**. No scrolling up needed. Confirming exited within **232 ms** of the original Quit invocation. |
+| G3: saved enrollment/cache/full check/Quit | **PASS** | Restart PID 38508 immediately showed Overview/Checking add-ons, not setup. Persisted scoped `.txt` cache existed. Check all files worked, including a new request on the restarted process; no “nothing is set up” warning. Normal GUI Quit **234 ms**; busy real-copy Quit **437 ms** including its visible confirmation. |
+| RV9-16: close setup-complete screen | **PASS** | PID 32904 on “This computer is set up”: Close hid its Win32 window while the process remained alive. Launching the same explicit-state executable signalled/reopened that instance; Finish and open WoW Sync reached the main view. No invisible first-close sheet. Physical tray-icon clicking was not separately automated. |
+| RV9-15: interrupted full check survives restart | **PASS** | Requested full check, quit while Syncing, and found the one-byte scoped `.full` marker after exit. Restart re-read **all 35 files** in **2,228 ms**; marker disappeared only after that completed full scan. `.txt` cache remained. |
+| 10. Same-issuer panic regression | **PASS** | Same-issuer, sequence-2, empty-known, mutually excluding keeps offered both copies. Rapid A/B/A/A burst in **2 ms** wrote exactly one accepted keep and both computers converged. Additional unpublished third local payload also completed and converged, without a panic. Detail below. |
+| 11. Saved startup / duplicate enrollment | **PASS** | Actual package startup above showed the main view. Exact-source restart and duplicate-enrollment refusal tests also passed. No second enrollment was forced through GUI. |
+| 12. Panic resilience | **PASS — unit/code only** | Exact f95def1 injected-pass-panic, reopen-from-disk and restored-cache tests passed. No release-GUI panic injection hook; no packaged panic was injected. |
+| 13. Diagnostics versions/privacy | **PASS** | Actual GUI Preview→Save, correct full build commit, all three computer rows have `app_version=0.3.2`, aliases instead of names, no drive/profile paths. Actual file save **174 ms**, new Preview **230 ms**. All saves stayed inside redirected lab Documents. |
+| 14. Background memory after real-AddOns pass | **PASS** | Read-only copy of only the real 34,359-file AddOns tree, no WTF/accounts. Local synthetic group, isolated writable copy. Completed initial pass **206,859 ms**, 34,359 reads; hidden sampling then measured **54.01–88.87 MiB** aggregate private resident memory. |
+| Memory during a BigLab pass | **PASS** | Hidden extended BigLab full-read pass: **131 files / 13.42 GB**, pass **11,792 ms**, 10 samples overlapping its full-read interval. Entire 20-sample window **37.21–37.37 MiB**, one owned process. Extension/measurement details below. |
+
+### G1 — major, still open on f95def1
+
+The idle, warm-cache post-Sync and initial-upload observations are
+substantially better than the earlier candidates. **A routine cache miss in unrelated BigLab still
+delays a HideAnything decision beyond the requested approximately-one-second
+click-to-result gate.**
+
+Bounded reproduction, normal packaged app, enrolled lab computer:
+
+1. Install BigLab with 32 distinct 100 MiB `.bin` payloads and a small TOC:
+   **3,355,443,259 bytes / 33 files**. Complete a pass so its hashes exist.
+2. Resolve a HideAnything keep, make a settled synthetic local HideAnything
+   edit, Sync now, and open its “newer version is not shared” decision.
+3. Change **only BigLab's mtimes**, not bytes, to a different settled past
+   time. This legitimately invalidates its `(path,size,mtime)` hashes.
+4. Click **Sync now**, verify the Syncing progress indicator, then click
+   HideAnything's **Use this** option.
+
+Measured UIA feedback **13 ms**, fresh accepted result **2,209 ms**:
+
+```text
+2026-11-24T21:23:15Z pid=37128 INFO Decide: accepted, wrote record 99cbc1f23e0d (2093 ms)
+```
+
+This was **not** Check all files, an artificial pause, a provider delay or
+a stale-result measurement. Other commands in the same invalidation
+condition remained quick:
+
+```text
+2026-11-24T21:19:08Z pid=37128 INFO ExportDiagnostics: ok, 32 line(s) of text (17 ms)
+```
+
+That Preview completed in 144 ms with Syncing visible. The final source's
+`command` uses `observe_for_command(false)` for Decide, so uncached changed
+files in unrelated packages are still read inside its fresh observation.
+Immediate feedback is not substituted for command completion.
+
+Measurement method: UIA Invoke of an in-window control, monotonic stopwatch,
+fresh result-log count for the captured PID **and** the corresponding UIA
+result message. The short feedback timings are UIA-observed messages, not
+an assertion that an offscreen notice banner was visible at every scroll
+position. End-to-end result times, not those messages alone, determine G1.
+
+Initial-upload evidence used fresh PID 14872 / `fresh\d`, an entirely new
+install root with no previous journals/provider objects. It had **zero**
+own code-state files before Preview and before Decide:
+
+```text
+2026-11-24T21:27:14Z pid=14872 INFO ExportDiagnostics: ok, 29 line(s) of text (17 ms)
+2026-11-24T21:27:15Z pid=14872 INFO Decide: accepted, wrote record 43d9a12f15d0 (35 ms)
+```
+
+Earlier attempts that missed the active first-upload timing window were
+**discarded as first-pass latency evidence**, not counted as passes. They
+did independently verify completion-screen close/reopen. The never-used
+fixture above supplies the final timing result.
+
+### Conflict regression detail
+
+The verification-only helper linked exact archived f95def1 runtime/core/
+adapters to create synthetic identities, enrollment and the two authority
+records; it did not provide the GUI's decision/result implementation.
+Both records use the **same a issuer**, sequence 2, empty known, and each
+pins one copy while excluding the other.
+
+Packaged PIDs 33212/12568 offered both 1.10.0 copies plus local-only.
+Retained option handles A/B/A/A, invoked in 2 ms, produced only:
+
+```text
+2026-11-24T21:14:21Z pid=33212 INFO Decide: accepted, wrote record 4c0090b0f136 (21 ms)
+```
+
+Both showed up to date, no decision, and identical active payload SHA-256:
+
+```text
+6a3093e98b97c8b2f063086e0465f1f7c80574561f542d1e24453c1a943f8938
+```
+
+Restored pristine conflict, added a third unpublished local payload on a
+(the shape needed to expose the old eager-index panic), and used packaged
+PIDs 36392/34620. Choice accepted in 15 ms dispatch / 70 ms end-to-end.
+Both converged, no decision and no PANIC, with identical active payload:
+
+```text
+669ad7c51c2944a4cf5806f4a44fa4ac8184acb686c3f3307df7191d262d05f1
+```
+
+The old-version panic control remains the actual 0.3.1 execution documented
+earlier; 0.3.1 was not redownloaded/re-executed for this final recheck.
+
+### Durable full-check and memory evidence
+
+Actual G2/RV9-15 sequence, original PID 37128 → restart PID 38508:
+
+```text
+after busy Quit:
+hashcache-86407542f053f74e.full: 1 byte
+hashcache-86407542f053f74e.txt: 4098 bytes
+2026-11-24T21:25:58Z pid=38508 INFO sync pass took 2228 ms: 70 file(s) reused from the hash cache, 35 read
+after restarted full scan: zero .full markers, .txt cache retained
+```
+
+For the final **memory-only** phase, extended BigLab with 96 regular-file
+hard links **inside the isolated lab**, aliasing the original payloads
+under distinct names. This made a bounded **129-file / 13,421,772,859-byte**
+BigLab workload while retaining the same 32 distinct payload contents.
+Including HideAnything, the full scan read **131 files**. This extension
+was **after** the G1 matrix; G1 measurements used the original 3.35 GB data.
+It is a longer scanning-memory exercise, not a claim about 13 GB of unique
+data publication or an upload-memory soak.
+
+The existing approved MemLib PID+creation-time and descendant instrumentation
+was used, unchanged. Both windows were explicitly hidden and Win32
+visibility false before sampling. No name-based process selection/stopping.
+
+| Hidden sample | Samples | Private resident bytes min / mean / max | Private bytes max | GPU shared max |
+|---|---:|---|---:|---:|
+| Completed real-copy pass, PID 31196 | 20, about 25.4 s | 56,631,296 / 63,503,769.6 / 93,188,096 | 160,968,704 | 41,234,432 |
+| Extended BigLab full read, PID 38508 | 20, about 22.2 s | 39,022,592 / 39,071,334.4 / 39,182,336 | 106,409,984 | 41,881,600 |
+
+One owned process throughout, GPU dedicated 0, private resident gate
+104,857,600 bytes. Private bytes and GPU shared are reported separately,
+not silently substituted for that gate. Short sampled windows, not a
+long-duration or unsampled-peak guarantee.
+
+```text
+2026-11-24T21:28:13Z pid=38508 INFO check all files requested: the next pass re-reads every add-on file
+2026-11-24T21:28:13Z pid=38508 INFO window hidden
+2026-11-24T21:28:24Z pid=38508 INFO sync pass took 11792 ms: 262 file(s) reused from the hash cache, 131 read
+```
+
+Ten samples at elapsed 1.5–11.2 s overlap that active full-read interval.
+The initial visible-window memory attempt missed the BigLab transfer and
+is **not** used to establish the during-pass memory result.
+
+### Diagnostics and focused tests
+
+Actual saved GUI report:
+
+```text
+app_version: 0.3.2
+build_commit: f95def1363cd5d3407e6ac1bc6adb60d42d4314b
+This computer: enrollment=active retired=off report=current last_report_age=none watermark_seq=0 app_version=0.3.2
+Computer A: enrollment=active retired=off report=current last_report_age=0h watermark_seq=0 app_version=0.3.2
+Computer B: enrollment=active retired=off report=current last_report_age=0h watermark_seq=0 app_version=0.3.2
+```
+
+No synthetic/real computer or profile names or drive paths in its text;
+all Documents saves used a process-local USERPROFILE redirected into the
+lab. No file was saved to the owner's Documents on this recheck.
+
+Exact source was a `git archive f95def1` extraction under the lab, not a
+modified product checkout. Executed:
+
+```powershell
+cargo test --manifest-path D:\WoWSyncLab\R9-check\source\Cargo.toml --target-dir D:\GitHub\wow-sync.worktrees\R9-check\target --locked --offline -p wow-sync-app --bin wow-sync -- a_restart_with_a_saved_enrollment setup_finishing_for_an_enrolled a_panic_in_a_pass a_service_opened_from_a_saved_enrollment after_a_panic_the_service_is_reopened the_quit_sheet_is_outside --nocapture
+cargo test --manifest-path D:\WoWSyncLab\R9-check\source\Cargo.toml --target-dir D:\GitHub\wow-sync.worktrees\R9-check\target --locked --offline -p wow-sync-adapters --lib a_check_all_files_request_survives_a_reopen_until_a_full_pass_completes -- --nocapture
+```
+
+App **6/6 PASS in 2.28 s**; adapters **1/1 PASS in 0.01 s**.
+Observed injected panics at final `backend.rs:1103` followed by passing
+recovery/reopen/cache/quit assertions. The native-layout test is supplementary
+to the actual on-screen rectangle check, not a replacement for it.
+
+Mandatory local tiers were rerun from this evidence branch (unchanged
+7e4a43d product source plus the report), not misrepresented as a full local
+f95def1 suite. Initial offline attempt **FAIL** before tests could run:
+
+```text
+error[E0004]: non-exhaustive patterns: `PublishOutcome::Yielded` not covered
+crates\wow-sync-runtime\src\service.rs:3601:15
+```
+
+The shared worker target had been used for both the archived newer source
+and this older checkout. Its cached newer core enum contained `Yielded`,
+which the older checkout's on-disk enum does not contain. Cleared only this
+worker's six local-package build caches with `cargo clean -p`, changed no
+source/assertions, and retried: **offline PASS / native PASS**, both exit 0.
+Initial required-case checking was **SKIPPED** because compilation failed;
+it passed on retry. Native was first run after that successful retry.
+f95def1 itself additionally has its successful dispatch verification tiers,
+the exact-source targeted tests and the independent packaged checks above.
+
+Lab was retained solely for the subsequently assigned 104d238 recheck,
+then removed as recorded below.
+
+## Artifact 104d238
+
+Follow-up assigned after f95def1 observations were complete. Requested
+dispatch **45492591074**, head
+`104d238d8124fb278a48eadbfb17ad32df9c3a3d`.
+The watch encountered an HTTP 502 near packaging; that was a **watch/API
+error**, not a failed build. A fresh `gh run view` confirmed overall
+**success**, matching head, Windows job **success**, publishing **skipped**.
+Only then downloaded and ran the new package.
+
+```text
+ZIP SHA-256, matched supplied .sha256:
+29ef679a8785b150b2b5ddd562fa01137b1f127ba5964a755bf63fdfa3f6ab2e
+packaged wow-sync.exe SHA-256:
+40713a9c3903c5f7f8ea6b5bdf5076bc8c2d7a2b949038bd3af8feec2eb2dd7a
+actual GUI-saved report build_commit:
+104d238d8124fb278a48eadbfb17ad32df9c3a3d
+```
+
+Executed from
+`D:\WoWSyncLab\R9-check\artifact-104d238\expanded\wow-sync.exe`.
+Captured process path independently matched that executable. Same machine,
+UIA timing method and safety rules as above. Restored pristine synthetic
+conflict at its original paths, linked only the **original 32-payload,
+3.35 GB BigLab** into a, and completed its baseline publication. The 96
+memory-only aliases from the previous artifact were not present.
+
+| Requested 104d238 item | Result | Actual evidence |
+|---|---|---|
+| G1: exact unrelated-Decide / invalidated BigLab case | **PASS** | Settled HideAnything local edit and offered decision; changed only all BigLab mtimes to another settled past time, Sync now, Syncing visible. Decide feedback **52 ms**, fresh accepted result **129 ms**, dispatch **15 ms**. Same 33-file / 3,355,443,259-byte BigLab, no full-check request. f95def1's corresponding result was 2,209 ms. |
+| G1: first-upload clicks | **PASS** | Never-used `fresh104\e` install/provider/state, real GUI enrollment. Syncing visible and **zero own published code-state files** before both clicks. Preview **163 ms** / 16 ms dispatch; Decide **81 ms** / 15 ms dispatch. Resumed the yielded initial upload with Sync now before Decide, exactly as the final f95def1 initial-upload check. |
+| G3: quick saved-enrollment restart | **PASS** | Quit first instance in **197 ms**. Restarted same state: main Overview observed in **195 ms**, not setup; scoped cache survived (**4,098 bytes**). New Check all files accepted and completed, `.full` marker cleared, no missing-setup warning. Final Quit **201 ms**. |
+
+Actual result lines, normal-mode PID 1516:
+
+```text
+2026-11-24T21:56:34Z pid=1516 INFO Decide: accepted, wrote record 3467a2d0b6fa (15 ms)
+```
+
+Restart PID 1620:
+
+```text
+2026-11-24T21:56:39Z pid=1620 INFO sync pass took 4164 ms: 79 file(s) reused from the hash cache, 40 read
+```
+
+That is **40 cumulative reads**, including initial/interrupted work around
+the restart, not a claim that the 35-file install contains 40 distinct
+files. The full-check request completed over the 35-file tree and its
+persisted `.full` marker was gone afterward. Actual GUI Preview/Save on
+this process additionally completed in 77/98 ms and independently confirmed
+the new full build commit quoted above.
+
+Fresh first-enrollment PID 1288:
+
+```text
+2026-11-24T21:56:46Z pid=1288 INFO ExportDiagnostics: ok, 29 line(s) of text (16 ms)
+2026-11-24T21:56:46Z pid=1288 INFO Decide: accepted, wrote record e921faa377c5 (15 ms)
+```
+
+No product changes, extra GUI panic injection, or additional full matrix
+were performed for this bounded follow-up. G1 idle/post-Sync, G2, RV9-15/16,
+checks 10–14 and memory were **NOT RERUN on 104d238**; their f95def1 results
+remain explicitly attached to that artifact. All three requested 104d238
+rechecks pass; no new finding was observed in this scope.
+
+### Final validation and cleanup
+
+After staging both final artifact sections, reran the mandatory local
+evidence-branch tiers: **offline PASS / native PASS**, both exit 0.
+No tests/assertions, product code or required-case lists changed. Only this
+report is staged. The subsequent edit records these outcomes and cleanup.
+
+Verified zero remaining executables rooted in the verification lab after
+the captured app PIDs exited. Removed the entire
+`D:\WoWSyncLab\R9-check` directory and verified it no longer exists,
+including copied AddOns, stress data, synthetic providers/states, archived
+source, fixture-helper sources, reports, screenshots/CSVs and downloaded
+packages. Ordinary ignored Cargo build outputs remain in the worker's
+`target`; no lab process or monitor remains running.
+
+Protected real-group/WoW data remained read-only; the owner's application,
+its state, Battle.net and `D:\WoWSyncDemo` were not changed or stopped.
+No imported Lua, saved-variable files or legacy CMD metadata executed.
+No push, merge, tag or public publishing was performed by this worker.
+
+**Final bounded conclusion:** f95def1 fails G1's dirty-unrelated-package
+case; all its other requested checks pass at the stated evidence levels.
+104d238 passes all three subsequently requested targeted rechecks.
