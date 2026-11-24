@@ -494,6 +494,7 @@ struct World {
 pub struct SliceService {
     cfg: ServiceConfig,
     activity: Box<dyn ActivitySource>,
+    progress: crate::history::ProgressHub,
     hooks: Hooks,
     fault: FaultPlan,
     state: LocalState,
@@ -565,6 +566,7 @@ impl SliceService {
         Ok(SliceService {
             cfg,
             activity,
+            progress: crate::history::ProgressHub::new(),
             hooks: Hooks::default(),
             fault: FaultPlan::default(),
             state,
@@ -3833,6 +3835,11 @@ impl SliceService {
     }
 
     /// Newest first (UG-7).
+    /// The progress stream; clone it to subscribe from another thread.
+    pub fn progress_hub(&self) -> crate::history::ProgressHub {
+        self.progress.clone()
+    }
+
     pub fn activity_log(&self, limit: usize) -> Vec<crate::control::ActivityEntry> {
         crate::control::read_activity(&self.state, limit)
     }

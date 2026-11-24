@@ -10,6 +10,7 @@ mod detail;
 mod diag;
 mod discover;
 mod effects;
+mod history;
 mod notices;
 mod removal_cycle;
 mod restore_flow;
@@ -38,6 +39,11 @@ pub use discover::{
     wow_candidates, DetectedInstall, Discovery, Probe, ProbeResult, PRODUCT_DB_LIMIT,
 };
 pub use effects::{FaultPlan, Faulty, Hooks, RealEffects};
+pub use history::{
+    changes_by_pass, changes_for_package, history, recent_changes, record_change, ChangeKind,
+    ChangeReason, ChangeRecord, ChangeSource, FileCounts, HistoryItem, IncomingSummary, PassGroup,
+    Phase, ProgressEvent, ProgressHub, VersionLabel, MAX_RECORDS, MAX_RECORD_PATHS,
+};
 pub use notices::{CycleOutcome, DataAtRisk, NoticeRunner, RiskKind};
 pub use restore_flow::{RestoreProgress, RestoreState, RestoreWait};
 pub use rollback_flow::{RollbackOutcome, RollbackOutcomeKind, RollbackRefusal};
