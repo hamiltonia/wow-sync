@@ -450,3 +450,26 @@ fn conflicting_keeps_do_not_hide_each_others_copies_and_a_choice_supersedes_both
     });
     let _ = w.kept_hash;
 }
+
+#[test]
+fn a_keep_whose_release_no_copy_holds_still_builds_its_item_without_panicking() {
+    // Run-009 round 2: `unwrap_or(&copies[kept])` indexed past the list when the kept release
+    // was absent, panicking every sync pass.
+    let mut w = world();
+    let (it, _) = item(&mut w, &[2]);
+    assert_eq!(it.reason, DecisionKind::NewVersionAfterDecision);
+    let cs = copies(&w, &[2]);
+    let g = group_id();
+    let cx = w.env.cx(&g, 2);
+    w.env.view(|v| {
+        let p = pkg(&["alpha", "beta"]);
+        let nv = v.new_versions(&p, &cs);
+        let mut bad = nv[0].clone();
+        bad.absent_kept = None;
+        bad.kept = 7;
+        bad.copies = vec![9];
+        assert!(bad.kept_copy(&cs).is_none());
+        assert!(bad.local_only(&cs, &crate::testkit::computer(1)).is_empty());
+        assert!(new_version_item(v, &cx, &cs, &bad).is_err());
+    });
+}

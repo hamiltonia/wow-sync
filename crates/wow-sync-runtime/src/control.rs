@@ -561,7 +561,9 @@ pub(crate) fn withheld_local_versions(
             }
         }
         for (scope, first) in raised {
-            let copy = &pc.copies[first];
+            let Some(copy) = pc.copies.get(first) else {
+                continue;
+            };
             let name = copy
                 .version
                 .folders
