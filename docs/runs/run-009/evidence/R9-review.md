@@ -138,3 +138,17 @@ by run-009.
 | ID | Status | Severity | Notes |
 |---|---|---|---|
 | RV9-14 | **new (pre-existing)** | **major** (per R9-check G2) | A modal sheet can be off-screen while it blocks every action, so Quit gives no visible confirmation. It is recoverable by scrolling. Fix: render the sheet outside the scroller (pinned), or scroll `content-scroll` to the top when a sheet opens. Add a UIA or layout check that the sheet's default button is within the viewport. |
+
+### Addendum: RV9-13 independently confirmed (R9-check G3)
+
+R9-check found the same defect on the real `7101088` artifact (restarted
+enrolled PID 18864, after adding a 3.35 GB lab package). They saw no
+hash-cache file, repeated long scans, and **Settings → Check all files**
+logging `WARN check all files: nothing is set up to check` even though the
+computer is enrolled. That last symptom follows from the same cause: the
+`cache` `RefCell` is filled only by `read_ctl`, and `backend.rs` ~985–990
+falls to the `None` arm. RV9-13 therefore also breaks the GUI "Check all
+files" recovery action after any restart. It stays **major** and
+release-blocking. The fix is unchanged: call `set_read_ctl(read_ctl(t))`
+inside the `open` closure. Tests should cover restart, then cache use, Quit
+promptness and Check all files.
