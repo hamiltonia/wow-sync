@@ -115,3 +115,23 @@ Tests (each fails with the mutation `routine: false` + no reuse; run and restore
 - `e2e::tests::diagnostics_and_ledger_only_commands_answer_from_the_last_scan`: cache hits+misses unchanged across ExportDiagnostics and AllowAgain.
 
 Not measured: the live 1 s gate on a 3 GB tree (needs the owner's/checker's BigLab); changed files in a command's look are still hashed once. backend.rs untouched.
+
+## Round 6: status cost, diagnostics double look, publish yield (G1 continued)
+
+**Causes and fixes**
+1. `status()` spent ~1.2 s in `recovery_rows`, which called `effects::local_points`, which re-read every recovery copy in full on each call (`effects.rs`, `held_copy_matches`). A copy is never rewritten after it is set aside, so the verified result is now cached per copy with the folder fingerprint (every path, size, mtime from `snapshot_slot`). An unchanged copy is not re-read; a changed or tampered one no longer matches, is re-read, and is dropped from the list if it fails. The check is still against the recorded tree, never trusted from metadata.
+2. `diagnostics_command` took a second observation for fingerprints even when the export did not ask for them. It now looks only when `wants_fingerprints` (and then through the cache).
+3. Initial-upload latency (81 to 109 s): the pass's read-only part was interruptible, but `run_publish` (core `exec.rs`) uploaded object after object with no check. `RealEffects` now holds the backend's interrupt handle (`yielding_to(read_ctl)`) and checks it before every `stat_object` and `put_object`; a waiting command (or Quit) gives `EffectErrorKind::Yielded`, mapped to the new `PublishOutcome::Yielded`. The service reports "publishing paused to answer a command; it continues in the next pass" and does not treat it as an error. Safe because objects are content addressed and idempotent and the state record is written last: a yield leaves only complete objects, exactly like an I/O failure or crash, and the next pass reuses them. The sequence number was already persisted before publishing and is never reused.
+   Bound that remains: one object (one file copy) in flight, plus the apply phase (staging and renames, WoW-gated and journaled), which does not yield by design. A single large file therefore bounds the wait by its copy time; that is the unit the pass cannot split.
+
+**Tests**
+- `effects::tests::recovery_copies_are_read_in_full_once_and_again_only_after_they_change` (read counter is per thread): first look reads, second does not, a modified copy is re-read and is no longer listed.
+- `effects::tests::publishing_stops_at_the_next_object_when_a_command_is_waiting`: real adapters yield from both `stat_object` and `put_object` and write nothing.
+- `exec::tests::publishing_yields_between_objects_without_a_state_record_and_resumes`: yields after one object, no state record exists, the rerun publishes.
+- The round 5 test `diagnostics_and_ledger_only_commands_answer_from_the_last_scan` still covers the single look.
+
+**Measured** (release build, in-process e2e, synthetic tree of 12,000 files, about 240 MB, hash cache installed; not the real `_forever_` tree and not a live backend thread):
+- first pass (enroll and upload): 2.2 s
+- `status()` idle: 90 ms, again 86 ms (1.39 s with no hash cache installed, which is the production-less case)
+- `ExportDiagnostics` idle: 64 ms; right after SyncNow: 55 ms
+Not measured here: click-to-result while the backend thread is mid-pass, because it needs the app's armed interrupt (R9-app's harness); the mechanism is tested at unit level above. The gate of about 1 s holds for these paths; the in-pass wait is bounded by one object copy as described.

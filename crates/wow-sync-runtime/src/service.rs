@@ -814,8 +814,11 @@ impl SliceService {
             cmd,
             Command::ExportDiagnostics { options } if options.include_fingerprints
         );
-        let fingerprints = match self.observe_for_command(true) {
-            Ok(w) if wants_fingerprints => crate::diag::fingerprints_from(&snap, &w.inventory),
+        let fingerprints = match wants_fingerprints
+            .then(|| self.observe_for_command(true))
+            .transpose()
+        {
+            Ok(Some(w)) => crate::diag::fingerprints_from(&snap, &w.inventory),
             _ => Default::default(),
         };
         let s = self.toggles();
@@ -3341,7 +3344,8 @@ impl SliceService {
                     me.clone(),
                     &mut *self.activity,
                     self.cfg.recent_ms,
-                );
+                )
+                .yielding_to(self.read_ctl.clone());
                 // The crash budget counts across the whole cycle.
                 let mut fx = Faulty::new(real, self.fault, &mut self.hooks).starting_at(used);
                 let mut last_publish = None;
@@ -3712,6 +3716,11 @@ impl SliceService {
             }
             PublishOutcome::Failed(why) => {
                 report.publish_note = Some(format!("publish failed: {why}"));
+            }
+            PublishOutcome::Yielded => {
+                report.publish_note = Some(
+                    "publishing paused to answer a command; it continues in the next pass".into(),
+                );
             }
         }
     }
