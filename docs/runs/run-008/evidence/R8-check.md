@@ -132,3 +132,57 @@ not strand the user's quit request behind a confirmation they cannot see.
 - Lab installs, providers, states, logs, scripts, screenshots and extracted
   artifact were removed after recording these results. The ZIP hash is retained
   above, not private data. No subst drive was created. No push or merge.
+
+## Recheck — round 4, `f1fe1e9` (2026-11-23)
+
+**G1 and G2 are resolved by independent GUI reproduction.** This supersedes
+the historical failure verdict above for source
+`f1fe1e9aeb10eb2715eb5341ace9a4b4a5465322` (R8-fix round 4, `362d317`).
+**Artifact verification now PASS:** the initially missing dispatch was verified
+in the artifact follow-up below. No open findings or artifact blocker remain.
+
+Same Windows/UIA environment and boundaries as the first pass. Rebuilt with
+`cargo build --release -p wow-sync-app` after putting cargo on PATH: PASS,
+11.05 s, same four existing adapter warnings. Every process used a fresh
+`rc<n>` state and a separate lab log; synthetic providers were local lab
+directories. No real-data enrollment, writes, or default-state instance access.
+
+| Recheck | Result | Actual evidence |
+|---|---|---|
+| G2: Quit during setup's first write | **PASS / resolved** | PID 35756 joined a synthetic group from an empty target. First staging file appeared 98 ms after Set up. At the PID-verified tray Quit, **26 files were staged and 0 were active**. It stayed alive while finishing the write, without a Quit when safe/Keep running sheet, and exited automatically with no further UI action. Total Quit-to-exit: **38,378.1 ms**. |
+| G2: completion-to-exit timing / integrity | **PASS** | A `FileSystemWatcher` on the target variant timestamped deletion of the transaction's `.wowsync\journal\*.json` using the monotonic stopwatch clock. Journal retirement was **35,820.1 ms after Quit**; the process exited **2,558.0 ms after journal retirement**. Independently compared relative paths and SHA-256 hashes of **all 6,001 active files** with the source: exact equality. Zero remaining journals/staging files. |
+| G1: root picker usable-first | **PASS / resolved** | Same fixture shape: beta missing `.flavor.info`, Forever with valid `wowf` metadata. Normal fresh state, step 3, UIA root picker. Forever—not beta—was selected and inspected (**24 ms**), became “can be synced”, and Next was enabled; beta stayed listed. PID 20112. |
+| Check 2: read-only Quit regression | **PASS** | Live 8,001-file synthetic check (819,200,000 payload bytes), Cancel check visible and Next disabled. Tray Quit exited PID 20880 in **164 ms**, with `inspect cancelled`. |
+| Check 3: progress / cancellation regression | **PASS** | PID 20916 window capture showed “Checking add-ons… **357 files**”, Cancel check and disabled Next. Back returned to step 2 within a **265 ms** observation window and cancelled the scan. Next restarted; explicit Cancel restored Check again/disabled Next. Restart then root replacement cancelled the old scan and completed the new one-file check in **20 ms**. The old row stayed unchecked and the new row selected/ready, including after another 3 s. |
+| Verification tiers | **PASS** | Independently reran `cargo xtask verify --tier offline` (all six checks PASS) and `--tier native` (PASS). |
+| New dispatch artifact | **PASS** | Successful release run **45293621382**, head **f1fe1e9aeb10eb2715eb5341ace9a4b4a5465322**, downloaded with `gh run download 45293621382 -D D:\WoWSyncLab\R8-check\artifact`. ZIP SHA-256 matched its supplied checksum. Extracted executable opened setup without `--dev`, completed real `_forever_` read-only inspection in **5,899 ms** (102 eligible add-ons, 33,141 files), enabled Next, handled PID-verified tray Open and exited on tray Quit in **179 ms**. PID 10888; no enrollment. |
+
+The write-completion timing uses **journal retirement**, the observable
+transaction-completion boundary, rather than a guessed last-file timestamp or
+an up-to-date UI label. The subsequent 2.558 s includes finishing the safe
+backend cycle and actual process shutdown. The optional active-folder rename
+watch did not receive a rename event and was not used as timing evidence.
+The process was still writing immediately after Quit; it was not a trivial
+already-idle exit.
+
+Synthetic publisher PID 18840 completed setup/publication and exited through
+its PID-verified tray menu (207 ms). Other cleanup Quit latencies were 238 ms
+(PID 20112) and 225 ms (PID 20916). All captured recheck PIDs—**20112, 20880,
+20916, 18840, 35756**—were confirmed absent afterward; no forced termination
+was needed. Lab installs, group/provider, states, logs, watcher/UIA scripts and
+window capture were removed. No new findings, product-code edits, test
+assertion changes, push, merge, or subst drive.
+
+### Artifact follow-up (2026-11-23, 16:25 PST)
+
+`gh run view 45293621382 --json status,conclusion,headSha` returned completed /
+success and the exact candidate SHA above. ZIP:
+`be6db4e814bc4aa608731b67bf36b63dc36a088a9cb213b5c0da92767e210a4b`;
+executable:
+`d2851219d51a4a5bcacbfad0acb345b9dbdb790ee0f2dc915fc8aa64cb5b1a62`.
+UI Automation drove setup using fresh `--state
+D:\WoWSyncLab\R8-check\rc6-artifact` and a lab `WOWSYNC_LOG`. The real variant
+remained read-only; setup stopped at step 3. Matching inspect start/done/duration
+and `tray: open` / `tray: quit` were observed. PID **10888** exited normally and
+was confirmed absent; no lab-scoped process remained. Download, extraction,
+state, log and automation script were removed. No new findings.
