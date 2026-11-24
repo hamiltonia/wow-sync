@@ -44,7 +44,7 @@ use wow_sync_core::authority::{AuthorityRecord, Retired};
 use wow_sync_core::decide::decision_items;
 use wow_sync_core::decide::{DecideBehaviour, Standing};
 use wow_sync_core::decision::CycleCx;
-use wow_sync_core::decision::{DecideOutcome, DecisionEffect, FreshEvidence};
+use wow_sync_core::decision::{DecideOutcome, DecisionEffect, DecisionId, FreshEvidence};
 use wow_sync_core::exec::{
     apply_report, recover_interrupted, run_apply, run_publish, ApplyEffects, PublishOutcome,
 };
@@ -1126,6 +1126,10 @@ impl SliceService {
         let derived = derive(&self.plane.ledger, &gid, &self.plane.members);
         let held = BTreeSet::new();
         let mut policy_parts: Vec<(wow_sync_core::ids::Sha256, Vec<u8>)> = Vec::new();
+        let decided = match &cmd {
+            Command::Decide { item, .. } => Some(item.clone()),
+            _ => None,
+        };
         let effect = {
             let cx = CycleCx {
                 group_id: &gid,
@@ -1152,7 +1156,32 @@ impl SliceService {
                     let fresh = FreshEvidence {
                         items: self.offered.0.clone(),
                     };
-                    match behaviour.decide(&item, &option, &shown, &fresh) {
+                    let outcome = match behaviour.decide(&item, &option, &shown, &fresh) {
+                        DecideOutcome::Effect(_) => {
+                            // Judge again against what the group says now: an answer for a
+                            // conflict that this computer or a peer already settled is stale,
+                            // and the effect comes from a plan built over the current ledger.
+                            match w
+                                .offers
+                                .iter()
+                                .find(|(i, _)| DecisionId(i.scope.clone()) == item)
+                            {
+                                Some((now, plans)) => {
+                                    DecideBehaviour::new(plans.clone(), Standing::Active).decide(
+                                        &item,
+                                        &option,
+                                        &shown,
+                                        &FreshEvidence {
+                                            items: vec![now.clone()],
+                                        },
+                                    )
+                                }
+                                None => behaviour.decide(&item, &option, &shown, &fresh),
+                            }
+                        }
+                        refused => refused,
+                    };
+                    match outcome {
                         DecideOutcome::Effect(e) => e,
                         DecideOutcome::Refused(why) => return Err(CommandError::Decide(why)),
                     }
@@ -1389,7 +1418,7 @@ impl SliceService {
                 folder_writable: true,
             },
         );
-        match routed {
+        let result = match routed {
             Routed::Refused(why) => Err(CommandError::Decide(why)),
             Routed::Local(l) => {
                 if let wow_sync_core::decision::LocalResolution::Dismiss(h) = &l {
@@ -1429,7 +1458,15 @@ impl SliceService {
                 self.reserve_seq(&w, seq)?;
                 Ok(CommandOutcome::Kept)
             }
+        };
+        // An answered item is no longer offered: a second answer to the same stale view is
+        // refused as changed instead of writing a record that does not know the first.
+        if let (Some(id), Ok(_)) = (&decided, &result) {
+            self.offered
+                .0
+                .retain(|i| DecisionId(i.scope.clone()) != *id);
         }
+        result
     }
 
     /// Makes `checkpoint` reachable by peers: uploaded from this computer's store, or already in

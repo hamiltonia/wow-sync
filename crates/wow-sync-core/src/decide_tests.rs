@@ -341,3 +341,112 @@ fn encode_authority_is_the_record_wire_form() {
     assert_eq!(bytes, crate::records::encode(written(&plans[0].1)));
     assert!(!bytes.is_empty());
 }
+
+/// Two computers each keep a different copy of the same scope without knowing the other's keep.
+fn conflicting_world() -> World {
+    let invs: Vec<Inventory> = ["1.0", "2.0"].iter().map(|v| inv2(v, v)).collect();
+    let p = pkg(&["alpha", "beta"]);
+    let vs: Vec<PackageVersion> = invs.iter().map(|i| pv(&p, i)).collect();
+    let mut env = Env::new();
+    let g = group_id();
+    let shown = [
+        CopyEntry::new(entry_folders(&vs[0]), vec![]),
+        CopyEntry::new(entry_folders(&vs[1]), vec![]),
+    ];
+    let mut records = Vec::new();
+    for i in 0..2 {
+        let cx = env.cx(&g, 1);
+        records.push(
+            env.view(|v| {
+                crate::choice::build_keep(
+                    v,
+                    &cx,
+                    crate::kinds::ChoiceReason::Ambiguous,
+                    &[key("alpha"), key("beta")],
+                    &shown[i],
+                    &shown,
+                    &Source::from_inventory(&invs[i]),
+                )
+            })
+            .unwrap(),
+        );
+    }
+    for r in &records {
+        env.add(r);
+    }
+    World {
+        env,
+        kept_hash: vs[0].hash,
+        invs,
+        vs,
+    }
+}
+
+fn conflict_target() -> crate::target::GroupTarget {
+    use crate::explain::Explanation;
+    use crate::target::{DecisionReason, PackageTarget};
+    let mut t = crate::target::GroupTarget {
+        group_id: group_id(),
+        packages: Default::default(),
+        effective: Default::default(),
+        local_hash: Default::default(),
+    };
+    t.packages.insert(
+        key("alpha"),
+        PackageTarget::NeedsDecision {
+            reason: DecisionReason::ChoicesDiffer,
+            candidates: vec![],
+            why: Explanation::ConcurrentDecisions,
+        },
+    );
+    t
+}
+
+#[test]
+fn conflicting_keeps_do_not_hide_each_others_copies_and_a_choice_supersedes_both() {
+    // Run-009 R9-decide: each keep excludes the other's copy, which emptied the copy list.
+    use crate::target::{PackageCopies, ScopeMatch};
+    let mut w = conflicting_world();
+    let p = pkg(&["alpha", "beta"]);
+    for inv in &w.invs {
+        let verdict = w.env.view(|v| v.excluded(&p, &Source::from_inventory(inv)));
+        assert_ne!(verdict, ScopeMatch::Same, "a kept copy is never hidden");
+    }
+    let cs = copies(&w, &[0, 1]);
+    let pcs = [PackageCopies {
+        package: p.clone(),
+        copies: cs,
+    }];
+    let g = group_id();
+    let cx = w.env.cx(&g, 2);
+    let (items, chosen) = w.env.view(|v| {
+        let items = crate::decide::decision_items(v, &cx, &conflict_target(), &pcs);
+        assert_eq!(items.len(), 1, "the conflict raises one item");
+        let (it, plans) = items[0].clone();
+        assert_eq!(it.reason, DecisionKind::ChoicesDiffer);
+        let labels: Vec<&OptionLabel> = it.options.iter().map(|o| &o.label).collect();
+        assert_eq!(labels.len(), 3, "each copy plus keep on this computer");
+        let id = DecisionId(it.scope.clone());
+        let b = DecideBehaviour::new(plans, Standing::Active);
+        let fresh = FreshEvidence {
+            items: vec![it.clone()],
+        };
+        let DecideOutcome::Effect(e) = b.decide(&id, &OptionId(1), &it.evidence, &fresh) else {
+            panic!("choose")
+        };
+        (items.len(), written(&e).clone())
+    });
+    assert_eq!(items, 1);
+    assert_eq!(chosen.keep.as_ref().unwrap().package_hash, w.vs[1].hash);
+    assert!(!chosen
+        .exclude
+        .iter()
+        .any(|e| e.package_hash == w.vs[1].hash));
+    let h = w.env.add(&chosen);
+    w.env.view(|v| {
+        let live = v.live_choices(&key("alpha"));
+        assert_eq!(live.len(), 1, "the choice covers both conflicting records");
+        assert_eq!(live[0].0, h);
+    });
+    let _ = w.kept_hash;
+}
