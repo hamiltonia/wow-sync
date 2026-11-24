@@ -768,11 +768,12 @@ fn run(
                 .is_some_and(|s| !s.pause_state().holds_sync() && s.is_enrolled());
             let next = scheduled.then(|| now_ms() + opts.interval.as_millis() as i64);
             publish(&shared, &wake, |g| g.next_check_ms = next);
-            match rx.recv_timeout(if lock(&shared).fault.is_some() {
+            let wait = if lock(&shared).fault.is_some() {
                 fault_retry()
             } else {
                 opts.interval
-            }) {
+            };
+            match rx.recv_timeout(wait) {
                 Err(RecvTimeoutError::Disconnected) => return,
                 Ok(c) => Some(c),
                 Err(RecvTimeoutError::Timeout) => None,
@@ -1022,6 +1023,7 @@ fn run(
             }
             continue;
         };
+        publish(&shared, &wake, |g| g.fault = None);
         let crashed = matches!(&res, Ok(r) if r.crashed);
         if crashed {
             let _ = s.set_paused(true);
@@ -1409,7 +1411,7 @@ mod tests {
 
     #[test]
     fn a_panic_in_a_pass_is_shown_keeps_commands_working_and_is_retried() {
-        let (base, shared, tx, _t) = enrolled_lab("panic");
+        let (base, shared, tx, _t) = enrolled_lab("faultpass");
         FAULT_RETRY_MS.store(2000, Ordering::Relaxed);
         wait_for("the first pass", Duration::from_secs(20), || {
             let g = lock(&shared);
