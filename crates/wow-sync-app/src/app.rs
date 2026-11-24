@@ -501,6 +501,9 @@ impl Shell {
                 paused_since_ms: g.paused_since,
                 pause_damaged: g.pause_damaged,
                 activity: &g.activity,
+                history: &g.history,
+                progress: g.progress.as_ref(),
+                done_note: g.done_note.as_deref(),
                 syncing: g.busy,
                 last_check_ms: g.last_check_ms,
                 next_check_ms: g.next_check_ms,
@@ -1379,7 +1382,10 @@ impl Shell {
                 t.pause = pause;
                 t.needs = needs;
                 t.quit = quit;
-                log(&format!("tray updated: {tip}"));
+                // Progress text changes twice a second; the pump already logs each phase.
+                if self.w.progress.is_none() {
+                    log(&format!("tray updated: {tip}"));
+                }
             }
         }
     }

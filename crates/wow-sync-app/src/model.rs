@@ -169,9 +169,17 @@ pub fn headline(w: &World) -> Head {
         )
     } else if w.is_paused() && !core_blocks_pause {
         ("Paused".to_string(), Tone::Paused)
+    } else if let (false, Some(p)) = (
+        core_blocks_pause,
+        w.progress.as_ref().filter(|p| !p.text.is_empty()),
+    ) {
+        (p.text.clone(), Tone::Working)
     } else {
         match w.view.headline {
-            Headline::Ok => ("This computer is up to date".to_string(), Tone::Ok),
+            Headline::Ok => match &w.done_note {
+                Some(n) => (n.clone(), Tone::Ok),
+                None => ("This computer is up to date".to_string(), Tone::Ok),
+            },
             Headline::Working => (
                 match &w.busy {
                     Some(Busy::Syncing { done, total }) if *total > 0 => {
@@ -208,6 +216,9 @@ fn removing(w: &World) -> usize {
 pub fn headline_sub(w: &World) -> Option<String> {
     if w.enrolled && w.fault.is_some() {
         return fault_sub(w);
+    }
+    if let Some(i) = w.progress.as_ref().and_then(|p| p.incoming.clone()) {
+        return Some(i);
     }
     if !w.enrolled
         || blocked_by_test_mode(w)
@@ -265,6 +276,16 @@ fn unavailable_sentence(w: &World) -> Option<String> {
         ),
     })
 }
+/// A package that has started applying no longer waits for a decision, whatever the last
+/// status read still says.
+pub fn decision_satisfied(w: &World, key: &str) -> bool {
+    let Some(p) = &w.progress else { return false };
+    p.satisfied.contains(key)
+        || w.addons
+            .iter()
+            .any(|a| a.key == key && p.satisfied.contains(&a.title))
+}
+
 fn waiting_sentence(w: &World) -> String {
     if w.view.blocks.contains(&PlanBlock::GameRunning) {
         return match removing(w) {
@@ -279,7 +300,9 @@ fn waiting_sentence(w: &World) -> String {
         .view
         .packages
         .iter()
-        .filter(|(_, s, _)| matches!(s, PackageStatus::NeedsDecision(_)))
+        .filter(|(k, s, _)| {
+            matches!(s, PackageStatus::NeedsDecision(_)) && !decision_satisfied(w, k.as_str())
+        })
         .count();
     if n > 0 {
         return format!(
@@ -315,7 +338,14 @@ pub fn headline_a11y(w: &World) -> String {
 }
 
 pub fn tray_tooltip(w: &World) -> String {
-    format!("WoW Sync: {}", headline(w).text)
+    let t = format!("WoW Sync: {}", headline(w).text);
+    // Windows shows at most 127 characters of a tooltip.
+    if t.chars().count() > 120 {
+        let cut: String = t.chars().take(119).collect();
+        format!("{cut}…")
+    } else {
+        t
+    }
 }
 
 /// Window title for the page (screen readers announce the change).
@@ -1812,6 +1842,9 @@ mod tests {
             paused_since_ms: None,
             pause_damaged: false,
             activity: &[],
+            history: &[],
+            progress: None,
+            done_note: None,
             syncing: false,
             last_check_ms: None,
             next_check_ms: None,

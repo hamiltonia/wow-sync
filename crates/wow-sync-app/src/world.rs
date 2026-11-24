@@ -87,7 +87,7 @@ pub fn absolute(secs: i64) -> String {
     format!("{hm} on {d} {}", MONTHS[m])
 }
 
-fn day_label(days: i64, today: i64) -> String {
+pub fn day_label(days: i64, today: i64) -> String {
     match today - days {
         0 => "Today".into(),
         1 => "Yesterday".into(),
@@ -164,6 +164,8 @@ pub struct ActivityItem {
     pub problem: bool,
     pub day: String,
     pub when: String,
+    /// Per-add-on rows of a structured pass group; empty for plain lines.
+    pub rows: Vec<crate::history_ui::ChangeRow>,
 }
 
 #[derive(Clone, Debug)]
@@ -269,6 +271,12 @@ pub struct World {
     pub checking: bool,
     /// The sync thread hit an internal error in this phase and is retrying.
     pub fault: Option<String>,
+    /// What the running pass is doing now, from the service's progress events.
+    pub progress: Option<crate::progress_ui::ProgressView>,
+    /// "Updated 15 add-ons from RYZENFISH — see Activity", for a short while after a pass.
+    pub done_note: Option<String>,
+    /// Structured change records, newest first, for the add-on pages.
+    pub changes: Vec<wow_sync_runtime::ChangeRecord>,
 }
 
 /// The real inputs besides the snapshot.
@@ -277,6 +285,9 @@ pub struct Inputs<'a> {
     pub paused_since_ms: Option<i64>,
     pub pause_damaged: bool,
     pub activity: &'a [ActivityEntry],
+    pub history: &'a [wow_sync_runtime::HistoryItem],
+    pub progress: Option<&'a crate::progress_ui::ProgressView>,
+    pub done_note: Option<&'a str>,
     pub syncing: bool,
     pub last_check_ms: Option<i64>,
     pub next_check_ms: Option<i64>,
@@ -351,6 +362,7 @@ fn activity_items(entries: &[ActivityEntry], now: i64) -> Vec<ActivityItem> {
                 problem,
                 day: "Earlier".into(),
                 when: String::new(),
+                rows: Vec::new(),
             });
             batch_start = None;
             continue;
@@ -373,9 +385,60 @@ fn activity_items(entries: &[ActivityEntry], now: i64) -> Vec<ActivityItem> {
             problem,
             day: day_label(days, today),
             when: hm,
+            rows: Vec::new(),
         });
         batch_start = joins.then_some(ms);
     }
+    out
+}
+
+/// The Activity list from the unified history: structured records grouped by pass, older plain
+/// lines as before, in the order given (newest first).
+fn history_items(items: &[wow_sync_runtime::HistoryItem], now: i64) -> Vec<ActivityItem> {
+    use wow_sync_runtime::HistoryItem;
+    let (today, _) = local_parts(now);
+    let mut out: Vec<ActivityItem> = Vec::new();
+    let mut legacy: Vec<ActivityEntry> = Vec::new();
+    let mut group: Vec<wow_sync_runtime::ChangeRecord> = Vec::new();
+    let flush_legacy = |legacy: &mut Vec<ActivityEntry>, out: &mut Vec<ActivityItem>| {
+        if !legacy.is_empty() {
+            out.extend(activity_items(legacy, now));
+            legacy.clear();
+        }
+    };
+    let flush_group =
+        |group: &mut Vec<wow_sync_runtime::ChangeRecord>, out: &mut Vec<ActivityItem>| {
+            let Some(first) = group.iter().map(|r| r.unix_ms).max() else {
+                return;
+            };
+            let (days, hm) = local_parts(first);
+            out.push(ActivityItem {
+                title: crate::history_ui::group_title(group),
+                items: Vec::new(),
+                problem: false,
+                day: day_label(days, today),
+                when: hm,
+                rows: group.iter().map(crate::history_ui::row_of).collect(),
+            });
+            group.clear();
+        };
+    for it in items {
+        match it {
+            HistoryItem::Legacy(e) => {
+                flush_group(&mut group, &mut out);
+                legacy.push(e.clone());
+            }
+            HistoryItem::Change(r) => {
+                flush_legacy(&mut legacy, &mut out);
+                if group.first().is_some_and(|g| g.pass_id != r.pass_id) {
+                    flush_group(&mut group, &mut out);
+                }
+                group.push(r.clone());
+            }
+        }
+    }
+    flush_group(&mut group, &mut out);
+    flush_legacy(&mut legacy, &mut out);
     out
 }
 
@@ -416,6 +479,9 @@ impl World {
             view: placeholder_view(),
             checking: false,
             fault: None,
+            progress: None,
+            done_note: None,
+            changes: Vec::new(),
         }
     }
 
@@ -454,7 +520,21 @@ impl World {
             .next_check_ms
             .filter(|_| !w.is_paused())
             .map(|ms| local_parts(ms).1);
-        w.activity = activity_items(i.activity, now);
+        w.activity = if i.history.is_empty() {
+            activity_items(i.activity, now)
+        } else {
+            history_items(i.history, now)
+        };
+        w.changes = i
+            .history
+            .iter()
+            .filter_map(|h| match h {
+                wow_sync_runtime::HistoryItem::Change(r) => Some(r.clone()),
+                _ => None,
+            })
+            .collect();
+        w.progress = i.progress.cloned();
+        w.done_note = i.done_note.map(str::to_string);
         // The service only remembers a publish made in this run; the log remembers older ones.
         let logged_publish = i
             .activity
@@ -583,6 +663,9 @@ mod tests {
                 paused_since_ms: None,
                 pause_damaged: false,
                 activity: &[],
+                history: &[],
+                progress: None,
+                done_note: None,
                 syncing: false,
                 last_check_ms: None,
                 next_check_ms: None,
@@ -606,6 +689,9 @@ mod tests {
             paused_since_ms: None,
             pause_damaged: false,
             activity: &[],
+            history: &[],
+            progress: None,
+            done_note: None,
             syncing: false,
             last_check_ms: None,
             next_check_ms: None,
@@ -627,6 +713,9 @@ mod tests {
             paused_since_ms: Some(now_ms()),
             pause_damaged: false,
             activity: &[],
+            history: &[],
+            progress: None,
+            done_note: None,
             syncing: true,
             last_check_ms: Some(now_ms() - 5_000),
             next_check_ms: Some(now_ms() + 60_000),
@@ -681,6 +770,9 @@ mod tests {
             paused_since_ms: None,
             pause_damaged: false,
             activity: &log,
+            history: &[],
+            progress: None,
+            done_note: None,
             syncing: false,
             last_check_ms: None,
             next_check_ms: None,
