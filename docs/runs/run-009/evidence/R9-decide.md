@@ -50,3 +50,30 @@ for the second click. The app should treat `Changed` as "refresh the decision li
 
 The real group under `D:\Dropbox\WoW Sync` was only read to establish the record shape; no
 live instance was started.
+
+## Round 2: RYZENFISH panic (`choice.rs:374` in v0.3.1)
+
+**Root cause.** `NewVersion::kept_copy` was `self.absent_kept.as_ref().unwrap_or(&copies[self.kept])`.
+`unwrap_or` evaluates its argument eagerly. When the kept release is not among the copies,
+`new_versions` sets `absent_kept = Some(..)` and `kept = copies.len()`, so `copies[kept]` indexed
+one past the end ("len is 1 but the index is 1") even though the stand-in was about to be used.
+RYZENFISH hit it because the rival keep excluded its own kept copy, leaving one copy listed; every
+pass called `decision_items` → `new_version_item` → `kept_copy`. The round-1 `kept_by_rival` change
+keeps both copies listed so this path is not reached for that shape, but the panic was reachable
+for any live keep whose release no copy holds (Q-88).
+
+**Fixes.**
+- `kept_copy` returns `Option` and never indexes eagerly; `NewVersion::local_only` and
+  `NewerAfterRollback::local_only` use `get`; `dismissal_key` skips unknown indexes.
+- `new_version_item` and `rollback_item` (`decide.rs`) return an error / `None` instead of indexing
+  `copies`/`shown`/`recovered`; `withheld_local_versions` (`control.rs`) skips an unknown index.
+  A remaining `copies[i]` in the sync path is only over indexes produced from the same list in the
+  same call (`reject.rs` `recovered`, `decide.rs` conflict loop `shown[i]`).
+
+**Tests.**
+- `decide_tests::a_keep_whose_release_no_copy_holds_still_builds_its_item_without_panicking`
+  (absent kept release with one copy: the exact len-1/index-1 shape; mismatched indexes yield
+  `None`/empty/error).
+- `e2e::tests::the_holder_of_one_mutually_excluded_copy_syncs_offers_both_and_converges_when_it_decides`
+  (three synthetic computers, real record shape, decided from the holder of one copy; all converge
+  and none still shows a decision).

@@ -367,8 +367,9 @@ impl NewerAfterRollback {
             .iter()
             .copied()
             .filter(|i| {
-                let h = &copies[*i].holders;
-                !h.is_empty() && h.iter().all(|e| &e.computer_id == own)
+                copies.get(*i).is_some_and(|c| {
+                    !c.holders.is_empty() && c.holders.iter().all(|e| &e.computer_id == own)
+                })
             })
             .collect()
     }
@@ -378,7 +379,7 @@ impl NewerAfterRollback {
         let mut hashes: Vec<Sha256> = self
             .copies
             .iter()
-            .map(|i| copies[*i].version.hash)
+            .filter_map(|i| copies.get(*i).map(|c| c.version.hash))
             .collect();
         hashes.sort();
         let mut bytes = b"newer-after-rollback".to_vec();

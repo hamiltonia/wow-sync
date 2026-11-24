@@ -106,10 +106,13 @@ pub fn new_version_item(
         .chain(nv.absent_kept.iter())
         .map(|c| CopyEntry::from_copy(c, &nv.scope))
         .collect::<Result<_, _>>()?;
+    let stale = || WriteError::Invalid("the kept copy is not among the copies shown".into());
+    let kept = nv.kept_copy(copies).ok_or_else(stale)?;
     let kept_entry = match &nv.absent_kept {
-        Some(_) => &shown[copies.len()],
-        None => &shown[nv.kept],
-    };
+        Some(_) => shown.get(copies.len()),
+        None => shown.get(nv.kept),
+    }
+    .ok_or_else(stale)?;
     let mut planned = Vec::new();
     let mut next = 0u32;
     let mut push = |label: OptionLabel,
@@ -132,7 +135,6 @@ pub fn new_version_item(
         next += 1;
     };
     let reason = ChoiceReason::NewVersionAfterDecision;
-    let kept = nv.kept_copy(copies);
     push(
         OptionLabel::KeepCurrent,
         kept.holders.clone(),
@@ -148,7 +150,9 @@ pub fn new_version_item(
         )?,
     );
     for i in &nv.copies {
-        let c = &copies[*i];
+        let (Some(c), Some(entry)) = (copies.get(*i), shown.get(*i)) else {
+            return Err(stale());
+        };
         let label = c
             .version
             .folders
@@ -161,7 +165,7 @@ pub fn new_version_item(
             },
             c.holders.clone(),
             nv.scope.clone(),
-            build_keep(view, cx, reason, &nv.scope, &shown[*i], &shown, &c.source)?,
+            build_keep(view, cx, reason, &nv.scope, entry, &shown, &c.source)?,
         );
     }
     push(
@@ -222,13 +226,15 @@ fn rollback_item(
         .ok()?;
     let mut planned = Vec::new();
     for i in &n.copies {
-        let c = &pc.copies[*i];
+        let (Some(c), Some(entry)) = (pc.copies.get(*i), shown.get(*i)) else {
+            return None;
+        };
         let choice = build_keep(
             view,
             cx,
             ChoiceReason::NewerAfterRollback,
             &n.scope,
-            &shown[*i],
+            entry,
             &shown,
             &c.source,
         )
@@ -259,7 +265,7 @@ fn rollback_item(
         option: DecisionOption {
             id: OptionId(planned.len() as u32),
             label: OptionLabel::KeepCurrent,
-            holders: pc.copies[n.recovered].holders.clone(),
+            holders: pc.copies.get(n.recovered)?.holders.clone(),
             consequence: Consequence::default(),
             warning: None,
         },
