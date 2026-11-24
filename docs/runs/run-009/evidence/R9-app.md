@@ -16,3 +16,16 @@ Branch `run009/R9-app` (from main 64830b1, merged with main b9fdc77). Windows x6
 Memory not measured against the 100 MiB gate (**not run**).
 Verify: offline PASS, native PASS (after merging main b9fdc77). One intermediate offline run reported FAIL without a captured cause; two reruns passed.
 Not done: live GUI latency/memory runs; e2e that other packages apply while one is Unavailable; peer versions in the diagnostics export (core).
+
+
+## Round 2
+
+| Item | Result | Notes |
+|---|---|---|
+| Saved enrollment never shows setup | passed (unit/backend) | Backend publishes enrolled for a saved target at start; headline "Checking add-ons…" until the first snapshot. Test restarts a backend on an enrolled state. |
+| Panic resilience | passed (backend test with injected panic) | Pass, command and status reads run under catch_unwind; fault shown as headline, commands still answered, retry after 5 min (300 ms in the test) clears it. |
+| Second enrollment guard | passed | Enroll when `is_enrolled()` is refused with a message; core already returned AlreadyEnrolled. |
+| Hash cache after restart | persistence passed (unit reopen test in fs_scan) | Round 1 real `_forever_` AddOns: 6926 ms cold, 150 ms with cache. No new restart timing on the owner's 3.2 GB tree (**not run**). |
+| Diagnostics peer version | passed (unit) | `app_version=` per computer row; non-version text reads `unknown`. |
+
+Not done: live GUI check of the restart on the owner's machine; the core panic itself is R9-decide's.

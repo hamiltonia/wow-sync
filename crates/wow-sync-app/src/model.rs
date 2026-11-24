@@ -125,6 +125,16 @@ fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
 
+pub const FAULT_HEADLINE: &str = "WoW Sync hit an internal error and stopped syncing";
+
+pub fn fault_sub(w: &World) -> Option<String> {
+    w.fault.as_ref().map(|phase| {
+        format!(
+            "It failed while {phase}. It will try again in a few minutes. Export diagnostics from Settings and report it."
+        )
+    })
+}
+
 pub fn headline(w: &World) -> Head {
     // Core's `Headline` is used as is (RV-5), then three app-side promotions (ops.md §1.6-§1.7):
     // a retired or held self, and "Review needed". Pause is not part of core's status, so it only
@@ -134,6 +144,8 @@ pub fn headline(w: &World) -> Head {
     let standing = crate::computers_ui::standing_headline(&w.features.standing);
     let (text, tone) = if !w.enrolled {
         ("Set up this computer".to_string(), Tone::Unknown)
+    } else if w.fault.is_some() {
+        (FAULT_HEADLINE.to_string(), Tone::Error)
     } else if let Some(r) = w.features.data_at_risk.first() {
         (r.text.clone(), Tone::Error)
     } else if blocked_by_test_mode(w) {
@@ -148,6 +160,8 @@ pub fn headline(w: &World) -> Head {
             "Pausing, finishing the current step".to_string(),
             Tone::Paused,
         )
+    } else if w.checking && !w.is_paused() {
+        ("Checking add-ons…".to_string(), Tone::Working)
     } else if w.pause_damaged && !core_blocks_pause {
         (
             "Syncing is held: the pause setting can't be read".to_string(),
@@ -192,6 +206,9 @@ fn removing(w: &World) -> usize {
 
 /// The line under the headline when the headline alone is not enough (ops.md §1.6-§1.7).
 pub fn headline_sub(w: &World) -> Option<String> {
+    if w.enrolled && w.fault.is_some() {
+        return fault_sub(w);
+    }
     if !w.enrolled
         || blocked_by_test_mode(w)
         || !w.features.data_at_risk.is_empty()
@@ -1420,6 +1437,19 @@ mod tests {
             "Settings sync, current page"
         );
         assert_eq!(nav_name(Page::Needs, 3, false), "Needs attention, 3 items");
+    }
+
+    #[test]
+    fn a_first_pass_in_progress_reads_checking_and_an_internal_error_is_never_silent() {
+        let mut w = enrolled();
+        w.checking = true;
+        assert_eq!(headline(&w).text, "Checking add-ons…");
+        w.checking = false;
+        w.fault = Some("running a sync pass".into());
+        let h = headline(&w);
+        assert_eq!(h.text, FAULT_HEADLINE);
+        assert_eq!(h.tone, Tone::Error);
+        assert!(headline_sub(&w).unwrap().contains("running a sync pass"));
     }
 
     fn enrolled() -> World {
