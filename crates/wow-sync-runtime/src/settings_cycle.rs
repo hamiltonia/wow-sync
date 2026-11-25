@@ -825,6 +825,10 @@ pub enum SettingsUnitStatus {
     Paused,
     /// Competing shared revisions exist; the owner picks one (`Command::ChooseSettings`).
     NeedsChoice,
+    /// The account or character folder this unit belongs to does not exist on this computer
+    /// yet. The app never creates it; the settings are applied once WoW creates the folder.
+    /// `SettingsUnitRow::waiting_for` has the identity in plain words.
+    WaitingForIdentity,
     Active,
 }
 
@@ -854,6 +858,9 @@ pub struct SettingsUnitRow {
     /// The value `Command::ShareSettings { checkpoint }` takes: this computer's latest capture.
     pub latest_capture: Option<wow_sync_core::ids::CheckpointRef>,
     pub can_share: bool,
+    /// Set with `WaitingForIdentity`: the missing identity in plain words, for the detail row
+    /// only (it names an account or character, so it is never logged).
+    pub waiting_for: Option<String>,
 }
 
 pub fn settings_units(
@@ -924,6 +931,7 @@ pub fn settings_units(
                 live: status == SettingsUnitStatus::Active,
                 restore_possible: actionable && !history.is_empty(),
                 can_share: actionable && latest_capture.is_some(),
+                waiting_for: None,
                 latest_capture,
                 competing,
                 history,

@@ -916,6 +916,7 @@ mod tests {
             restore_possible: true,
             latest_capture: Some(Sha256([9; 32])),
             can_share: true,
+            waiting_for: None,
         }
     }
 

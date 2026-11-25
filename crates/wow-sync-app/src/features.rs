@@ -744,6 +744,8 @@ pub fn settings_unit_rows(
                     S::PolicyConflict => UnitStatus::PolicyConflict,
                     S::Paused => UnitStatus::Paused,
                     S::NeedsChoice => UnitStatus::NeedsChoice,
+                    // Placeholder until R11-app adds the "waiting" wording; never emitted yet.
+                    S::WaitingForIdentity => UnitStatus::Off,
                     S::Active => UnitStatus::Active,
                 },
                 live: r.live,
