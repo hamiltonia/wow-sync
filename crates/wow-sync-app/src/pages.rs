@@ -775,13 +775,13 @@ impl Shell {
                 )
                 .child(
                     div()
-                        .w(u(90.))
+                        .w(u(70.))
                         .flex_none()
                         .child(SharedString::from(r.version.clone())),
                 )
                 .child(
                     div()
-                        .w(u(250.))
+                        .w(u(210.))
                         .flex_none()
                         .flex()
                         .items_center()
@@ -793,7 +793,7 @@ impl Shell {
                 )
                 .child(
                     div()
-                        .w(u(160.))
+                        .w(u(120.))
                         .flex_none()
                         .truncate()
                         .text_color(rgb(pal.muted))
@@ -801,7 +801,7 @@ impl Shell {
                 )
                 .child(
                     div()
-                        .w(u(200.))
+                        .w(u(150.))
                         .flex_none()
                         .truncate()
                         .text_color(rgb(pal.muted))
@@ -818,10 +818,10 @@ impl Shell {
             .text_size(u(12.))
             .text_color(rgb(pal.muted))
             .child(div().flex_1().child("Name"))
-            .child(div().w(u(90.)).flex_none().child("Version here"))
-            .child(div().w(u(250.)).flex_none().child("Status"))
-            .child(div().w(u(160.)).flex_none().child("Confirmed by"))
-            .child(div().w(u(200.)).flex_none().child("Settings"));
+            .child(div().w(u(70.)).flex_none().child("Version here"))
+            .child(div().w(u(210.)).flex_none().child("Status"))
+            .child(div().w(u(120.)).flex_none().child("Confirmed by"))
+            .child(div().w(u(150.)).flex_none().child("Settings"));
         let sh = self.scroll("addons");
         let max_h = (self.window_h - 76.0 - 26.0 - 200.0).max(200.0);
         let list = div()

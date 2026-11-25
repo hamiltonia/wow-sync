@@ -54,3 +54,15 @@ Lab: synthetic two-computer lab prepared (synthetic add-ons, accounts and charac
 - Screenshots: the screen was locked, so CopyFromScreen captured the lock screen (deleted); PrintWindow was used. Kept in the lab, not committed: a4-consent, a5-shared, a6-master, b2-consent, b3-after-use, b4-addons, b5-activity. The overview shot showing a lab path was deleted.
 - Verify: offline PASS, native PASS.
 
+
+## Screenshots
+
+Each was viewed and contains only synthetic names (A-demo, B-demo, ACCOUNTONE, ACCOUNTTWO, Bagnon, Details, Plater, Questie) and no path. Directory: [R11-app/](R11-app/).
+
+- [a4-consent.png](R11-app/a4-consent.png): computer A, headline offer and consent, accounts ticked, this computer as master.
+- [a5-shared.png](R11-app/a5-shared.png): computer A after Share settings.
+- [b2-consent.png](R11-app/b2-consent.png): computer B, the other computer's offer and consent.
+- [b3-after-use.png](R11-app/b3-after-use.png): computer B after Use settings.
+- [b4-addons.png](R11-app/b4-addons.png): Add-ons list with the Settings column (names were squeezed to an ellipsis by the new column; fixed by narrowing the other columns and recaptured).
+- [b5-activity.png](R11-app/b5-activity.png): Activity (no settings rows yet; runtime data pending).
+
