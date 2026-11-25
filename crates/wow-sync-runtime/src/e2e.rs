@@ -5645,6 +5645,21 @@ mod tests {
                 why: wow_sync_core::kinds::ChoiceReason::Ambiguous,
             })
             .is_ok());
+        let kept = b
+            .svc
+            .history(100)
+            .into_iter()
+            .find_map(|i| match i {
+                HistoryItem::Change(c) if c.kind == ChangeKind::Kept => Some(c),
+                _ => None,
+            })
+            .expect("a kept record");
+        assert!(
+            matches!(&kept.new_version, VersionLabel::ContentId(s) if !s.is_empty())
+                || matches!(&kept.new_version, VersionLabel::Toc(_)),
+            "the kept copy's version is shown: {kept:?}"
+        );
+        assert_eq!(kept.old_version, kept.new_version);
         for _ in 0..4 {
             synced(&mut b);
             synced(&mut a);
