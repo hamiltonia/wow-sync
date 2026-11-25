@@ -79,6 +79,13 @@ pub fn day_text(unix_ms: u64) -> String {
     format!("{d} {}", MONTHS[m])
 }
 
+/// The local date and time of a recorded instant, e.g. "16 November 21:02".
+pub fn date_time_text(unix_ms: u64) -> String {
+    let (days, hm) = local_parts(i64::try_from(unix_ms).unwrap_or(i64::MAX / 2));
+    let (_, m, d) = civil(days);
+    format!("{d} {} {hm}", MONTHS[m])
+}
+
 /// Absolute local time of something `secs` ago, e.g. "21:02 on 16 November".
 pub fn absolute(secs: i64) -> String {
     let at = now_ms() - secs.max(0) * 1000;

@@ -155,7 +155,10 @@ pub fn reason_text(r: &ChangeRecord) -> String {
         ChangeReason::Choice(Some(n)) => format!("a choice made on {n}"),
         ChangeReason::SettingsMaster => "settings master".into(),
         ChangeReason::SharedFromHere => "shared from this computer".into(),
-        ChangeReason::RestoredFromRecovery => "restored from a recovery copy".into(),
+        ChangeReason::RestoredFromRecovery => match from {
+            Some(n) => format!("restored a copy from {n}"),
+            None => "restored this computer's earlier copy".into(),
+        },
         ChangeReason::PeerPush => match from {
             Some(n) => format!("pushed from {n}"),
             None => "pushed to this computer".into(),
@@ -423,6 +426,17 @@ pub(crate) mod tests {
         assert_eq!(row.reason, "shared from this computer");
         assert!(row.what.starts_with("shared"));
         assert!(!row.line().contains("pushed"));
+    }
+
+    #[test]
+    fn a_restore_reads_as_a_restore_on_both_computers() {
+        let mut r = rec(ChangeKind::SettingsPublished, "Bagnon", None);
+        r.reason = ChangeReason::RestoredFromRecovery;
+        assert_eq!(reason_text(&r), "restored this computer's earlier copy");
+        let mut p = rec(ChangeKind::SettingsApplied, "Bagnon", Some("DESK"));
+        p.reason = ChangeReason::RestoredFromRecovery;
+        assert_eq!(reason_text(&p), "restored a copy from DESK");
+        assert!(!reason_text(&p).contains("master"));
     }
 
     #[test]
