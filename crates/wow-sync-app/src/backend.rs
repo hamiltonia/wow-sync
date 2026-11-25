@@ -304,6 +304,8 @@ pub fn spawn(
     shared: SharedState,
     wake: Sender<()>,
 ) {
+    #[cfg(test)]
+    tests::watch(&shared);
     std::thread::Builder::new()
         .name("sync".into())
         .spawn(move || run(target, setup, opts, rx, shared, wake))
@@ -1301,10 +1303,47 @@ mod tests {
         }
     }
 
+    thread_local! {
+        static WATCHED: std::cell::RefCell<Option<SharedState>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    /// The service state a test is waiting on, so a timeout reports what it saw.
+    pub(super) fn watch(s: &SharedState) {
+        WATCHED.with(|w| *w.borrow_mut() = Some(s.clone()));
+    }
+
+    fn describe_state() -> String {
+        WATCHED.with(|w| match w.borrow().as_ref() {
+            None => "no service".into(),
+            Some(s) => {
+                let g = lock(s);
+                format!(
+                    "started={} enrolled_now={} snapshot.enrolled={} busy={} detail={} quit_ready={} \
+                     setup={} fault={:?} message={:?}",
+                    g.started,
+                    g.enrolled_now,
+                    g.snapshot.enrolled,
+                    g.busy,
+                    g.snapshot.detail.is_some(),
+                    g.quit_ready,
+                    g.setup.is_some(),
+                    g.fault,
+                    g.message
+                )
+            }
+        })
+    }
+
     fn wait_for(what: &str, limit: Duration, mut ok: impl FnMut() -> bool) -> Duration {
         let start = Instant::now();
         while !ok() {
-            assert!(start.elapsed() < limit, "timed out waiting for {what}");
+            assert!(
+                start.elapsed() < limit,
+                "timed out waiting for {what} after {:?}; {}",
+                start.elapsed(),
+                describe_state()
+            );
             std::thread::sleep(Duration::from_millis(10));
         }
         start.elapsed()
