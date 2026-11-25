@@ -1157,16 +1157,14 @@ fn run(
         publish(&shared, &wake, |g| g.busy = true);
         interrupt.armed.store(true, Ordering::Relaxed);
         let pass_started = Instant::now();
-        crate::app::log(&format!(
-            "sync pass starting: {}",
-            if manual {
-                "you asked for it"
-            } else if was_forced {
-                "start or after a change"
-            } else {
-                "scheduled check"
-            }
-        ));
+        // The pass-start line is logged by the progress pump once the pass does something.
+        crate::progress_ui::set_trigger(if manual {
+            "you asked for it"
+        } else if was_forced {
+            "start or after a change"
+        } else {
+            crate::progress_ui::SCHEDULED
+        });
         let res = guarded("running a sync pass", &shared, &wake, || {
             #[cfg(test)]
             {

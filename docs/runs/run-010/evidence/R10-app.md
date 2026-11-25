@@ -62,3 +62,9 @@ Screenshots were taken with PrintWindow because the desktop was locked.
 ## Open issues
 - A mixed update-and-remove pass was not produced live; the removal and install
   passes were run separately.
+## Round 4 (RV10-02, RV10-07, release notes)
+
+- RV10-02: `model::progress_headline` lets a routine phase (scanning, deciding, publishing) take the headline only when no decision is pending; otherwise the progress shows as the quiet line under it and the tray stays on the hourglass. Staging, installing and removing still take over. The pump no longer clears the "Updated N add-ons" note when the next pass starts; it clears it on real work or after NOTE_MS (20 s). Test: `model::tests::a_routine_check_never_replaces_a_waiting_decision`, `progress_ui::tests::the_note_survives_idle_passes_for_its_full_lifetime`.
+- RV10-07: an idle pass is silent (a "slow check" line if 2 s or more) and is not shown before 1.5 s; a pass that works, or was asked for or follows a change, logs in full. Tests: `a_quick_idle_pass_is_silent_and_never_flashes_the_headline`, `a_slow_idle_pass_is_one_line_and_is_shown_once_it_lasts`, `real_work_replaces_the_note_and_a_manual_pass_is_logged_in_full`.
+- Release notes rewritten to claim only this behaviour; RV10-01/03/04/05/06/08 are listed as limits because the R10-history round-4 fixes were not on main when written.
+- Not re-run live; verified by unit tests only. No new screenshots.

@@ -169,10 +169,7 @@ pub fn headline(w: &World) -> Head {
         )
     } else if w.is_paused() && !core_blocks_pause {
         ("Paused".to_string(), Tone::Paused)
-    } else if let (false, Some(p)) = (
-        core_blocks_pause,
-        w.progress.as_ref().filter(|p| !p.text.is_empty()),
-    ) {
+    } else if let (false, Some(p)) = (core_blocks_pause, progress_headline(w)) {
         (p.text.clone(), Tone::Working)
     } else {
         match w.view.headline {
@@ -212,6 +209,35 @@ fn removing(w: &World) -> usize {
         .count()
 }
 
+/// Pending decisions that the service has not started applying.
+fn pending_decisions(w: &World) -> usize {
+    if w.view.headline != Headline::Waiting {
+        return 0;
+    }
+    w.view
+        .packages
+        .iter()
+        .filter(|(k, s, _)| {
+            matches!(s, PackageStatus::NeedsDecision(_)) && !decision_satisfied(w, k.as_str())
+        })
+        .count()
+}
+
+/// Progress that takes over the headline. A routine check (scanning, deciding, publishing)
+/// never replaces a decision that is still waiting for the user; an apply or removal does.
+fn progress_headline(w: &World) -> Option<&crate::progress_ui::ProgressView> {
+    let p = w.progress.as_ref().filter(|p| !p.text.is_empty())?;
+    let applying = matches!(
+        p.phase,
+        Some(
+            wow_sync_runtime::Phase::Staging
+                | wow_sync_runtime::Phase::Installing
+                | wow_sync_runtime::Phase::Removing
+        )
+    );
+    (applying || pending_decisions(w) == 0).then_some(p)
+}
+
 /// The line under the headline when the headline alone is not enough (ops.md §1.6-§1.7).
 pub fn headline_sub(w: &World) -> Option<String> {
     if w.enrolled && w.fault.is_some() {
@@ -219,6 +245,12 @@ pub fn headline_sub(w: &World) -> Option<String> {
     }
     if let Some(i) = w.progress.as_ref().and_then(|p| p.incoming.clone()) {
         return Some(i);
+    }
+    // A routine check that does not take over the headline still shows as a quiet line.
+    if let Some(p) = w.progress.as_ref().filter(|p| !p.text.is_empty()) {
+        if progress_headline(w).is_none() {
+            return Some(p.text.clone());
+        }
     }
     if !w.enrolled
         || blocked_by_test_mode(w)
@@ -1889,6 +1921,51 @@ mod tests {
             headline(&w).text,
             "Updated 15 add-ons from RYZENFISH \u{2014} see Activity"
         );
+    }
+
+    #[test]
+    fn a_routine_check_never_replaces_a_waiting_decision() {
+        let mut w = world_with(
+            PackageStatus::NeedsDecision(DecisionReason::Ambiguous),
+            wow_sync_core::explain::Explanation::InSync,
+        );
+        w.view.headline = Headline::Waiting;
+        let waiting = headline(&w).text;
+        assert_eq!(waiting, "Waiting for your decision on 1 add-on");
+        for phase in [
+            wow_sync_runtime::Phase::Scanning,
+            wow_sync_runtime::Phase::Deciding,
+            wow_sync_runtime::Phase::Publishing,
+        ] {
+            w.progress = Some(crate::progress_ui::ProgressView {
+                text: "Checking files: 120 of 36,000".into(),
+                phase: Some(phase),
+                ..Default::default()
+            });
+            assert_eq!(headline(&w).text, waiting);
+            assert_eq!(headline(&w).tone, Tone::Waiting);
+            assert_eq!(tray_shape(&w), TrayShape::Hourglass);
+            assert_eq!(tray_tooltip(&w), format!("WoW Sync: {waiting}"));
+            assert_eq!(
+                headline_sub(&w).as_deref(),
+                Some("Checking files: 120 of 36,000")
+            );
+        }
+        w.progress = Some(crate::progress_ui::ProgressView {
+            text: "Removing Demo".into(),
+            phase: Some(wow_sync_runtime::Phase::Removing),
+            ..Default::default()
+        });
+        assert_eq!(headline(&w).text, "Removing Demo");
+        assert_eq!(tray_shape(&w), TrayShape::Arrows);
+        // Without a waiting decision a routine check still shows.
+        w.view.headline = Headline::Ok;
+        w.progress = Some(crate::progress_ui::ProgressView {
+            text: "Checking files: 120 of 36,000".into(),
+            phase: Some(wow_sync_runtime::Phase::Scanning),
+            ..Default::default()
+        });
+        assert_eq!(headline(&w).text, "Checking files: 120 of 36,000");
     }
 
     #[test]

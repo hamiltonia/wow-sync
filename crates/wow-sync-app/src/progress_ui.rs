@@ -12,6 +12,24 @@ use crate::history_ui::{done_note, group_digits, group_title, size_text};
 pub const MIN_GAP_MS: i64 = 500;
 /// How long "Updated 15 add-ons … see Activity" stays in the headline.
 pub const NOTE_MS: i64 = 20_000;
+/// A routine check (scanning, deciding, publishing) is only shown once it has lasted this long,
+/// so a quick idle pass does not flicker the headline and the tray every few seconds.
+pub const QUIET_MS: i64 = 1_500;
+/// A scheduled pass that did nothing is logged only when it was this slow.
+pub const SLOW_IDLE_MS: i64 = 2_000;
+
+static TRIGGER: std::sync::Mutex<Option<&'static str>> = std::sync::Mutex::new(None);
+
+/// Why the next pass starts. The pass-start log line waits until the pass does something.
+pub fn set_trigger(why: &'static str) {
+    *TRIGGER.lock().unwrap_or_else(|p| p.into_inner()) = Some(why);
+}
+
+pub const SCHEDULED: &str = "scheduled check";
+
+fn is_work(p: Phase) -> bool {
+    matches!(p, Phase::Staging | Phase::Installing | Phase::Removing)
+}
 
 /// What the window shows while a pass works.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -191,9 +209,45 @@ pub struct Pump {
     records: Vec<ChangeRecord>,
     note_until: Option<i64>,
     pass_started_ms: i64,
+    trigger: &'static str,
+    /// Log lines of a pass that has not done anything yet.
+    held: Vec<String>,
+    worked: bool,
+    #[cfg(test)]
+    armed: Option<&'static str>,
 }
 
 impl Pump {
+    #[cfg(test)]
+    fn take_armed(&mut self) -> Option<&'static str> {
+        self.armed.take()
+    }
+
+    #[cfg(not(test))]
+    fn take_armed(&mut self) -> Option<&'static str> {
+        None
+    }
+
+    fn log(&mut self, out: &mut Vec<Out>, line: String) {
+        if self.worked {
+            out.push(Out::Log(line));
+        } else {
+            self.held.push(line);
+        }
+    }
+
+    /// The pass does real work: from now on everything is logged, including what was held.
+    fn start_work(&mut self, out: &mut Vec<Out>) {
+        if !self.worked {
+            self.worked = true;
+            out.push(Out::Log(format!("sync pass starting: {}", self.trigger)));
+            out.extend(self.held.drain(..).map(Out::Log));
+            if self.note_until.take().is_some() {
+                out.push(Out::Note(None));
+            }
+        }
+    }
+
     pub fn on_event(&mut self, e: &ProgressEvent, now: i64) -> Vec<Out> {
         let mut out = Vec::new();
         if e.phase == Phase::Idle {
@@ -205,7 +259,7 @@ impl Pump {
             self.last_phase = None;
             let records = std::mem::take(&mut self.records);
             let ms = (now - self.pass_started_ms).max(0);
-            out.push(Out::Log(format!(
+            let line = format!(
                 "pass summary: {} ({} change(s), {ms} ms)",
                 if records.is_empty() {
                     "nothing changed on this computer".to_string()
@@ -213,8 +267,16 @@ impl Pump {
                     group_title(&records)
                 },
                 records.len()
-            )));
-            out.push(Out::Show(None));
+            );
+            if self.worked {
+                out.push(Out::Log(line));
+            } else if ms >= SLOW_IDLE_MS {
+                out.push(Out::Log(format!("slow check, {line}")));
+            }
+            self.held.clear();
+            if self.shown.take().is_some() {
+                out.push(Out::Show(None));
+            }
             self.view = ProgressView::default();
             if let Some(n) = done_note(&records) {
                 self.note_until = Some(now + NOTE_MS);
@@ -227,8 +289,23 @@ impl Pump {
             self.pass_started_ms = now;
             self.records.clear();
             self.view = ProgressView::default();
-            self.note_until = None;
-            out.push(Out::Note(None));
+            self.worked = false;
+            self.held.clear();
+            let armed = self.take_armed();
+            self.trigger = armed.unwrap_or_else(|| {
+                TRIGGER
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .take()
+                    .unwrap_or(SCHEDULED)
+            });
+            // A pass that was asked for or follows a change is always logged in full.
+            if self.trigger != SCHEDULED {
+                self.start_work(&mut out);
+            }
+        }
+        if is_work(e.phase) || e.completed.is_some() || e.incoming.is_some() {
+            self.start_work(&mut out);
         }
         if self.last_phase != Some(e.phase) {
             self.last_phase = Some(e.phase);
@@ -239,17 +316,17 @@ impl Pump {
             if e.bytes_total > 0 {
                 line.push_str(&format!(", {}", size_text(e.bytes_total)));
             }
-            out.push(Out::Log(line));
+            self.log(&mut out, line);
         }
         if let Some(i) = incoming_text(e) {
-            out.push(Out::Log(i.to_lowercase()));
+            self.log(&mut out, i.to_lowercase());
             self.view.incoming = Some(i);
         }
         for p in &e.decision_satisfied {
             self.view.satisfied.insert(p.clone());
         }
         if let Some(r) = &e.completed {
-            out.push(Out::Log(record_log(r)));
+            self.log(&mut out, record_log(r));
             self.records.push(r.clone());
         }
         self.view.phase = Some(e.phase);
@@ -260,7 +337,7 @@ impl Pump {
             || e.incoming.is_some()
             || self.last_shown_ms == 0
             || self.view.phase != self.shown;
-        if urgent || now - self.last_shown_ms >= MIN_GAP_MS {
+        if !self.held_back(now) && (urgent || now - self.last_shown_ms >= MIN_GAP_MS) {
             out.extend(self.flush(now));
         }
         out
@@ -269,7 +346,7 @@ impl Pump {
     /// Called on a timer: sends the held update once its time has come, ends the note.
     pub fn tick(&mut self, now: i64) -> Vec<Out> {
         let mut out = Vec::new();
-        if self.dirty && now - self.last_shown_ms >= MIN_GAP_MS {
+        if self.dirty && !self.held_back(now) && now - self.last_shown_ms >= MIN_GAP_MS {
             out.extend(self.flush(now));
         }
         if self.note_until.is_some_and(|t| now >= t) {
@@ -277,6 +354,15 @@ impl Pump {
             out.push(Out::Note(None));
         }
         out
+    }
+
+    /// A routine check that has not lasted long enough to be worth showing.
+    fn held_back(&self, now: i64) -> bool {
+        !self.worked
+            && !self.view.phase.is_some_and(is_work)
+            && self.view.incoming.is_none()
+            && self.view.satisfied.is_empty()
+            && now - self.pass_started_ms < QUIET_MS
     }
 
     fn flush(&mut self, now: i64) -> Vec<Out> {
@@ -459,8 +545,9 @@ mod tests {
         e.completed = Some(record("Bagnon"));
         take(p.on_event(&e, 2_000));
         take(p.on_event(&ev(3, Phase::Idle), 3_000));
-        assert_eq!(logs[0], "phase: checking files");
-        assert!(logs[1].starts_with("phase: installing"));
+        assert_eq!(logs[0], "sync pass starting: scheduled check");
+        assert_eq!(logs[1], "phase: checking files");
+        assert!(logs[2].starts_with("phase: installing"));
         assert!(logs
             .iter()
             .any(|l| l.starts_with("applied Bagnon (from RYZENFISH): 1 \u{2192} 2")));
@@ -487,5 +574,65 @@ mod tests {
         ));
         assert!(p.tick(2_000 + NOTE_MS - 1).is_empty());
         assert!(matches!(p.tick(2_000 + NOTE_MS)[..], [Out::Note(None)]));
+    }
+
+    fn logs_of(outs: &[Out]) -> Vec<String> {
+        outs.iter()
+            .filter_map(|o| match o {
+                Out::Log(l) => Some(l.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_quick_idle_pass_is_silent_and_never_flashes_the_headline() {
+        let mut p = Pump::default();
+        let mut all = p.on_event(&ev(1, Phase::Scanning), 1_000);
+        all.extend(p.on_event(&ev(2, Phase::Publishing), 1_100));
+        all.extend(p.on_event(&ev(3, Phase::Idle), 1_200));
+        assert!(logs_of(&all).is_empty(), "{:?}", logs_of(&all));
+        assert!(!all.iter().any(|o| matches!(o, Out::Show(_))));
+    }
+
+    #[test]
+    fn a_slow_idle_pass_is_one_line_and_is_shown_once_it_lasts() {
+        let mut p = Pump::default();
+        let mut all = p.on_event(&ev(1, Phase::Scanning), 1_000);
+        assert!(!all.iter().any(|o| matches!(o, Out::Show(_))));
+        all.extend(p.tick(1_000 + QUIET_MS + 600));
+        assert!(all.iter().any(|o| matches!(o, Out::Show(Some(_)))));
+        all.extend(p.on_event(&ev(2, Phase::Idle), 1_000 + SLOW_IDLE_MS + 10));
+        let logs = logs_of(&all);
+        assert_eq!(logs.len(), 1, "{logs:?}");
+        assert!(logs[0].starts_with("slow check, pass summary: nothing changed"));
+        assert!(all.iter().any(|o| matches!(o, Out::Show(None))));
+    }
+
+    #[test]
+    fn the_note_survives_idle_passes_for_its_full_lifetime() {
+        let mut p = Pump::default();
+        let mut e = ev(1, Phase::Installing);
+        e.completed = Some(record("Bagnon"));
+        p.on_event(&e, 1_000);
+        p.on_event(&ev(2, Phase::Idle), 2_000);
+        let mut all = p.on_event(&ev(3, Phase::Scanning), 7_000);
+        all.extend(p.on_event(&ev(4, Phase::Idle), 7_100));
+        assert!(!all.iter().any(|o| matches!(o, Out::Note(_))));
+        assert!(p.tick(2_000 + NOTE_MS - 1).is_empty());
+        assert!(matches!(p.tick(2_000 + NOTE_MS)[..], [Out::Note(None)]));
+    }
+
+    #[test]
+    fn real_work_replaces_the_note_and_a_manual_pass_is_logged_in_full() {
+        let mut p = Pump::default();
+        let mut e = ev(1, Phase::Installing);
+        e.completed = Some(record("Bagnon"));
+        p.on_event(&e, 1_000);
+        p.on_event(&ev(2, Phase::Idle), 2_000);
+        p.armed = Some("you asked for it");
+        let outs = p.on_event(&ev(3, Phase::Scanning), 8_000);
+        assert!(outs.iter().any(|o| matches!(o, Out::Note(None))));
+        assert_eq!(logs_of(&outs)[0], "sync pass starting: you asked for it");
     }
 }
