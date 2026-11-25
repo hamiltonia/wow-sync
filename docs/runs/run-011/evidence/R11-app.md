@@ -39,5 +39,9 @@ identity on history detail, settings phase in progress/tray, release notes.
 - Folder match is case-insensitive.
 - Retired computer or retired master gets no offer.
 
-Verify: offline tier PASS (fmt, clippy, test, required-cases, deny, links). Native tier not run; live lab screenshots not done.
+Verify: offline tier PASS (fmt, clippy, test, required-cases, deny, links). Native tier PASS.
+
+Fail-without-change: each new test was run against a deliberate mutation of the code it covers (removing the Active-standing check, the dismissed check, the enabled check, flipping the default master pick and tick filter, giving the confirming computer a master, dropping the identity from the Activity line, lowering the waiting urgency) and FAILED each time; the code was restored by git checkout each time.
+
+Lab: synthetic two-computer lab prepared (synthetic add-ons, accounts and characters, own state and provider); screenshots wait on the runtime accounts list.
 
