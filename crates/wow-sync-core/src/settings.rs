@@ -83,7 +83,7 @@ pub struct SettingsScope {
     pub diagnoses: Vec<ScopeDiagnosis>,
     /// Units that must not sync in either direction because of a diagnosis.
     pub blocked: BTreeSet<SettingsUnit>,
-    /// Real-data sync needs an approved size cap (Q-77 PENDING OWNER).
+    /// Whether a size cap was given; without one nothing is owned.
     pub sync_enabled: bool,
 }
 

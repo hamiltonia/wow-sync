@@ -3,7 +3,7 @@
 
 use crate::history::{
     record_change, ChangeKind, ChangeRecord, ChangeSource, IncomingSummary, Phase, ProgressEvent,
-    ProgressHub,
+    ProgressHub, VersionLabel,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -60,6 +60,21 @@ impl Drop for PassGuard {
 
 pub(crate) fn phase(hub: &ProgressHub, pass_id: u64, p: Phase) {
     hub.emit(blank(pass_id, p));
+}
+
+/// Settings progress in units; `current` is the add-on whose settings are being looked at.
+pub(crate) fn settings_step(
+    hub: &ProgressHub,
+    pass_id: u64,
+    done: u64,
+    total: u64,
+    current: Option<&str>,
+) {
+    let mut e = blank(pass_id, Phase::Settings);
+    e.items_done = done;
+    e.items_total = total.max(done);
+    e.current = current.map(str::to_string);
+    hub.emit_throttled(e);
 }
 
 /// Polls a scan's file counter and reports it while a scan runs.
@@ -130,10 +145,39 @@ pub(crate) struct ApplyProgress {
     hub: ProgressHub,
     pass_id: u64,
     state_dir: PathBuf,
+    addons: Option<PathBuf>,
     inner: Arc<Mutex<Inner>>,
 }
 
+/// The `## Version` of the folder's own `.toc` as installed, if it has one.
+fn live_version(addons: &std::path::Path, folder: &str) -> Option<String> {
+    use std::io::Read;
+    let path = addons.join(folder).join(format!("{folder}.toc"));
+    if std::fs::symlink_metadata(&path)
+        .ok()?
+        .file_type()
+        .is_symlink()
+    {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(wow_sync_core::toc::TOC_LIMIT as u64 + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    let v = wow_sync_core::toc::parse_toc(&bytes).ok()?.version?;
+    let v = v.trim();
+    (!v.is_empty()).then(|| crate::changes::clip(v))
+}
+
 impl ApplyProgress {
+    /// Lets a rollback's record show the installed TOC version instead of a content id.
+    pub(crate) fn with_addons(mut self, addons: PathBuf) -> Self {
+        self.addons = Some(addons);
+        self
+    }
+
     /// `prepared` pairs each planned package with the record its apply will write.
     pub(crate) fn new(
         hub: &ProgressHub,
@@ -178,6 +222,7 @@ impl ApplyProgress {
             hub: hub.clone(),
             pass_id,
             state_dir: state.path().to_path_buf(),
+            addons: None,
             inner: Arc::new(Mutex::new(Inner {
                 items,
                 total,
@@ -313,6 +358,18 @@ impl ApplyProgress {
         g.items_done += 1;
         let mut e = self.event(&g, Some(rec.name.clone()), Some(rec.source.clone()));
         drop(g);
+        if let (Some(dir), ChangeKind::RolledBack, VersionLabel::ContentId(_)) =
+            (&self.addons, &rec.kind, &rec.new_version)
+        {
+            let own = rec.folders.iter().find(|f| **f == rec.name);
+            if let Some(v) = own
+                .into_iter()
+                .chain(rec.folders.iter())
+                .find_map(|f| live_version(dir, f))
+            {
+                rec.new_version = VersionLabel::Toc(v);
+            }
+        }
         if let Ok(state) = LocalState::open_at(&self.state_dir) {
             record_change(&state, &rec);
         }
@@ -338,6 +395,16 @@ impl ApplyProgress {
     }
 }
 
+/// Announces a record written outside an apply (publishing, saved settings, crash recovery)
+/// so the live log and the pass summary count it.
+pub(crate) fn recorded(hub: &ProgressHub, pass_id: u64, phase: Phase, rec: ChangeRecord) {
+    let mut e = blank(pass_id, phase);
+    e.current = Some(rec.name.clone());
+    e.source = Some(rec.source.clone());
+    e.completed = Some(rec);
+    hub.emit(e);
+}
+
 /// Counts publishing steps against a known total.
 #[derive(Clone)]
 pub(crate) struct PublishProgress {
@@ -359,6 +426,11 @@ impl PublishProgress {
 
     pub(crate) fn set_total(&self, n: u64) {
         self.total.store(n, Ordering::Relaxed);
+    }
+
+    /// A record this publication wrote: the live log and the pass summary count it.
+    pub(crate) fn recorded(&self, rec: ChangeRecord) {
+        recorded(&self.hub, self.pass_id, Phase::Publishing, rec);
     }
 
     pub(crate) fn step(&self) {
@@ -417,6 +489,7 @@ mod tests {
             hub,
             pass_id: 1,
             state_dir: PathBuf::new(),
+            addons: None,
             inner: Arc::new(Mutex::new(Inner {
                 items: items.into_iter().collect(),
                 total,
@@ -478,6 +551,7 @@ mod tests {
             hub,
             pass_id: 1,
             state_dir: PathBuf::new(),
+            addons: None,
             inner: Arc::new(Mutex::new(Inner {
                 items: vec![first, second].into_iter().collect(),
                 total: 2,
@@ -515,6 +589,7 @@ mod tests {
             hub,
             pass_id: 1,
             state_dir: PathBuf::new(),
+            addons: None,
             inner: Arc::new(Mutex::new(Inner {
                 items: vec![one].into_iter().collect(),
                 total: 1,

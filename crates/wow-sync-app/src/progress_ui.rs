@@ -240,14 +240,20 @@ pub struct Pump {
 }
 
 impl Pump {
+    /// Why the pass that starts now was run. Tests never read the process-wide request, which
+    /// the backend tests running in parallel also set.
     #[cfg(test)]
-    fn take_armed(&mut self) -> Option<&'static str> {
-        self.armed.take()
+    fn next_trigger(&mut self) -> &'static str {
+        self.armed.take().unwrap_or(SCHEDULED)
     }
 
     #[cfg(not(test))]
-    fn take_armed(&mut self) -> Option<&'static str> {
-        None
+    fn next_trigger(&mut self) -> &'static str {
+        TRIGGER
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+            .unwrap_or(SCHEDULED)
     }
 
     fn log(&mut self, out: &mut Vec<Out>, line: String) {
@@ -313,14 +319,7 @@ impl Pump {
             self.view = ProgressView::default();
             self.worked = false;
             self.held.clear();
-            let armed = self.take_armed();
-            self.trigger = armed.unwrap_or_else(|| {
-                TRIGGER
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .take()
-                    .unwrap_or(SCHEDULED)
-            });
+            self.trigger = self.next_trigger();
             // A pass that was asked for or follows a change is always logged in full.
             if self.trigger != SCHEDULED {
                 self.start_work(&mut out);
@@ -629,6 +628,30 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn a_pass_that_publishes_is_logged_and_summarised_as_publishing() {
+        let mut p = Pump::default();
+        let mut all = p.on_event(&ev(1, Phase::Scanning), 1_000);
+        all.extend(p.on_event(&ev(2, Phase::Publishing), 1_100));
+        let mut e = ev(3, Phase::Publishing);
+        let mut r = record("Bagnon");
+        r.kind = ChangeKind::Published;
+        r.source = ChangeSource::ThisComputer;
+        e.completed = Some(r);
+        all.extend(p.on_event(&e, 1_200));
+        all.extend(p.on_event(&ev(4, Phase::Idle), 1_300));
+        let logs = logs_of(&all);
+        assert!(logs.iter().any(|l| l == "phase: publishing"), "{logs:?}");
+        assert!(
+            logs.iter().any(|l| l.starts_with("published Bagnon")),
+            "{logs:?}"
+        );
+        let last = logs.last().unwrap();
+        assert!(!last.contains("nothing changed"), "{last}");
+        assert!(last.contains("shared from this computer"), "{last}");
+        assert!(last.contains("(1 change(s)"), "{last}");
     }
 
     #[test]

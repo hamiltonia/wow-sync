@@ -1,6 +1,8 @@
 # Run 010 handoff
 
-- **Status:** approved (D-32, 2026-11-24), no AIU ceiling.
+- **Status:** **closed**. `v0.3.3` is tagged as a pre-release. See
+  [REPORT.md](REPORT.md). Worktrees and branches have been removed.
+- **Approval:** D-32 (2026-11-24), no AIU ceiling.
 - **Plan:** [PLAN.md](PLAN.md). Packets: [packets/](packets/).
 - **Phase A:** R10-history (interface first), R10-speed and R10-app, in
   parallel.

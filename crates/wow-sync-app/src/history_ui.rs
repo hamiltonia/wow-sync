@@ -22,9 +22,22 @@ pub struct ChangeRow {
     /// Changed paths relative to the add-on folder, already capped.
     pub paths: Vec<String>,
     pub paths_more: u32,
+    /// "from RYZENFISH", or "from this computer".
+    pub from: String,
 }
 
 impl ChangeRow {
+    /// The row with where the change came from, for lists that mix computers.
+    pub fn line_with_source(&self) -> String {
+        let mut parts: Vec<&str> = vec![self.name.as_str(), self.from.as_str()];
+        for p in [&self.what, &self.files, &self.size, &self.reason] {
+            if !p.is_empty() {
+                parts.push(p);
+            }
+        }
+        parts.join(" · ")
+    }
+
     /// The whole row as one sentence, for the screen reader and the list.
     pub fn line(&self) -> String {
         let mut parts: Vec<&str> = vec![self.name.as_str()];
@@ -149,7 +162,10 @@ pub fn reason_text(r: &ChangeRecord) -> String {
             Some(n) => format!("removed on {n}"),
             None => "removed on this computer".into(),
         },
-        ChangeReason::Rollback => "rolled back for the group".into(),
+        ChangeReason::Rollback => match from {
+            Some(n) => format!("rolled back on {n} for the group"),
+            None => "rolled back on this computer for the group".into(),
+        },
         ChangeReason::Recovery => "restored from recovery".into(),
     }
 }
@@ -208,6 +224,10 @@ pub fn row_of(r: &ChangeRecord) -> ChangeRow {
         unix_ms: r.unix_ms,
         paths: r.paths.clone(),
         paths_more: r.paths_more,
+        from: match source_name(&r.source) {
+            Some(n) => format!("from {n}"),
+            None => "from this computer".into(),
+        },
     }
 }
 
@@ -395,6 +415,17 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn an_add_on_pages_rows_name_where_each_change_came_from() {
+        let r = row_of(&rec(ChangeKind::Applied, "Bagnon", Some("RYZENFISH")));
+        assert_eq!(
+            r.line_with_source(),
+            "Bagnon · from RYZENFISH · 1.0 \u{2192} 1.1 · +2 ~3 \u{2212}1 files · +2 KB · newer release"
+        );
+        let own = row_of(&rec(ChangeKind::Applied, "Bagnon", None));
+        assert!(own.line_with_source().contains("from this computer"));
+    }
+
+    #[test]
     fn new_removed_and_content_id_versions() {
         let mut n = rec(ChangeKind::InstalledNew, "Nav", Some("A"));
         n.old_version = VersionLabel::New;
@@ -433,7 +464,10 @@ pub(crate) mod tests {
             (ChangeReason::SettingsMaster, "settings master"),
             (ChangeReason::PeerPush, "pushed from RYZENFISH"),
             (ChangeReason::Removal, "removed on RYZENFISH"),
-            (ChangeReason::Rollback, "rolled back for the group"),
+            (
+                ChangeReason::Rollback,
+                "rolled back on RYZENFISH for the group",
+            ),
             (ChangeReason::Recovery, "restored from recovery"),
         ];
         for (reason, want) in cases {

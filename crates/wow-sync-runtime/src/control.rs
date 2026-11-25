@@ -378,8 +378,8 @@ pub enum Command {
         why: wow_sync_core::kinds::ChoiceReason,
     },
     /// Choose the settings master and the per-folder exceptions (settings.md §5.2). Explicit only:
-    /// the whole policy is replaced, nothing elects a master. Recorded as intent; applying it to
-    /// real settings stays off until the settings size cap is approved (Q-77).
+    /// the whole policy is replaced, nothing elects a master. Applying it needs this
+    /// computer's consent (`EnableSettings`).
     SetSettingsPolicy {
         master: Option<wow_sync_core::kinds::EnrollmentRef>,
         exceptions: Vec<wow_sync_core::kinds::PolicyRule>,

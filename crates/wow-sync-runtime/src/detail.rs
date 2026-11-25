@@ -83,7 +83,8 @@ pub struct StatusDetail {
     pub game_build: Option<String>,
 }
 
-/// `|cAARRGGBB` and `|r` colour codes are display markup, not part of a name.
+/// `|cAARRGGBB` and `|r` colour codes and `|T...|t` or `|A...|a` inline images are display
+/// markup, not part of a name.
 pub fn strip_colour_codes(s: &str) -> String {
     let mut out = String::new();
     let b: Vec<char> = s.chars().collect();
@@ -98,6 +99,21 @@ pub fn strip_colour_codes(s: &str) -> String {
                 'r' | 'R' => {
                     i += 2;
                     continue;
+                }
+                open @ ('t' | 'T' | 'a' | 'A') => {
+                    let close = if open.eq_ignore_ascii_case(&'t') {
+                        't'
+                    } else {
+                        'a'
+                    };
+                    let end = (i + 2..b.len().saturating_sub(1))
+                        .find(|&j| b[j] == '|' && b[j + 1].eq_ignore_ascii_case(&close));
+                    if let Some(j) = end {
+                        i = j + 2;
+                        continue;
+                    }
+                    // An image that never closes: drop it with everything after it.
+                    break;
                 }
                 _ => {}
             }
@@ -978,5 +994,13 @@ mod tests {
         assert_eq!(strip_colour_codes("|cff00ff00Bagnon|r"), "Bagnon");
         assert_eq!(strip_colour_codes("Plain"), "Plain");
         assert_eq!(strip_colour_codes("a|cff"), "a|cff");
+        assert_eq!(
+            strip_colour_codes("|TInterface\\AddOns\\X\\icon:16|t Atlas |A:x:1:1|a Loot"),
+            "Atlas  Loot"
+        );
+        assert_eq!(
+            strip_colour_codes("Name |TInterface\\AddOns\\X\\ic"),
+            "Name"
+        );
     }
 }

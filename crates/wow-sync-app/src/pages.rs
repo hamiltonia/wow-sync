@@ -1317,7 +1317,12 @@ impl Shell {
                                     .text_color(rgb(pal.muted))
                                     .child(SharedString::from(when)),
                             )
-                            .child(div().flex_1().min_w_0().child(SharedString::from(r.line())))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(SharedString::from(r.line_with_source())),
+                            )
                             .into_any_element()
                     })
                     .collect()
