@@ -3617,6 +3617,74 @@ mod tests {
         assert!(a.svc.settings_history(&alpha_unit()).is_empty());
     }
 
+    #[test]
+    fn a_character_missing_here_waits_and_is_never_created_and_a_big_unit_says_so() {
+        use crate::settings_cycle::SettingsUnitStatus as S;
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let rel = "WTF/Account/ACC/Realm1/CharA1/SavedVariables/Alpha.lua";
+        let on_a = a.install.variant_dir.join(rel);
+        std::fs::create_dir_all(on_a.parent().unwrap()).unwrap();
+        std::fs::write(&on_a, "AlphaChar = { v = 1 }\n").unwrap();
+        synced(&mut a);
+        std::fs::write(&on_a, "AlphaChar = { v = 2 }\n").unwrap();
+        synced(&mut a);
+        synced(&mut b);
+        synced(&mut b);
+        let realm = b.install.variant_dir.join("WTF/Account/ACC/Realm1");
+        assert!(!realm.exists(), "a missing character is never created");
+        let waiting = b
+            .svc
+            .status()
+            .settings_units
+            .into_iter()
+            .find(|r| r.status == S::WaitingForIdentity)
+            .expect("waiting row");
+        assert!(waiting.waiting_for.is_some());
+
+        // Over the cap: the unit is named with its size and nothing is published.
+        a.svc.set_settings_cap_for_tests(Some(8));
+        write_wtf(&a, "Alpha", "AlphaDB = { a_long_value = 1 }\n");
+        synced(&mut a);
+        let big = a
+            .svc
+            .status()
+            .settings_units
+            .into_iter()
+            .find(|r| r.status == S::TooLarge)
+            .expect("too large row");
+        assert!(big.size_bytes.is_some());
+    }
+
+    #[test]
+    fn with_the_game_running_settings_wait_and_nothing_is_applied() {
+        use crate::settings_cycle::SettingsUnitStatus as S;
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        b.act.set(Activity::Running { pids: vec![4242] });
+        synced(&mut b);
+        assert_eq!(read_wtf(&b, "Alpha"), None);
+        assert!(
+            b.svc
+                .status()
+                .settings_units
+                .iter()
+                .all(|r| r.status == S::WaitingForWow),
+            "{:?}",
+            b.svc.status().settings_units
+        );
+        b.act.set(Activity::NotRunning);
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 2 }\n")
+        );
+    }
+
     fn alpha_unit() -> wow_sync_core::ids::SettingsUnit {
         wow_sync_core::ids::SettingsUnit {
             folder: wow_sync_core::paths::validate_folder_name("Alpha").unwrap(),
