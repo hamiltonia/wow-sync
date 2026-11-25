@@ -3836,6 +3836,8 @@ mod tests {
         assert_eq!(a.svc.settings_history(&alpha_unit()).len(), 1);
         synced(&mut b);
         synced(&mut b);
+        synced(&mut b);
+        synced(&mut a);
         assert_eq!(
             read_wtf(&b, "Alpha").as_deref(),
             Some("AlphaDB = { v = 1 }\n")
