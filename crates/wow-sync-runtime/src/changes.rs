@@ -243,6 +243,32 @@ fn diff(cx: &BuildCx, p: &PackageApply) -> Diff {
     }
 }
 
+/// Files added, changed and removed between two listings of one folder, and their paths.
+fn file_diff(
+    old: &[wow_sync_core::inventory::FileEntry],
+    new: &[wow_sync_core::inventory::FileEntry],
+) -> (FileCounts, Vec<String>) {
+    let old_map: BTreeMap<&str, &wow_sync_core::ids::Sha256> =
+        old.iter().map(|e| (e.path.as_str(), &e.sha256)).collect();
+    let mut counts = FileCounts::default();
+    let mut paths = BTreeSet::new();
+    let mut seen = BTreeSet::new();
+    for e in new {
+        seen.insert(e.path.as_str());
+        match old_map.get(e.path.as_str()) {
+            None => counts.added += 1,
+            Some(h) if **h != e.sha256 => counts.changed += 1,
+            Some(_) => continue,
+        }
+        paths.insert(e.path.as_str().to_string());
+    }
+    for path in old_map.keys().filter(|p| !seen.contains(*p)) {
+        counts.removed += 1;
+        paths.insert((*path).to_string());
+    }
+    (counts, paths.into_iter().collect())
+}
+
 fn capped(mut paths: Vec<String>) -> (Vec<String>, u32) {
     let more = paths.len().saturating_sub(MAX_RECORD_PATHS) as u32;
     paths.truncate(MAX_RECORD_PATHS);
@@ -461,6 +487,28 @@ pub(crate) fn display_of(
         .map_or_else(|| key.as_str().to_string(), |f| f.name.clone())
 }
 
+/// An interrupted apply that crash recovery finished. Only the result is known: the version
+/// before the interruption is not, and is shown as an empty content id.
+pub(crate) fn recovered(
+    stamp: (u64, i64),
+    key: &FolderKey,
+    titles: &BTreeMap<String, String>,
+    now: &Inventory,
+) -> ChangeRecord {
+    let name = display_of(titles, now, key);
+    let mut rec = base(
+        stamp,
+        ChangeKind::Applied,
+        name.clone(),
+        vec![name],
+        ChangeSource::ThisComputer,
+        ChangeReason::Recovery,
+    );
+    rec.old_version = VersionLabel::ContentId(String::new());
+    rec.new_version = now.get(key).map_or(VersionLabel::New, label);
+    rec
+}
+
 /// A saved-settings revision this computer just published.
 pub(crate) fn settings_published(
     stamp: (u64, i64),
@@ -486,12 +534,17 @@ pub(crate) fn settings_published(
 }
 
 /// Records for add-on folders this pass published: new or changed against the previously
-/// published state, minus the folders this same pass installed from a peer. Many at once
-/// (a first publish) become one record.
+/// published state (file by file, using `prev_files`), minus the folders this same pass
+/// installed or removed for a peer. An add-on gone from `present` that the previous state
+/// held is a removal made on this computer. Many at once (a first publish) become one record.
 pub(crate) fn published(
     stamp: (u64, i64),
     previous: Option<&wow_sync_core::records::CodeState>,
     now: &Inventory,
+    present: &Inventory,
+    earlier_files: &dyn Fn(
+        &wow_sync_core::ids::Sha256,
+    ) -> Option<Vec<wow_sync_core::inventory::FileEntry>>,
     skip: &BTreeSet<FolderKey>,
 ) -> Vec<ChangeRecord> {
     const MAX_SEPARATE: usize = 25;
@@ -515,10 +568,43 @@ pub(crate) fn published(
         rec.old_version = before.map_or(VersionLabel::New, label);
         rec.new_version = label(f);
         let (old_files, old_bytes) = before.map_or((0, 0), |b| (b.files, b.bytes));
-        rec.files.added = f.files.saturating_sub(old_files);
-        rec.files.removed = old_files.saturating_sub(f.files);
-        rec.files.changed = f.files.min(old_files);
+        match before.and_then(|b| b.tree).and_then(|h| earlier_files(&h)) {
+            Some(old) => {
+                let (counts, paths) = file_diff(&old, &f.file_entries);
+                rec.files = counts;
+                let (paths, more) = capped(paths);
+                rec.paths = paths;
+                rec.paths_more = more;
+            }
+            // The earlier tree is not at hand: only the net difference is known.
+            _ => {
+                rec.files.added = f.files.saturating_sub(old_files);
+                rec.files.removed = old_files.saturating_sub(f.files);
+                rec.files.changed = f.files.min(old_files);
+            }
+        }
         rec.byte_delta = f.bytes as i64 - old_bytes as i64;
+        out.push(rec);
+    }
+    for b in previous.map_or(&[][..], |s| s.folders.as_slice()) {
+        if !b.transfer_eligible()
+            || skip.contains(&b.key)
+            || present.folders.iter().any(|f| f.key == b.key)
+        {
+            continue;
+        }
+        let mut rec = base(
+            stamp,
+            ChangeKind::Removed,
+            b.name.clone(),
+            vec![b.name.clone()],
+            ChangeSource::ThisComputer,
+            ChangeReason::Removal,
+        );
+        rec.old_version = label(b);
+        rec.new_version = VersionLabel::Removed;
+        rec.files.removed = b.files;
+        rec.byte_delta = -(b.bytes as i64);
         out.push(rec);
     }
     if out.len() <= MAX_SEPARATE {

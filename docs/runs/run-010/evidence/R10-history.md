@@ -34,6 +34,21 @@ Branch `run010/R10-history`, built on the merged interface (main `33261fe`).
   (recovery) and master settings records. Settings records now use the display name; restore
   records carry an 8-hex content-id version label.
 
+## Round 4 (review fixes)
+
+- RV10-01: a package's first staging event is unthrottled; bytes now move as files are copied
+  (`ApplyProgress::copied`, per file in `stage_folder`) and are topped up at completion.
+- RV10-03: records are stamped at finalize time. `history()` hides a legacy `applied` line when
+  a record of that package was made after the package's previous such line (no 60 s window).
+- RV10-04: `published()` diffs file by file against the previous published tree (read from the
+  provider only for changed folders); falls back to net counts if that tree is unreadable.
+- RV10-05: `published()` records a `Removed` record (this computer, reason Removal) for a folder
+  in the previous published state that is gone locally and was not removed by this pass's apply.
+- RV10-06: the scan counter is reset at pass start.
+- RV10-08: a crash-recovered install writes an `Applied` record with reason `Recovery` (old
+  version unknown: an empty content id).
+- No public API change.
+
 ## Open issues
 
 - Settings records name the folder only; no account/character paths are stored.
