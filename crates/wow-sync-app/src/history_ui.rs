@@ -407,6 +407,17 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_single_share_from_a_non_master_computer_reads_as_shared_from_here() {
+        let mut r = rec(ChangeKind::SettingsPublished, "Bagnon", None);
+        r.reason = ChangeReason::SharedFromHere;
+        r.identity = Some("account ERIC".into());
+        let row = row_of(&r);
+        assert_eq!(row.reason, "shared from this computer");
+        assert!(row.what.starts_with("shared"));
+        assert!(!row.line().contains("pushed"));
+    }
+
+    #[test]
     fn row_text_covers_versions_files_size_and_reason() {
         let r = row_of(&rec(ChangeKind::Applied, "Bagnon", Some("RYZENFISH")));
         assert_eq!(

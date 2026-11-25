@@ -186,9 +186,7 @@ pub fn status_text(s: &UnitStatus) -> String {
             with.join(", ")
         ),
         UnitStatus::WaitingForWow => "New settings will be used when WoW closes".into(),
-        UnitStatus::WaitingForSharedCopy => {
-            "The shared settings have not arrived yet; they will be used once they do".into()
-        }
+        UnitStatus::WaitingForSharedCopy => "Waiting for the shared settings to arrive".into(),
     }
 }
 
@@ -1562,6 +1560,21 @@ mod tests {
             status_text(&UnitStatus::WaitingForWow),
             "New settings will be used when WoW closes"
         );
+        assert_eq!(
+            status_text(&UnitStatus::WaitingForSharedCopy),
+            "Waiting for the shared settings to arrive"
+        );
+        assert!(urgency(&UnitStatus::WaitingForSharedCopy) > urgency(&UnitStatus::NoSharedCopy));
+        let mut w = world();
+        w.features.settings.enabled = true;
+        w.features.settings.units = vec![unit(UnitStatus::InSync { from: None }), {
+            let mut u = unit(UnitStatus::WaitingForSharedCopy);
+            u.unit.identity = Identity::account("ZED").unwrap();
+            u
+        }];
+        let line = addon_settings_line(&w, "Details");
+        assert_eq!(line, "Waiting for the shared settings to arrive");
+        assert!(!line.contains("up to date"));
         assert!(urgency(&UnitStatus::TooLarge { size: None }) > urgency(&UnitStatus::NoSharedCopy));
     }
 
