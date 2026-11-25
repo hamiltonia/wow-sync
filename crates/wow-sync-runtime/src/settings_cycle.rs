@@ -1225,6 +1225,7 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                     pinned: false,
                     authority_since: None,
                     kept: Vec::new(),
+                    pending_selection: None,
                 });
                 local.units.len() - 1
             }
@@ -1317,9 +1318,20 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
         // basis predates that record (the basis only advances once the copy is applied), so the
         // not-yet-applied selection must not read as a concurrent local edit: apply it, and
         // never republish the file the app is about to overwrite (G13).
+        // The live file is the stale one the selection supersedes, or a shared copy this
+        // computer applied itself; anything else is a genuine edit made after the selection.
+        let stale_or_applied = live.is_some_and(|l| {
+            local.units[li].pending_selection.is_some()
+                && (Some(l) == local.units[li].pending_selection
+                    || plane.ledger.entries().any(|e| {
+                        matches!(plane.ledger.record(&e.hash),
+                            Some(AuthorityRecord::SettingsRevision(r)) if r.checkpoint == l && r.unit == unit)
+                    }))
+        });
         let case = match (&case, graph.head_states.len()) {
             (Case::LocalDifferent(LocalReason::ConcurrentPush), 1)
                 if is_authority
+                    && stale_or_applied
                     && !graph.heads.is_empty()
                     && graph.heads.iter().all(|h| {
                         matches!(plane.ledger.record(h),
@@ -1347,6 +1359,12 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
             Case::NoSharedCopy if live.is_some() => Some(UnitFact::NoSharedCopy),
             _ => None,
         };
+        // The pending own selection is spent once applied, or once a different edit shows up.
+        if local.units[li].pending_selection.is_some()
+            && (matches!(case, Case::InSync { .. }) || !stale_or_applied)
+        {
+            local.units[li].pending_selection = None;
+        }
         if let Some(f) = fact {
             out.facts.units.insert(unit.clone(), f);
         }
@@ -1878,11 +1896,18 @@ pub fn settings_units(
             let status = if matches!(
                 status,
                 SettingsUnitStatus::Active | SettingsUnitStatus::InSync
-            ) && facts
-                .seen_heads
-                .get(&unit)
-                .is_some_and(|seen| *seen != graph.heads)
-            {
+            ) && match facts.seen_heads.get(&unit) {
+                Some(seen) => *seen != graph.heads,
+                // Not evaluated since the start: up to date only once the basis names the heads.
+                None => {
+                    !graph.heads.is_empty()
+                        && local
+                            .units
+                            .iter()
+                            .find(|u| u.unit == unit)
+                            .is_some_and(|u| u.basis != graph.heads)
+                }
+            } {
                 SettingsUnitStatus::WaitingForSharedCopy
             } else {
                 status
