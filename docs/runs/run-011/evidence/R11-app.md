@@ -101,3 +101,21 @@ Each was viewed and contains only synthetic names (A-demo, B-demo, ACCOUNTONE, A
 - Decision: first adoption = `!group_has_shared_settings`. Why: the runtime now says so. Reversible: yes.
 - Decision: a single `ShareSettingsNow` with the ticked units, after the policy. Why: matches the runtime API; a refusal shows once. Reversible: yes.
 - Decision: share-candidate lines use the add-on title when known, else the folder name. Why: plain words. Reversible: yes.
+## Live lab run (synthetic names, own lab, v0.4.0 debug build)
+
+Screenshots (privacy-checked by viewing): b-master-confirm, a-master-confirm-nonfirst, b-bagnon-waiting, b-ss-localdiff-suspect, b-restore-confirm.
+
+Observed working: master confirmation on first adoption lists 16 units with "Share these now: yes" and publishing created 16 revisions; the peer applied them; non-first adoption defaulted to "no" and, ticked, published only the missing character's units; a missing character shows "Waiting for <character> to log in on this computer" while other units are up to date; a locally edited file shows "Changed here, not shared" with "Use shared settings", which replaced it with the shared copy; an emptied file with a .bak shows "This add-on's settings file looks damaged; it was not shared"; "Restore this computer's copy from <day>" confirmed and restored the file (33 to 50 bytes).
+Fixed in app: confirmation read "copy of copy from ..."; now "Restore this computer's copy from ...". Test extended (not mutation-run separately; old text fails the new assertion by construction).
+Both tiers pass.
+
+### Defects for the runtime (steps / expected / actual)
+- D1: Guided consent on first adoption, before settings sync is on: expected a "Share these now" list ticked by default (OD-23); actual `to_share` empty, no list, nothing shared. Units only exist once settings sync is enabled.
+- D2: Publishing via ShareSettingsNow (16 revisions), a peer applying them, and a later push produced no settings rows in Activity or changes.jsonl; expected "Saved settings shared/applied" rows with identity detail. Only add-on code rows appeared.
+- D3: Phase::Settings progress text not observed; passes finished too fast to catch (not verified).
+- D4 (app wording): "Settings up to date (from <this computer's own name>)" on the master; consider omitting self as source. Not changed.
+- Observation: Add-ons list shows the worst unit status per add-on (e.g. "Waiting for a character" although most units are in sync). A UIA click on the confirm button once appeared to do nothing; not reproducible.
+
+### Decisions
+- Decision: drop "of" in the local-copy restore sentence. Why: label already says "copy from <day>". Reversible: yes.
+- Decision: leave D4 unchanged. Why: runtime/design question about self-source; low impact. Reversible: yes.

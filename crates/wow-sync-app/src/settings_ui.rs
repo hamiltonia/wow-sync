@@ -254,7 +254,7 @@ pub fn restore_controls(w: &World, row: &UnitRow) -> Vec<(Control, String)> {
         .map(|(c, mine)| {
             let confirm = if mine {
                 format!(
-                    "Restore this computer's copy of {} for {}? The settings used now are kept as a recovery copy.",
+                    "Restore this computer's {} for {}? The settings used now are kept as a recovery copy.",
                     c.label,
                     identity_words(&row.unit)
                 )
@@ -1684,6 +1684,9 @@ mod tests {
         let rs = restore_controls(&w, &r);
         assert_eq!(rs.len(), 1);
         assert_eq!(rs[0].0.label, "Restore this computer's copy from 1 Jan…");
+        assert!(rs[0]
+            .1
+            .starts_with("Restore this computer's copy from 1 Jan for "));
         assert_eq!(
             rs[0].0.action,
             Ok(GroupAction::RestoreSettings {
