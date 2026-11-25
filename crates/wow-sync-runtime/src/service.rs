@@ -3193,8 +3193,14 @@ impl SliceService {
                 let mut settings_info = BTreeMap::new();
                 let settings_ops = if w.standing == OwnStanding::Active && !game_blocks {
                     let hub = self.progress.clone();
-                    let tick = |done: u64, total: u64, current: Option<&str>| {
-                        crate::tracking::settings_step(&hub, pass_id, done, total, current);
+                    let tick = |done: u64,
+                                total: u64,
+                                current: Option<&str>,
+                                from: Option<&ComputerId>| {
+                        let source = from
+                            .and_then(|c| w.names.get(c))
+                            .map(|n| crate::changes::clip(n));
+                        crate::tracking::settings_step(&hub, pass_id, done, total, current, source);
                     };
                     let out = crate::settings_cycle::settings_cycle(
                         &mut self.plane,

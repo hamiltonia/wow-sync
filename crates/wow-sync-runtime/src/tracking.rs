@@ -69,12 +69,19 @@ pub(crate) fn settings_step(
     done: u64,
     total: u64,
     current: Option<&str>,
+    source: Option<String>,
 ) {
     let mut e = blank(pass_id, Phase::Settings);
     e.items_done = done;
     e.items_total = total.max(done);
     e.current = current.map(str::to_string);
-    hub.emit_throttled(e);
+    e.source = source.map(crate::history::ChangeSource::Computer);
+    if e.source.is_some() {
+        // Naming where a replacement comes from is never dropped by the throttle.
+        hub.emit(e);
+    } else {
+        hub.emit_throttled(e);
+    }
 }
 
 /// Polls a scan's file counter and reports it while a scan runs.
@@ -448,6 +455,20 @@ mod tests {
     use crate::history::{ChangeReason, FileCounts, VersionLabel};
     use wow_sync_core::paths::validate_folder_name;
 
+    #[test]
+    fn settings_progress_reports_units_name_and_origin() {
+        let hub = ProgressHub::with_min_interval(Duration::ZERO);
+        let rx = hub.subscribe();
+        settings_step(&hub, 7, 2, 5, Some("Alpha"), None);
+        settings_step(&hub, 7, 3, 5, Some("Beta"), Some("Desk".into()));
+        let ev: Vec<_> = rx.try_iter().collect();
+        assert_eq!(ev.len(), 2);
+        assert_eq!(ev[0].phase, Phase::Settings);
+        assert_eq!((ev[0].items_done, ev[0].items_total), (2, 5));
+        assert_eq!(ev[0].current.as_deref(), Some("Alpha"));
+        assert_eq!(ev[0].source, None);
+        assert_eq!(ev[1].source, Some(ChangeSource::Computer("Desk".into())));
+    }
     fn item(name: &str, source: ChangeSource) -> (String, Item) {
         let record = ChangeRecord {
             unix_ms: 1,

@@ -18,7 +18,7 @@ use wow_sync_adapters::wtf::scan_wtf;
 use wow_sync_adapters::FsError;
 use wow_sync_core::authority::AuthorityRecord;
 use wow_sync_core::hash::sha256;
-use wow_sync_core::ids::{CheckpointRef, GroupId, OpId, SettingsUnit, Sha256};
+use wow_sync_core::ids::{CheckpointRef, ComputerId, GroupId, OpId, SettingsUnit, Sha256};
 use wow_sync_core::kinds::{EnrollmentRef, Issuer};
 use wow_sync_core::layout;
 use wow_sync_core::ledger::derive;
@@ -544,7 +544,9 @@ pub(crate) struct StepArgs<'a> {
     pub decls: &'a [DeclaringFolder],
     pub game_blocks: bool,
     /// Reports progress: units done, units in all, the add-on being worked on.
-    pub tick: &'a dyn Fn(u64, u64, Option<&str>),
+    /// Progress: units done, units total, the add-on, and the computer a revision being applied
+    /// came from (None for local capture or publish).
+    pub tick: &'a dyn Fn(u64, u64, Option<&str>, Option<&ComputerId>),
 }
 
 #[derive(Debug, Default)]
@@ -658,7 +660,7 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
     let total = units.len() as u64;
     out.considered = units.len();
     for (n, unit) in units.into_iter().enumerate() {
-        (a.tick)(n as u64, total, None);
+        (a.tick)(n as u64, total, None, None);
         if scope.blocked.contains(&unit) {
             continue;
         }
@@ -675,6 +677,7 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
             n as u64,
             total,
             Some(&crate::detail::strip_colour_codes(&name)),
+            None,
         );
         let Some(rel) = unit_rel(&unit, &name) else {
             continue;
@@ -884,6 +887,24 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                         .push(format!("{name}: shared settings are not available yet"));
                     continue;
                 };
+                let origin =
+                    plane
+                        .ledger
+                        .entries()
+                        .find_map(|e| match plane.ledger.record(&e.hash) {
+                            Some(AuthorityRecord::SettingsRevision(r))
+                                if r.checkpoint == to && r.unit == unit =>
+                            {
+                                Some(r.issuer.computer_id.clone())
+                            }
+                            _ => None,
+                        });
+                (a.tick)(
+                    n as u64,
+                    total,
+                    Some(&crate::detail::strip_colour_codes(&name)),
+                    origin.as_ref().filter(|c| **c != a.own.computer_id),
+                );
                 let op = OpId::parse(&random_id_hex()).expect("random id");
                 if let Some((nb, ns)) = manifest_file(a.provider, &to, &unit) {
                     out.apply_info.insert(

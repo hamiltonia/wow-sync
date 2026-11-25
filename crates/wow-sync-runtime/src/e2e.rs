@@ -3685,6 +3685,60 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_variable_declared_by_two_addons_is_owned_by_several_and_publishes_nothing() {
+        use crate::settings_cycle::SettingsUnitStatus as S;
+        let lab = Lab::new();
+        let (mut a, _b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        a.addon_with("Gamma", "gamma-v1", SV_TOC);
+        synced(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        write_wtf(&a, "Gamma", "AlphaDB = { v = 9 }\n");
+        synced(&mut a);
+        synced(&mut a);
+        let rows = a.svc.status().settings_units;
+        let several: Vec<_> = rows
+            .iter()
+            .filter(|r| r.status == S::OwnedBySeveral)
+            .collect();
+        assert!(!several.is_empty(), "{rows:?}");
+        assert!(
+            several
+                .iter()
+                .any(|r| r.shared_with.iter().any(|n| n == "Gamma")),
+            "{several:?}"
+        );
+        assert!(a.svc.settings_history(&alpha_unit()).is_empty());
+    }
+
+    #[test]
+    fn settings_progress_counts_units_names_the_addon_and_the_origin_when_applying() {
+        use crate::history::Phase;
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let rx_a = a.svc.progress_hub().subscribe();
+        let rx_b = b.svc.progress_hub().subscribe();
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        let on_a: Vec<_> = rx_a
+            .try_iter()
+            .filter(|e| e.phase == Phase::Settings && e.completed.is_none())
+            .collect();
+        assert!(on_a.iter().all(|e| e.source.is_none()), "{on_a:?}");
+        let on_b: Vec<_> = rx_b
+            .try_iter()
+            .filter(|e| e.phase == Phase::Settings)
+            .collect();
+        assert!(
+            on_b.iter().any(|e| e.current.as_deref() == Some("Alpha")
+                && e.source == Some(ChangeSource::Computer("a".into()))),
+            "{on_b:?}"
+        );
+    }
+
     fn alpha_unit() -> wow_sync_core::ids::SettingsUnit {
         wow_sync_core::ids::SettingsUnit {
             folder: wow_sync_core::paths::validate_folder_name("Alpha").unwrap(),
