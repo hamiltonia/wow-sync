@@ -1048,6 +1048,7 @@ tests = [
     "effects::tests::a_settings_failure_names_no_account_realm_character_or_path",
     "exec::tests::v2::settings_and_code_recovery_points_never_evict_each_other",
     "fs_install::tests::a_move_never_replaces_a_file_created_after_the_check",
+    "plan::tests::lazy_publish_yields_the_same_objects_as_the_full_plan",
     "e2e::tests::change_history::explicit_pushes_and_peer_applies_are_recorded_with_versions_size_and_identity",
     "e2e::tests::change_history::share_these_now_ticked_at_consent_pushes_the_first_captures_once",
     "stream_guard::a_large_settings_file_is_hashed_stored_uploaded_and_staged_in_fixed_buffers",

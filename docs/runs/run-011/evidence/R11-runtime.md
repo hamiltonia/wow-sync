@@ -165,3 +165,19 @@ Same lab and real release app, only the big file shrunk to 100 KB (one byte edit
 | 31.9 MiB | 57 MiB | 86 MiB | 29 MiB | 117 MiB |
 | 100 KB | 73 MiB | 99 MiB | 26 MiB | 121 MiB |
 The rise is the same with a tiny file, so it is not proportional to file size and nothing in the settings path still reads whole files; it comes from the app's per-pass work on the 113-add-on lab (status snapshots / GUI), not from file contents. Idle varies run to run (57-94 MiB), and the 100 KB run peaked at 99 MiB, close to the 100 MiB gate: the headroom is thin and comes from the app baseline, which is outside the runtime's files. Flagged as an open issue for R11-app / the owner.
+
+### Memory regression investigation (private working set, same 113-add-on / 36k-file lab, real release app)
+
+| Variant | Idle | Pass peak |
+|---|---|---|
+| (a) v0.3.3 (settings state removed) | 76.2 MiB | 76.4 MiB |
+| (b) main, settings off | 79.4 | 79.6 |
+| (c) main, settings on (before) | 87.0 | 98.3 |
+| (c) after lazy publish (this change) | 74.7 | 83.2 |
+
+Findings: the regression predates run-011 (v0.3.3 is already 76 MiB on this lab; earlier 37-40 MiB figures were from labs with ~130 files; here per-file memory dominates, and about 24 MiB is GUI native memory). Settings added ~8 MiB at idle and ~11-19 MiB per edit pass, because a settings publish moves the authority head and so re-plans a full code-state publish, which built every object for all 113 folders at once (encoded trees ~12 MiB, ~36k ObjectRefs ~16 MiB, a full inventory clone ~4 MiB; ~33 MiB at the heap peak).
+Fix: the code publish now streams its objects one folder at a time (blobs, then that folder's tree, state record last) and its state carries no local file lists. Result: (c) pass peak 98.3 -> 83.2 MiB, now about the same as settings off (79.6). The 70 MiB target is NOT reached: the remaining ~76 MiB is the pre-existing per-file baseline (scan/inventory/hash-cache transients and GUI), which would need a separate reduction pass (Arc'd scans, no tree decode for unchanged trees); not attempted here.
+
+- Decision: stream publish objects lazily; keep `plan_publish` returning full objects for tests. Why: removes the largest transient (~25 MiB). Reversible: yes.
+- Decision: a source file whose hash no longer matches at upload aborts the publish as Unstable (was a failure). Why: same meaning as the existing source-changed check. Reversible: yes.
+- Heap harness `examples/heap_lab.rs` (lab path as argument) is committed.
