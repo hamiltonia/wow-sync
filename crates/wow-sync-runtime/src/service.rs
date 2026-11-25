@@ -49,7 +49,8 @@ use wow_sync_core::decision::{
     DecideError, DecideOutcome, DecisionEffect, DecisionId, DecisionScope, FreshEvidence,
 };
 use wow_sync_core::exec::{
-    apply_report, recover_interrupted, run_apply, run_publish, ApplyEffects, PublishOutcome,
+    apply_report, recover_interrupted, run_apply, run_publish, ApplyEffects, PackageResult,
+    PublishOutcome,
 };
 use wow_sync_core::explain;
 use wow_sync_core::hooks::RemovalHooks;
@@ -496,6 +497,8 @@ struct World {
 pub struct SliceService {
     cfg: ServiceConfig,
     activity: Box<dyn ActivitySource>,
+    progress: crate::history::ProgressHub,
+    scan_total_hint: u64,
     hooks: Hooks,
     fault: FaultPlan,
     state: LocalState,
@@ -568,6 +571,8 @@ impl SliceService {
         Ok(SliceService {
             cfg,
             activity,
+            progress: crate::history::ProgressHub::new(),
+            scan_total_hint: 0,
             hooks: Hooks::default(),
             fault: FaultPlan::default(),
             state,
@@ -1494,6 +1499,12 @@ impl SliceService {
                     .save(&self.state)
                     .map_err(|e| CommandError::Service(e.to_string()))?;
                 self.reserve_seq(&w, seq)?;
+                if let AuthorityRecord::CodeChoice(c) = &*rec {
+                    if let Some(k) = crate::changes::kept((now_unix_ms() as u64, now_unix_ms()), c)
+                    {
+                        crate::history::record_change(&self.state, &k);
+                    }
+                }
                 Ok(CommandOutcome::Written(h))
             }
             Routed::Keep(rec, why) => {
@@ -3019,9 +3030,25 @@ impl SliceService {
     pub fn sync_once(&mut self) -> Result<SyncReport, ServiceError> {
         let mut report = SyncReport::default();
         self.at_risk_apply.clear();
-        let mut w = match self.observe_world(true) {
+        let pass_id = now_unix_ms() as u64;
+        let _pass = crate::tracking::PassGuard::start(&self.progress, pass_id);
+        let scan_total = self.scan_total_hint;
+        let observed = {
+            let _tick = crate::tracking::ScanTicker::start(
+                &self.progress,
+                pass_id,
+                self.read_ctl.files.clone(),
+                scan_total,
+            );
+            self.observe_world(true)
+        };
+        let mut w = match observed {
             Ok(w) => {
                 self.provider_error = None;
+                self.scan_total_hint = self
+                    .read_ctl
+                    .files
+                    .load(std::sync::atomic::Ordering::Relaxed);
                 w
             }
             Err(ServiceError::NotEnrolled) => return Err(ServiceError::NotEnrolled),
@@ -3049,9 +3076,16 @@ impl SliceService {
         self.settle_kept(&w, &provider);
         Self::hide_scopes(&mut w, &answered);
         self.hide_answered(&mut w);
+        crate::tracking::phase(&self.progress, pass_id, crate::history::Phase::Deciding);
+        let mut decided: BTreeSet<FolderKey> = answered.iter().flatten().cloned().collect();
         if w.standing == OwnStanding::Active {
             let (items, plans): (Vec<_>, Vec<_>) =
                 std::mem::take(&mut w.offers).into_iter().unzip();
+            for it in &items {
+                if let DecisionScope::Folders(keys) = &it.scope {
+                    decided.extend(keys.iter().cloned());
+                }
+            }
             self.offer_decisions(items, plans.into_iter().flatten().collect());
         } else {
             self.offer_decisions(vec![], vec![]);
@@ -3162,6 +3196,24 @@ impl SliceService {
                         },
                         &mut next_seq,
                     );
+                    for h in &out.published {
+                        if let Some(AuthorityRecord::SettingsRevision(r)) =
+                            self.plane.ledger.record(h)
+                        {
+                            crate::history::record_change(
+                                &self.state,
+                                &crate::changes::settings_published(
+                                    (pass_id, now_unix_ms()),
+                                    r,
+                                    crate::changes::display_of(
+                                        &w.titles,
+                                        &w.inventory,
+                                        &r.unit.folder,
+                                    ),
+                                ),
+                            );
+                        }
+                    }
                     out.applies
                 } else {
                     Vec::new()
@@ -3343,6 +3395,34 @@ impl SliceService {
                 match planned {
                     None => {}
                     Some(plan) => {
+                        let prepared = {
+                            let cx = crate::changes::BuildCx {
+                                inventory: &w.inventory,
+                                target: &apply_target,
+                                names: &w.names,
+                                own: &w.computer.computer_id,
+                                titles: &w.titles,
+                                ledger: &self.plane.ledger,
+                                pass_id,
+                                now_ms: now_unix_ms(),
+                            };
+                            plan.packages
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(i, p)| {
+                                    crate::changes::prepare(p, &cx).map(|r| (i, r))
+                                })
+                                .collect::<Vec<_>>()
+                        };
+                        let progress = crate::tracking::ApplyProgress::new(
+                            &self.progress,
+                            pass_id,
+                            &self.state,
+                            &plan,
+                            prepared,
+                        );
+                        fx.inner_mut().set_reporting(progress.clone());
+                        progress.announce(&decided);
                         for (k, why) in &plan.skipped {
                             report.applied.push(AppliedLine {
                                 package: k.to_string(),
@@ -3350,6 +3430,13 @@ impl SliceService {
                             });
                         }
                         let outcome = run_apply(&plan, &mut fx);
+                        progress.complete_keys(
+                            outcome
+                                .packages
+                                .iter()
+                                .filter(|(_, r)| matches!(r, PackageResult::Applied { .. }))
+                                .map(|(k, _)| k),
+                        );
                         self.at_risk_apply = crate::notices::risks_from_outcome(&outcome);
                         for (k, r) in &outcome.packages {
                             report.applied.push(AppliedLine {
@@ -3465,6 +3552,17 @@ impl SliceService {
                 // The crash budget counts across the whole cycle.
                 let mut fx = Faulty::new(real, self.fault, &mut self.hooks).starting_at(used);
                 let mut last_publish = None;
+                crate::tracking::phase(&self.progress, pass_id, crate::history::Phase::Publishing);
+                let applied_keys: BTreeSet<FolderKey> = applied_plan
+                    .iter()
+                    .flat_map(|p| p.packages.iter())
+                    .flat_map(|q| {
+                        std::iter::once(q.package.clone())
+                            .chain(q.folders.iter().map(|f| f.key.clone()))
+                    })
+                    .collect();
+                let publishing = crate::tracking::PublishProgress::new(&self.progress, pass_id);
+                fx.inner_mut().set_publishing(publishing.clone());
                 Self::publish_step(
                     &self.cfg,
                     &self.state,
@@ -3476,6 +3574,7 @@ impl SliceService {
                     journals_remaining,
                     &mut fx,
                     &mut report,
+                    (&publishing, (pass_id, now_unix_ms()), &applied_keys),
                 );
                 report.crashed = fx.crashed();
                 if last_publish.is_some() {
@@ -3707,6 +3806,11 @@ impl SliceService {
         journals_remaining: bool,
         fx: &mut E,
         report: &mut SyncReport,
+        track: (
+            &crate::tracking::PublishProgress,
+            (u64, i64),
+            &BTreeSet<FolderKey>,
+        ),
     ) {
         if journals_remaining {
             report.publish_note =
@@ -3810,6 +3914,7 @@ impl SliceService {
             }
         };
         // The sequence number is persisted before anything is published so it is never reused.
+        track.0.set_total(plan.objects.len() as u64);
         let mut le = w.enrollment.clone();
         le.next_seq = seq + 1;
         if state.write_atomic("enrollment.json", &encode(&le)).is_err() {
@@ -3818,6 +3923,11 @@ impl SliceService {
         }
         match run_publish(&plan, &mut ctx, fx) {
             PublishOutcome::Published { uploaded, .. } => {
+                for rec in
+                    crate::changes::published(track.1, w.own_latest.as_ref(), &publishable, track.2)
+                {
+                    crate::history::record_change(state, &rec);
+                }
                 *last_publish = Some(now_unix_ms());
                 plane.mark_listed(&own_index.newly, seq);
                 let _ = plane.save(state);
@@ -3895,6 +4005,27 @@ impl SliceService {
     }
 
     /// Newest first (UG-7).
+    /// The progress stream; clone it to subscribe from another thread.
+    pub fn progress_hub(&self) -> crate::history::ProgressHub {
+        self.progress.clone()
+    }
+
+    pub fn history(&self, limit: usize) -> Vec<crate::history::HistoryItem> {
+        crate::history::history(&self.state, limit)
+    }
+
+    pub fn changes_by_pass(&self, limit: usize) -> Vec<crate::history::PassGroup> {
+        crate::history::changes_by_pass(&self.state, limit)
+    }
+
+    pub fn package_changes(
+        &self,
+        package: &str,
+        limit: usize,
+    ) -> Vec<crate::history::ChangeRecord> {
+        crate::history::changes_for_package(&self.state, package, limit)
+    }
+
     pub fn activity_log(&self, limit: usize) -> Vec<crate::control::ActivityEntry> {
         crate::control::read_activity(&self.state, limit)
     }

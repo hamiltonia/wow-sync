@@ -6760,4 +6760,229 @@ mod tests {
             assert!(!bad.exists(), "nothing is written into {forbidden:?}");
         }
     }
+
+    mod change_history {
+        use super::*;
+        use crate::history::{HistoryItem, Phase};
+
+        fn changes(pc: &Pc) -> Vec<ChangeRecord> {
+            pc.svc
+                .history(100)
+                .into_iter()
+                .filter_map(|i| match i {
+                    HistoryItem::Change(c) => Some(c),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        #[test]
+        fn an_install_then_an_update_record_source_versions_counts_and_reason() {
+            let lab = Lab::new();
+            let mut a = lab.pc("a");
+            let mut b = lab.pc("b");
+            a.addon("Alpha", "alpha-v1");
+            let g = a.create();
+            synced(&mut a);
+            b.join(&g);
+            synced(&mut b);
+            let first = changes(&b);
+            let rec = first
+                .iter()
+                .find(|c| c.kind == ChangeKind::InstalledNew)
+                .unwrap_or_else(|| panic!("{first:?}"));
+            assert_eq!(rec.source, ChangeSource::Computer("a".into()));
+            assert_eq!(rec.old_version, VersionLabel::New);
+            assert_eq!(rec.new_version, VersionLabel::Toc("2.0".into()));
+            assert_eq!(rec.files.added, 2);
+            assert!(rec.byte_delta > 0);
+            assert_eq!(rec.reason, ChangeReason::NewerRelease);
+            assert!(rec.paths.contains(&"main.lua".to_string()), "{rec:?}");
+
+            a.addon("Alpha", "alpha-v2");
+            synced(&mut a);
+            synced(&mut b);
+            let all = changes(&b);
+            let upd = all
+                .iter()
+                .find(|c| c.kind == ChangeKind::Applied)
+                .unwrap_or_else(|| panic!("{all:?}"));
+            assert_eq!(upd.source, ChangeSource::Computer("a".into()));
+            assert_eq!(upd.old_version, VersionLabel::Toc("2.0".into()));
+            assert_eq!(upd.new_version, VersionLabel::Toc("3.0".into()));
+            assert_eq!(upd.files.changed, 2, "{upd:?}");
+            assert_eq!(upd.files.added + upd.files.removed, 0);
+            assert!(upd.unix_ms >= rec.unix_ms);
+
+            b.restart();
+            assert_eq!(changes(&b), all, "records survive a restart");
+            let json = format!("{all:?}");
+            assert!(!json.contains(&b.install.addons.to_string_lossy().to_string()));
+        }
+
+        #[test]
+        fn a_removal_is_recorded_with_its_author_and_no_new_version() {
+            let lab = Lab::new();
+            let mut a = lab.pc("a");
+            let mut b = lab.pc("b");
+            let g = a.create();
+            b.addon("Alpha", "alpha-v1");
+            b.join(&g);
+            synced(&mut b);
+            a_removes_alpha(&mut a, &g);
+            synced(&mut b);
+            let all = changes(&b);
+            let rm = all
+                .iter()
+                .find(|c| c.kind == ChangeKind::Removed)
+                .unwrap_or_else(|| panic!("{all:?}"));
+            assert_eq!(rm.new_version, VersionLabel::Removed);
+            assert_eq!(rm.reason, ChangeReason::Removal);
+            assert_eq!(rm.source, ChangeSource::Computer("a".into()));
+            assert!(rm.files.removed >= 1);
+            assert!(rm.byte_delta < 0);
+        }
+
+        #[test]
+        fn progress_runs_scanning_to_idle_in_order_and_reports_each_record() {
+            let lab = Lab::new();
+            let mut a = lab.pc("a");
+            let mut b = lab.pc("b");
+            a.addon("Alpha", "alpha-v1");
+            a.addon("Beta", "beta-v1");
+            let g = a.create();
+            synced(&mut a);
+            b.join(&g);
+            let rx = b.svc.progress_hub().subscribe();
+            synced(&mut b);
+            let events: Vec<_> = rx.try_iter().collect();
+            let first = events.first().expect("events");
+            assert_eq!(first.phase, Phase::Scanning);
+            assert_eq!(first.items_done, 0);
+            assert_eq!(events.last().unwrap().phase, Phase::Idle);
+            assert!(events.windows(2).all(|w| w[0].seq < w[1].seq));
+            assert!(events.iter().all(|e| e.pass_id == first.pass_id));
+            let done: Vec<_> = events.iter().filter_map(|e| e.completed.as_ref()).collect();
+            assert_eq!(done.len(), 2, "{done:?}");
+            let inc = events
+                .iter()
+                .find_map(|e| e.incoming.as_ref())
+                .expect("a two add-on apply is summarised");
+            assert_eq!(inc.addons, 2);
+            assert_eq!(inc.source, Some(ChangeSource::Computer("a".into())));
+            assert!(events.iter().any(|e| e.phase == Phase::Installing));
+            assert!(events.iter().any(|e| e.phase == Phase::Publishing));
+            assert_eq!(
+                b.svc
+                    .history(100)
+                    .into_iter()
+                    .filter(|i| matches!(i, HistoryItem::Change(c) if c.kind == ChangeKind::InstalledNew))
+                    .count(),
+                2
+            );
+        }
+
+        #[test]
+        fn a_rollback_a_restore_and_a_settings_change_are_recorded_with_their_reasons() {
+            use wow_sync_core::hash::package_hash;
+            let lab = Lab::new();
+            let (_a, mut b, c, g) = alpha_v2_published(&lab);
+            let v1 = alpha_folder(&lab, &g, &c);
+            let v1_hash = package_hash(&[(v1.key.clone(), v1.tree.unwrap())]);
+            synced(&mut b);
+            b.svc
+                .command(Command::Rollback {
+                    package: v1.key.clone(),
+                    recovered: v1_hash,
+                })
+                .unwrap();
+            synced(&mut b);
+            let all = changes(&b);
+            let rb = all
+                .iter()
+                .find(|c| c.kind == ChangeKind::RolledBack)
+                .unwrap_or_else(|| panic!("{all:?}"));
+            assert_eq!(rb.reason, ChangeReason::Rollback);
+            assert_eq!(rb.source, ChangeSource::ThisComputer);
+            assert_eq!(rb.files.changed, 2, "{rb:?}");
+            assert_ne!(rb.old_version, rb.new_version);
+        }
+
+        #[test]
+        fn a_restore_is_recorded_as_a_recovery() {
+            let lab = Lab::new();
+            let mut a = lab.pc("a");
+            let mut b = lab.pc("b");
+            a.addon("Alpha", "alpha-v1");
+            let g = a.create();
+            synced(&mut a);
+            b.join(&g);
+            synced(&mut b);
+            a_removes_alpha(&mut a, &g);
+            let (ac, _) = pc_ids(&a);
+            let removal = removal_hash(&lab, &g, &ac);
+            synced(&mut b);
+            b.svc.command(Command::RestoreRemoved { removal }).unwrap();
+            for _ in 0..3 {
+                synced(&mut b);
+                synced(&mut a);
+            }
+            let all = changes(&b);
+            let r = all
+                .iter()
+                .find(|c| c.kind == ChangeKind::RecoveryRestored)
+                .unwrap_or_else(|| panic!("{all:?}"));
+            assert_eq!(r.reason, ChangeReason::Recovery);
+            assert_eq!(r.source, ChangeSource::ThisComputer);
+            assert_eq!(r.old_version, VersionLabel::New);
+            assert_eq!(r.files.added, 2, "{r:?}");
+            assert!(
+                matches!(&r.new_version, VersionLabel::ContentId(s) if s.len() == 8),
+                "{r:?}"
+            );
+        }
+
+        #[test]
+        fn a_masters_settings_change_is_recorded_on_both_computers_without_paths() {
+            let lab = Lab::new();
+            let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+            write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+            synced(&mut a);
+            write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+            synced(&mut a);
+            synced(&mut b);
+            let on_b = changes(&b);
+            let got = on_b
+                .iter()
+                .find(|c| c.kind == ChangeKind::SettingsApplied)
+                .unwrap_or_else(|| panic!("{on_b:?}"));
+            assert_eq!(got.source, ChangeSource::Computer("a".into()));
+            assert_eq!(got.reason, ChangeReason::SettingsMaster);
+            assert_eq!(got.name, "Alpha settings");
+            assert_eq!(got.files.changed, 1);
+            assert!(got.paths.is_empty());
+            assert!(!format!("{got:?}").contains("ACC"));
+            let on_a = changes(&a);
+            let sent = on_a
+                .iter()
+                .find(|c| c.kind == ChangeKind::SettingsPublished)
+                .unwrap_or_else(|| panic!("{on_a:?}"));
+            assert_eq!(sent.source, ChangeSource::ThisComputer);
+        }
+
+        #[test]
+        fn older_audit_lines_still_appear_in_the_history() {
+            let lab = Lab::new();
+            let mut a = lab.pc("a");
+            a.create();
+            a.addon("Alpha", "alpha-v1");
+            synced(&mut a);
+            let st = LocalState::open_at(&a.cfg.state_dir).unwrap();
+            crate::control::log_activity(&st, "recovered", None, "an older line");
+            let h = a.svc.history(50);
+            assert!(h
+                .iter()
+                .any(|i| matches!(i, HistoryItem::Legacy(e) if e.text == "an older line")));
+        }
+    }
 }
