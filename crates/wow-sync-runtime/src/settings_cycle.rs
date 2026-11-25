@@ -256,6 +256,33 @@ pub(crate) fn issued_by_master(
     }
 }
 
+/// A checkpoint's total size. A checkpoint id is its content hash, so the size never changes
+/// and is remembered for the process (bounded) instead of re-reading the manifest every pass.
+fn checkpoint_size(
+    provider: &ProviderRoot,
+    checkpoint: &CheckpointRef,
+    unit: &SettingsUnit,
+) -> Option<u64> {
+    static SIZES: std::sync::Mutex<Option<std::collections::HashMap<CheckpointRef, u64>>> =
+        std::sync::Mutex::new(None);
+    if let Some(s) = SIZES
+        .lock()
+        .ok()?
+        .get_or_insert_with(Default::default)
+        .get(checkpoint)
+    {
+        return Some(*s);
+    }
+    let (_, size) = manifest_unit(provider, checkpoint, unit)?;
+    let mut g = SIZES.lock().ok()?;
+    let m = g.get_or_insert_with(Default::default);
+    if m.len() >= 4096 {
+        m.clear();
+    }
+    m.insert(*checkpoint, size);
+    Some(size)
+}
+
 /// The unit-level version of a checkpoint (its id) and the total size of all its files.
 pub(crate) fn manifest_unit(
     provider: &ProviderRoot,
@@ -1073,6 +1100,28 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                         .collect();
                     out.facts.units.insert(u.clone(), UnitFact::Several(others));
                 }
+                // Even with no file yet, the owner must see which add-ons share the variable.
+                for folder in folders {
+                    if scope.blocked.iter().any(|u| &u.folder == folder) {
+                        continue;
+                    }
+                    let others: Vec<String> = folders
+                        .iter()
+                        .filter(|f| *f != folder)
+                        .map(&display)
+                        .collect();
+                    for account in &included {
+                        if let Ok(identity) = wow_sync_core::ids::Identity::account(account) {
+                            out.facts.units.insert(
+                                SettingsUnit {
+                                    folder: folder.clone(),
+                                    identity,
+                                },
+                                UnitFact::Several(others.clone()),
+                            );
+                        }
+                    }
+                }
             }
             wow_sync_core::settings::ScopeDiagnosis::TooLarge { file, size } => {
                 for u in &scope.blocked {
@@ -1190,11 +1239,9 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
             }
         };
         let graph = graph_from_ledger(&plane.ledger, &derived, &unit);
-        if graph.head_states.len() > 1 {
-            for c in graph.head_states.keys() {
-                if let Some((_, size)) = manifest_unit(a.provider, c, &unit) {
-                    out.facts.sizes.insert(*c, size);
-                }
+        for rev in graph.nodes.values() {
+            if let Some(size) = checkpoint_size(a.provider, &rev.checkpoint, &unit) {
+                out.facts.sizes.insert(rev.checkpoint, size);
             }
         }
         let authority = authority_for(&heads, &unit.folder);
@@ -1707,6 +1754,19 @@ pub fn settings_units(
             let graph = graph_from_ledger(ledger, derived, &unit);
             let mut history = settings_history(ledger, derived, &unit);
             history.retain(|h| !facts.unavailable.contains(&h.checkpoint));
+            for h in &mut history {
+                if let Some(AuthorityRecord::SettingsRevision(rev)) = ledger.record(&h.hash) {
+                    h.origin = if issued_by_master(ledger, derived, rev) {
+                        HeadKind::MastersRevision
+                    } else if rev.issuer.computer_id == own.computer_id {
+                        HeadKind::ThisComputersCopy
+                    } else {
+                        HeadKind::SharedFrom
+                    };
+                    h.source = names.get(&rev.issuer.computer_id).cloned();
+                }
+                h.size_bytes = facts.sizes.get(&h.checkpoint).copied();
+            }
             let latest_capture = local
                 .units
                 .iter()
