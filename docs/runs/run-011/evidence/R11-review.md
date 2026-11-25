@@ -286,3 +286,121 @@ both apply correctly.
 | Probes | `cargo test -p wow-sync-runtime --lib rv11_probe -- --nocapture --test-threads=1` | 3 of 3 failed, confirming RV11-01, -02 and -03 (and RV11-04's status). The probes are reverted; `git status` was clean before this file was added. |
 | Offline | `cargo xtask verify --tier offline` | PASS (fmt, clippy, test, required-cases, deny, markdown-links). Run on `f3fc1a0` plus this file. |
 | Native | `cargo xtask verify --tier native` | Not run: this is a review-only change (one markdown file); the probes used the offline e2e harness. |
+
+## Round 2: recheck at `faddd5d`
+
+- Revision: `faddd5d`, which is `main` with `d9a2690` merged into `run011/R11-review`. Scope:
+  the RV11 fixes and the new code covered by OD-23 to OD-35.
+- Data boundaries: as in round 1. I used synthetic e2e labs only, and the logs are in
+  `D:\WoWSyncLab\R11-review\r2-*.log`.
+- Not reviewed: R11-runtime's in-flight round (the SharedFromHere reason, multi-file record
+  versions and the full-lab memory check).
+
+### Round 2 verdict
+
+**One new open major (RV11-12). No criticals.** All five round-1 majors are fixed. I confirmed each
+with the tests that were added for it, and I read the code paths they cover.
+
+### Status of the round-1 findings
+
+| ID | Was | Now | Evidence |
+| --- | --- | --- | --- |
+| RV11-01 | major | **Fixed** | Displaced copies are kept per unit (`kept`, newest 3) and shown as `local_copies`. `RestoreSettings` accepts them. Test `a_copy_replaced_by_the_masters_is_listed_restorable_and_survives_later_applies` (it is my round-1 scenario plus three more applies) passes. The app test `this_computers_replaced_copy_can_be_restored` passes. OD-20 is now confirmed. |
+| RV11-02 | major | **Fixed** | `settle_points` keeps `KEEP_RECOVERY` per `rp.class()` (`exec.rs:919-930`). Test `settings_and_code_recovery_points_never_evict_each_other` passes. |
+| RV11-03 | major | **Fixed** | `suspect_units` (`settings_cycle.rs:349`) waits for the settle period and looks a second time. Test `a_zero_byte_file_next_to_a_backup_is_suspect_and_never_published` passes. |
+| RV11-04 | major | **Fixed** | The statuses LocalDifferent, InSync, Suspect and the others are reported. Tests `a_local_edit_that_is_not_shared_is_local_different_not_syncing` and the app test `the_runtimes_new_statuses_and_local_copies_reach_the_controls` pass. |
+| RV11-05 | major | **Fixed** | OD-28 offers "Use shared settings" for every LocalDifferent reason. App test `every_local_difference_offers_share_and_use_shared` passes. |
+| RV11-06 | minor | **Fixed** | Being made master no longer publishes anything; sharing is an explicit "Share these now" (OD-23, OD-31, OD-33). Test `becoming_master_publishes_nothing_and_share_now_publishes_the_listed_units` passes. |
+| RV11-07 | minor | **Fixed, but see RV11-12** | Provider GC was added (OD-34), and the local store is pruned. |
+| RV11-08 | minor | **Fixed** | Test `a_settings_note_never_names_an_account_realm_or_character` passes. |
+| RV11-09 | minor | **Fixed** | `MoveFileExW` is called without `MOVEFILE_REPLACE_EXISTING` (`fs_install.rs:613-627`). |
+| RV11-10 | note | **Fixed** | Test `one_missing_character_waits_alone_and_everything_else_still_applies` passes. |
+
+### New findings
+
+#### RV11-12 (major): provider GC deletes a reused old blob that a newer revision needs
+
+- **What happens.**
+  - `upload_checkpoint` (`settings_cycle.rs:581-587`) skips any blob or manifest already on the
+    provider, so a reused object keeps its old mtime.
+  - `sweep_provider` (`settings_cycle.rs:502-541`) runs on every computer with consent. It deletes
+    any settings object older than `GC_MIN_AGE_MS` (30 days) that is outside its *own* ledger's
+    keep set: heads plus the newest `KEEP_CAPTURES` per unit.
+  - So when a computer republishes content that existed more than 30 days ago, the new revision
+    points at old objects. Examples: a setting toggled back, a restore of an old revision, or a
+    share of an old local copy. A peer whose ledger has not yet received that revision's record
+    sweeps those objects. Dropbox delivers files in no particular order, so the peer can get the
+    sweep stamp's turn before it gets the record.
+  - After that the revision is a dangling head. No computer re-uploads it, peers never apply it,
+    and the status shows **Active**, not a problem. This breaks A-12 (changes propagate) and the
+    honest-status rule.
+- **Probe.**
+  - A temporary e2e test, since reverted: `a` (master) publishes v0..v5 and `b` applies v5. All
+    provider settings files are aged to 60 days.
+  - `a` republishes `v = 1`. The provider still holds 12 files: the manifest and blob were
+    reused, not rewritten.
+  - The three new member records of `a` are held back to simulate Dropbox lag, `b`'s sweep stamp
+    is forgotten, and `b` syncs. The sweep leaves 6 files, deleting the `v = 1` objects.
+  - The records are then released and `b` syncs twice. `b` still has `v = 5`, and its status is
+    `Active`; the assertion for `v = 1` failed. The log is `D:\WoWSyncLab\R11-review\r2-gc.log`.
+- **Suggested fix.** Do both:
+  1. When `upload_checkpoint` reuses an existing object, refresh its mtime: rewrite it or touch
+     it, as a provider-allowed write of the uploader's own content.
+  2. In `sweep_provider`, keep every object referenced by any manifest on the provider that is
+     younger than the minimum age, not only the sweeper's own keep set.
+
+  A self-healing step would also help: when a head's blob is missing, the issuer re-uploads it
+  from its local store and the status says "shared settings are not available yet". Add the
+  probe above as a regression test.
+
+#### RV11-13 (minor): history can offer a restore that GC has made impossible
+
+- Every revision in the ledger history is listed as restorable (`restore_possible`,
+  `settings_cycle.rs:1565`).
+- The provider and local GC keep only heads plus the newest three per unit (`settings_cycle.rs:460-481`).
+- Restoring an older entry is refused with `UnknownCheckpoint` (`service.rs` `share_checkpoint`).
+  That is safe, but the GUI offers an action that cannot work.
+- Fix: mark history entries whose checkpoint is in neither the local store nor the provider as
+  not restorable, or list only the retained ones.
+
+#### RV11-14 (note): ShareSettingsWhenReady is not tied to master authority in the runtime
+
+- `share_when_ready` (`service.rs`, about line 1647) pushes every `NoSharedCopy` unit once facts
+  exist. It checks only the flag and consent; `ShareSettingsWhenReady` itself is refused without
+  consent (`NotAllowed`).
+- The app sends the command only when this computer is the chosen master (OD-33; app test
+  `the_guided_consent_pushes_only_when_this_computer_is_the_master`).
+- The risk is small:
+  - The flag is cleared after the first pass that has facts.
+  - Only units with no shared copy are pushed, so the push cannot override a master's copy.
+- Suggestion: drop the flag when the policy is not "this computer is master" at the time of use.
+
+#### RV11-15 (note): ShareSettings and ShareSettingsNow check standing, not consent
+
+- Both commands check only that the standing is Active.
+- Captures exist only after consent, and there is no command that withdraws consent. In practice
+  nothing unconsented can be pushed today.
+- Add a consent check if withdrawing consent is ever added.
+
+### Areas checked clean (round 2)
+
+- **Streaming I/O (OD-30).**
+  - `put_blob_stream` and `put_object_reader`/`put_stream` (`provider.rs:232-270`) write a temp
+    file, call `sync_all`, re-hash the temp file and only then rename. A size or hash mismatch
+    leaves the target untouched.
+  - `stage_settings` (`fs_install.rs:518`) verifies the size and hash of the staging copy.
+    Recovery and the journaled renames happen before any live file is replaced (`exec.rs`).
+- **Consent sheet.** The add-on list comes from the installed add-ons (`w.addons`,
+  `settings_ui.rs:786-801`), not from WTF.
+  - Judgment call: `available_accounts` lists the `WTF\Account` folder names before consent
+    (`service.rs:2883`). I accept this because account choice is part of consent (V-05); only
+    directory names are read, never file contents.
+- **Missing-character fix (RV11-10).** Only the affected unit waits.
+
+### Round 2 verification
+
+| Tier | Command (from the worktree root) | Result |
+| --- | --- | --- |
+| Recheck tests | `cargo test -p wow-sync-runtime --lib` (the ten settings tests named above), `cargo test -p wow-sync-core --lib settings_and_code_recovery`, `cargo test -p wow-sync-app` (six settings_ui tests) | All PASS. |
+| GC race probe | `cargo test -p wow-sync-runtime --lib rvprobe -- --nocapture --test-threads=1` | FAILED as expected, confirming RV11-12. Reverted; `git status` was clean before this file was edited. |
+| Offline | `cargo xtask verify --tier offline` | PASS (fmt, clippy, test, required-cases, deny, markdown-links) on `faddd5d` plus this file. Native not run (review-only change). |
