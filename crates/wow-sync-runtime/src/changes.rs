@@ -52,10 +52,11 @@ impl BuildCx<'_> {
             .entries()
             .filter(|e| e.kind == kind)
             .filter_map(|e| self.ledger.record(&e.hash).map(|r| (e, r)))
-            .filter(|(e, r)| {
-                e.folders.iter().any(|f| keys.contains(f))
-                    || matches!(r, AuthorityRecord::Removal(x)
-                        if x.folders.iter().any(|f| keys.contains(&f.key)))
+            .filter(|(_, r)| match r {
+                AuthorityRecord::Removal(x) => x.folders.iter().any(|f| keys.contains(&f.key)),
+                AuthorityRecord::CodeChoice(x) => x.folders.iter().any(|f| keys.contains(f)),
+                AuthorityRecord::Rejection(x) => x.folders.iter().any(|f| keys.contains(f)),
+                _ => false,
             })
             .map(|(_, r)| r)
             .max_by_key(|r| written_ms(r))
@@ -85,7 +86,7 @@ fn short(h: &wow_sync_core::ids::Sha256) -> String {
     h.0[..4].iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn clip(s: &str) -> String {
+pub(crate) fn clip(s: &str) -> String {
     s.chars()
         .filter(|c| !c.is_control())
         .take(MAX_VERSION_CHARS)
@@ -322,6 +323,33 @@ pub(crate) fn prepare(p: &PackageApply, cx: &BuildCx) -> Option<ChangeRecord> {
                 ChangeKind::Applied
             };
             let content_source = explained_source(cx, p).unwrap_or(ChangeSource::ThisComputer);
+            // A peer's rollback arrives as a plain apply of the recovered release.
+            let rolled_back = (old != VersionLabel::New)
+                .then(|| cx.newest(AuthorityKind::Rejection, &keys))
+                .flatten()
+                .filter(|r| {
+                    matches!(r, AuthorityRecord::Rejection(x)
+                        if x.recovered.package_hash == p.target_hash)
+                })
+                .and_then(|r| cx.author_of(r));
+            if let Some(by) = rolled_back {
+                let mut rec = base(
+                    cx.stamp(),
+                    ChangeKind::RolledBack,
+                    display_name(cx, p),
+                    folder_names(p),
+                    by,
+                    ChangeReason::Rollback,
+                );
+                let (paths, more) = capped(d.paths);
+                rec.old_version = old;
+                rec.new_version = new;
+                rec.files = d.counts;
+                rec.byte_delta = d.byte_delta;
+                rec.paths = paths;
+                rec.paths_more = more;
+                return Some(rec);
+            }
             let chosen = cx
                 .newest(AuthorityKind::CodeChoice, &keys)
                 .filter(|r| {
