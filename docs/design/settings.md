@@ -848,7 +848,7 @@ one exists, otherwise leaves the unit empty.
 | `Off` | no policy, or not confirmed on this computer, or account not included | "Settings not shared" |
 | `InSync` | live == head, reported `applied` | "Settings up to date (from Den PC)" |
 | `Waiting` | newer head, blocked by WoW running or by another journal; or `Waiting(MissingParent)` (§4.2) | "New settings from Den PC will be used when WoW closes"; "Waiting for settings information from Den PC" |
-| `LocalDifferent` | live differs from head and is not published (non-authority, `EpochNotClean`, `BasisNotShared` or `ConcurrentPush`, §4.1–§4.2) | "Changed here, not shared" with "Share my settings" (and "Use shared settings" for `EpochNotClean`, `BasisNotShared` and `ConcurrentPush`) |
+| `LocalDifferent` | live differs from head and is not published (non-authority, `EpochNotClean`, `BasisNotShared` or `ConcurrentPush`, §4.1–§4.2) | "Changed here, not shared" with "Share my settings" and "Use shared settings" for every reason (run-011 OD-28; previously not offered for a routine local change) |
 | `NoSharedCopy` | a policy exists but no valid revision of the unit yet | "Not shared yet" |
 | `Paused` | §6 | "Settings paused on this computer" |
 | `NeedsChoice` | §4.4 | "Choose which settings to keep" |
