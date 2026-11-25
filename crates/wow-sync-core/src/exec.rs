@@ -17,8 +17,17 @@ use crate::records::{
     PendingRecord, RecoveryPoint, RecoveryPointV2, RecoverySlot, ReportKind, ReportResult,
     SettingsFileOp, TreeRef,
 };
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
+/// What a settings file is called in reasons and logs: the add-on and whether the file is
+/// account-wide or a character's. Never the account, realm or character name (RV11-08).
+fn settings_label(o: &SettingsFileOp) -> String {
+    let kind = match o.unit.identity.realm_character() {
+        None => "account",
+        Some(_) => "character",
+    };
+    format!("{} {kind} settings", o.unit.folder.as_str())
+}
 /// A settings file location for the `/2` slot tables (settings.md §4.3).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SettingsSlot {
@@ -838,6 +847,16 @@ impl PointEntry {
             Self::V2(p) => p.created_unix_ms,
         }
     }
+    /// The retention budget a point counts against: all code, or one settings unit.
+    fn class(&self) -> String {
+        match self {
+            Self::V2(p) if p.kind == OpKind::Settings => match p.settings.first() {
+                Some(r) => format!("settings:{:?}", r.unit),
+                None => "settings".to_string(),
+            },
+            _ => "code".to_string(),
+        }
+    }
     fn unpin(&mut self, fx: &mut impl ApplyEffects) -> Result<(), EffectError> {
         match self {
             Self::V1(p) => {
@@ -898,8 +917,15 @@ fn settle_points(
         .filter(|(o, rp)| !rp.pinned() && (o == op || !journals.contains(o.as_str())))
         .collect();
     prunable.sort_by(|a, b| (b.1.created(), b.0.as_str()).cmp(&(a.1.created(), a.0.as_str())));
-    for (o, _) in prunable.into_iter().skip(KEEP_RECOVERY) {
-        fx.remove_recovery(pkg, o)?;
+    // Code and each settings unit keep their own two previous points: a settings apply never
+    // evicts a code rollback point, nor the reverse (A-17).
+    let mut seen: BTreeMap<String, usize> = BTreeMap::new();
+    for (o, rp) in prunable {
+        let n = seen.entry(rp.class()).or_insert(0);
+        *n += 1;
+        if *n > KEEP_RECOVERY {
+            fx.remove_recovery(pkg, o)?;
+        }
     }
     Ok(())
 }
@@ -1269,7 +1295,7 @@ fn items_of(j: &ApplyJournalV2) -> Vec<Item> {
             continue;
         }
         out.push(Item {
-            label: o.live_rel.as_str().to_string(),
+            label: settings_label(o),
             live: Tgt::File(SettingsSlot::Live {
                 rel: o.live_rel.as_str().to_string(),
             }),
@@ -1554,8 +1580,8 @@ fn apply_package_v2(plan: &ApplyPlan, p: &PackageApply, fx: &mut impl ApplyEffec
     for (idx, o) in p.settings_ops.iter().enumerate() {
         let Some(want) = o.staged else { continue };
         if let Err(e) = fx.settings_stage(&p.op, idx, o) {
-            let label = o.live_rel.as_str();
-            return abort_staging_v2(fx, &mut j, stage_failure(&name, label, e), None);
+            let label = settings_label(o);
+            return abort_staging_v2(fx, &mut j, stage_failure(&name, &label, e), None);
         }
         let slot = SettingsSlot::Staging {
             op: p.op.clone(),
@@ -1568,7 +1594,7 @@ fn apply_package_v2(plan: &ApplyPlan, p: &PackageApply, fx: &mut impl ApplyEffec
                     fx,
                     &mut j,
                     PackageResult::Failed(Explanation::StagedMismatch {
-                        folder: o.live_rel.as_str().to_string(),
+                        folder: settings_label(o),
                     }),
                     None,
                 )

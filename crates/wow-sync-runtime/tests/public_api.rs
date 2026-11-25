@@ -47,6 +47,7 @@ fn command_name(c: &Command) -> &'static str {
         Command::Resume { .. } => "resume",
         Command::SetSettingsPolicy { .. } => "policy",
         Command::ShareSettings { .. } => "share",
+        Command::ShareSettingsNow { .. } => "share-now",
         Command::EnableSettings { .. } => "enable",
         Command::PauseSettings { .. } => "pause-settings",
         Command::ResumeSettings { .. } => "resume-settings",
@@ -105,6 +106,9 @@ fn every_command_can_be_built_and_every_refusal_named_from_outside_the_crate() {
             unit: unit(),
             checkpoint: hash,
         },
+        Command::ShareSettingsNow {
+            units: vec![unit()],
+        },
         Command::EnableSettings {
             included_accounts: vec!["ACC".into()],
         },
@@ -153,7 +157,7 @@ fn every_command_can_be_built_and_every_refusal_named_from_outside_the_crate() {
     let mut names: Vec<_> = commands.iter().map(command_name).collect();
     names.sort_unstable();
     names.dedup();
-    assert_eq!(names.len(), 22, "one of each command");
+    assert_eq!(names.len(), 23, "one of each command");
 
     assert_eq!(outcome_name(&CommandOutcome::Written(hash)), "written");
     assert_eq!(outcome_name(&CommandOutcome::Kept), "kept");

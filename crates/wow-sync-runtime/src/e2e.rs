@@ -3541,6 +3541,21 @@ mod tests {
         std::fs::read_to_string(wtf_file(pc, folder)).ok()
     }
 
+    /// The master's explicit "Share these now" for everything the snapshot lists.
+    fn share_now(pc: &mut Pc) -> CommandOutcome {
+        let units: Vec<_> = pc
+            .svc
+            .status()
+            .settings
+            .to_share
+            .iter()
+            .map(|o| o.unit.clone())
+            .collect();
+        let out = pc.svc.command(Command::ShareSettingsNow { units }).unwrap();
+        synced(pc);
+        out
+    }
+
     /// Two computers with the same addon that saves variables, settings consent on both, and
     /// `master` chosen (`a` is the master when true, `b` otherwise). Test cap is on for both.
     fn settings_pair(lab: &Lab, a_is_master: bool, cap: Option<u64>) -> (Pc, Pc, GroupId) {
@@ -3702,7 +3717,9 @@ mod tests {
             "only the missing character waits: {rows:?}"
         );
         assert_eq!(
-            rows.iter().filter(|r| r.status == S::Active).count(),
+            rows.iter()
+                .filter(|r| matches!(r.status, S::Active | S::InSync))
+                .count(),
             rows.len() - 1
         );
     }
@@ -3815,6 +3832,7 @@ mod tests {
         let (mut a, b, g) = settings_pair(&lab, true, Some(cap));
         write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
         synced(&mut a);
+        share_now(&mut a);
         (lab, a, b, g)
     }
 
@@ -4435,8 +4453,8 @@ mod tests {
         synced(&mut a);
         assert_eq!(
             a.svc.settings_history(&alpha_unit()).len(),
-            2,
-            "a non-master's routine write publishes nothing (the master's two revisions only)"
+            1,
+            "a non-master's routine write publishes nothing (the master's one revision only)"
         );
         write_wtf(&a, "Alpha", "AlphaDB = { v = 3 }\n");
         synced(&mut a);
@@ -4586,6 +4604,7 @@ mod tests {
         let alpha = alpha_unit().folder;
         write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
         synced(&mut a);
+        share_now(&mut a);
         write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
         synced(&mut a);
         synced(&mut b);
@@ -4732,6 +4751,7 @@ mod tests {
         let unit = alpha_unit();
         write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
         synced(&mut a);
+        share_now(&mut a);
         write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
         synced(&mut a);
         synced(&mut b);
@@ -4833,13 +4853,14 @@ mod tests {
         let unit = alpha_unit();
         write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
         synced(&mut a);
+        share_now(&mut a);
         write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
         synced(&mut a);
         synced(&mut b);
         synced(&mut b);
         let calm = b.svc.status().settings_units;
         assert_eq!(calm.len(), 1, "{calm:?}");
-        assert_eq!(calm[0].status, S::Active);
+        assert_eq!(calm[0].status, S::InSync);
         assert!(calm[0].live && calm[0].competing.is_empty() && calm[0].shown_heads.is_empty());
         assert!(calm[0].can_share && calm[0].latest_capture.is_some());
         assert_eq!(calm[0].history.len(), 2);
@@ -4884,7 +4905,7 @@ mod tests {
         synced(&mut a);
         synced(&mut b);
         let after = b.svc.status().settings_units.remove(0);
-        assert_eq!(after.status, S::Active, "{after:?}");
+        assert_eq!(after.status, S::InSync, "{after:?}");
         assert!(after.competing.is_empty());
 
         let earlier = after.history[0].checkpoint;
@@ -4990,6 +5011,7 @@ mod tests {
         let unit = alpha_unit();
         write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
         synced(&mut a);
+        share_now(&mut a);
         write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
         synced(&mut a);
         synced(&mut b);
@@ -7266,6 +7288,9 @@ mod tests {
             assert_eq!(got.byte_delta, "AlphaDB = { v = 2 }\n".len() as i64);
             assert_eq!(got.identity.as_deref(), Some("account-wide"));
             assert!(!format!("{got:?}").contains("ACC"));
+            write_wtf(&a, "Alpha", "AlphaDB = { v = 3 }\n");
+            synced(&mut a);
+            synced(&mut b);
             let on_a = changes(&a);
             let sent = on_a
                 .iter()
@@ -7276,7 +7301,7 @@ mod tests {
                 .iter()
                 .filter(|c| c.kind == ChangeKind::SettingsPublished)
                 .collect();
-            assert_eq!(all.len(), 2, "the first share and the change: {on_a:?}");
+            assert_eq!(all.len(), 2, "the first change and the next: {on_a:?}");
             for c in &all {
                 assert!(
                     matches!(&c.new_version, VersionLabel::ContentId(s) if s.len() == 8),

@@ -1195,6 +1195,60 @@ impl SliceService {
             }
         }
         let derived = derive(&self.plane.ledger, &gid, &self.plane.members);
+        if let Command::ShareSettingsNow { units } = &cmd {
+            if w.standing != OwnStanding::Active {
+                return Err(CommandError::Service(
+                    "this computer cannot share settings right now".into(),
+                ));
+            }
+            let local = crate::settings_cycle::load_local(&self.state, &gid);
+            let mut next = seq;
+            let mut wrote = false;
+            for unit in units {
+                let Some(cp) = local
+                    .units
+                    .iter()
+                    .find(|u| &u.unit == unit)
+                    .and_then(|u| u.captures.first().copied())
+                else {
+                    continue;
+                };
+                self.share_checkpoint(&provider, w.own.computer_id.as_str(), &cp, unit)?;
+                let Ok(rec) = wow_sync_core::settings::build_push(
+                    &self.plane.ledger,
+                    &derived,
+                    &gid,
+                    Issuer {
+                        computer_id: w.own.computer_id.clone(),
+                        enrollment_id: w.own.enrollment_id.clone(),
+                        issued_at_seq: next,
+                    },
+                    unit.clone(),
+                    cp,
+                    now,
+                ) else {
+                    continue;
+                };
+                write_own_record(
+                    &mut self.plane,
+                    &provider,
+                    &gid,
+                    &w.own.computer_id,
+                    &AuthorityRecord::SettingsRevision(rec),
+                )
+                .map_err(|e| CommandError::Service(e.to_string()))?;
+                next += 1;
+                wrote = true;
+            }
+            if !wrote {
+                return Ok(CommandOutcome::NothingToDo);
+            }
+            self.plane
+                .save(&self.state)
+                .map_err(|e| CommandError::Service(e.to_string()))?;
+            self.reserve_seq(&w, next - 1)?;
+            return Ok(CommandOutcome::Recorded);
+        }
         let held = BTreeSet::new();
         let mut policy_parts: Vec<(wow_sync_core::ids::Sha256, Vec<u8>)> = Vec::new();
         let decided = match &cmd {
@@ -1304,6 +1358,7 @@ impl SliceService {
                 // Dispatched before observation, above.
                 Command::ReEnroll
                 | Command::EnableSettings { .. }
+                | Command::ShareSettingsNow { .. }
                 | Command::PauseSettings { .. }
                 | Command::ResumeSettings { .. }
                 | Command::UseSharedSettings { .. }
@@ -1333,6 +1388,12 @@ impl SliceService {
                     if !known_here {
                         return Err(CommandError::UnknownCheckpoint(checkpoint));
                     }
+                    self.share_checkpoint(
+                        &provider,
+                        w.own.computer_id.as_str(),
+                        &checkpoint,
+                        &unit,
+                    )?;
                     let rec = wow_sync_core::settings::build_push(
                         &self.plane.ledger,
                         &derived,
@@ -2758,7 +2819,28 @@ impl SliceService {
             this_retirement.is_some(),
             self.settings_cap.is_some(),
             &self.settings_facts,
+            &names,
+            &w.own,
         );
+        settings.to_share = settings_units
+            .iter()
+            .filter(|r| {
+                r.can_share
+                    && matches!(
+                        r.status,
+                        crate::settings_cycle::SettingsUnitStatus::NoSharedCopy
+                            | crate::settings_cycle::SettingsUnitStatus::LocalDifferent(_)
+                    )
+            })
+            .filter_map(|r| {
+                Some(crate::settings_cycle::ShareOffer {
+                    unit: r.unit.clone(),
+                    checkpoint: r.latest_capture?,
+                    not_shared_yet: r.status
+                        == crate::settings_cycle::SettingsUnitStatus::NoSharedCopy,
+                })
+            })
+            .collect();
         let unresolved: Vec<FolderKey> = interrupted
             .iter()
             .cloned()
@@ -3215,6 +3297,11 @@ impl SliceService {
                             decls: &w.decls,
                             game_blocks,
                             tick: &tick,
+                            settle: &|| {
+                                std::thread::sleep(std::time::Duration::from_millis(
+                                    self.cfg.recent_ms,
+                                ))
+                            },
                         },
                         &mut next_seq,
                     );
