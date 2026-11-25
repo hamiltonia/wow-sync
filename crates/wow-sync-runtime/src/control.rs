@@ -390,6 +390,14 @@ pub enum Command {
         unit: wow_sync_core::ids::SettingsUnit,
         checkpoint: wow_sync_core::ids::Sha256,
     },
+    /// "Share these now": the explicit push of the settings of each listed unit
+    /// (`SettingsSnapshot::to_share`), one revision per unit that has a capture here. Becoming
+    /// master shares nothing by itself; this is the only way a first copy is published for
+    /// several add-ons at once. Units without a capture are skipped; refused for a retired or
+    /// held computer.
+    ShareSettingsNow {
+        units: Vec<wow_sync_core::ids::SettingsUnit>,
+    },
     /// Consent to settings sync on this computer for these accounts (settings.md §5.4). Local
     /// only; nothing of WTF is read until it is recorded.
     EnableSettings { included_accounts: Vec<String> },

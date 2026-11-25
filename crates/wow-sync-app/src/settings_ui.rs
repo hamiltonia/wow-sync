@@ -1278,6 +1278,9 @@ mod tests {
             waiting_for: None,
             size_bytes: None,
             shared_with: Vec::new(),
+            in_sync_from: None,
+            local_copies: Vec::new(),
+            local_reason: None,
         }
     }
 

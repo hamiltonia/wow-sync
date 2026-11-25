@@ -591,7 +591,7 @@ impl InstallArea {
             }
         }
         tr.ensure_dir(parent_rel)?;
-        std::fs::rename(&src, &dst).map_err(|e| FsError::from_io(&src, &e))
+        move_no_replace(&src, &dst)
     }
 
     /// Deletes `settings-staging/<op>`. Idempotent.
@@ -604,6 +604,38 @@ impl InstallArea {
     pub fn remove_settings_recovery(&self, op: &str) -> Result<(), FsError> {
         seg(self.work.path(), op)?;
         self.work.remove_tree(&format!("settings-recovery/{op}"))
+    }
+}
+
+/// Moves a file without ever replacing an existing destination, so a file created between the
+/// caller's check and the move is kept (RV11-09). A hard link fails when the destination exists;
+/// the source name is removed once the link is made. Where links are unsupported the destination
+/// is checked again immediately before a plain rename.
+fn move_no_replace(src: &Path, dst: &Path) -> Result<(), FsError> {
+    match std::fs::hard_link(src, dst) {
+        Ok(()) => {
+            if let Err(e) = std::fs::remove_file(src) {
+                let _ = std::fs::remove_file(dst);
+                return Err(FsError::from_io(src, &e));
+            }
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(FsError::new(
+            FsErrorKind::AlreadyExists,
+            dst,
+            "destination exists",
+        )),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(FsError::from_io(src, &e)),
+        Err(_) => {
+            if std::fs::symlink_metadata(dst).is_ok() {
+                return Err(FsError::new(
+                    FsErrorKind::AlreadyExists,
+                    dst,
+                    "destination exists",
+                ));
+            }
+            std::fs::rename(src, dst).map_err(|e| FsError::from_io(src, &e))
+        }
     }
 }
 
@@ -715,6 +747,22 @@ mod tests {
                 .unwrap(),
             None
         );
+    }
+
+    #[test]
+    fn a_move_never_replaces_a_file_created_after_the_check() {
+        let t = TempDir::new();
+        let (src, dst) = (t.path().join("src.lua"), t.path().join("dst.lua"));
+        std::fs::write(&src, b"staged").unwrap();
+        std::fs::write(&dst, b"made meanwhile").unwrap();
+        let e = move_no_replace(&src, &dst).unwrap_err();
+        assert_eq!(e.kind, FsErrorKind::AlreadyExists);
+        assert_eq!(std::fs::read(&dst).unwrap(), b"made meanwhile");
+        assert_eq!(std::fs::read(&src).unwrap(), b"staged");
+        std::fs::remove_file(&dst).unwrap();
+        move_no_replace(&src, &dst).unwrap();
+        assert_eq!(std::fs::read(&dst).unwrap(), b"staged");
+        assert!(!src.exists());
     }
 
     #[test]

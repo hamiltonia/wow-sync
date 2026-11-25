@@ -896,6 +896,17 @@ pub struct LocalUnitState {
     pub last_applied: Option<CheckpointRef>,
     pub pinned: bool,
     pub authority_since: Option<u64>,
+    /// This computer's own copies that a shared copy replaced, newest first. They are pinned
+    /// against pruning and listed for restore (settings.md §7).
+    #[serde(default)]
+    pub kept: Vec<KeptCopy>,
+}
+
+/// A local settings copy a shared copy displaced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeptCopy {
+    pub checkpoint: CheckpointRef,
+    pub at_unix_ms: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
