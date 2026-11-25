@@ -2406,6 +2406,7 @@ impl Shell {
         match t {
             NeedTarget::Error | NeedTarget::Risk => Act::Nav(Page::Needs),
             NeedTarget::Restore => Act::Nav(Page::Addons),
+            NeedTarget::SettingsChoice => Act::Nav(Page::SettingsSync),
             NeedTarget::Reconfirm => Act::OpenReconfirm,
             NeedTarget::TestMode => Act::TurnOffTestMode,
             NeedTarget::NeedsHelp(k) => Act::OpenNeedsHelp(k.clone()),

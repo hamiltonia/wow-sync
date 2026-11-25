@@ -134,3 +134,15 @@ Decision: `share_when_ready` is only requested when this computer is the chosen 
 Decision: wording "Waiting for the shared settings to arrive". Why: the status carries no computer name, so the suggested "<computer>" form can't be filled honestly; it matches "Waiting for <character> to log in" in tone. Reversible: yes.
 Decision: WaitingForSharedCopy keeps urgency 6 (same as other waiting states), so the Add-ons list never reads "up to date" while any identity waits for its copy. Test: `the_new_attention_statuses_read_in_plain_words` (mutation: urgency 1 fails).
 Activity: a non-master's single share reads "shared, ... · shared from this computer", never "pushed". Test: `a_single_share_from_a_non_master_computer_reads_as_shared_from_here` (mutation: old wording fails). No screenshot refresh needed (no layout change).
+
+## Fix round: G3, G4, G5, G7 and OD-46 (commits a6f3cd8, 8ae856c, this one)
+
+Implemented and tested (206 app tests): G3 distinct choices (kind, source, date+time, size) and pending-decision headline/Needs attention; G4 Pause all / Resume all settings; G5a add-on detail settings history; G5b restore wording on both computers; G5c recovery list with source, kind, time, size; G7 fallback.
+Mutation checks (each fails without the change): head_label kind text; restore arm in history_ui; shared_by_other gate; ResumeAllSettings mapped to PauseAllSettings.
+G7 root cause: the runtime creates OwnedBySeveral only for blocked units that also have a row; a blocked add-on with no row fell back to "Not shared yet". App fix: `shared_by_other` finds another row whose OwnedBySeveral names this add-on (key or title, case-insensitive). Test with two add-ons declaring the same variables.
+
+### OD-46 (window close on hide): NOT shipped, blocker reported
+I built close-on-hide (window destroyed, recreated on show, Shell held in a global) and A/B-measured it in the same release binary (113-add-on lab, zoom 1.5, start visible, Settings sync, hide at ~38 s, private working set, 25 ms samples, 2 runs each). Per-second maxima after hide: close 57-91 MiB, keep (SW_HIDE) 58-94 MiB; same sawtooth (about 60 idle, 84-87 during passes) in both. No measurable benefit; run-to-run variance (about 13 MiB, allocator retention after start-up scan) exceeds any effect. Earlier runs: close z1.0 hidden max 76.8; close z1.5 87.6/90.8; start-hidden z1.5 76.6; old build z1.5 93.1.
+Decision: reverted the refactor (app.rs/main.rs unchanged from 8ae856c). Why: risk without demonstrated gain. Reversible: yes. The remaining excess is allocator/scan retention, not window renderer memory.
+Counter vs sampler: they agree within 0.1 MiB at steady state; differ up to 10 MiB only at pass transitions because the perf counter is a ~1 s lagging instantaneous value while QueryWorkingSet samples every 25 ms.
+Not done: show/hide cycle test (moot after revert) and refreshed live-lab screenshots for G3-G7 (not captured this round; tests cover the wording).

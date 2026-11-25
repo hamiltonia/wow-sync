@@ -2162,6 +2162,15 @@ impl Shell {
         let mut p: Vec<AnyElement> = vec![div()
             .child("Protected settings are not shared or replaced. When you resume, you'll see any differences first.")
             .into_any_element()];
+        if self.w.features.settings.paused_all {
+            p.push(
+                div()
+                    .child("All add-on settings are paused on this computer, including add-ons found later.")
+                    .into_any_element(),
+            );
+        }
+        let all = crate::settings_ui::pause_all_control(&self.w);
+        p.extend(self.control_buttons("ss-pause-all", vec![all], cx));
         let paused = self.w.features.settings.paused.clone();
         let folders: Vec<wow_sync_core::paths::FolderKey> = units
             .iter()

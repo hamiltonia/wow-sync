@@ -414,18 +414,22 @@ pub(crate) fn prepare(p: &PackageApply, cx: &BuildCx) -> Option<ChangeRecord> {
                 let RootState::Captured { checkpoint, .. } = &root.state else {
                     return None;
                 };
+                // A restore returns to a checkpoint an earlier revision also named: the newest
+                // revision of that state is the one that brought it here.
                 cx.ledger
                     .entries()
                     .filter_map(|e| cx.ledger.record(&e.hash))
-                    .find_map(|r| match r {
+                    .filter_map(|r| match r {
                         AuthorityRecord::SettingsRevision(s) if s.checkpoint == *checkpoint => {
                             Some(s)
                         }
                         _ => None,
                     })
+                    .max_by_key(|s| s.written_unix_ms)
             });
             let reason = match revision.map(|r| r.kind) {
                 Some(RevisionKind::Push) => ChangeReason::PeerPush,
+                Some(RevisionKind::Restore) => ChangeReason::RestoredFromRecovery,
                 _ => ChangeReason::SettingsMaster,
             };
             let by = revision
@@ -444,11 +448,20 @@ pub(crate) fn prepare(p: &PackageApply, cx: &BuildCx) -> Option<ChangeRecord> {
             let name = names
                 .first()
                 .map_or_else(|| "Saved settings".to_string(), |n| format!("{n} settings"));
+            // The add-on's own page finds its settings by folder name, as for its code.
+            let mut folders = names;
+            folders.extend(
+                p.settings_ops
+                    .iter()
+                    .map(|o| o.unit.folder.as_str().to_string()),
+            );
+            folders.sort();
+            folders.dedup();
             let mut rec = base(
                 cx.stamp(),
                 ChangeKind::SettingsApplied,
                 name,
-                names,
+                folders,
                 by,
                 reason,
             );
@@ -582,18 +595,26 @@ pub(crate) fn recovered(
 pub(crate) fn settings_published(
     stamp: (u64, i64),
     by_master: bool,
+    kind: wow_sync_core::kinds::RevisionKind,
     display: String,
+    folder_key: &str,
     info: &crate::settings_cycle::SettingsChangeInfo,
 ) -> ChangeRecord {
     let folder = display;
+    let mut folders = vec![folder.clone()];
+    if !folder.eq_ignore_ascii_case(folder_key) {
+        folders.push(folder_key.to_string());
+    }
     let mut rec = base(
         stamp,
         ChangeKind::SettingsPublished,
         format!("{folder} settings"),
-        vec![folder],
+        folders,
         ChangeSource::ThisComputer,
         // A publish from here is never a push received from a peer.
-        if by_master {
+        if kind == wow_sync_core::kinds::RevisionKind::Restore {
+            ChangeReason::RestoredFromRecovery
+        } else if by_master {
             ChangeReason::SettingsMaster
         } else {
             ChangeReason::SharedFromHere

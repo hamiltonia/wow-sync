@@ -410,7 +410,14 @@ pub enum Command {
     PauseSettings {
         folder: wow_sync_core::paths::FolderKey,
     },
-    /// Resume the settings of `folder` with one of the choices the resume preview offered
+    /// "Pause all settings" on this computer (settings.md §6, T-S12): no unit, including those
+    /// of add-ons found later, is published or replaced until `ResumeAllSettings`. Persisted,
+    /// local only; code keeps syncing. Per-folder pauses are kept as they are.
+    PauseAllSettings,
+    /// Lifts "Pause all settings". Never publishes; units whose file differs from the shared
+    /// copy follow the normal rules (a local difference is shown, nothing is replaced unasked).
+    ResumeAllSettings,
+    /// Resume the settings of ``folder`` with one of the choices the resume preview offered
     /// (settings.md §6). Resume never publishes: the share choices are refused here and are the
     /// `ShareSettings` command. `StayPaused` changes nothing.
     ResumeSettings {

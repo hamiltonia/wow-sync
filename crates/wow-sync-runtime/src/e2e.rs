@@ -3541,6 +3541,17 @@ mod tests {
         std::fs::read_to_string(wtf_file(pc, folder)).ok()
     }
 
+    fn recent_changes_of(pc: &mut Pc) -> Vec<ChangeRecord> {
+        pc.svc
+            .history(100)
+            .into_iter()
+            .filter_map(|i| match i {
+                crate::history::HistoryItem::Change(c) => Some(c),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// The master's explicit "Share these now" for everything the snapshot lists.
     fn share_now(pc: &mut Pc) -> CommandOutcome {
         let units: Vec<_> = pc
@@ -3754,6 +3765,63 @@ mod tests {
     }
 
     #[test]
+    fn two_addons_declaring_one_variable_with_different_bytes_are_owned_by_several_from_the_first_pass(
+    ) {
+        use crate::settings_cycle::SettingsUnitStatus as S;
+        let lab = Lab::new();
+        let mut a = lab.pc("a");
+        let mut b = lab.pc("b");
+        for pc in [&a, &b] {
+            std::fs::create_dir_all(pc.install.variant_dir.join("WTF/Account/ACC")).unwrap();
+        }
+        for pc in [&mut a, &mut b] {
+            pc.addon_with("Alpha", "alpha-v1", SV_TOC);
+            pc.addon_with(
+                "Gamma",
+                "gamma-v1",
+                "## Interface: 11508\n## Title: Gamma\n## SavedVariables: ZetaDB, AlphaDB\n",
+            );
+        }
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        write_wtf(&a, "Gamma", "AlphaDB = { v = 2 }\n");
+        write_wtf(&b, "Alpha", "AlphaDB = { v = 3 }\n");
+        write_wtf(&b, "Gamma", "AlphaDB = { v = 4 }\n");
+        let g = a.create();
+        synced(&mut a);
+        b.join(&g);
+        synced(&mut b);
+        synced(&mut a);
+        a.svc.set_settings_cap_for_tests(Some(1 << 20));
+        b.svc.set_settings_cap_for_tests(Some(1 << 20));
+        let master = ref_of(&a);
+        a.svc
+            .command(Command::SetSettingsPolicy {
+                master: Some(master),
+                exceptions: vec![],
+            })
+            .unwrap();
+        for pc in [&mut a, &mut b] {
+            pc.svc
+                .command(Command::EnableSettings {
+                    included_accounts: vec!["ACC".into()],
+                })
+                .unwrap();
+        }
+        synced(&mut a);
+        synced(&mut b);
+        let _ = share_now(&mut a);
+        for pc in [&mut a, &mut b] {
+            let rows = pc.svc.status().settings_units;
+            assert!(!rows.is_empty(), "no unit rows");
+            for r in &rows {
+                assert_eq!(r.status, S::OwnedBySeveral, "{rows:?}");
+                assert!(!r.shared_with.is_empty(), "{rows:?}");
+            }
+        }
+        assert!(a.svc.settings_history(&alpha_unit()).is_empty());
+    }
+
+    #[test]
     fn a_variable_declared_by_two_addons_is_owned_by_several_and_publishes_nothing() {
         use crate::settings_cycle::SettingsUnitStatus as S;
         let lab = Lab::new();
@@ -3921,6 +3989,16 @@ mod tests {
         let copies = b.svc.status().settings_units.remove(0).local_copies;
         assert_eq!(copies.len(), 1, "{copies:?}");
         let kept = copies[0].checkpoint;
+        // G5: the recovery entry says why it was kept, whose copy replaced it, when and how big.
+        let rec = b.svc.status().settings_units.remove(0).recovery_copies;
+        assert!(
+            rec.iter().any(|r| r.checkpoint == kept
+                && r.kind == crate::settings_cycle::RecoveryKind::YieldedToMaster
+                && r.source.is_some()
+                && r.at_unix_ms > 0
+                && r.size_bytes.is_some_and(|s| s > 0)),
+            "{rec:?}"
+        );
 
         for v in 3..=5 {
             write_wtf(&a, "Alpha", &format!("AlphaDB = {{ v = {v} }}\n"));
@@ -3946,6 +4024,111 @@ mod tests {
             read_wtf(&b, "Alpha").as_deref(),
             Some("AlphaDB = { mine = true }\n")
         );
+        // G5: the restore is its own reason on both computers, never a share or master write.
+        use crate::history::ChangeReason as R;
+        let reason_of = |pc: &mut Pc| -> Vec<R> {
+            recent_changes_of(pc)
+                .iter()
+                .filter(|r| {
+                    matches!(
+                        r.kind,
+                        crate::history::ChangeKind::SettingsPublished
+                            | crate::history::ChangeKind::SettingsApplied
+                    )
+                })
+                .map(|r| r.reason.clone())
+                .collect()
+        };
+        let rb = reason_of(&mut b);
+        assert!(rb.contains(&R::RestoredFromRecovery), "{rb:?}");
+        synced(&mut a);
+        let ra = reason_of(&mut a);
+        assert!(ra.contains(&R::RestoredFromRecovery), "{ra:?}");
+        // The restore's own published and applied rows are the two newest on the restorer.
+        assert!(
+            rb[..2].iter().all(|r| *r == R::RestoredFromRecovery),
+            "{rb:?}"
+        );
+        assert!(!rb[..2].contains(&R::SharedFromHere), "{rb:?}");
+    }
+
+    #[test]
+    fn pausing_all_settings_persists_covers_later_addons_and_resumes() {
+        use crate::settings_cycle::SettingsUnitStatus as S;
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        share_now(&mut a);
+        synced(&mut b);
+        assert_eq!(
+            b.svc.command(Command::PauseAllSettings),
+            Ok(CommandOutcome::Recorded)
+        );
+        assert_eq!(
+            b.svc.command(Command::PauseAllSettings),
+            Ok(CommandOutcome::NothingToDo)
+        );
+        assert!(b.svc.status().settings.paused_all);
+        // An add-on discovered afterwards is paused too.
+        b.addon_with(
+            "Delta",
+            "delta-v1",
+            "## Interface: 11508\n## SavedVariables: DeltaDB\n",
+        );
+        write_wtf(&b, "Delta", "DeltaDB = { v = 1 }\n");
+        synced(&mut b);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 1 }\n"),
+            "nothing applies while paused"
+        );
+        let rows = b.svc.status().settings_units;
+        assert!(!rows.is_empty());
+        assert!(rows.iter().all(|r| r.status == S::Paused), "{rows:?}");
+        // It persists across a restart.
+        b.restart();
+        assert!(b.svc.status().settings.paused_all);
+        assert_eq!(
+            b.svc.command(Command::ResumeAllSettings),
+            Ok(CommandOutcome::Recorded)
+        );
+        assert!(!b.svc.status().settings.paused_all);
+        synced(&mut b);
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 2 }\n")
+        );
+    }
+
+    #[test]
+    fn a_settings_record_is_found_by_the_addons_own_folder_name() {
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let titled = "## Interface: 11508\n## Title: Pretty Alpha\n## SavedVariables: AlphaDB\n";
+        a.addon_with("Alpha", "alpha-v2", titled);
+        b.addon_with("Alpha", "alpha-v2", titled);
+        synced(&mut a);
+        synced(&mut b);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        share_now(&mut a);
+        synced(&mut b);
+        for pc in [&mut a, &mut b] {
+            let recs = recent_changes_of(pc);
+            assert!(
+                recs.iter().any(|r| matches!(
+                    r.kind,
+                    crate::history::ChangeKind::SettingsPublished
+                        | crate::history::ChangeKind::SettingsApplied
+                ) && r.folders.iter().any(|f| f.eq_ignore_ascii_case("alpha"))),
+                "{recs:?}"
+            );
+        }
     }
 
     #[test]
@@ -5301,6 +5484,23 @@ mod tests {
         assert_eq!(row.competing.len(), 2, "{row:?}");
         assert_eq!(row.shown_heads.len(), 2);
         assert!(row.history.len() >= 3);
+        // G3: each choice says whose copy it is, what kind, when and how big.
+        use crate::settings_cycle::HeadKind;
+        let st = b.svc.status();
+        assert_eq!(st.settings_decisions_pending, 1);
+        assert!(
+            !st.headline.to_lowercase().contains("up to date"),
+            "{}",
+            st.headline
+        );
+        let kinds: Vec<HeadKind> = row.competing.iter().map(|c| c.kind).collect();
+        assert!(kinds.contains(&HeadKind::MastersRevision), "{kinds:?}");
+        assert!(kinds.contains(&HeadKind::ThisComputersCopy), "{kinds:?}");
+        for c in &row.competing {
+            assert!(c.source.is_some(), "{c:?}");
+            assert!(c.written_unix_ms > 0, "{c:?}");
+            assert!(c.size_bytes.is_some_and(|s| s > 0), "{c:?}");
+        }
         let pick = row.competing[0].checkpoint;
         assert!(matches!(
             b.svc.command(Command::ChooseSettings {
@@ -6366,6 +6566,39 @@ mod tests {
             Err(CommandError::Export(ExportError::Save(_)))
         ));
         assert!(!bad.exists());
+    }
+
+    #[test]
+    fn the_diagnostics_export_with_settings_on_names_no_account_realm_character_or_path() {
+        use wow_sync_core::diagnostics::ExportOptions;
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let vd = |pc: &Pc, rel: &str| pc.install.variant_dir.join(rel);
+        let base = "WTF/Account/ACC/Plantedrealm/Plantedchar/SavedVariables";
+        for pc in [&a, &b] {
+            std::fs::create_dir_all(vd(pc, base)).unwrap();
+        }
+        let file = format!("{base}/Alpha.lua");
+        std::fs::write(vd(&a, &file), "AlphaChar = { v = 1 }\n").unwrap();
+        synced(&mut a);
+        std::fs::write(vd(&a, &file), "AlphaChar = { v = 2 }\n").unwrap();
+        synced(&mut a);
+        let _ = share_now(&mut a);
+        synced(&mut b);
+        for pc in [&mut a, &mut b] {
+            let Ok(CommandOutcome::Exported(e)) = pc.svc.command(Command::ExportDiagnostics {
+                options: ExportOptions::default(),
+            }) else {
+                panic!("refused");
+            };
+            let low = e.text.to_lowercase();
+            for needle in ["plantedrealm", "plantedchar"] {
+                assert!(!low.contains(needle), "export names {needle}");
+            }
+            let root = pc.install.variant_dir.to_string_lossy().to_lowercase();
+            assert!(!low.contains(&root), "export has a path");
+            assert!(!low.contains(&lab.shared.to_string_lossy().to_lowercase()));
+        }
     }
 
     #[test]

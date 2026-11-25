@@ -41,6 +41,8 @@ pub enum ActionKind {
     StartSettings,
     PauseSettings,
     ResumeSettings,
+    PauseAllSettings,
+    ResumeAllSettings,
     UseSharedSettings,
     ChooseSettings,
     RestoreSettings,
@@ -107,6 +109,8 @@ impl Capabilities {
             StartSettings,
             PauseSettings,
             ResumeSettings,
+            PauseAllSettings,
+            ResumeAllSettings,
             UseSharedSettings,
             ChooseSettings,
             RestoreSettings,
@@ -188,6 +192,9 @@ pub enum GroupAction {
     PauseSettings {
         folder: FolderKey,
     },
+    /// Pause every add-on's settings on this computer, including add-ons found later.
+    PauseAllSettings,
+    ResumeAllSettings,
     ResumeSettings {
         folder: FolderKey,
         choice: ResumeOption,
@@ -234,6 +241,8 @@ impl GroupAction {
             GroupAction::EnableSettings { .. } => ActionKind::EnableSettings,
             GroupAction::StartSettings { .. } => ActionKind::StartSettings,
             GroupAction::PauseSettings { .. } => ActionKind::PauseSettings,
+            GroupAction::PauseAllSettings => ActionKind::PauseAllSettings,
+            GroupAction::ResumeAllSettings => ActionKind::ResumeAllSettings,
             GroupAction::ResumeSettings { .. } => ActionKind::ResumeSettings,
             GroupAction::UseSharedSettings { .. } => ActionKind::UseSharedSettings,
             GroupAction::ChooseSettings { .. } => ActionKind::ChooseSettings,
@@ -300,6 +309,8 @@ impl GroupAction {
                 included_accounts, ..
             } => Command::EnableSettings { included_accounts },
             GroupAction::PauseSettings { folder } => Command::PauseSettings { folder },
+            GroupAction::PauseAllSettings => Command::PauseAllSettings,
+            GroupAction::ResumeAllSettings => Command::ResumeAllSettings,
             GroupAction::ResumeSettings { folder, choice } => {
                 Command::ResumeSettings { folder, choice }
             }
@@ -737,6 +748,7 @@ fn apply_settings(f: &mut FeatureData, s: &wow_sync_runtime::SettingsSnapshot) {
     d.exceptions = s.exceptions.clone();
     d.policy_conflict = s.policy_conflict;
     d.paused = s.paused.clone();
+    d.paused_all = s.paused_all;
     d.to_share = s
         .to_share
         .iter()
@@ -748,6 +760,36 @@ fn apply_settings(f: &mut FeatureData, s: &wow_sync_runtime::SettingsSnapshot) {
     d.group_has_shared_settings = s.group_has_shared_settings;
 }
 
+/// Names a competing copy by who it came from, so two choices never read alike.
+pub fn head_label(kind: wow_sync_runtime::HeadKind, source: Option<&str>, detail: &str) -> String {
+    use wow_sync_runtime::HeadKind as K;
+    match (kind, source) {
+        (K::MastersRevision, Some(n)) => format!("the copy from settings master {n} ({detail})"),
+        (K::MastersRevision, None) => format!("the copy from the settings master ({detail})"),
+        (K::ThisComputersCopy, _) => format!("the copy from this computer ({detail})"),
+        (K::SharedFrom, Some(n)) => format!("the copy shared from {n} ({detail})"),
+        (K::SharedFrom, None) => format!("the copy shared from another computer ({detail})"),
+    }
+}
+
+/// Names a recovery copy by when it was set aside and what replaced it.
+pub fn recovery_label(
+    kind: wow_sync_runtime::RecoveryKind,
+    source: Option<&str>,
+    detail: &str,
+) -> String {
+    use wow_sync_runtime::RecoveryKind as K;
+    let by = source.map(|n| format!(" from {n}")).unwrap_or_default();
+    match kind {
+        K::FirstAdoption => {
+            format!("copy from {detail}, kept when shared settings{by} were first adopted")
+        }
+        K::YieldedToMaster => format!("copy from {detail}, replaced by the settings master{by}"),
+        K::PeerReplaced => format!("copy from {detail}, replaced by a copy shared{by}"),
+        K::Unknown => format!("copy from {detail}"),
+    }
+}
+
 /// The settings rows as the screen shows them.
 pub fn settings_unit_rows(
     rows: &[wow_sync_runtime::SettingsUnitRow],
@@ -756,13 +798,12 @@ pub fn settings_unit_rows(
     use wow_sync_runtime::SettingsUnitStatus as S;
     rows.iter()
         .map(|r| {
-            let when = |c: &wow_sync_core::ids::Sha256| {
-                r.history.iter().find(|h| &h.checkpoint == c).map(|h| {
-                    format!(
-                        "the copy from {}",
-                        crate::world::day_text(h.written_unix_ms)
-                    )
-                })
+            let detail = |ms: u64, size: Option<u64>| {
+                let mut s = crate::world::date_time_text(ms);
+                if let Some(b) = size {
+                    s = format!("{s}, {}", crate::history_ui::size_text(b));
+                }
+                s
             };
             UnitRow {
                 unit: r.unit.clone(),
@@ -797,10 +838,13 @@ pub fn settings_unit_rows(
                 heads: r
                     .competing
                     .iter()
-                    .enumerate()
-                    .map(|(i, h)| Copy {
+                    .map(|h| Copy {
                         checkpoint: h.checkpoint,
-                        label: when(&h.checkpoint).unwrap_or_else(|| format!("copy {}", i + 1)),
+                        label: head_label(
+                            h.kind,
+                            h.source.as_deref(),
+                            &detail(h.written_unix_ms, h.size_bytes),
+                        ),
                     })
                     .collect(),
                 shown_heads: r.shown_heads.clone(),
@@ -812,19 +856,35 @@ pub fn settings_unit_rows(
                         checkpoint: h.checkpoint,
                         label: format!(
                             "the copy from {}",
-                            crate::world::day_text(h.written_unix_ms)
+                            crate::world::date_time_text(h.written_unix_ms)
                         ),
                     })
                     .collect(),
                 restore_possible: r.restore_possible,
-                local_copies: r
-                    .local_copies
-                    .iter()
-                    .map(|h| Copy {
-                        checkpoint: h.hash,
-                        label: format!("copy from {}", crate::world::day_text(h.written_unix_ms)),
-                    })
-                    .collect(),
+                local_copies: if r.recovery_copies.is_empty() {
+                    r.local_copies
+                        .iter()
+                        .map(|h| Copy {
+                            checkpoint: h.hash,
+                            label: format!(
+                                "copy from {}",
+                                crate::world::date_time_text(h.written_unix_ms)
+                            ),
+                        })
+                        .collect()
+                } else {
+                    r.recovery_copies
+                        .iter()
+                        .map(|c| Copy {
+                            checkpoint: c.checkpoint,
+                            label: recovery_label(
+                                c.kind,
+                                c.source.as_deref(),
+                                &detail(c.at_unix_ms, c.size_bytes),
+                            ),
+                        })
+                        .collect()
+                },
             }
         })
         .collect()
