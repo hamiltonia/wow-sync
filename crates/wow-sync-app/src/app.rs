@@ -524,6 +524,7 @@ impl Shell {
             });
             w.confirm_enrolled(g.enrolled_now);
             w.fault = g.fault.clone();
+            w.settings_note = g.settings_note.clone();
             w.shared_label = g
                 .shared_root
                 .as_ref()

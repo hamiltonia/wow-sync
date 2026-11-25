@@ -1983,6 +1983,16 @@ impl Shell {
             .body_col()
             .child(self.heading("Settings sync", 1))
             .child(banner);
+        if let Some(n) = crate::settings_ui::settings_note_text(&self.w) {
+            col = col.child(
+                div()
+                    .id("ss-note")
+                    .role(Role::Status)
+                    .aria_label(SharedString::from(n.clone()))
+                    .text_color(rgb(pal.fg(Tone::Waiting)))
+                    .child(SharedString::from(n)),
+            );
+        }
 
         let offer = crate::settings_ui::offer(&self.w);
         if let Some(o) = offer.clone() {

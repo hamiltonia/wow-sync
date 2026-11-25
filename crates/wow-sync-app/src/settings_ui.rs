@@ -594,6 +594,21 @@ pub enum Offer {
 
 pub const OFFER_SHARE_QUESTION: &str = "Share add-on settings between your computers?";
 
+/// The start of the runtime's note when some saved settings were left out of a pass.
+pub const SETTINGS_NOTE_PREFIX: &str = "some saved settings were not shared";
+
+/// The note shown with the settings status: a capital and a closing full stop.
+pub fn settings_note_text(w: &World) -> Option<String> {
+    let n = w.settings_note.as_deref()?.trim();
+    let mut c = n.chars();
+    let first = c.next()?;
+    let mut s: String = first.to_uppercase().chain(c).collect();
+    if !s.ends_with('.') {
+        s.push('.');
+    }
+    Some(s)
+}
+
 /// The consent text of settings.md §5.4, shown before anything is shared.
 pub const CONSENT_TEXT: &str = "All addon settings on this computer are shared, including addons you install later. WoW's own settings, key bindings, macros and layout are not shared. Settings stay inside each account and character.";
 
@@ -1388,6 +1403,16 @@ mod tests {
         assert!(urgency(&UnitStatus::TooLarge { size: None }) > urgency(&UnitStatus::NoSharedCopy));
     }
 
+    #[test]
+    fn the_cycle_note_reads_as_a_sentence_and_is_absent_without_one() {
+        let mut w = world();
+        assert_eq!(settings_note_text(&w), None);
+        w.settings_note = Some(format!("{SETTINGS_NOTE_PREFIX}: Details is too large"));
+        assert_eq!(
+            settings_note_text(&w).as_deref(),
+            Some("Some saved settings were not shared: Details is too large.")
+        );
+    }
     #[test]
     fn add_on_status_lines_say_the_most_urgent_thing_in_plain_words() {
         let mut w = world();
