@@ -136,6 +136,12 @@ pub struct Shared {
     pub paused_since: Option<i64>,
     pub pause_damaged: bool,
     pub activity: Vec<ActivityEntry>,
+    /// Structured change records and older plain lines, newest first.
+    pub history: Vec<wow_sync_runtime::HistoryItem>,
+    /// What the running pass is doing, from the service's progress events.
+    pub progress: Option<crate::progress_ui::ProgressView>,
+    /// The brief "Updated … see Activity" headline after a pass.
+    pub done_note: Option<String>,
     pub settings: AppSettings,
     pub toggles: wow_sync_runtime::AppToggles,
     pub busy: bool,
@@ -317,6 +323,60 @@ fn now_ms() -> i64 {
     crate::world::now_ms()
 }
 
+/// Closes the progress of a pass in order after every event the service emitted.
+fn end_pass(hub: &wow_sync_runtime::ProgressHub) {
+    let last = hub.latest();
+    // The service already ends a pass with Idle; only add one if it did not.
+    if last
+        .as_ref()
+        .is_some_and(|e| e.phase == wow_sync_runtime::Phase::Idle)
+    {
+        return;
+    }
+    hub.emit(wow_sync_runtime::ProgressEvent {
+        seq: last.as_ref().map_or(1, |e| e.seq + 1),
+        pass_id: last.as_ref().map_or(0, |e| e.pass_id),
+        phase: wow_sync_runtime::Phase::Idle,
+        current: None,
+        items_done: 0,
+        items_total: 0,
+        bytes_done: 0,
+        bytes_total: 0,
+        source: None,
+        incoming: None,
+        decision_satisfied: Vec::new(),
+        completed: None,
+    });
+}
+
+/// Forwards the service's progress events to the window (at most about twice a second) and to
+/// the log (every event that matters). Ends when the service is dropped.
+fn spawn_pump(hub: wow_sync_runtime::ProgressHub, shared: SharedState, wake: Sender<()>) {
+    use crate::progress_ui::{Out, Pump};
+    let rx = hub.subscribe();
+    drop(hub);
+    let _ = std::thread::Builder::new()
+        .name("progress".into())
+        .spawn(move || {
+            let mut pump = Pump::default();
+            loop {
+                let now = now_ms();
+                let outs = match rx.recv_timeout(Duration::from_millis(250)) {
+                    Ok(e) => pump.on_event(&e, now),
+                    Err(RecvTimeoutError::Timeout) => pump.tick(now),
+                    Err(RecvTimeoutError::Disconnected) => return,
+                };
+                for o in outs {
+                    match o {
+                        Out::Log(l) => crate::app::log(&l),
+                        Out::Show(v) => publish(&shared, &wake, |g| g.progress = v),
+                        Out::Note(n) => publish(&shared, &wake, |g| g.done_note = n),
+                    }
+                }
+            }
+        });
+}
+
 static LAST_LOGGED: Mutex<String> = Mutex::new(String::new());
 
 /// Writes what is holding sync (plan blocks, a provider problem) once per change, so a
@@ -419,6 +479,7 @@ fn refresh_with(
     log_status_changes(&st);
     let decisions = svc.offered_decisions().to_vec();
     let (pause, act, settings) = (svc.pause_state(), svc.activity_log(300), svc.app_settings());
+    let history = svc.history(300);
     let toggles = svc.toggles();
     publish(shared, wake, |g| {
         g.started = true;
@@ -431,6 +492,7 @@ fn refresh_with(
         };
         g.pause_damaged = pause == PauseState::Damaged;
         g.activity = act;
+        g.history = history;
         g.settings = settings;
         if checked {
             g.last_check_ms = Some(now_ms());
@@ -734,6 +796,7 @@ fn run(
         // Every service, however it is opened, gets the hash cache, quit cancel and command
         // interrupt.
         s.set_read_ctl(read_ctl(t));
+        spawn_pump(s.progress_hub(), shared.clone(), wake.clone());
         #[cfg(test)]
         tests::count_open(&opts.state_dir);
         s.inject_crash_after(opts.crash_after);
@@ -827,6 +890,7 @@ fn run(
                 }
             }
         };
+        let was_forced = force;
         force = false;
         let mut manual = false;
         match cmd {
@@ -1093,6 +1157,16 @@ fn run(
         publish(&shared, &wake, |g| g.busy = true);
         interrupt.armed.store(true, Ordering::Relaxed);
         let pass_started = Instant::now();
+        crate::app::log(&format!(
+            "sync pass starting: {}",
+            if manual {
+                "you asked for it"
+            } else if was_forced {
+                "start or after a change"
+            } else {
+                "scheduled check"
+            }
+        ));
         let res = guarded("running a sync pass", &shared, &wake, || {
             #[cfg(test)]
             {
@@ -1106,6 +1180,7 @@ fn run(
             s.sync_once()
         });
         interrupt.armed.store(false, Ordering::Relaxed);
+        end_pass(&s.progress_hub());
         let Some(res) = res else {
             // Start again from what is on disk, not from half-updated memory.
             svc = active.as_ref().and_then(|t| open(t).ok());

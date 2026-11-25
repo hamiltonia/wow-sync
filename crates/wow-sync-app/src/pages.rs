@@ -1280,6 +1280,34 @@ impl Shell {
                 det.push(self.muted(d.clone()).into_any_element());
             }
         }
+        let recent: Vec<AnyElement> = {
+            let rows = crate::history_ui::rows_for(&self.w.changes, key, &s.title, 10);
+            if rows.is_empty() {
+                vec![self
+                    .muted("No changes to this add-on have been recorded yet.")
+                    .into_any_element()]
+            } else {
+                let today = crate::world::local_parts(crate::world::now_ms()).0;
+                rows.into_iter()
+                    .map(|(ms, r)| {
+                        let (d, hm) = crate::world::local_parts(ms);
+                        let when = format!("{} {hm}", crate::world::day_label(d, today));
+                        div()
+                            .flex()
+                            .gap(u(10.))
+                            .child(
+                                div()
+                                    .w(u(110.))
+                                    .flex_none()
+                                    .text_color(rgb(pal.muted))
+                                    .child(SharedString::from(when)),
+                            )
+                            .child(div().flex_1().min_w_0().child(SharedString::from(r.line())))
+                            .into_any_element()
+                    })
+                    .collect()
+            }
+        };
         let why: Vec<AnyElement> = s
             .why
             .iter()
@@ -1311,6 +1339,7 @@ impl Shell {
             .child(self.panel("Next step", next))
             .child(self.panel("Change decision", change))
             .child(self.panel("On each computer", comps))
+            .child(self.panel("Recent changes", recent))
             .child(self.panel("Folders", folders))
             .child(self.panel("Recovery copies", rec))
             .child(self.panel("Details", det))
@@ -1766,7 +1795,7 @@ impl Shell {
                 a.title,
                 a.day,
                 a.when,
-                if a.items.is_empty() {
+                if a.items.is_empty() && a.rows.is_empty() {
                     String::new()
                 } else if open {
                     ", expanded".into()
@@ -1782,7 +1811,7 @@ impl Shell {
                     n,
                     &name,
                     label,
-                    if a.items.is_empty() {
+                    if a.items.is_empty() && a.rows.is_empty() {
                         Act::None
                     } else {
                         Act::ToggleExpand(name.clone())
@@ -1817,11 +1846,64 @@ impl Shell {
                                 .min_w_0()
                                 .child(SharedString::from(a.title.clone())),
                         )
-                        .when(!a.items.is_empty(), |d| {
+                        .when(!a.items.is_empty() || !a.rows.is_empty(), |d| {
                             d.child(self.muted(if open { "▾" } else { "▸" }))
                         }),
                 );
             if open {
+                for (j, row) in a.rows.iter().enumerate() {
+                    let rk = format!("{name}-r{j}");
+                    let ropen = self.expanded.contains(&rk);
+                    let has_paths = !row.paths.is_empty() || row.paths_more > 0;
+                    let mut line = self
+                        .clickable(
+                            &rk,
+                            if has_paths {
+                                Act::ToggleExpand(rk.clone())
+                            } else {
+                                Act::None
+                            },
+                            cx,
+                        )
+                        .role(Role::Button)
+                        // A row's click must not also fold its group.
+                        .on_click(|_, _, cx| cx.stop_propagation())
+                        .aria_label(SharedString::from(format!(
+                            "{}{}",
+                            row.line(),
+                            if !has_paths {
+                                ""
+                            } else if ropen {
+                                ", files shown"
+                            } else {
+                                ", files hidden"
+                            }
+                        )))
+                        .pl(u(150.))
+                        .flex()
+                        .gap(u(8.))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_color(rgb(pal.muted))
+                                .child(SharedString::from(row.line())),
+                        );
+                    if has_paths {
+                        line = line.child(self.muted(if ropen { "▾" } else { "▸" }));
+                    }
+                    r = r.child(line);
+                    if ropen {
+                        for p in row.paths_text() {
+                            r = r.child(
+                                div()
+                                    .pl(u(172.))
+                                    .text_color(rgb(pal.muted))
+                                    .child(SharedString::from(p)),
+                            );
+                        }
+                    }
+                }
                 for it in &a.items {
                     r = r.child(
                         div()

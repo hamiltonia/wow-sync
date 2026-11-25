@@ -169,9 +169,17 @@ pub fn headline(w: &World) -> Head {
         )
     } else if w.is_paused() && !core_blocks_pause {
         ("Paused".to_string(), Tone::Paused)
+    } else if let (false, Some(p)) = (
+        core_blocks_pause,
+        w.progress.as_ref().filter(|p| !p.text.is_empty()),
+    ) {
+        (p.text.clone(), Tone::Working)
     } else {
         match w.view.headline {
-            Headline::Ok => ("This computer is up to date".to_string(), Tone::Ok),
+            Headline::Ok => match &w.done_note {
+                Some(n) => (n.clone(), Tone::Ok),
+                None => ("This computer is up to date".to_string(), Tone::Ok),
+            },
             Headline::Working => (
                 match &w.busy {
                     Some(Busy::Syncing { done, total }) if *total > 0 => {
@@ -208,6 +216,9 @@ fn removing(w: &World) -> usize {
 pub fn headline_sub(w: &World) -> Option<String> {
     if w.enrolled && w.fault.is_some() {
         return fault_sub(w);
+    }
+    if let Some(i) = w.progress.as_ref().and_then(|p| p.incoming.clone()) {
+        return Some(i);
     }
     if !w.enrolled
         || blocked_by_test_mode(w)
@@ -265,6 +276,15 @@ fn unavailable_sentence(w: &World) -> Option<String> {
         ),
     })
 }
+/// A package that has started applying no longer waits for a decision, whatever the last
+/// status read still says. The service names decided packages by display name.
+pub fn decision_satisfied(w: &World, key: &str) -> bool {
+    let Some(p) = &w.progress else { return false };
+    w.addons
+        .iter()
+        .any(|a| a.key == key && p.satisfied.contains(&a.title))
+}
+
 fn waiting_sentence(w: &World) -> String {
     if w.view.blocks.contains(&PlanBlock::GameRunning) {
         return match removing(w) {
@@ -279,7 +299,9 @@ fn waiting_sentence(w: &World) -> String {
         .view
         .packages
         .iter()
-        .filter(|(_, s, _)| matches!(s, PackageStatus::NeedsDecision(_)))
+        .filter(|(k, s, _)| {
+            matches!(s, PackageStatus::NeedsDecision(_)) && !decision_satisfied(w, k.as_str())
+        })
         .count();
     if n > 0 {
         return format!(
@@ -315,7 +337,14 @@ pub fn headline_a11y(w: &World) -> String {
 }
 
 pub fn tray_tooltip(w: &World) -> String {
-    format!("WoW Sync: {}", headline(w).text)
+    let t = format!("WoW Sync: {}", headline(w).text);
+    // Windows shows at most 127 characters of a tooltip.
+    if t.chars().count() > 120 {
+        let cut: String = t.chars().take(119).collect();
+        format!("{cut}…")
+    } else {
+        t
+    }
 }
 
 /// Window title for the page (screen readers announce the change).
@@ -1812,12 +1841,64 @@ mod tests {
             paused_since_ms: None,
             pause_damaged: false,
             activity: &[],
+            history: &[],
+            progress: None,
+            done_note: None,
             syncing: false,
             last_check_ms: None,
             next_check_ms: None,
             setup: None,
             app_version: "x",
         })
+    }
+
+    #[test]
+    fn progress_replaces_a_decision_headline_when_the_apply_starts() {
+        let mut w = world_with(
+            PackageStatus::NeedsDecision(DecisionReason::Ambiguous),
+            wow_sync_core::explain::Explanation::InSync,
+        );
+        w.view.headline = Headline::Waiting;
+        assert_eq!(headline(&w).text, "Waiting for your decision on 1 add-on");
+        let mut p = crate::progress_ui::ProgressView {
+            text: "Installing Demo from RYZENFISH: 1.2 of 1.8 GB".into(),
+            ..Default::default()
+        };
+        p.satisfied.insert("Demo".into());
+        w.progress = Some(p);
+        assert_eq!(
+            headline(&w).text,
+            "Installing Demo from RYZENFISH: 1.2 of 1.8 GB"
+        );
+        assert_eq!(headline(&w).tone, Tone::Working);
+        assert!(tray_tooltip(&w).starts_with("WoW Sync: Installing Demo"));
+        // Progress gone, decision satisfied by an earlier apply: no stale wording either.
+        w.progress = Some(crate::progress_ui::ProgressView::default());
+        assert!(!decision_satisfied(&w, "other"));
+        let mut p = crate::progress_ui::ProgressView::default();
+        p.satisfied.insert("demo".into());
+        w.progress = Some(p);
+        assert!(
+            !decision_satisfied(&w, "demo"),
+            "a folder key is not a display name"
+        );
+        w.progress = None;
+        w.view.headline = Headline::Ok;
+        w.done_note = Some("Updated 15 add-ons from RYZENFISH \u{2014} see Activity".into());
+        assert_eq!(
+            headline(&w).text,
+            "Updated 15 add-ons from RYZENFISH \u{2014} see Activity"
+        );
+    }
+
+    #[test]
+    fn a_long_progress_tooltip_fits_the_windows_limit() {
+        let mut w = enrolled();
+        w.progress = Some(crate::progress_ui::ProgressView {
+            text: "Installing 15 add-ons from A-VERY-LONG-COMPUTER-NAME: 1.2 of 1.8 GB (SpokenQuestsAudioSharedAndSomeOtherVeryLongFolderNameHere)".into(),
+            ..Default::default()
+        });
+        assert!(tray_tooltip(&w).chars().count() <= 120);
     }
 
     #[test]

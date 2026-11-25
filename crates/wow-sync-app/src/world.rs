@@ -87,7 +87,7 @@ pub fn absolute(secs: i64) -> String {
     format!("{hm} on {d} {}", MONTHS[m])
 }
 
-fn day_label(days: i64, today: i64) -> String {
+pub fn day_label(days: i64, today: i64) -> String {
     match today - days {
         0 => "Today".into(),
         1 => "Yesterday".into(),
@@ -164,6 +164,8 @@ pub struct ActivityItem {
     pub problem: bool,
     pub day: String,
     pub when: String,
+    /// Per-add-on rows of a structured pass group; empty for plain lines.
+    pub rows: Vec<crate::history_ui::ChangeRow>,
 }
 
 #[derive(Clone, Debug)]
@@ -269,6 +271,12 @@ pub struct World {
     pub checking: bool,
     /// The sync thread hit an internal error in this phase and is retrying.
     pub fault: Option<String>,
+    /// What the running pass is doing now, from the service's progress events.
+    pub progress: Option<crate::progress_ui::ProgressView>,
+    /// "Updated 15 add-ons from RYZENFISH — see Activity", for a short while after a pass.
+    pub done_note: Option<String>,
+    /// Structured change records, newest first, for the add-on pages.
+    pub changes: Vec<wow_sync_runtime::ChangeRecord>,
 }
 
 /// The real inputs besides the snapshot.
@@ -277,6 +285,9 @@ pub struct Inputs<'a> {
     pub paused_since_ms: Option<i64>,
     pub pause_damaged: bool,
     pub activity: &'a [ActivityEntry],
+    pub history: &'a [wow_sync_runtime::HistoryItem],
+    pub progress: Option<&'a crate::progress_ui::ProgressView>,
+    pub done_note: Option<&'a str>,
     pub syncing: bool,
     pub last_check_ms: Option<i64>,
     pub next_check_ms: Option<i64>,
@@ -320,23 +331,38 @@ fn kind_of(p: &PackageRow, peers: &[&MemberRow]) -> Kind {
     }
 }
 
-fn plain_text(t: &str) -> String {
-    if t.starts_with("published seq ") {
-        return "Shared this computer's add-on changes".into();
+/// `None` for a publish that carried nothing new: it is not worth a line.
+fn plain_text(t: &str) -> Option<String> {
+    if let Some(rest) = t.strip_prefix("published seq ") {
+        let objects = rest
+            .split_once('(')
+            .and_then(|(_, c)| c.split_once(' '))
+            .and_then(|(n, _)| n.parse::<u64>().ok());
+        return match objects {
+            Some(0) => None,
+            Some(1) => Some("Shared 1 new item from this computer".into()),
+            Some(n) => Some(format!(
+                "Shared {} new items from this computer",
+                crate::history_ui::group_digits(n)
+            )),
+            None => Some("Shared this computer's add-on changes".into()),
+        };
     }
     if t.starts_with("enrolled group ") {
-        return "This computer joined the add-on group".into();
+        return Some("This computer joined the add-on group".into());
     }
-    t.to_string()
+    Some(t.to_string())
 }
 
 fn activity_items(entries: &[ActivityEntry], now: i64) -> Vec<ActivityItem> {
     let (today, _) = local_parts(now);
     let entries: Vec<ActivityEntry> = entries
         .iter()
-        .map(|e| ActivityEntry {
-            text: plain_text(&e.text),
-            ..e.clone()
+        .filter_map(|e| {
+            Some(ActivityEntry {
+                text: plain_text(&e.text)?,
+                ..e.clone()
+            })
         })
         .collect();
     let entries = &entries[..];
@@ -351,6 +377,7 @@ fn activity_items(entries: &[ActivityEntry], now: i64) -> Vec<ActivityItem> {
                 problem,
                 day: "Earlier".into(),
                 when: String::new(),
+                rows: Vec::new(),
             });
             batch_start = None;
             continue;
@@ -373,9 +400,60 @@ fn activity_items(entries: &[ActivityEntry], now: i64) -> Vec<ActivityItem> {
             problem,
             day: day_label(days, today),
             when: hm,
+            rows: Vec::new(),
         });
         batch_start = joins.then_some(ms);
     }
+    out
+}
+
+/// The Activity list from the unified history: structured records grouped by pass, older plain
+/// lines as before, in the order given (newest first).
+fn history_items(items: &[wow_sync_runtime::HistoryItem], now: i64) -> Vec<ActivityItem> {
+    use wow_sync_runtime::HistoryItem;
+    let (today, _) = local_parts(now);
+    let mut out: Vec<ActivityItem> = Vec::new();
+    let mut legacy: Vec<ActivityEntry> = Vec::new();
+    let mut group: Vec<wow_sync_runtime::ChangeRecord> = Vec::new();
+    let flush_legacy = |legacy: &mut Vec<ActivityEntry>, out: &mut Vec<ActivityItem>| {
+        if !legacy.is_empty() {
+            out.extend(activity_items(legacy, now));
+            legacy.clear();
+        }
+    };
+    let flush_group = |group: &mut Vec<wow_sync_runtime::ChangeRecord>,
+                       out: &mut Vec<ActivityItem>| {
+        let Some(first) = group.iter().map(|r| r.unix_ms).max() else {
+            return;
+        };
+        let (days, hm) = local_parts(first);
+        out.push(ActivityItem {
+            title: crate::history_ui::group_title(group),
+            items: Vec::new(),
+            problem: false,
+            day: day_label(days, today),
+            when: hm,
+            rows: group.iter().map(crate::history_ui::row_of).collect(),
+        });
+        group.clear();
+    };
+    for it in items {
+        match it {
+            HistoryItem::Legacy(e) => {
+                flush_group(&mut group, &mut out);
+                legacy.push(e.clone());
+            }
+            HistoryItem::Change(r) => {
+                flush_legacy(&mut legacy, &mut out);
+                if group.first().is_some_and(|g| g.pass_id != r.pass_id) {
+                    flush_group(&mut group, &mut out);
+                }
+                group.push(r.clone());
+            }
+        }
+    }
+    flush_group(&mut group, &mut out);
+    flush_legacy(&mut legacy, &mut out);
     out
 }
 
@@ -416,6 +494,9 @@ impl World {
             view: placeholder_view(),
             checking: false,
             fault: None,
+            progress: None,
+            done_note: None,
+            changes: Vec::new(),
         }
     }
 
@@ -454,7 +535,21 @@ impl World {
             .next_check_ms
             .filter(|_| !w.is_paused())
             .map(|ms| local_parts(ms).1);
-        w.activity = activity_items(i.activity, now);
+        w.activity = if i.history.is_empty() {
+            activity_items(i.activity, now)
+        } else {
+            history_items(i.history, now)
+        };
+        w.changes = i
+            .history
+            .iter()
+            .filter_map(|h| match h {
+                wow_sync_runtime::HistoryItem::Change(r) => Some(r.clone()),
+                _ => None,
+            })
+            .collect();
+        w.progress = i.progress.cloned();
+        w.done_note = i.done_note.map(str::to_string);
         // The service only remembers a publish made in this run; the log remembers older ones.
         let logged_publish = i
             .activity
@@ -583,6 +678,9 @@ mod tests {
                 paused_since_ms: None,
                 pause_damaged: false,
                 activity: &[],
+                history: &[],
+                progress: None,
+                done_note: None,
                 syncing: false,
                 last_check_ms: None,
                 next_check_ms: None,
@@ -606,6 +704,9 @@ mod tests {
             paused_since_ms: None,
             pause_damaged: false,
             activity: &[],
+            history: &[],
+            progress: None,
+            done_note: None,
             syncing: false,
             last_check_ms: None,
             next_check_ms: None,
@@ -627,6 +728,9 @@ mod tests {
             paused_since_ms: Some(now_ms()),
             pause_damaged: false,
             activity: &[],
+            history: &[],
+            progress: None,
+            done_note: None,
             syncing: true,
             last_check_ms: Some(now_ms() - 5_000),
             next_check_ms: Some(now_ms() + 60_000),
@@ -673,14 +777,24 @@ mod tests {
             ),
         ];
         let items = activity_items(&log, now_ms());
-        assert_eq!(items[0].title, "Shared this computer's add-on changes");
+        assert_eq!(items[0].title, "Shared 6 new items from this computer");
         assert_eq!(items[1].title, "This computer joined the add-on group");
+        let quiet = [
+            entry(t, "published", "published seq 8 (0 new objects)"),
+            entry(t - 1_000, "published", "published seq 9 (1 new object)"),
+        ];
+        let items = activity_items(&quiet, now_ms());
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].title, "Shared 1 new item from this computer");
         let snap = StatusSnapshot::default();
         let w = World::from_snapshot(Inputs {
             snap: &snap,
             paused_since_ms: None,
             pause_damaged: false,
             activity: &log,
+            history: &[],
+            progress: None,
+            done_note: None,
             syncing: false,
             last_check_ms: None,
             next_check_ms: None,
@@ -688,6 +802,68 @@ mod tests {
             app_version: "x",
         });
         assert!(w.last_shared_secs.is_some_and(|s| (115..180).contains(&s)));
+    }
+
+    #[test]
+    fn history_groups_by_pass_and_keeps_older_plain_lines() {
+        use crate::history_ui::tests::rec;
+        use wow_sync_runtime::{ChangeKind, HistoryItem};
+        let now = now_ms();
+        let mut items: Vec<HistoryItem> = Vec::new();
+        for i in 0..3 {
+            let mut r = rec(
+                ChangeKind::Applied,
+                &format!("Spoken{i}"),
+                Some("RYZENFISH"),
+            );
+            r.pass_id = 7;
+            r.unix_ms = now - i;
+            items.push(HistoryItem::Change(r));
+        }
+        let mut other = rec(ChangeKind::Removed, "Old", Some("RYZENFISH"));
+        other.pass_id = 6;
+        other.unix_ms = now - 600_000;
+        items.push(HistoryItem::Change(other));
+        items.push(HistoryItem::Legacy(entry(
+            now - 900_000,
+            "applied",
+            "applied bagnon applied",
+        )));
+        items.push(HistoryItem::Legacy(ActivityEntry {
+            unix_ms: None,
+            kind: "published".into(),
+            package: None,
+            text: "enrolled group g".into(),
+        }));
+        let out = history_items(&items, now);
+        assert_eq!(out.len(), 4);
+        assert_eq!(out[0].title, "3 add-ons updated from RYZENFISH (+4 KB)");
+        assert_eq!(out[0].day, "Today");
+        assert_eq!(out[0].rows.len(), 3);
+        assert_eq!(out[1].title, "Old removed from RYZENFISH");
+        assert!(out[2].rows.is_empty() && out[2].title == "applied bagnon applied");
+        assert_eq!(out[3].title, "This computer joined the add-on group");
+    }
+
+    #[test]
+    fn an_addon_page_lists_only_its_own_changes_newest_first() {
+        use crate::history_ui::tests::rec;
+        use wow_sync_runtime::ChangeKind;
+        let mut a = rec(ChangeKind::Applied, "Bagnon", None);
+        a.unix_ms = 9;
+        let mut b = rec(ChangeKind::Applied, "Nav", None);
+        b.unix_ms = 8;
+        let mut c = rec(ChangeKind::Removed, "Bagnon", None);
+        c.unix_ms = 7;
+        let recs = vec![a, b, c];
+        let rows = crate::history_ui::rows_for(&recs, "Bagnon", "Bagnon", 10);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0, 9);
+        assert_eq!(
+            crate::history_ui::rows_for(&recs, "Bagnon", "Bagnon", 1).len(),
+            1
+        );
+        assert!(crate::history_ui::rows_for(&recs, "Other", "Other", 10).is_empty());
     }
 
     #[test]
