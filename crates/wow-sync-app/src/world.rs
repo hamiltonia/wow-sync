@@ -79,6 +79,13 @@ pub fn day_text(unix_ms: u64) -> String {
     format!("{d} {}", MONTHS[m])
 }
 
+/// The local date and time of a recorded instant, e.g. "16 November 21:02".
+pub fn date_time_text(unix_ms: u64) -> String {
+    let (days, hm) = local_parts(i64::try_from(unix_ms).unwrap_or(i64::MAX / 2));
+    let (_, m, d) = civil(days);
+    format!("{d} {} {hm}", MONTHS[m])
+}
+
 /// Absolute local time of something `secs` ago, e.g. "21:02 on 16 November".
 pub fn absolute(secs: i64) -> String {
     let at = now_ms() - secs.max(0) * 1000;
@@ -867,6 +874,14 @@ mod tests {
             1
         );
         assert!(crate::history_ui::rows_for(&recs, "Other", "Other", 10).is_empty());
+        let mut s = rec(ChangeKind::SettingsPublished, "Bagnon settings", None);
+        s.folders = vec!["Bagnon".into()];
+        s.unix_ms = 10;
+        let mut with_settings = recs.clone();
+        with_settings.insert(0, s);
+        let rows = crate::history_ui::rows_for(&with_settings, "bagnon", "Bagnon", 10);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].1.kind, ChangeKind::SettingsPublished);
     }
 
     #[test]

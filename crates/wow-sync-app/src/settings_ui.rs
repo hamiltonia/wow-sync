@@ -98,6 +98,8 @@ pub struct SettingsData {
     pub policy_conflict: bool,
     /// Paused folders with what a resume would meet.
     pub paused: Vec<wow_sync_runtime::PausedFolder>,
+    /// "Pause all settings" is on for this computer.
+    pub paused_all: bool,
     /// What "Share these now" would push (runtime `to_share`).
     pub to_share: Vec<ShareItem>,
     /// Some computer already shared settings in this group (not the first adoption).
@@ -179,12 +181,11 @@ pub fn status_text(s: &UnitStatus) -> String {
         ),
         UnitStatus::TooLarge { size: None } => "Too large to share automatically".into(),
         UnitStatus::OwnedBySeveral { with } if with.is_empty() => {
-            "Also used by other add-ons, so not shared automatically".into()
+            "Shared with another add-on, not synced".into()
         }
-        UnitStatus::OwnedBySeveral { with } => format!(
-            "Also used by {}, so not shared automatically",
-            with.join(", ")
-        ),
+        UnitStatus::OwnedBySeveral { with } => {
+            format!("Shared with {}, not synced", with.join(", "))
+        }
         UnitStatus::WaitingForWow => "New settings will be used when WoW closes".into(),
         UnitStatus::WaitingForSharedCopy => "Waiting for the shared settings to arrive".into(),
     }
@@ -294,6 +295,25 @@ pub fn restore_controls(w: &World, row: &UnitRow) -> Vec<(Control, String)> {
             (button, confirm)
         })
         .collect()
+}
+
+/// "Pause all settings" or, when it is on, "Resume all settings"; the per-add-on pause stays.
+pub fn pause_all_control(w: &World) -> Control {
+    if w.features.settings.paused_all {
+        control(
+            w,
+            ActionKind::ResumeAllSettings,
+            "Resume all settings",
+            GroupAction::ResumeAllSettings,
+        )
+    } else {
+        control(
+            w,
+            ActionKind::PauseAllSettings,
+            "Pause all settings",
+            GroupAction::PauseAllSettings,
+        )
+    }
 }
 
 pub fn pause_control(w: &World, folder: &FolderKey) -> Control {
@@ -587,6 +607,36 @@ fn urgency(s: &UnitStatus) -> u8 {
     }
 }
 
+/// An add-on with no row of its own that another add-on's row says shares its saved variables.
+fn shared_by_other(w: &World, folder: &str) -> Option<UnitStatus> {
+    let names: Vec<&str> = std::iter::once(folder)
+        .chain(
+            w.addons
+                .iter()
+                .filter(|a| {
+                    a.key.eq_ignore_ascii_case(folder) || a.title.eq_ignore_ascii_case(folder)
+                })
+                .flat_map(|a| [a.key.as_str(), a.title.as_str()]),
+        )
+        .collect();
+    w.features
+        .settings
+        .units
+        .iter()
+        .find_map(|u| match &u.status {
+            UnitStatus::OwnedBySeveral { with }
+                if with
+                    .iter()
+                    .any(|n| names.iter().any(|m| n.eq_ignore_ascii_case(m))) =>
+            {
+                Some(UnitStatus::OwnedBySeveral {
+                    with: vec![u.addon.clone()],
+                })
+            }
+            _ => None,
+        })
+}
+
 /// The settings line of the Add-ons list: the most urgent status among the add-on's identities.
 pub fn addon_settings_line(w: &World, folder: &str) -> String {
     let worst = w
@@ -602,6 +652,9 @@ pub fn addon_settings_line(w: &World, folder: &str) -> String {
             status_text(&UnitStatus::WaitingForIdentity { who: None })
         }
         Some(s) => status_text(s),
+        None if shared_by_other(w, folder).is_some() => {
+            status_text(&shared_by_other(w, folder).unwrap_or(UnitStatus::Off))
+        }
         None if w.features.settings.enabled => "Not shared yet".into(),
         None => "Settings not shared".into(),
     }
@@ -621,6 +674,30 @@ pub fn addon_settings_lines(w: &World, folder: &str) -> Vec<String> {
         vec![addon_settings_line(w, folder)]
     } else {
         lines
+    }
+}
+
+/// The add-ons with saved settings waiting for the owner to pick one of two competing copies.
+pub fn pending_choice_addons(w: &World) -> Vec<String> {
+    let mut v: Vec<String> = w
+        .features
+        .settings
+        .units
+        .iter()
+        .filter(|u| matches!(u.status, UnitStatus::NeedsChoice))
+        .map(|u| u.addon.clone())
+        .collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
+/// What the headline says while a settings choice is pending: never "up to date".
+pub fn pending_choice_headline(w: &World) -> Option<String> {
+    match pending_choice_addons(w).len() {
+        0 => None,
+        1 => Some("Choose which saved settings to keep".into()),
+        n => Some(format!("Choose which saved settings to keep ({n} add-ons)")),
     }
 }
 
@@ -1552,6 +1629,29 @@ mod tests {
     }
 
     #[test]
+    fn a_pending_settings_choice_shows_in_the_headline_and_needs_attention() {
+        let mut w = world();
+        w.enrolled = true;
+        w.view.headline = wow_sync_core::status::Headline::Ok;
+        w.features.settings.enabled = true;
+        assert_eq!(
+            crate::model::headline(&w).text,
+            "This computer is up to date"
+        );
+        assert!(crate::model::need_items(&w).is_empty());
+        w.features.settings.units = vec![unit(UnitStatus::NeedsChoice)];
+        let h = crate::model::headline(&w);
+        assert_eq!(h.text, "Choose which saved settings to keep");
+        assert_eq!(h.tone, crate::theme::Tone::Help);
+        let items = crate::model::need_items(&w);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].target, crate::model::NeedTarget::SettingsChoice);
+        assert!(items[0]
+            .title
+            .ends_with("choose which saved settings to keep"));
+    }
+
+    #[test]
     fn the_new_attention_statuses_read_in_plain_words() {
         assert_eq!(
             status_text(&UnitStatus::TooLarge {
@@ -1563,7 +1663,7 @@ mod tests {
             status_text(&UnitStatus::OwnedBySeveral {
                 with: vec!["Alpha".into(), "Beta".into()]
             }),
-            "Also used by Alpha, Beta, so not shared automatically"
+            "Shared with Alpha, Beta, not synced"
         );
         assert_eq!(
             status_text(&UnitStatus::WaitingForWow),
@@ -1627,6 +1727,89 @@ mod tests {
             ]
         );
         assert_eq!(addon_settings_line(&w, "Bagnon"), "Not shared yet");
+    }
+
+    #[test]
+    fn two_add_ons_declaring_the_same_variables_both_read_as_shared_not_synced() {
+        let mut w = world();
+        w.features.settings.enabled = true;
+        w.addons = vec![
+            test_addon("alpha", "Alpha Tools"),
+            test_addon("beta", "Beta"),
+        ];
+        let mut a = named(
+            "Alpha Tools",
+            UnitStatus::OwnedBySeveral {
+                with: vec!["Beta".into()],
+            },
+            1,
+        );
+        a.unit.folder = folder("alpha");
+        w.features.settings.units = vec![a];
+        assert_eq!(
+            addon_settings_line(&w, "alpha"),
+            "Shared with Beta, not synced"
+        );
+        assert_eq!(
+            addon_settings_line(&w, "beta"),
+            "Shared with Alpha Tools, not synced"
+        );
+        assert_ne!(addon_settings_line(&w, "beta"), "Not shared yet");
+    }
+
+    #[test]
+    fn competing_choices_name_their_source_kind_time_and_size() {
+        use crate::features::{head_label, recovery_label};
+        use wow_sync_runtime::{HeadKind as H, RecoveryKind as R};
+        let d = "25 November 14:32, 1 KB";
+        let a = head_label(H::MastersRevision, Some("Desk"), d);
+        let b = head_label(H::ThisComputersCopy, None, d);
+        let c = head_label(H::SharedFrom, Some("Laptop"), d);
+        assert!(a.contains("settings master Desk") && a.contains(d));
+        assert!(b.contains("this computer"));
+        assert!(c.contains("shared from Laptop"));
+        assert!(a != b && b != c && a != c);
+        let r1 = recovery_label(R::YieldedToMaster, Some("Desk"), d);
+        let r2 = recovery_label(R::PeerReplaced, Some("Laptop"), d);
+        assert!(r1 != r2 && r1.contains(d) && r2.contains("Laptop"));
+    }
+
+    #[test]
+    fn pause_all_toggles_to_resume_all_and_keeps_the_per_add_on_pause() {
+        let mut w = world();
+        let c = pause_all_control(&w);
+        assert_eq!(c.label, "Pause all settings");
+        assert_eq!(c.action, Ok(GroupAction::PauseAllSettings));
+        w.features.settings.paused_all = true;
+        let c = pause_all_control(&w);
+        assert_eq!(c.label, "Resume all settings");
+        assert_eq!(c.action, Ok(GroupAction::ResumeAllSettings));
+        assert_eq!(
+            GroupAction::PauseAllSettings.to_command(),
+            wow_sync_runtime::Command::PauseAllSettings
+        );
+        assert_eq!(
+            GroupAction::ResumeAllSettings.to_command(),
+            wow_sync_runtime::Command::ResumeAllSettings
+        );
+        assert!(pause_control(&w, &folder("bagnon")).action.is_ok());
+    }
+
+    fn test_addon(key: &str, title: &str) -> crate::world::Addon {
+        crate::world::Addon {
+            key: key.into(),
+            title: title.into(),
+            version: String::new(),
+            target_version: None,
+            folders: vec![],
+            kind: crate::world::Kind::Available,
+            candidates: vec![],
+            why: String::new(),
+            next: wow_sync_core::view::NextAction::Nothing,
+            awaiting: vec![],
+            waiting_on: vec![],
+            waiting_secs: None,
+        }
     }
 
     fn me() -> EnrollmentRef {
