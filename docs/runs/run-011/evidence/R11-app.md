@@ -45,3 +45,12 @@ Fail-without-change: each new test was run against a deliberate mutation of the 
 
 Lab: synthetic two-computer lab prepared (synthetic add-ons, accounts and characters, own state and provider); screenshots wait on the runtime accounts list.
 
+
+## Interface 2 and live lab
+
+- Merged main (cf5b761). Real wording for Phase::Settings (Saving add-on settings / Using settings from <computer>, counts and add-on), ChangeRecord.identity on the Activity row, and the TooLarge, OwnedBySeveral and WaitingForWow statuses (list line most-urgent; detail lines name them). New tests: settings progress wording, attention statuses; the Activity identity test now goes through the record.
+- Live lab (two synthetic computers, synthetic accounts and characters, own state and provider, debug build, UI Automation clicks): computer A showed the headline offer, opened the consent with both accounts ticked and this computer as master, and Share settings enabled sharing; computer B then showed 'A-demo is now the settings master. Use its add-on settings here?', its consent had both accounts ticked, and Use settings confirmed it without choosing a master. Processes were stopped by captured PID.
+- Not observable live yet: per-add-on statuses (Add-ons list stays 'Not shared yet'), settings progress and Activity identity rows, because the runtime still emits stub units, no Settings phase and no identity (its Step 2).
+- Screenshots: the screen was locked, so CopyFromScreen captured the lock screen (deleted); PrintWindow was used. Kept in the lab, not committed: a4-consent, a5-shared, a6-master, b2-consent, b3-after-use, b4-addons, b5-activity. The overview shot showing a lab path was deleted.
+- Verify: offline PASS, native PASS.
+
