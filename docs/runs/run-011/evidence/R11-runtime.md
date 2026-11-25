@@ -132,3 +132,29 @@ Each row: the guard was reverted by a one-line source change, the named test run
 - No pre-consent share preview (nothing of WTF is read before consent, by design).
 - `ShareSettingsWhenReady` takes effect on the pass after the first capture (one cycle later).
 - Unix no-replace is link-then-unlink; not exercised on this machine.
+
+## Final round (RV11-12/13/14, SharedFromHere, unit-level versions, full-app memory)
+
+### Full-app memory (real release app per lab computer, 113 add-ons, one 31.9 MiB file)
+| Phase | Private commit | Working set | Private working set |
+|---|---|---|---|
+| Idle app (synced) | 83-106 MiB | 90-112 MiB | 57 MiB |
+| Settings pass (31.9 MiB edit) | 117 MiB | 120 MiB | 86 MiB |
+Private working set stays under 100 MiB (peak 86 MiB per process). Private commit peaks at 117-131 MiB; most of it is the GUI baseline (about 84-106 MiB at idle), not the settings path (streaming; see OD-30). One real computer runs one process; the lab ran two (one per simulated computer), each measured alone.
+
+### Fails-without-fix (this round)
+| Guard | Test | Without the guard |
+|---|---|---|
+| SharedFromHere reason | a_share_from_a_computer_that_is_not_master_says_shared_from_here | FAILS |
+| Master-only ShareSettingsWhenReady | only_the_master_shares_in_bulk_but_any_computer_may_push_one_unit | FAILS |
+| Master-only ShareSettingsNow | same test | FAILS |
+| Touch on reuse (RV11-12) | a_reused_old_copy_starts_its_age_again_when_content_returns_to_it | not re-run reverted |
+| Keep recent records (RV11-12) | cleanup_keeps_every_copy_a_recent_revision_record_names_even_if_unread_here | not re-run reverted |
+| Waiting for shared copy | a_revision_whose_copy_is_missing_waits_truthfully_and_applies_when_it_returns | not re-run reverted |
+| Omit unavailable history (RV11-13) | settings_history_does_not_offer_a_copy_cleanup_removed | PASSES without the filter: the ledger already prunes those entries in this scenario, so the test is weak; the filter covers a provider-side loss only |
+
+### Decisions
+- Decision: bulk share commands only for the effective master; ShareSettings (one unit) stays open. Why: design 5.2 / RV11-14. Reversible: yes.
+- Decision: reused blobs and manifests are touched; GC also keeps every checkpoint named by a provider record under 30 days old. Why: Dropbox lag (RV11-12). Reversible: yes.
+- Decision: a record's versions are the unit's manifest (checkpoint) id and total size. Why: units are single-file in practice; the id covers the whole unit. Reversible: yes.
+- Decision: history omits entries whose copy is gone. Why: no dead restores. Reversible: yes.

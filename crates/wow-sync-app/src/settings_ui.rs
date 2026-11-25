@@ -52,6 +52,8 @@ pub enum UnitStatus {
     },
     /// New settings are ready but WoW is running.
     WaitingForWow,
+    /// The shared copy has not arrived in the shared folder yet.
+    WaitingForSharedCopy,
 }
 
 /// One saved copy of a unit, shown by when and where it came from.
@@ -184,6 +186,9 @@ pub fn status_text(s: &UnitStatus) -> String {
             with.join(", ")
         ),
         UnitStatus::WaitingForWow => "New settings will be used when WoW closes".into(),
+        UnitStatus::WaitingForSharedCopy => {
+            "The shared settings have not arrived yet; they will be used once they do".into()
+        }
     }
 }
 
@@ -574,7 +579,8 @@ fn urgency(s: &UnitStatus) -> u8 {
         UnitStatus::LocalDifferent(_) => 7,
         UnitStatus::Waiting { .. }
         | UnitStatus::WaitingForIdentity { .. }
-        | UnitStatus::WaitingForWow => 6,
+        | UnitStatus::WaitingForWow
+        | UnitStatus::WaitingForSharedCopy => 6,
         UnitStatus::Paused => 5,
         UnitStatus::NoSharedCopy => 4,
         UnitStatus::Retired => 3,

@@ -782,6 +782,7 @@ pub fn settings_unit_rows(
                         with: r.shared_with.clone(),
                     },
                     S::WaitingForWow => UnitStatus::WaitingForWow,
+                    S::WaitingForSharedCopy => UnitStatus::WaitingForSharedCopy,
                     S::Suspect => UnitStatus::Suspect,
                     S::LocalDifferent(reason) => UnitStatus::LocalDifferent(reason),
                     S::NoSharedCopy => UnitStatus::NoSharedCopy,

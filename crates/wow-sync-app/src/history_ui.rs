@@ -154,6 +154,7 @@ pub fn reason_text(r: &ChangeRecord) -> String {
         },
         ChangeReason::Choice(Some(n)) => format!("a choice made on {n}"),
         ChangeReason::SettingsMaster => "settings master".into(),
+        ChangeReason::SharedFromHere => "shared from this computer".into(),
         ChangeReason::PeerPush => match from {
             Some(n) => format!("pushed from {n}"),
             None => "pushed to this computer".into(),
@@ -462,6 +463,7 @@ pub(crate) mod tests {
                 "a choice made on DESK",
             ),
             (ChangeReason::SettingsMaster, "settings master"),
+            (ChangeReason::SharedFromHere, "shared from this computer"),
             (ChangeReason::PeerPush, "pushed from RYZENFISH"),
             (ChangeReason::Removal, "removed on RYZENFISH"),
             (

@@ -581,7 +581,7 @@ pub(crate) fn recovered(
 /// A saved-settings revision this computer just published.
 pub(crate) fn settings_published(
     stamp: (u64, i64),
-    _r: &wow_sync_core::kinds::SettingsRevision,
+    by_master: bool,
     display: String,
     info: &crate::settings_cycle::SettingsChangeInfo,
 ) -> ChangeRecord {
@@ -593,7 +593,11 @@ pub(crate) fn settings_published(
         vec![folder],
         ChangeSource::ThisComputer,
         // A publish from here is never a push received from a peer.
-        ChangeReason::SettingsMaster,
+        if by_master {
+            ChangeReason::SettingsMaster
+        } else {
+            ChangeReason::SharedFromHere
+        },
     );
     with_settings_info(&mut rec, info);
     rec

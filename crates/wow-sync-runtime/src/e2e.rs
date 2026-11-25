@@ -4010,6 +4010,7 @@ mod tests {
         for f in provider_settings_files(&lab) {
             wow_sync_adapters::testkit::set_mtime(&f, old);
         }
+        age_authority_records(&lab, 60);
         publish_versions(&mut a, 6, 6);
         forget_last_sweep(&a);
         synced(&mut a);
@@ -4037,6 +4038,165 @@ mod tests {
         forget_last_sweep(&a);
         synced(&mut a);
         assert_eq!(provider_settings_files(&lab).len(), before);
+    }
+    fn age_all_settings_files(lab: &Lab, days: u64) {
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(days * 24 * 3600);
+        for f in provider_settings_files(lab) {
+            wow_sync_adapters::testkit::set_mtime(&f, old);
+        }
+    }
+
+    fn age_authority_records(lab: &Lab, days: u64) {
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(days * 24 * 3600);
+        let mut stack = vec![lab.shared.join("WoWSync")];
+        while let Some(d) = stack.pop() {
+            for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p.to_string_lossy().contains("authority") {
+                    wow_sync_adapters::testkit::set_mtime(&p, old);
+                }
+            }
+        }
+    }
+
+    fn blob_path(lab: &Lab, text: &str) -> PathBuf {
+        let h = wow_sync_core::hash::sha256(text.as_bytes());
+        lab.shared
+            .join("WoWSync/settings/blobs")
+            .join(h.to_string())
+    }
+
+    #[test]
+    fn a_reused_old_copy_starts_its_age_again_when_content_returns_to_it() {
+        let lab = Lab::new();
+        let (mut a, _b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        share_now(&mut a);
+        age_all_settings_files(&lab, 60);
+        publish_versions(&mut a, 2, 2);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        let m = std::fs::metadata(blob_path(&lab, "AlphaDB = { v = 1 }\n")).unwrap();
+        let age = std::time::SystemTime::now()
+            .duration_since(m.modified().unwrap())
+            .unwrap();
+        assert!(age.as_secs() < 24 * 3600, "reused blob is {age:?} old");
+    }
+
+    #[test]
+    fn cleanup_keeps_every_copy_a_recent_revision_record_names_even_if_unread_here() {
+        let lab = Lab::new();
+        let (mut a, _b, g) = settings_pair(&lab, true, Some(1 << 20));
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        share_now(&mut a);
+        publish_versions(&mut a, 2, 3);
+        let before = provider_settings_files(&lab).len();
+        age_all_settings_files(&lab, 60);
+        let provider =
+            wow_sync_adapters::provider::ProviderRoot::open_or_create(&lab.shared).unwrap();
+        let now = wow_sync_adapters::sysinfo::now_unix_ms() as u64;
+        // This computer retains nothing; the recent records on the shared folder still hold.
+        crate::settings_cycle::sweep_provider(
+            &provider,
+            &g,
+            &std::collections::BTreeSet::new(),
+            now,
+        )
+        .unwrap();
+        assert_eq!(provider_settings_files(&lab).len(), before);
+    }
+
+    #[test]
+    fn a_revision_whose_copy_is_missing_waits_truthfully_and_applies_when_it_returns() {
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        share_now(&mut a);
+        let blob = blob_path(&lab, "AlphaDB = { v = 1 }\n");
+        let bytes = std::fs::read(&blob).unwrap();
+        std::fs::remove_file(&blob).unwrap();
+        synced(&mut b);
+        let row = &b.svc.status().settings_units[0];
+        assert_eq!(
+            row.status,
+            crate::settings_cycle::SettingsUnitStatus::WaitingForSharedCopy
+        );
+        assert_ne!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 1 }\n")
+        );
+        std::fs::write(&blob, bytes).unwrap();
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 1 }\n")
+        );
+        assert_ne!(
+            b.svc.status().settings_units[0].status,
+            crate::settings_cycle::SettingsUnitStatus::WaitingForSharedCopy
+        );
+    }
+
+    #[test]
+    fn settings_history_does_not_offer_a_copy_cleanup_removed() {
+        let lab = Lab::new();
+        let (mut a, _b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 0 }\n");
+        synced(&mut a);
+        share_now(&mut a);
+        publish_versions(&mut a, 1, 5);
+        age_all_settings_files(&lab, 60);
+        age_authority_records(&lab, 60);
+        publish_versions(&mut a, 6, 6);
+        forget_last_sweep(&a);
+        synced(&mut a);
+        let row = &a.svc.status().settings_units[0];
+        assert!(!row.history.is_empty());
+        for h in &row.history {
+            let m = lab
+                .shared
+                .join("WoWSync/settings/manifests")
+                .join(format!("{}.json", h.checkpoint));
+            assert!(m.exists(), "an entry is listed whose copy is gone");
+        }
+    }
+
+    #[test]
+    fn only_the_master_shares_in_bulk_but_any_computer_may_push_one_unit() {
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        write_wtf(&b, "Alpha", "AlphaDB = { v = 9 }\n");
+        synced(&mut b);
+        assert_eq!(
+            b.svc.command(Command::ShareSettingsNow {
+                units: vec![alpha_unit()]
+            }),
+            Err(CommandError::NotAllowed)
+        );
+        assert_eq!(
+            b.svc.command(Command::ShareSettingsWhenReady),
+            Err(CommandError::NotAllowed)
+        );
+        let cp = b.svc.status().settings_units[0].latest_capture.unwrap();
+        assert!(b
+            .svc
+            .command(Command::ShareSettings {
+                unit: alpha_unit(),
+                checkpoint: cp
+            })
+            .is_ok());
+        assert_eq!(
+            a.svc.command(Command::ShareSettingsWhenReady),
+            Ok(CommandOutcome::Recorded)
+        );
     }
     #[test]
     fn a_settings_note_never_names_an_account_realm_or_character() {
@@ -7536,7 +7696,11 @@ mod tests {
             assert_eq!(first.byte_delta, "AlphaDB = { v = 1 }\n".len() as i64);
             assert_eq!(first.identity.as_deref(), Some("account-wide"));
             assert_eq!(first.source, ChangeSource::ThisComputer);
-            assert_ne!(first.reason, ChangeReason::PeerPush, "a share from here");
+            assert_eq!(
+                first.reason,
+                ChangeReason::SettingsMaster,
+                "the master's own share"
+            );
             synced(&mut b);
             let applied = changes(&b)
                 .into_iter()
@@ -7574,6 +7738,30 @@ mod tests {
             );
         }
 
+        #[test]
+        fn a_share_from_a_computer_that_is_not_master_says_shared_from_here() {
+            let lab = Lab::new();
+            let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+            write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+            synced(&mut a);
+            share_now(&mut a);
+            synced(&mut b);
+            write_wtf(&b, "Alpha", "AlphaDB = { v = 9 }\n");
+            synced(&mut b);
+            let cp = b.svc.status().settings_units[0].latest_capture.unwrap();
+            b.svc
+                .command(Command::ShareSettings {
+                    unit: alpha_unit(),
+                    checkpoint: cp,
+                })
+                .unwrap();
+            let row = changes(&b)
+                .into_iter()
+                .find(|c| c.kind == ChangeKind::SettingsPublished)
+                .expect("the share has an Activity row");
+            assert_eq!(row.reason, ChangeReason::SharedFromHere, "{row:?}");
+            assert_eq!(row.source, ChangeSource::ThisComputer);
+        }
         #[test]
         fn share_these_now_ticked_at_consent_pushes_the_first_captures_once() {
             let lab = Lab::new();

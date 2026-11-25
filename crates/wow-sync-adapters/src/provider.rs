@@ -269,6 +269,25 @@ impl ProviderRoot {
         Ok((m.size, m.mtime_ns))
     }
 
+    /// Sets a plain file's modification time to now, so age-based cleanup by any computer sees a
+    /// reused object as new.
+    pub fn touch(&self, rel: &str) -> Result<(), FsError> {
+        let m = self.root.check_components(rel)?;
+        let path = self.root.join(rel)?;
+        if m.is_dir {
+            return Err(FsError::new(
+                FsErrorKind::NotPlainFile,
+                &path,
+                "is a directory",
+            ));
+        }
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .and_then(|f| f.set_modified(std::time::SystemTime::now()))
+            .map_err(|e| FsError::from_io(&path, &e))
+    }
+
     /// The caller restricts this to its own member directory.
     pub fn remove_file(&self, rel: &str) -> Result<(), FsError> {
         let m = match self.root.check_components(rel) {
