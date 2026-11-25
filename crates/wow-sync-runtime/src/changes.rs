@@ -451,6 +451,7 @@ pub(crate) fn base(
         paths: Vec::new(),
         paths_more: 0,
         ms: 0,
+        identity: None,
     }
 }
 

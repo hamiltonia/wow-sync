@@ -107,6 +107,10 @@ pub struct ChangeRecord {
     /// Duration of this package's apply, in milliseconds (0 for older records).
     #[serde(default)]
     pub ms: u32,
+    /// Settings changes only: the identity in plain words ("account-wide", or the character
+    /// name), for the Activity detail row. Never written to a log.
+    #[serde(default)]
+    pub identity: Option<String>,
 }
 
 /// One pass's records, summarised for the Activity page.
@@ -314,6 +318,9 @@ pub enum Phase {
     /// Used instead of `Installing` while a package is being removed.
     Removing,
     Publishing,
+    /// Saving, sharing or using add-on settings: `items_done` / `items_total` count settings
+    /// units, `current` is the add-on display name and `source` the computer they come from.
+    Settings,
     Idle,
 }
 
@@ -454,6 +461,7 @@ mod tests {
             paths: vec![],
             paths_more: 0,
             ms: 0,
+            identity: None,
         }
     }
 
@@ -472,6 +480,14 @@ mod tests {
             decision_satisfied: vec![],
             completed: None,
         }
+    }
+
+    #[test]
+    fn a_record_written_before_identities_existed_still_reads() {
+        let mut v = serde_json::to_value(rec("Alpha", 5)).unwrap();
+        v.as_object_mut().unwrap().remove("identity");
+        let old: ChangeRecord = serde_json::from_value(v).unwrap();
+        assert_eq!(old.identity, None);
     }
 
     #[test]

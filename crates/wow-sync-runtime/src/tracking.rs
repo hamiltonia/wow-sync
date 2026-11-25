@@ -378,6 +378,7 @@ mod tests {
             paths: vec![],
             paths_more: 0,
             ms: 0,
+            identity: None,
         };
         let key = validate_folder_name(name).unwrap();
         (

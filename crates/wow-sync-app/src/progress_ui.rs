@@ -139,6 +139,7 @@ pub fn text(e: &ProgressEvent) -> Option<String> {
             group_digits(e.items_total)
         ),
         Phase::Publishing => "Publishing changes".into(),
+        Phase::Settings => "Working on add-on settings".into(),
     })
 }
 
@@ -164,6 +165,7 @@ fn phase_name(p: Phase) -> &'static str {
         Phase::Installing => "installing",
         Phase::Removing => "removing",
         Phase::Publishing => "publishing",
+        Phase::Settings => "settings",
         Phase::Idle => "idle",
     }
 }
@@ -415,6 +417,7 @@ mod tests {
             paths: vec!["Core.lua".into()],
             paths_more: 0,
             ms: 0,
+            identity: None,
         }
     }
 
