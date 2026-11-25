@@ -171,7 +171,9 @@ pub fn reason_text(r: &ChangeRecord) -> String {
     }
 }
 
-/// One add-on's own recent changes (newest first), matched by folder key or display name.
+/// One add-on's own recent changes (newest first), matched by folder key or display name, in
+/// any letter case. Settings records are named "<add-on> settings" and list the add-on's name
+/// as their folder, so they match the same way.
 pub fn rows_for(
     records: &[ChangeRecord],
     key: &str,
@@ -180,7 +182,12 @@ pub fn rows_for(
 ) -> Vec<(i64, ChangeRow)> {
     records
         .iter()
-        .filter(|r| r.name == title || r.folders.iter().any(|f| f == key))
+        .filter(|r| {
+            r.name.eq_ignore_ascii_case(title)
+                || r.folders
+                    .iter()
+                    .any(|f| f.eq_ignore_ascii_case(key) || f.eq_ignore_ascii_case(title))
+        })
         .take(limit)
         .map(|r| (r.unix_ms, row_of(r)))
         .collect()

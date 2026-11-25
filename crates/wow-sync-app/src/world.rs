@@ -867,6 +867,14 @@ mod tests {
             1
         );
         assert!(crate::history_ui::rows_for(&recs, "Other", "Other", 10).is_empty());
+        let mut s = rec(ChangeKind::SettingsPublished, "Bagnon settings", None);
+        s.folders = vec!["Bagnon".into()];
+        s.unix_ms = 10;
+        let mut with_settings = recs.clone();
+        with_settings.insert(0, s);
+        let rows = crate::history_ui::rows_for(&with_settings, "bagnon", "Bagnon", 10);
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].1.kind, ChangeKind::SettingsPublished);
     }
 
     #[test]

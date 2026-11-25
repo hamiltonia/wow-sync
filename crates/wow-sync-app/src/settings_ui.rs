@@ -179,12 +179,11 @@ pub fn status_text(s: &UnitStatus) -> String {
         ),
         UnitStatus::TooLarge { size: None } => "Too large to share automatically".into(),
         UnitStatus::OwnedBySeveral { with } if with.is_empty() => {
-            "Also used by other add-ons, so not shared automatically".into()
+            "Shared with another add-on, not synced".into()
         }
-        UnitStatus::OwnedBySeveral { with } => format!(
-            "Also used by {}, so not shared automatically",
-            with.join(", ")
-        ),
+        UnitStatus::OwnedBySeveral { with } => {
+            format!("Shared with {}, not synced", with.join(", "))
+        }
         UnitStatus::WaitingForWow => "New settings will be used when WoW closes".into(),
         UnitStatus::WaitingForSharedCopy => "Waiting for the shared settings to arrive".into(),
     }
@@ -621,6 +620,30 @@ pub fn addon_settings_lines(w: &World, folder: &str) -> Vec<String> {
         vec![addon_settings_line(w, folder)]
     } else {
         lines
+    }
+}
+
+/// The add-ons with saved settings waiting for the owner to pick one of two competing copies.
+pub fn pending_choice_addons(w: &World) -> Vec<String> {
+    let mut v: Vec<String> = w
+        .features
+        .settings
+        .units
+        .iter()
+        .filter(|u| matches!(u.status, UnitStatus::NeedsChoice))
+        .map(|u| u.addon.clone())
+        .collect();
+    v.sort();
+    v.dedup();
+    v
+}
+
+/// What the headline says while a settings choice is pending: never "up to date".
+pub fn pending_choice_headline(w: &World) -> Option<String> {
+    match pending_choice_addons(w).len() {
+        0 => None,
+        1 => Some("Choose which saved settings to keep".into()),
+        n => Some(format!("Choose which saved settings to keep ({n} add-ons)")),
     }
 }
 
@@ -1543,6 +1566,29 @@ mod tests {
     }
 
     #[test]
+    fn a_pending_settings_choice_shows_in_the_headline_and_needs_attention() {
+        let mut w = world();
+        w.enrolled = true;
+        w.view.headline = wow_sync_core::status::Headline::Ok;
+        w.features.settings.enabled = true;
+        assert_eq!(
+            crate::model::headline(&w).text,
+            "This computer is up to date"
+        );
+        assert!(crate::model::need_items(&w).is_empty());
+        w.features.settings.units = vec![unit(UnitStatus::NeedsChoice)];
+        let h = crate::model::headline(&w);
+        assert_eq!(h.text, "Choose which saved settings to keep");
+        assert_eq!(h.tone, crate::theme::Tone::Help);
+        let items = crate::model::need_items(&w);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].target, crate::model::NeedTarget::SettingsChoice);
+        assert!(items[0]
+            .title
+            .ends_with("choose which saved settings to keep"));
+    }
+
+    #[test]
     fn the_new_attention_statuses_read_in_plain_words() {
         assert_eq!(
             status_text(&UnitStatus::TooLarge {
@@ -1554,7 +1600,7 @@ mod tests {
             status_text(&UnitStatus::OwnedBySeveral {
                 with: vec!["Alpha".into(), "Beta".into()]
             }),
-            "Also used by Alpha, Beta, so not shared automatically"
+            "Shared with Alpha, Beta, not synced"
         );
         assert_eq!(
             status_text(&UnitStatus::WaitingForWow),

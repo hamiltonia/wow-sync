@@ -155,6 +155,11 @@ pub fn headline(w: &World) -> Head {
         (h.clone(), if held { Tone::Waiting } else { Tone::Help })
     } else if w.features.review_needed && !core_blocks_pause {
         ("Review needed".to_string(), Tone::Help)
+    } else if let (false, Some(t)) = (
+        core_blocks_pause,
+        crate::settings_ui::pending_choice_headline(w),
+    ) {
+        (t, Tone::Help)
     } else if w.busy == Some(Busy::Pausing) {
         (
             "Pausing, finishing the current step".to_string(),
@@ -808,6 +813,8 @@ pub enum NeedTarget {
     TestMode,
     /// A refused restore of a removed add-on; its Try again and Dismiss are on the Removed list.
     Restore,
+    /// A saved-settings choice; the controls are on the Settings sync page.
+    SettingsChoice,
 }
 
 /// What to do about each data-at-risk condition, one sentence.
@@ -877,6 +884,16 @@ pub fn need_items(w: &World) -> Vec<NeedItem> {
             button: "Confirm…",
             tone: Tone::Help,
             target: NeedTarget::Reconfirm,
+        });
+    }
+    for addon in crate::settings_ui::pending_choice_addons(w) {
+        v.push(NeedItem {
+            title: format!("{addon}: choose which saved settings to keep"),
+            reason: "Two computers saved different settings. Nothing was replaced; both copies are kept until you choose.".into(),
+            affects: String::new(),
+            button: "Choose settings",
+            tone: Tone::Help,
+            target: NeedTarget::SettingsChoice,
         });
     }
     for a in &w.addons {
