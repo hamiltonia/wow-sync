@@ -68,3 +68,11 @@ Screenshots were taken with PrintWindow because the desktop was locked.
 - RV10-07: an idle pass is silent (a "slow check" line if 2 s or more) and is not shown before 1.5 s; a pass that works, or was asked for or follows a change, logs in full. Tests: `a_quick_idle_pass_is_silent_and_never_flashes_the_headline`, `a_slow_idle_pass_is_one_line_and_is_shown_once_it_lasts`, `real_work_replaces_the_note_and_a_manual_pass_is_logged_in_full`.
 - Release notes rewritten to claim only this behaviour; RV10-01/03/04/05/06/08 are listed as limits because the R10-history round-4 fixes were not on main when written.
 - Not re-run live; verified by unit tests only. No new screenshots.
+
+## Round 5
+
+- Release notes: the limits fixed by R10-history round 4 (RV10-01/03/04/05/06/08) are gone; what remains is source wording that can change mid-install (RV10-09), display-only clock skew in ordering, and the "unknown" old version for crash-recovered installs.
+- An empty `ContentId("")` renders as "unknown" (`history_ui::tests::a_recovered_install_with_no_old_content_id_says_unknown`).
+- The "tray updated" log line was written on every pass with the same tooltip (about 2 lines per pass while a decision waited); it now logs only when the tooltip changes.
+- Live lab (synthetic, `D:\WoWSyncLab\R10-app`, computers A-demo and B-demo, PIDs 18264 and 5152, both stopped): A gained six 60 MB add-ons; B's headline read "Installing 6 add-ons from A-demo: 0 B of 360.0 MB", then named ShotAddon1 to ShotAddon6 in turn, ending "Updated 6 add-ons from A-demo — see Activity". Before the apply, B showed "Waiting for your decision on 2 add-ons" through every idle pass (about 25 s, 1.5 s interval) and the log had no lines for those passes. Screenshots: `progress-installing.png` (new, taken with PrintWindow) and `waiting-decision-stays.png`.
+- The two waiting decisions came from my own test setup (add-ons written to A after being added), not from a product fault.

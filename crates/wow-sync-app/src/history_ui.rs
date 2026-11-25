@@ -101,6 +101,7 @@ fn version_text(v: &VersionLabel) -> String {
         VersionLabel::New => "new".into(),
         VersionLabel::Removed => "removed".into(),
         VersionLabel::Toc(s) => s.clone(),
+        VersionLabel::ContentId(s) if s.is_empty() => "unknown".into(),
         VersionLabel::ContentId(s) => format!("#{s}"),
     }
 }
@@ -401,6 +402,15 @@ pub(crate) mod tests {
         assert_eq!(r.what, "removed, was 2.0");
         assert_eq!(r.size, "\u{2212}5.0 MB");
         assert_eq!(r.reason, "removed on A");
+    }
+
+    #[test]
+    fn a_recovered_install_with_no_old_content_id_says_unknown() {
+        let mut r = rec(ChangeKind::Applied, "Bagnon", Some("A"));
+        r.old_version = VersionLabel::ContentId(String::new());
+        r.new_version = VersionLabel::Toc("1.2.0".into());
+        assert_eq!(row_of(&r).what, "unknown \u{2192} 1.2.0");
+        assert!(!row_of(&r).line().contains('#'));
     }
 
     #[test]

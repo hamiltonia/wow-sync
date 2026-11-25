@@ -1382,9 +1382,15 @@ impl Shell {
                 t.pause = pause;
                 t.needs = needs;
                 t.quit = quit;
-                // Progress text changes twice a second; the pump already logs each phase.
+                // Progress text changes twice a second; the pump already logs each phase. The
+                // same tooltip is logged once, not on every pass.
                 if self.w.progress.is_none() {
-                    log(&format!("tray updated: {tip}"));
+                    static LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+                    let mut last = LAST.lock().unwrap_or_else(|p| p.into_inner());
+                    if *last != tip {
+                        log(&format!("tray updated: {tip}"));
+                        *last = tip;
+                    }
                 }
             }
         }
