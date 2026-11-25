@@ -1854,6 +1854,48 @@ mod tests {
     }
 
     #[test]
+    fn progress_replaces_a_decision_headline_when_the_apply_starts() {
+        let mut w = world_with(
+            PackageStatus::NeedsDecision(DecisionReason::Ambiguous),
+            wow_sync_core::explain::Explanation::InSync,
+        );
+        w.view.headline = Headline::Waiting;
+        assert_eq!(headline(&w).text, "Waiting for your decision on 1 add-on");
+        let mut p = crate::progress_ui::ProgressView {
+            text: "Installing Demo from RYZENFISH: 1.2 of 1.8 GB".into(),
+            ..Default::default()
+        };
+        p.satisfied.insert("Demo".into());
+        w.progress = Some(p);
+        assert_eq!(
+            headline(&w).text,
+            "Installing Demo from RYZENFISH: 1.2 of 1.8 GB"
+        );
+        assert_eq!(headline(&w).tone, Tone::Working);
+        assert!(tray_tooltip(&w).starts_with("WoW Sync: Installing Demo"));
+        // Progress gone, decision satisfied by an earlier apply: no stale wording either.
+        w.progress = Some(crate::progress_ui::ProgressView::default());
+        assert!(!decision_satisfied(&w, "other"));
+        w.progress = None;
+        w.view.headline = Headline::Ok;
+        w.done_note = Some("Updated 15 add-ons from RYZENFISH \u{2014} see Activity".into());
+        assert_eq!(
+            headline(&w).text,
+            "Updated 15 add-ons from RYZENFISH \u{2014} see Activity"
+        );
+    }
+
+    #[test]
+    fn a_long_progress_tooltip_fits_the_windows_limit() {
+        let mut w = enrolled();
+        w.progress = Some(crate::progress_ui::ProgressView {
+            text: "Installing 15 add-ons from A-VERY-LONG-COMPUTER-NAME: 1.2 of 1.8 GB (SpokenQuestsAudioSharedAndSomeOtherVeryLongFolderNameHere)".into(),
+            ..Default::default()
+        });
+        assert!(tray_tooltip(&w).chars().count() <= 120);
+    }
+
+    #[test]
     fn interrupted_text_follows_core_and_differs_by_cause() {
         use wow_sync_core::explain::{render, Explanation as E};
         let a = E::Interrupted {

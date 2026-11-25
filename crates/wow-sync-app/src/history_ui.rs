@@ -47,7 +47,7 @@ pub fn group_digits(n: u64) -> String {
     let s = n.to_string();
     let mut out = String::new();
     for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(c);
@@ -205,12 +205,19 @@ pub fn row_of(r: &ChangeRecord) -> ChangeRow {
 }
 
 fn plural(n: usize, one: &str, many: &str) -> String {
-    format!("{} {}", group_digits(n as u64), if n == 1 { one } else { many })
+    format!(
+        "{} {}",
+        group_digits(n as u64),
+        if n == 1 { one } else { many }
+    )
 }
 
 /// "from RYZENFISH", "from 2 computers", or nothing when it all happened on this computer.
 fn from_phrase(records: &[&ChangeRecord]) -> String {
-    let mut names: Vec<&str> = records.iter().filter_map(|r| source_name(&r.source)).collect();
+    let mut names: Vec<&str> = records
+        .iter()
+        .filter_map(|r| source_name(&r.source))
+        .collect();
     names.sort_unstable();
     names.dedup();
     match names.as_slice() {
@@ -286,7 +293,9 @@ pub fn group_title(records: &[ChangeRecord]) -> String {
         ));
     }
     if !settings.is_empty() {
-        let pushed = settings.iter().all(|r| r.kind == ChangeKind::SettingsPublished);
+        let pushed = settings
+            .iter()
+            .all(|r| r.kind == ChangeKind::SettingsPublished);
         parts.push(if pushed {
             "saved settings shared".into()
         } else {
@@ -311,7 +320,10 @@ pub fn done_note(records: &[ChangeRecord]) -> Option<String> {
         .iter()
         .filter(|r| matches!(r.kind, ChangeKind::Applied | ChangeKind::InstalledNew))
         .collect();
-    let removed = records.iter().filter(|r| r.kind == ChangeKind::Removed).count();
+    let removed = records
+        .iter()
+        .filter(|r| r.kind == ChangeKind::Removed)
+        .count();
     let mut parts: Vec<String> = Vec::new();
     if !updated.is_empty() {
         let what = if updated.len() == 1 {
@@ -336,7 +348,7 @@ pub fn done_note(records: &[ChangeRecord]) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     pub(crate) fn rec(kind: ChangeKind, name: &str, src: Option<&str>) -> ChangeRecord {
@@ -361,6 +373,7 @@ mod tests {
             reason: ChangeReason::NewerRelease,
             paths: vec!["Core.lua".into()],
             paths_more: 0,
+            ms: 0,
         }
     }
 
@@ -418,7 +431,13 @@ mod tests {
     #[test]
     fn group_title_names_count_source_and_size() {
         let mut v: Vec<ChangeRecord> = (0..15)
-            .map(|i| rec(ChangeKind::Applied, &format!("Spoken{i}"), Some("RYZENFISH")))
+            .map(|i| {
+                rec(
+                    ChangeKind::Applied,
+                    &format!("Spoken{i}"),
+                    Some("RYZENFISH"),
+                )
+            })
             .collect();
         for r in &mut v {
             r.byte_delta = 128 * 1024 * 1024;
@@ -428,7 +447,10 @@ mod tests {
             "15 add-ons updated from RYZENFISH (+1.9 GB)"
         );
         v.push(rec(ChangeKind::Removed, "Old", Some("RYZENFISH")));
-        assert!(group_title(&v).ends_with(", 1 add-on removed from RYZENFISH") || group_title(&v).ends_with(", Old removed from RYZENFISH"));
+        assert!(
+            group_title(&v).ends_with(", 1 add-on removed from RYZENFISH")
+                || group_title(&v).ends_with(", Old removed from RYZENFISH")
+        );
         assert_eq!(
             group_title(&[rec(ChangeKind::Applied, "Bagnon", None)]),
             "Bagnon updated (+2 KB)"

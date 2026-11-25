@@ -89,7 +89,11 @@ pub fn text(e: &ProgressEvent) -> Option<String> {
                 String::new()
             };
             // One add-on already names itself.
-            let cur = if e.items_total == 1 { String::new() } else { cur };
+            let cur = if e.items_total == 1 {
+                String::new()
+            } else {
+                cur
+            };
             format!("{verb} {what}{from}{amount}{cur}")
         }
         Phase::Publishing if e.items_total > 0 => format!(
@@ -129,7 +133,7 @@ pub fn record_log(r: &ChangeRecord) -> String {
         ChangeSource::Computer(n) => n.clone(),
     };
     format!(
-        "{} {} (from {from}): {}, files {}, {} bytes",
+        "{} {} (from {from}): {}, files {}, {} bytes, {} ms",
         r.kind.as_str(),
         r.name,
         crate::history_ui::what_text(r),
@@ -137,7 +141,8 @@ pub fn record_log(r: &ChangeRecord) -> String {
             let f = &r.files;
             format!("+{} ~{} -{}", f.added, f.changed, f.removed)
         },
-        r.byte_delta
+        r.byte_delta,
+        r.ms
     )
 }
 
@@ -261,9 +266,7 @@ impl Pump {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use wow_sync_runtime::{
-        ChangeKind, ChangeReason, FileCounts, IncomingSummary, VersionLabel,
-    };
+    use wow_sync_runtime::{ChangeKind, ChangeReason, FileCounts, IncomingSummary, VersionLabel};
 
     fn ev(seq: u64, phase: Phase) -> ProgressEvent {
         ProgressEvent {
@@ -301,6 +304,7 @@ mod tests {
             reason: ChangeReason::Choice(None),
             paths: vec!["Core.lua".into()],
             paths_more: 0,
+            ms: 0,
         }
     }
 
@@ -351,7 +355,11 @@ mod tests {
     fn window_updates_are_throttled_and_the_last_one_is_not_lost() {
         let mut p = Pump::default();
         let mut shows = 0;
-        let count = |outs: &[Out]| outs.iter().filter(|o| matches!(o, Out::Show(Some(_)))).count();
+        let count = |outs: &[Out]| {
+            outs.iter()
+                .filter(|o| matches!(o, Out::Show(Some(_))))
+                .count()
+        };
         // 100 byte updates in one second.
         for i in 0..100u64 {
             let mut e = ev(i + 1, Phase::Installing);
@@ -402,11 +410,16 @@ mod tests {
         take(p.on_event(&ev(3, Phase::Idle), 3_000));
         assert_eq!(logs[0], "phase: checking files");
         assert!(logs[1].starts_with("phase: installing"));
-        assert!(logs.iter().any(|l| l.starts_with("applied Bagnon (from RYZENFISH): 1 \u{2192} 2")));
+        assert!(logs
+            .iter()
+            .any(|l| l.starts_with("applied Bagnon (from RYZENFISH): 1 \u{2192} 2")));
         let last = logs.last().unwrap();
         assert!(last.starts_with("pass summary: Bagnon updated from RYZENFISH"));
         for l in &logs {
-            assert!(!l.contains('\\') && !l.contains(":/") && !l.contains("Core.lua"), "{l}");
+            assert!(
+                !l.contains('\\') && !l.contains(":/") && !l.contains("Core.lua"),
+                "{l}"
+            );
         }
     }
 

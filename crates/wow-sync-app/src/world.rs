@@ -406,22 +406,22 @@ fn history_items(items: &[wow_sync_runtime::HistoryItem], now: i64) -> Vec<Activ
             legacy.clear();
         }
     };
-    let flush_group =
-        |group: &mut Vec<wow_sync_runtime::ChangeRecord>, out: &mut Vec<ActivityItem>| {
-            let Some(first) = group.iter().map(|r| r.unix_ms).max() else {
-                return;
-            };
-            let (days, hm) = local_parts(first);
-            out.push(ActivityItem {
-                title: crate::history_ui::group_title(group),
-                items: Vec::new(),
-                problem: false,
-                day: day_label(days, today),
-                when: hm,
-                rows: group.iter().map(crate::history_ui::row_of).collect(),
-            });
-            group.clear();
+    let flush_group = |group: &mut Vec<wow_sync_runtime::ChangeRecord>,
+                       out: &mut Vec<ActivityItem>| {
+        let Some(first) = group.iter().map(|r| r.unix_ms).max() else {
+            return;
         };
+        let (days, hm) = local_parts(first);
+        out.push(ActivityItem {
+            title: crate::history_ui::group_title(group),
+            items: Vec::new(),
+            problem: false,
+            day: day_label(days, today),
+            when: hm,
+            rows: group.iter().map(crate::history_ui::row_of).collect(),
+        });
+        group.clear();
+    };
     for it in items {
         match it {
             HistoryItem::Legacy(e) => {
@@ -780,6 +780,68 @@ mod tests {
             app_version: "x",
         });
         assert!(w.last_shared_secs.is_some_and(|s| (115..180).contains(&s)));
+    }
+
+    #[test]
+    fn history_groups_by_pass_and_keeps_older_plain_lines() {
+        use crate::history_ui::tests::rec;
+        use wow_sync_runtime::{ChangeKind, HistoryItem};
+        let now = now_ms();
+        let mut items: Vec<HistoryItem> = Vec::new();
+        for i in 0..3 {
+            let mut r = rec(
+                ChangeKind::Applied,
+                &format!("Spoken{i}"),
+                Some("RYZENFISH"),
+            );
+            r.pass_id = 7;
+            r.unix_ms = now - i;
+            items.push(HistoryItem::Change(r));
+        }
+        let mut other = rec(ChangeKind::Removed, "Old", Some("RYZENFISH"));
+        other.pass_id = 6;
+        other.unix_ms = now - 600_000;
+        items.push(HistoryItem::Change(other));
+        items.push(HistoryItem::Legacy(entry(
+            now - 900_000,
+            "applied",
+            "applied bagnon applied",
+        )));
+        items.push(HistoryItem::Legacy(ActivityEntry {
+            unix_ms: None,
+            kind: "published".into(),
+            package: None,
+            text: "enrolled group g".into(),
+        }));
+        let out = history_items(&items, now);
+        assert_eq!(out.len(), 4);
+        assert_eq!(out[0].title, "3 add-ons updated from RYZENFISH (+4 KB)");
+        assert_eq!(out[0].day, "Today");
+        assert_eq!(out[0].rows.len(), 3);
+        assert_eq!(out[1].title, "Old removed from RYZENFISH");
+        assert!(out[2].rows.is_empty() && out[2].title == "applied bagnon applied");
+        assert_eq!(out[3].title, "This computer joined the add-on group");
+    }
+
+    #[test]
+    fn an_addon_page_lists_only_its_own_changes_newest_first() {
+        use crate::history_ui::tests::rec;
+        use wow_sync_runtime::ChangeKind;
+        let mut a = rec(ChangeKind::Applied, "Bagnon", None);
+        a.unix_ms = 9;
+        let mut b = rec(ChangeKind::Applied, "Nav", None);
+        b.unix_ms = 8;
+        let mut c = rec(ChangeKind::Removed, "Bagnon", None);
+        c.unix_ms = 7;
+        let recs = vec![a, b, c];
+        let rows = crate::history_ui::rows_for(&recs, "Bagnon", "Bagnon", 10);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0, 9);
+        assert_eq!(
+            crate::history_ui::rows_for(&recs, "Bagnon", "Bagnon", 1).len(),
+            1
+        );
+        assert!(crate::history_ui::rows_for(&recs, "Other", "Other", 10).is_empty());
     }
 
     #[test]
