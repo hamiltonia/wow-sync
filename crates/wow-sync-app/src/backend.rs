@@ -91,21 +91,19 @@ pub fn dispatch(svc: &mut SliceService, a: &GroupAction) -> ActionResult {
     ActionResult::from_outcome(out)
 }
 
-/// The explicit pushes the owner ticked ("Share these now"), one per unit, after the policy is
-/// recorded. The first refusal stops the rest and is what the screen shows.
+/// The explicit push the owner ticked ("Share these now"): one `ShareSettingsNow` for all the
+/// units, after the policy is recorded. A refusal is what the screen shows.
 fn push_now(
     svc: &mut SliceService,
-    share_now: &[(wow_sync_core::ids::SettingsUnit, wow_sync_core::ids::Sha256)],
+    share_now: &[wow_sync_core::ids::SettingsUnit],
     done: wow_sync_runtime::CommandOutcome,
 ) -> Result<wow_sync_runtime::CommandOutcome, wow_sync_runtime::CommandError> {
-    let mut last = done;
-    for (unit, checkpoint) in share_now {
-        last = svc.command(wow_sync_runtime::Command::ShareSettings {
-            unit: unit.clone(),
-            checkpoint: *checkpoint,
-        })?;
+    if share_now.is_empty() {
+        return Ok(done);
     }
-    Ok(last)
+    svc.command(wow_sync_runtime::Command::ShareSettingsNow {
+        units: share_now.to_vec(),
+    })
 }
 
 /// One log line for what a group command did: its kind, whether it was accepted or refused and

@@ -95,6 +95,18 @@ pub struct SettingsData {
     pub policy_conflict: bool,
     /// Paused folders with what a resume would meet.
     pub paused: Vec<wow_sync_runtime::PausedFolder>,
+    /// What "Share these now" would push (runtime `to_share`).
+    pub to_share: Vec<ShareItem>,
+    /// Some computer already shared settings in this group (not the first adoption).
+    pub group_has_shared_settings: bool,
+}
+
+/// One add-on's settings the runtime says could be pushed now.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShareItem {
+    pub unit: SettingsUnit,
+    /// Nothing was ever shared for it; otherwise it would replace the shared copy.
+    pub not_shared_yet: bool,
 }
 
 /// Shown when no add-on has settings to list yet.
@@ -718,50 +730,42 @@ pub fn master_choices(w: &World) -> Vec<MasterChoice> {
     mine.chain(others).collect()
 }
 
-/// One add-on whose settings on this computer differ from the group's or have no shared copy.
+/// One add-on whose settings here the runtime says differ from the group's or have no shared copy.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShareCandidate {
     pub unit: SettingsUnit,
-    pub checkpoint: Sha256,
     pub line: String,
 }
 
-/// The units a new master could push now (settings.md §5.2): they differ here or the group has no
-/// copy, and this computer has a capture to publish. Becoming master never pushes them by itself.
+/// The units a new master could push now (runtime `to_share`). Becoming master never pushes them
+/// by itself (settings.md §5.2).
 pub fn share_candidates(w: &World) -> Vec<ShareCandidate> {
     w.features
         .settings
-        .units
+        .to_share
         .iter()
-        .filter(|u| u.can_share)
-        .filter_map(|u| {
-            let why = match u.status {
-                UnitStatus::LocalDifferent(_) => "differs from the shared copy",
-                UnitStatus::NoSharedCopy => "has no shared copy yet",
-                _ => return None,
+        .map(|s| {
+            let why = if s.not_shared_yet {
+                "has no shared copy yet"
+            } else {
+                "differs from the shared copy"
             };
-            Some(ShareCandidate {
-                unit: u.unit.clone(),
-                checkpoint: u.latest_capture?,
-                line: format!("{} ({}) {why}", u.addon, identity_words(&u.unit)),
-            })
+            let name = w
+                .addon(s.unit.folder.as_str())
+                .map(|a| a.title.clone())
+                .unwrap_or_else(|| s.unit.folder.as_str().to_string());
+            ShareCandidate {
+                unit: s.unit.clone(),
+                line: format!("{name} ({}) {why}", identity_words(&s.unit)),
+            }
         })
         .collect()
 }
 
 /// The first adoption: the group has no shared settings yet, so nothing here can overwrite a
-/// shared copy (OD-23). Any unit with a shared copy or older shared state rules it out.
+/// shared copy (OD-23).
 pub fn first_adoption(w: &World) -> bool {
-    !w.features.settings.units.iter().any(|u| {
-        !u.history.is_empty()
-            || matches!(
-                u.status,
-                UnitStatus::InSync { .. }
-                    | UnitStatus::Waiting { .. }
-                    | UnitStatus::LocalDifferent(_)
-                    | UnitStatus::NeedsChoice
-            )
-    })
+    !w.features.settings.group_has_shared_settings
 }
 
 /// "Share these now" is ticked by default only on the first adoption; the owner's flip inverts it.
@@ -770,19 +774,15 @@ pub fn share_now_on(w: &World, flipped: bool) -> bool {
 }
 
 /// What a ticked box pushes: every candidate; nothing when unticked.
-pub fn pushes(cands: &[ShareCandidate], on: bool) -> Vec<(SettingsUnit, Sha256)> {
+pub fn pushes(cands: &[ShareCandidate], on: bool) -> Vec<SettingsUnit> {
     if !on {
         return Vec::new();
     }
-    cands
-        .iter()
-        .map(|c| (c.unit.clone(), c.checkpoint))
-        .collect()
+    cands.iter().map(|c| c.unit.clone()).collect()
 }
-
 /// "Make this computer the master": the confirmation's action. `share_now` is what the ticked
 /// "Share these now" box pushes after the policy is recorded.
-pub fn make_master_control(w: &World, share_now: Vec<(SettingsUnit, Sha256)>) -> Control {
+pub fn make_master_control(w: &World, share_now: Vec<SettingsUnit>) -> Control {
     let label = "Make this computer the master";
     let Some(mine) = w.features.this_enrollment.clone() else {
         return off(label, "This computer is not ready to be chosen yet.");
@@ -1598,39 +1598,43 @@ mod tests {
     fn share_these_now_lists_only_differing_or_unshared_units_and_is_off_unless_first_adoption() {
         let mut w = world();
         w.features.this_enrollment = Some(me());
-        w.features.settings.units = vec![
-            named("Bagnon", UnitStatus::NoSharedCopy, 1),
-            named(
-                "Details",
-                UnitStatus::LocalDifferent(LocalReason::LocalChange),
-                2,
-            ),
-            named("Plater", UnitStatus::Active, 3),
-            {
-                let mut r = named("Questie", UnitStatus::NoSharedCopy, 4);
-                r.can_share = false;
-                r
+        w.features.settings.group_has_shared_settings = true;
+        w.features.settings.to_share = vec![
+            ShareItem {
+                unit: named("Bagnon", UnitStatus::Active, 1).unit,
+                not_shared_yet: true,
+            },
+            ShareItem {
+                unit: named("Details", UnitStatus::Active, 2).unit,
+                not_shared_yet: false,
             },
         ];
         let c = share_candidates(&w);
         assert_eq!(c.len(), 2);
-        assert!(c[0].line.starts_with("Bagnon") && c[0].line.ends_with("has no shared copy yet"));
+        assert_eq!(c[0].line, "bagnon (account ERIC) has no shared copy yet");
         assert!(c[1].line.ends_with("differs from the shared copy"));
-        // A differing unit means the group already has shared settings: off by default.
+        // The group already has shared settings: off by default.
         assert!(!first_adoption(&w));
         assert!(!share_now_on(&w, false) && share_now_on(&w, true));
         assert_eq!(pushes(&c, false), vec![]);
         assert_eq!(pushes(&c, true).len(), 2);
         // Nothing shared anywhere yet: first adoption, on by default.
-        w.features.settings.units = vec![named("Bagnon", UnitStatus::NoSharedCopy, 1)];
+        w.features.settings.group_has_shared_settings = false;
         assert!(first_adoption(&w) && share_now_on(&w, false) && !share_now_on(&w, true));
+    }
+
+    fn with_one_to_share(w: &mut World) {
+        w.features.settings.to_share = vec![ShareItem {
+            unit: named("Bagnon", UnitStatus::Active, 7).unit,
+            not_shared_yet: true,
+        }];
     }
 
     #[test]
     fn making_this_computer_master_pushes_only_what_the_box_ticks() {
         let mut w = world();
         w.features.this_enrollment = Some(me());
-        w.features.settings.units = vec![named("Bagnon", UnitStatus::NoSharedCopy, 7)];
+        with_one_to_share(&mut w);
         let c = make_master_control(&w, pushes(&share_candidates(&w), true));
         let Ok(GroupAction::SetSettingsPolicy {
             master, share_now, ..
@@ -1639,8 +1643,7 @@ mod tests {
             panic!("not a policy")
         };
         assert_eq!(master, Some(me()));
-        assert_eq!(share_now.len(), 1);
-        assert_eq!(share_now[0].1, Sha256([7; 32]));
+        assert_eq!(share_now, vec![named("Bagnon", UnitStatus::Active, 7).unit]);
         let none = make_master_control(&w, pushes(&share_candidates(&w), false));
         assert!(matches!(
             none.action,
@@ -1656,7 +1659,7 @@ mod tests {
     #[test]
     fn the_guided_consent_pushes_only_when_this_computer_is_the_master() {
         let mut w = offer_world(|_| {});
-        w.features.settings.units = vec![named("Bagnon", UnitStatus::NoSharedCopy, 9)];
+        with_one_to_share(&mut w);
         let all = ["ACC".to_string()];
         let push = |c: Control| match c.action {
             Ok(GroupAction::StartSettings { share_now, .. }) => share_now,
@@ -1689,5 +1692,55 @@ mod tests {
             })
         );
         assert!(rs[0].1.contains("kept as a recovery copy"));
+    }
+
+    #[test]
+    fn the_runtimes_new_statuses_and_local_copies_reach_the_controls() {
+        use wow_sync_runtime::SettingsUnitStatus as S;
+        let map = |row: wow_sync_runtime::SettingsUnitRow| {
+            crate::features::settings_unit_rows(&[row]).remove(0)
+        };
+        let mut r = runtime_row(S::LocalDifferent(LocalReason::LocalChange));
+        r.local_copies = vec![wow_sync_runtime::SettingsHistoryEntry {
+            hash: Sha256([8; 32]),
+            ..runtime_row(S::Active).history[0].clone()
+        }];
+        let row = map(r);
+        assert_eq!(
+            row.status,
+            UnitStatus::LocalDifferent(LocalReason::LocalChange)
+        );
+        let w = world();
+        let labels: Vec<String> = unit_controls(&w, &row)
+            .into_iter()
+            .map(|c| c.label)
+            .collect();
+        assert_eq!(labels, ["Share my settings", "Use shared settings"]);
+        let restore = restore_controls(&w, &row);
+        let mine = restore.last().unwrap();
+        assert!(mine
+            .0
+            .label
+            .starts_with("Restore this computer's copy from"));
+        assert_eq!(
+            mine.0.action,
+            Ok(GroupAction::RestoreSettings {
+                unit: row.unit.clone(),
+                checkpoint: Sha256([8; 32]),
+            })
+        );
+        assert_eq!(map(runtime_row(S::Suspect)).status, UnitStatus::Suspect);
+        assert_eq!(
+            map(runtime_row(S::NoSharedCopy)).status,
+            UnitStatus::NoSharedCopy
+        );
+        let mut s = runtime_row(S::InSync);
+        s.in_sync_from = Some("Den PC".into());
+        assert_eq!(
+            map(s).status,
+            UnitStatus::InSync {
+                from: "Den PC".into()
+            }
+        );
     }
 }

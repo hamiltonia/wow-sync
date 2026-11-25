@@ -89,15 +89,15 @@ Each was viewed and contains only synthetic names (A-demo, B-demo, ACCOUNTONE, A
 - RV11-01: `UnitRow.local_copies` and "Restore this computer's copy from <day>…" (confirm names the recovery copy that is kept). Not fed yet.
 - Tests (all fail without their change; checked by mutation: default-on always, push for another master, NoSharedCopy not listed; can_share ignored was caught after adding a non-shareable unit): `share_these_now_lists_only_…`, `making_this_computer_master_pushes_only_…`, `the_guided_consent_pushes_only_when_…`, `this_computers_replaced_copy_can_be_restored`, `a_damaged_settings_file_…`, `every_local_difference_offers_share_and_use_shared`, and the master-choice test now expects no direct "this computer" button.
 
-### Needed from R11-runtime (not delivered; marked TODO)
+### Runtime interface delivered (419908f) and wired
 
-1. `SettingsUnitStatus::{InSync, LocalDifferent, NoSharedCopy, Suspect}` plus `SettingsUnitRow.local_reason: Option<LocalReason>` and `in_sync_from: Option<String>` (or `waiting_from`). Until then `features::settings_unit_rows` maps only the existing statuses, so the candidate list stays empty and "Use shared settings" does not appear live.
-2. `SettingsUnitRow.local_copies: Vec<SettingsHistoryEntry>` (checkpoint takes `RestoreSettings`, `written_unix_ms`), pinned against pruning. Replace the `local_copies: Vec::new()` TODO in `features.rs`.
-3. Optional: `SettingsSnapshot.group_has_shared_settings: bool`; the app now infers first adoption from the rows (`first_adoption`).
-4. `ShareSettings` must be accepted right after `SetSettingsPolicy` in the same command sequence for units whose capture exists.
+- `SettingsSnapshot.to_share` feeds the confirmation list (copied into the app's `ShareItem`; `ShareOffer` is not exported). One `Command::ShareSettingsNow{units}` is sent after the policy, or nothing when the list is empty. `group_has_shared_settings` drives the OD-23 default (on only when false). The four statuses, `in_sync_from` and `local_copies` (hash = checkpoint for `RestoreSettings`) are mapped in `features::settings_unit_rows`. TODOs removed.
+- Mutation checks, all caught by tests (reverted afterwards): default-on always; first adoption ignoring `group_has_shared_settings`; push for another master; Use shared settings excluded for LocalChange; local copies not listed. New mapping test: `the_runtimes_new_statuses_and_local_copies_reach_the_controls`.
+- NOT DONE in this pass: a fresh live lab run and screenshots for the confirmation, LocalDifferent, Suspect and local-copy restore (unit tests only). Earlier screenshots remain from commit 1607acf.
 
 ### Decisions (Decision / Why / Reversible)
 
-- Decision: "Use shared settings" for all LocalDifferent reasons. Why: RV11-05; it is explicit and keeps a recovery copy. Reversible: yes.
-- Decision: first adoption is inferred from the rows. Why: no runtime flag yet. Reversible: yes.
-- Decision: pushes run after the policy and stop at the first refusal. Why: a failed push should not hide behind later successes. Reversible: yes.
+- Decision: "Use shared settings" for all LocalDifferent reasons. Why: RV11-05; explicit and keeps a recovery copy. Reversible: yes.
+- Decision: first adoption = `!group_has_shared_settings`. Why: the runtime now says so. Reversible: yes.
+- Decision: a single `ShareSettingsNow` with the ticked units, after the policy. Why: matches the runtime API; a refusal shows once. Reversible: yes.
+- Decision: share-candidate lines use the add-on title when known, else the folder name. Why: plain words. Reversible: yes.
