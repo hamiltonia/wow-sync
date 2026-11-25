@@ -1044,14 +1044,18 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                 ) {
                     Ok(r) => r,
                     Err(e) => {
-                        out.notes.push(format!("{name}: not shared ({e:?})"));
+                        let _ = e;
+                        out.notes
+                            .push(format!("{name}: not shared (could not be prepared)"));
                         continue;
                     }
                 };
                 if let Err(e) =
                     upload_checkpoint(a.provider, &store, &cp, a.own.computer_id.as_str())
                 {
-                    out.notes.push(format!("{name}: not shared ({e})"));
+                    let _ = e;
+                    out.notes
+                        .push(format!("{name}: not shared (could not be uploaded)"));
                     continue;
                 }
                 match write_own_record(
@@ -1089,7 +1093,9 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                             UnitFact::InSync(Some(a.own.computer_id.clone())),
                         );
                     }
-                    Err(e) => out.notes.push(format!("{name}: not shared ({e})")),
+                    Err(_) => out
+                        .notes
+                        .push(format!("{name}: not shared (could not be recorded)")),
                 }
             }
             Case::FirstAdoption(to) if live == Some(to) => {
@@ -1104,7 +1110,15 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                 };
                 // The replaced copy stays restorable (RV11-01): a peer's own edit that the
                 // shared copy overwrites is pinned as a displaced copy.
-                if let Some(l) = live.filter(|l| *l != to) {
+                let is_shared = |l: wow_sync_core::ids::CheckpointRef| {
+                    plane.ledger.entries().any(|e| {
+                        matches!(plane.ledger.record(&e.hash),
+                            Some(AuthorityRecord::SettingsRevision(r)) if r.checkpoint == l && r.unit == unit)
+                    })
+                };
+                if let Some(l) = live.filter(|l| {
+                    *l != to && Some(*l) != local.units[li].last_applied && !is_shared(*l)
+                }) {
                     let kept = &mut local.units[li].kept;
                     if !kept.iter().any(|k| k.checkpoint == l) {
                         kept.insert(

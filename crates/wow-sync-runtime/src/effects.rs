@@ -1350,4 +1350,25 @@ mod tests {
             Ok(ObjectStat::Missing)
         ));
     }
+
+    #[test]
+    fn a_settings_failure_names_no_account_realm_character_or_path() {
+        use wow_sync_adapters::{FsError, FsErrorKind};
+        let path = PathBuf::from("C:/Games/WoW/WTF/Account/SECRETACC/SECRETREALM/SECRETCHAR/x.lua");
+        for kind in [
+            FsErrorKind::NotFound,
+            FsErrorKind::AlreadyExists,
+            FsErrorKind::InUse,
+            FsErrorKind::OutsideRoot,
+            FsErrorKind::Io,
+            FsErrorKind::HashMismatch,
+        ] {
+            let e = FsError::new(kind, &path, "SECRETCHAR could not be opened");
+            let text = format!("{} {:?}", map_settings_err(e), kind);
+            assert!(
+                !text.contains("SECRET") && !text.contains("WTF") && !text.contains("Games"),
+                "{text}"
+            );
+        }
+    }
 }
