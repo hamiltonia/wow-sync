@@ -62,6 +62,9 @@ pub enum ChangeReason {
     PeerPush,
     /// An explicit share of saved settings made on this (non-master) computer.
     SharedFromHere,
+    /// Saved settings brought back from a recovery copy or an earlier copy by a restore, on the
+    /// computer that restored and on the computers that received it.
+    RestoredFromRecovery,
     Removal,
     Rollback,
     Recovery,

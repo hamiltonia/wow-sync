@@ -1333,6 +1333,7 @@ mod tests {
             shared_with: Vec::new(),
             in_sync_from: None,
             local_copies: Vec::new(),
+            recovery_copies: Vec::new(),
             local_reason: None,
         }
     }
@@ -1379,10 +1380,18 @@ mod tests {
                     HeadChoice {
                         checkpoint: Sha256([4; 32]),
                         revisions: vec![Sha256([4; 32])],
+                        source: None,
+                        kind: wow_sync_runtime::HeadKind::SharedFrom,
+                        written_unix_ms: 0,
+                        size_bytes: None,
                     },
                     HeadChoice {
                         checkpoint: Sha256([5; 32]),
                         revisions: vec![Sha256([5; 32])],
+                        source: None,
+                        kind: wow_sync_runtime::HeadKind::SharedFrom,
+                        written_unix_ms: 0,
+                        size_bytes: None,
                     },
                 ];
                 r.shown_heads = vec![Sha256([4; 32]), Sha256([5; 32]), Sha256([6; 32])];
