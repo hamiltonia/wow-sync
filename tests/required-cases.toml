@@ -1897,6 +1897,7 @@ tests = [
     "history_ui::tests::row_text_covers_versions_files_size_and_reason",
     "history_ui::tests::new_removed_and_content_id_versions",
     "history_ui::tests::every_reason_has_plain_words",
+    "history_ui::tests::a_recovered_install_with_no_old_content_id_says_unknown",
     "history_ui::tests::group_title_names_count_source_and_size",
     "history_ui::tests::done_note_is_none_when_nothing_changed_here",
     "history_ui::tests::file_paths_are_capped_with_and_n_more",
