@@ -934,6 +934,7 @@ impl Shell {
         self.send(Cmd::SaveSettings(wow_sync_runtime::AppSettings {
             closing_quits: self.closing_quits,
             first_close_seen: self.first_close_done,
+            settings_offer_dismissed: false,
         }));
     }
 

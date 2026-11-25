@@ -163,6 +163,31 @@ pub fn record_change(state: &LocalState, record: &ChangeRecord) {
     }
 }
 
+const APPLY_SOURCES_FILE: &str = "apply-sources.json";
+
+/// Remembers where the packages of the apply that is starting come from (folder key to
+/// source), so crash recovery can still say who the install was from. Best effort.
+pub(crate) fn save_apply_sources(
+    state: &LocalState,
+    sources: &std::collections::BTreeMap<String, ChangeSource>,
+) {
+    if let Ok(bytes) = serde_json::to_vec(sources) {
+        let _ = state.write_atomic(APPLY_SOURCES_FILE, &bytes);
+    }
+}
+
+/// The sources saved by the last apply; empty when none or unreadable.
+pub(crate) fn load_apply_sources(
+    state: &LocalState,
+) -> std::collections::BTreeMap<String, ChangeSource> {
+    state
+        .read(APPLY_SOURCES_FILE, 1024 * 1024)
+        .ok()
+        .flatten()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
 fn trim(state: &LocalState) {
     let Ok(text) = std::fs::read(state.path().join(CHANGES_FILE)) else {
         return;

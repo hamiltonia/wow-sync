@@ -68,6 +68,9 @@ pub struct AppSettings {
     pub closing_quits: bool,
     /// The one-time first-close sheet has been shown.
     pub first_close_seen: bool,
+    /// "Not now" was chosen on the guided "Share add-on settings?" offer: it stays hidden until
+    /// the owner opens the Settings sync page.
+    pub settings_offer_dismissed: bool,
 }
 
 impl AppSettings {
@@ -80,6 +83,7 @@ impl AppSettings {
             match line.trim() {
                 "closing_quits=1" => s.closing_quits = true,
                 "first_close_seen=1" => s.first_close_seen = true,
+                "settings_offer_dismissed=1" => s.settings_offer_dismissed = true,
                 _ => {}
             }
         }
@@ -88,9 +92,10 @@ impl AppSettings {
 
     pub fn save(&self, state: &LocalState) -> Result<(), String> {
         let text = format!(
-            "closing_quits={}\nfirst_close_seen={}\n",
+            "closing_quits={}\nfirst_close_seen={}\nsettings_offer_dismissed={}\n",
             u8::from(self.closing_quits),
-            u8::from(self.first_close_seen)
+            u8::from(self.first_close_seen),
+            u8::from(self.settings_offer_dismissed)
         );
         state
             .write_atomic(SETTINGS_FILE, text.as_bytes())
@@ -725,9 +730,13 @@ mod tests {
         let v = AppSettings {
             closing_quits: true,
             first_close_seen: true,
+            settings_offer_dismissed: true,
         };
         v.save(&s).unwrap();
         assert_eq!(AppSettings::load(&s), v);
+        s.write_atomic(SETTINGS_FILE, b"closing_quits=1\nfirst_close_seen=1\n")
+            .unwrap();
+        assert!(!AppSettings::load(&s).settings_offer_dismissed);
     }
 
     #[test]
@@ -746,6 +755,7 @@ mod tests {
         AppSettings {
             closing_quits: true,
             first_close_seen: true,
+            settings_offer_dismissed: false,
         }
         .save(&s)
         .unwrap();
