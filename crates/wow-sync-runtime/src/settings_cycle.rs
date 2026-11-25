@@ -1597,6 +1597,30 @@ mod tests {
     }
 
     #[test]
+    fn a_file_still_changing_across_the_settle_wait_is_suspect_and_a_stable_one_is_not() {
+        let t = TempDir::new();
+        let wtf = t.path().join("WTF");
+        let rel = "Account/ERIC/SavedVariables/Details.lua";
+        put(&wtf, rel, b"DetailsDB = { v = 1 }");
+        let scope = observe_scope(t.path(), &decls(), &included(), Some(1024)).unwrap();
+        let store = SettingsStore::open(t.path()).unwrap();
+        let local = SettingsLocal {
+            units: vec![],
+            paused_folders: vec![],
+            included_accounts: vec![],
+            consent: true,
+            first_adoption: None,
+        };
+        let stable = suspect_units(t.path(), &store, &local, &scope.owned, 1024, &|| {});
+        assert!(stable.is_empty(), "{stable:?}");
+        let live = wtf.join("Account/ERIC/SavedVariables/Details.lua");
+        let busy = suspect_units(t.path(), &store, &local, &scope.owned, 1024, &|| {
+            std::fs::write(&live, b"DetailsDB = { v = 2 }").unwrap();
+        });
+        assert_eq!(busy.len(), 1, "a file that changed during the wait waits");
+    }
+
+    #[test]
     fn a_failing_store_records_no_state() {
         let t = TempDir::new();
         let wtf = t.path().join("WTF");
