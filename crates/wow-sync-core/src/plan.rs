@@ -90,7 +90,78 @@ pub struct PublishPlan {
     pub source_fingerprints: Vec<(String, Sha256)>,
 }
 
+/// The objects a publication of `inv` needs, folder by folder: each folder's new blobs, then its
+/// tree record. Built one at a time so a large install never holds every object at once; a blob
+/// or tree already produced for an earlier folder is not produced again.
+pub fn publish_objects<'a>(
+    inv: &'a Inventory,
+    group: &'a GroupId,
+) -> impl Iterator<Item = ObjectRef> + 'a {
+    let mut seen: std::collections::HashSet<(bool, Sha256)> = std::collections::HashSet::new();
+    inv.folders
+        .iter()
+        .filter(|f| f.transfer_eligible())
+        .filter_map(|f| f.tree.map(|t| (f, t)))
+        .flat_map(move |(f, tree)| {
+            let mut out: Vec<ObjectRef> = Vec::new();
+            for e in &f.file_entries {
+                if seen.insert((false, e.sha256)) {
+                    out.push(ObjectRef {
+                        rel: blob(group, &e.sha256),
+                        kind: ObjectKind::Blob,
+                        expect: e.sha256,
+                        source: ObjectSource::Folder {
+                            folder: f.name.clone(),
+                            path: e.path.clone(),
+                        },
+                    });
+                }
+            }
+            let mut bytes = encode(&FolderTreeRecord {
+                tree,
+                files: f.file_entries.clone(),
+            });
+            bytes.shrink_to_fit();
+            if seen.insert((true, tree)) {
+                out.push(ObjectRef {
+                    rel: tree_record(group, &tree),
+                    kind: ObjectKind::Tree,
+                    expect: sha256(&bytes),
+                    source: ObjectSource::Bytes(bytes),
+                });
+            }
+            out
+        })
+}
+
+/// How many objects `publish_objects` yields, without keeping any of them.
+pub fn count_publish_objects(inv: &Inventory) -> u64 {
+    let mut seen: std::collections::HashSet<(bool, Sha256)> = std::collections::HashSet::new();
+    for f in inv.folders.iter().filter(|f| f.transfer_eligible()) {
+        let Some(tree) = f.tree else { continue };
+        for e in &f.file_entries {
+            seen.insert((false, e.sha256));
+        }
+        seen.insert((true, tree));
+    }
+    seen.len() as u64
+}
+
+/// The plan without its objects (`publish_objects`) and with a state that carries no local file
+/// lists (they are never serialised), so a large install is not copied for a publication.
+pub fn plan_publish_state(inv: &Inventory, ctx: &PublishContext) -> Result<PublishPlan, PlanBlock> {
+    plan_publish_inner(inv, ctx, false)
+}
+
 pub fn plan_publish(inv: &Inventory, ctx: &PublishContext) -> Result<PublishPlan, PlanBlock> {
+    plan_publish_inner(inv, ctx, true)
+}
+
+fn plan_publish_inner(
+    inv: &Inventory,
+    ctx: &PublishContext,
+    with_objects: bool,
+) -> Result<PublishPlan, PlanBlock> {
     if !inv.listing_stable {
         return Err(PlanBlock::Unstable);
     }
@@ -106,38 +177,24 @@ pub fn plan_publish(inv: &Inventory, ctx: &PublishContext) -> Result<PublishPlan
             "the next state number must be greater than every existing one".into(),
         ));
     }
-    let mut blobs: BTreeMap<String, ObjectRef> = BTreeMap::new();
-    let mut trees: BTreeMap<String, ObjectRef> = BTreeMap::new();
-    let mut fingerprints = Vec::new();
-    for f in inv.folders.iter().filter(|f| f.transfer_eligible()) {
-        let Some(tree) = f.tree else { continue };
-        for e in &f.file_entries {
-            let rel = blob(&ctx.group, &e.sha256);
-            blobs.entry(rel.clone()).or_insert_with(|| ObjectRef {
-                rel,
-                kind: ObjectKind::Blob,
-                expect: e.sha256,
-                source: ObjectSource::Folder {
-                    folder: f.name.clone(),
-                    path: e.path.clone(),
-                },
-            });
+    let mut objects = Vec::new();
+    if with_objects {
+        let mut blobs: BTreeMap<String, ObjectRef> = BTreeMap::new();
+        let mut trees: BTreeMap<String, ObjectRef> = BTreeMap::new();
+        for o in publish_objects(inv, &ctx.group) {
+            match o.kind {
+                ObjectKind::Blob => blobs.insert(o.rel.clone(), o),
+                ObjectKind::Tree => trees.insert(o.rel.clone(), o),
+            };
         }
-        let bytes = encode(&FolderTreeRecord {
-            tree,
-            files: f.file_entries.clone(),
-        });
-        let rel = tree_record(&ctx.group, &tree);
-        trees.entry(rel.clone()).or_insert_with(|| ObjectRef {
-            rel,
-            kind: ObjectKind::Tree,
-            expect: sha256(&bytes),
-            source: ObjectSource::Bytes(bytes),
-        });
-        if let Some(fp) = f.fingerprint {
-            fingerprints.push((f.name.clone(), fp));
-        }
+        objects = blobs.into_values().chain(trees.into_values()).collect();
     }
+    let fingerprints: Vec<(String, Sha256)> = inv
+        .folders
+        .iter()
+        .filter(|f| f.transfer_eligible() && f.tree.is_some())
+        .filter_map(|f| f.fingerprint.map(|fp| (f.name.clone(), fp)))
+        .collect();
     let state = CodeState {
         group_id: ctx.group.clone(),
         computer_id: ctx.computer.clone(),
@@ -148,7 +205,11 @@ pub fn plan_publish(inv: &Inventory, ctx: &PublishContext) -> Result<PublishPlan
         written_unix_ms: ctx.now_unix_ms,
         client: ctx.client.clone(),
         inventory_complete: inv.folders.iter().all(|f| f.transfer_eligible()),
-        folders: inv.folders.clone(),
+        folders: if with_objects {
+            inv.folders.clone()
+        } else {
+            inv.folders.iter().map(|f| f.without_entries()).collect()
+        },
         apply_report: ctx.apply_report.clone(),
         authority_index: ctx.authority_index,
         features: ctx.features.clone(),
@@ -163,7 +224,7 @@ pub fn plan_publish(inv: &Inventory, ctx: &PublishContext) -> Result<PublishPlan
         .map(|s| state_record(&ctx.group, &ctx.computer, &ctx.enrollment, *s))
         .collect();
     Ok(PublishPlan {
-        objects: blobs.into_values().chain(trees.into_values()).collect(),
+        objects,
         state_path: state_record(&ctx.group, &ctx.computer, &ctx.enrollment, ctx.seq),
         state,
         prune_states,
@@ -468,6 +529,25 @@ mod tests {
         assert_eq!((other.status, other.tree), (FolderStatus::Unstable, None));
         assert!(!p.state.inventory_complete);
         assert_eq!(p.source_fingerprints.len(), 1);
+    }
+
+    #[test]
+    fn lazy_publish_yields_the_same_objects_as_the_full_plan() {
+        let sc = Scenario::new(suite("1.0", "a")).peer(2, suite("2.0", "b"));
+        let ctx = sc.publish_ctx(1, &[]);
+        let full = plan_publish(&sc.local, &ctx).unwrap();
+        let lean = plan_publish_state(&sc.local, &ctx).unwrap();
+        assert!(lean.objects.is_empty());
+        assert!(lean.state.folders.iter().all(|f| f.file_entries.is_empty()));
+        let key = |o: &ObjectRef| (o.rel.clone(), o.expect);
+        let mut a: Vec<_> = full.objects.iter().map(key).collect();
+        let mut b: Vec<_> = publish_objects(&sc.local, &ctx.group)
+            .map(|o| key(&o))
+            .collect();
+        a.sort();
+        b.sort();
+        assert_eq!(a, b);
+        assert_eq!(count_publish_objects(&sc.local), a.len() as u64);
     }
 
     #[test]
