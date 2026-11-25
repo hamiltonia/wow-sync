@@ -1323,6 +1323,12 @@ pub fn build_restore(
         .filter(|b| g.nodes.contains_key(b))
         .copied()
         .collect();
+    // This computer's own heads are known to it even when the basis has not caught up with
+    // them yet (a choice it just wrote): a restore supersedes them, never competes with them.
+    parents.extend(g.heads.iter().filter(|h| {
+        matches!(l.record(h), Some(AuthorityRecord::SettingsRevision(r))
+            if r.issuer.computer_id == issuer.computer_id)
+    }));
     parents.sort();
     parents.dedup();
     Ok(crate::kinds::SettingsRevision {

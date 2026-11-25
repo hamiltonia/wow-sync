@@ -769,7 +769,7 @@ pub(crate) mod fixtures {
             files: 1,
             bytes: 1,
             toc: TocSummary::empty(TocKind::Selected),
-            file_entries: vec![],
+            file_entries: Default::default(),
         }
     }
 

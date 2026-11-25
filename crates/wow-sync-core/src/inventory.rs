@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 pub struct FolderScan {
     pub name: String,
     pub status: ScanStatus,
-    pub files: Vec<ScannedFile>,
+    pub files: std::sync::Arc<Vec<ScannedFile>>,
     pub tocs: Vec<TocCandidate>,
     pub fingerprint: Option<Sha256>,
 }
@@ -101,7 +101,7 @@ pub struct FolderState {
     pub toc: TocSummary,
     /// Local only; peers' file lists come from tree records.
     #[serde(skip)]
-    pub file_entries: Vec<FileEntry>,
+    pub file_entries: std::sync::Arc<Vec<FileEntry>>,
 }
 
 /// The status label of an add-on without a recognised `.toc` (R-05, D-29).
@@ -126,7 +126,7 @@ impl FolderState {
             files: self.files,
             bytes: self.bytes,
             toc: self.toc.clone(),
-            file_entries: Vec::new(),
+            file_entries: Default::default(),
         }
     }
     /// Eligible, but no `.toc` was selected: the folder is synced by content lineage (R-05).
@@ -172,7 +172,7 @@ fn unusable(name: &str, key: FolderKey, status: FolderStatus) -> FolderState {
         files: 0,
         bytes: 0,
         toc: TocSummary::empty(TocKind::None),
-        file_entries: Vec::new(),
+        file_entries: Default::default(),
     }
 }
 
@@ -201,7 +201,7 @@ fn summarize(sel: TocSelection) -> TocSummary {
 fn build_ok(scan: FolderScan, key: FolderKey, v: &ConfirmedVariant) -> FolderState {
     let mut entries = Vec::with_capacity(scan.files.len());
     let mut seen = std::collections::HashSet::with_capacity(scan.files.len());
-    for f in &scan.files {
+    for f in scan.files.iter() {
         let Ok(path) = validate_rel_path(&f.rel_path) else {
             return unusable(&scan.name, key, FolderStatus::Unsupported);
         };
@@ -225,7 +225,7 @@ fn build_ok(scan: FolderScan, key: FolderKey, v: &ConfirmedVariant) -> FolderSta
         files: entries.len() as u32,
         bytes,
         toc: summarize(select_toc(&scan.name, &scan.tocs, v.mapping())),
-        file_entries: entries,
+        file_entries: std::sync::Arc::new(entries),
     }
 }
 
@@ -324,7 +324,7 @@ mod tests {
         let mut unsafe_scan = testkit::folder_scan("Z", &[], &[]);
         unsafe_scan.status = ScanStatus::Unsafe("junction".into());
         let mut bad_path = testkit::folder_scan("Evil", &[("a.lua", b"1")], &["Evil.toc"]);
-        bad_path.files[0].rel_path = "../x".into();
+        std::sync::Arc::make_mut(&mut bad_path.files)[0].rel_path = "../x".into();
         let inv = build_inventory(
             vec![
                 unsafe_scan,

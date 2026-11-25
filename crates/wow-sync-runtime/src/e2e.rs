@@ -3848,6 +3848,29 @@ mod tests {
     }
 
     #[test]
+    fn two_addons_declaring_one_variable_both_get_rows_even_without_their_own_files() {
+        use crate::settings_cycle::SettingsUnitStatus as S;
+        let lab = Lab::new();
+        let (mut a, _b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let toc = "## Interface: 11508\n## SavedVariables: CheckShared\n## SavedVariablesPerCharacter: CheckShared\n";
+        a.addon_with("CheckSharedOne", "v1", toc);
+        a.addon_with("CheckSharedTwo", "v1", toc);
+        let dir = a.install.variant_dir.join("WTF/Account/ACC/SavedVariables");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("CheckShared.lua"), "CheckShared = { v = 1 }\n").unwrap();
+        synced(&mut a);
+        synced(&mut a);
+        let rows = a.svc.status().settings_units;
+        for name in ["checksharedone", "checksharedtwo"] {
+            let r = rows
+                .iter()
+                .find(|r| r.unit.folder.as_str() == name && r.status == S::OwnedBySeveral)
+                .unwrap_or_else(|| panic!("no OwnedBySeveral row for {name}: {rows:?}"));
+            assert!(!r.shared_with.is_empty(), "{r:?}");
+        }
+    }
+
+    #[test]
     fn settings_progress_counts_units_names_the_addon_and_the_origin_when_applying() {
         use crate::history::Phase;
         let lab = Lab::new();
@@ -4050,6 +4073,180 @@ mod tests {
             "{rb:?}"
         );
         assert!(!rb[..2].contains(&R::SharedFromHere), "{rb:?}");
+    }
+
+    #[test]
+    fn a_master_restore_then_a_choice_leaves_both_computers_on_the_selected_bytes() {
+        use crate::settings_cycle::SettingsUnitStatus as S;
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let unit = alpha_unit();
+        let v1 = "AlphaDB = { v = 1 }\n";
+        let mine = "AlphaDB = { mine = true, longer = 1 }\n";
+        write_wtf(&a, "Alpha", v1);
+        synced(&mut a);
+        share_now(&mut a);
+        synced(&mut b);
+        synced(&mut b);
+        // The peer's explicit copy reaches the master.
+        let cp = stored_checkpoint(&b, &unit, mine.as_bytes());
+        write_wtf(&b, "Alpha", mine);
+        synced(&mut b);
+        b.svc
+            .command(Command::ShareSettings {
+                unit: unit.clone(),
+                checkpoint: cp,
+            })
+            .unwrap();
+        for _ in 0..2 {
+            synced(&mut b);
+            synced(&mut a);
+        }
+        assert_eq!(read_wtf(&a, "Alpha").as_deref(), Some(mine));
+        // The master restores the earlier shared copy.
+        let row = a.svc.status().settings_units.remove(0);
+        let earlier = row
+            .history
+            .iter()
+            .map(|h| h.checkpoint)
+            .find(|c| *c == stored_checkpoint(&a, &unit, v1.as_bytes()))
+            .expect("the earlier shared copy is in the history");
+        assert!(matches!(
+            a.svc.command(Command::RestoreSettings {
+                unit: unit.clone(),
+                checkpoint: earlier,
+            }),
+            Ok(CommandOutcome::Written(_))
+        ));
+        for _ in 0..3 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        // A restore by the master is not a decision between the master's own copies.
+        let row = a.svc.status().settings_units.remove(0);
+        assert_ne!(row.status, S::NeedsChoice, "{row:?}");
+        assert_eq!(read_wtf(&a, "Alpha").as_deref(), Some(v1));
+        assert_eq!(read_wtf(&b, "Alpha").as_deref(), Some(v1));
+        let end = a.svc.status().settings_units.remove(0).status;
+        assert!(
+            !matches!(end, S::LocalDifferent(_) | S::NeedsChoice),
+            "{end:?}"
+        );
+    }
+
+    #[test]
+    fn a_master_restore_after_a_decision_does_not_create_a_decision_between_its_own_copies() {
+        use crate::settings_cycle::SettingsUnitStatus as S;
+        let lab = Lab::new();
+        let (mut a, mut b, g) = settings_pair(&lab, true, Some(1 << 20));
+        let unit = alpha_unit();
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        share_now(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        synced(&mut b);
+        let mine = stored_checkpoint(&b, &unit, b"AlphaDB = { mine = true, longer = 1 }\n");
+        let out = b
+            .svc
+            .command(Command::ShareSettings {
+                unit: unit.clone(),
+                checkpoint: mine,
+            })
+            .unwrap();
+        let CommandOutcome::Written(push) = out else {
+            panic!("{out:?}")
+        };
+        let (bc, _) = pc_ids(&b);
+        let held = provider_file(&lab, &layout::authority_record(&g, &bc, &push));
+        let held_bytes = std::fs::read(&held).unwrap();
+        std::fs::remove_file(&held).unwrap();
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 3 }\n");
+        synced(&mut a);
+        synced(&mut a);
+        std::fs::write(&held, held_bytes).unwrap();
+        synced(&mut a);
+        let row = a.svc.status().settings_units.remove(0);
+        assert_eq!(row.status, S::NeedsChoice);
+        // The peer's copy is chosen.
+        let pick = row
+            .competing
+            .iter()
+            .find(|c| c.checkpoint == mine)
+            .unwrap()
+            .checkpoint;
+        a.svc
+            .command(Command::ChooseSettings {
+                unit: unit.clone(),
+                checkpoint: pick,
+                shown_heads: row.shown_heads.clone(),
+            })
+            .unwrap();
+        // The master restores the earlier shared copy before its own choice has been applied, then nothing more is asked of anyone.
+        let earlier = stored_checkpoint(&a, &unit, b"AlphaDB = { v = 2 }\n");
+        assert!(matches!(
+            a.svc.command(Command::RestoreSettings {
+                unit: unit.clone(),
+                checkpoint: earlier,
+            }),
+            Ok(CommandOutcome::Written(_))
+        ));
+        for _ in 0..3 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        let row = a.svc.status().settings_units.remove(0);
+        assert_ne!(row.status, S::NeedsChoice, "{row:?}");
+        assert_eq!(
+            read_wtf(&a, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 2 }\n")
+        );
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 2 }\n")
+        );
+    }
+
+    #[test]
+    fn history_entries_carry_origin_source_size_and_sequence() {
+        use crate::settings_cycle::HeadKind;
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let unit = alpha_unit();
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        share_now(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 22 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        synced(&mut b);
+        let mine = stored_checkpoint(&b, &unit, b"AlphaDB = { mine = true }\n");
+        b.svc
+            .command(Command::ShareSettings {
+                unit: unit.clone(),
+                checkpoint: mine,
+            })
+            .unwrap();
+        synced(&mut b);
+        synced(&mut a);
+        let row = a.svc.status().settings_units.remove(0);
+        assert!(row.history.len() >= 3, "{row:?}");
+        for h in &row.history {
+            assert!(h.source.is_some(), "{h:?}");
+            assert!(h.size_bytes.is_some_and(|s| s > 0), "{h:?}");
+            assert!(h.seq > 0, "{h:?}");
+        }
+        let kinds: Vec<HeadKind> = row.history.iter().map(|h| h.origin).collect();
+        assert!(kinds.contains(&HeadKind::MastersRevision), "{kinds:?}");
+        assert!(kinds.contains(&HeadKind::SharedFrom), "{kinds:?}");
+        let mut keys: Vec<(u64, u64)> = row
+            .history
+            .iter()
+            .map(|h| (h.written_unix_ms, h.seq))
+            .collect();
+        keys.dedup();
+        assert_eq!(keys.len(), row.history.len(), "entries tell apart");
     }
 
     #[test]

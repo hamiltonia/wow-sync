@@ -1371,6 +1371,10 @@ mod tests {
             issuer: issuer.clone(),
             written_unix_ms: 1_700_000_000_000,
             is_head: head,
+            origin: wow_sync_runtime::HeadKind::SharedFrom,
+            source: None,
+            size_bytes: None,
+            seq: 0,
         };
         wow_sync_runtime::SettingsUnitRow {
             unit: unit(UnitStatus::Off).unit,
