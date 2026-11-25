@@ -1964,3 +1964,17 @@ tests = [
         "history_ui::tests::an_add_on_pages_rows_name_where_each_change_came_from",
 ]
 # <<< section: R10-history
+# >>> section: R11-app
+[[case]]
+id = "R11-app:guided-settings-offer-and-status"
+tier = "offline"
+tests = [
+    "settings_ui::tests::the_offer_follows_policy_and_consent_and_never_shows_when_it_cannot_act",
+    "settings_ui::tests::not_now_and_busy_headlines_hide_only_the_headline_offer",
+    "settings_ui::tests::the_consent_ticks_every_account_and_picks_this_computer_by_default",
+    "settings_ui::tests::confirming_a_master_chosen_elsewhere_sets_no_master",
+    "settings_ui::tests::a_retired_computer_is_not_offered_settings",
+    "settings_ui::tests::add_on_status_lines_say_the_most_urgent_thing_in_plain_words",
+    "history_ui::tests::a_settings_row_names_whose_settings_changed",
+]
+# <<< section: R11-app

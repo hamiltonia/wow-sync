@@ -139,7 +139,27 @@ pub fn text(e: &ProgressEvent) -> Option<String> {
             group_digits(e.items_total)
         ),
         Phase::Publishing => "Publishing changes".into(),
-        Phase::Settings => "Working on add-on settings".into(),
+        Phase::Settings => {
+            let head = match &e.source {
+                Some(ChangeSource::Computer(n)) => format!("Using settings from {n}"),
+                _ => "Saving add-on settings".into(),
+            };
+            match (e.items_total, &e.current) {
+                (0, _) => head,
+                (1, Some(c)) => format!("{head} for {c}"),
+                (n, c) => {
+                    let of = format!(
+                        "{head}: {} of {}",
+                        e.items_done,
+                        plural(n, "add-on", "add-ons")
+                    );
+                    match c {
+                        Some(c) => format!("{of} ({c})"),
+                        None => of,
+                    }
+                }
+            }
+        }
     })
 }
 
@@ -441,6 +461,29 @@ mod tests {
         e.items_total = 7;
         assert_eq!(text(&e).unwrap(), "Publishing changes: 3 of 7");
         assert_eq!(text(&ev(4, Phase::Idle)), None);
+    }
+
+    #[test]
+    fn settings_progress_says_whose_settings_and_how_many_add_ons() {
+        let mut e = ev(1, Phase::Settings);
+        assert_eq!(text(&e).unwrap(), "Saving add-on settings");
+        e.items_total = 12;
+        e.items_done = 3;
+        e.current = Some("Details".into());
+        assert_eq!(
+            text(&e).unwrap(),
+            "Saving add-on settings: 3 of 12 add-ons (Details)"
+        );
+        e.source = Some(ChangeSource::Computer("RYZENFISH".into()));
+        assert_eq!(
+            text(&e).unwrap(),
+            "Using settings from RYZENFISH: 3 of 12 add-ons (Details)"
+        );
+        e.items_total = 1;
+        assert_eq!(
+            text(&e).unwrap(),
+            "Using settings from RYZENFISH for Details"
+        );
     }
 
     #[test]

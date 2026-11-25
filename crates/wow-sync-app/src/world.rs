@@ -271,6 +271,8 @@ pub struct World {
     pub checking: bool,
     /// The sync thread hit an internal error in this phase and is retrying.
     pub fault: Option<String>,
+    /// "some saved settings were not shared: ..." from the last pass.
+    pub settings_note: Option<String>,
     /// What the running pass is doing now, from the service's progress events.
     pub progress: Option<crate::progress_ui::ProgressView>,
     /// "Updated 15 add-ons from RYZENFISH — see Activity", for a short while after a pass.
@@ -494,6 +496,7 @@ impl World {
             view: placeholder_view(),
             checking: false,
             fault: None,
+            settings_note: None,
             progress: None,
             done_note: None,
             changes: Vec::new(),

@@ -59,7 +59,21 @@ pub struct GroupResult {
 /// runtime command.
 pub fn dispatch(svc: &mut SliceService, a: &GroupAction) -> ActionResult {
     let started = Instant::now();
-    let out = svc.command(a.to_command());
+    // Consent first: a master chosen without consent here would publish nothing, but a consent
+    // without a master is harmless, so a failure in between leaves the safe state.
+    let out = match a {
+        GroupAction::StartSettings {
+            master: Some(master),
+            exceptions,
+            ..
+        } => svc.command(a.to_command()).and_then(|_| {
+            svc.command(wow_sync_runtime::Command::SetSettingsPolicy {
+                master: Some(master.clone()),
+                exceptions: exceptions.clone(),
+            })
+        }),
+        _ => svc.command(a.to_command()),
+    };
     let (ok, line) = group_log_line(a.kind(), &out);
     let ms = started.elapsed().as_millis();
     if ok {
@@ -155,6 +169,8 @@ pub struct Shared {
     pub enrolled_now: bool,
     /// Set when the sync thread caught a panic: the phase it was in. Cleared by a good pass.
     pub fault: Option<String>,
+    /// The last pass's note that some saved settings were not shared; cleared by a pass without one.
+    pub settings_note: Option<String>,
     pub shared_root: Option<PathBuf>,
     /// What core currently offers the owner to decide (typed; the app renders the words).
     pub decisions: Vec<wow_sync_core::decision::DecisionItem>,
@@ -1215,6 +1231,11 @@ fn run(
                     g.message.clear();
                     g.fault = None;
                 });
+                let note = r
+                    .apply_note
+                    .clone()
+                    .filter(|n| n.starts_with(crate::settings_ui::SETTINGS_NOTE_PREFIX));
+                publish(&shared, &wake, |g| g.settings_note = note);
                 let mut st = r.status;
                 st.test_mode = s.test_mode();
                 refresh_with(s, &shared, &wake, true, st);
