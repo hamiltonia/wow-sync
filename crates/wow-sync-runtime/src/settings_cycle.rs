@@ -1505,6 +1505,17 @@ pub struct SettingsHistoryEntry {
     pub written_unix_ms: u64,
     /// Currently a head of the unit's graph: nothing newer builds on it.
     pub is_head: bool,
+    /// What kind of copy this is: the master's revision, this computer's own, or another
+    /// computer's share or push.
+    pub origin: HeadKind,
+    /// The display name of the computer that wrote it; `None` when not known.
+    pub source: Option<String>,
+    /// The saved file's size in bytes, when the copy can be read.
+    pub size_bytes: Option<u64>,
+    /// Tells entries written in the same minute apart: the issuing computer's own sequence
+    /// number (`issuer.issued_at_seq`; 0 for a local recovery copy). Order by
+    /// `(written_unix_ms, seq)`; `written_unix_ms` already has millisecond precision.
+    pub seq: u64,
 }
 
 /// The valid revisions of `unit`, oldest first. Invalid and unreadable ones are not history.
@@ -1526,6 +1537,10 @@ pub fn settings_history(
                 issuer: r.issuer.clone(),
                 written_unix_ms: r.written_unix_ms,
                 is_head: graph.heads.contains(h),
+                origin: HeadKind::SharedFrom,
+                source: None,
+                size_bytes: None,
+                seq: r.issuer.issued_at_seq,
             }),
             _ => None,
         })
@@ -1811,6 +1826,10 @@ pub fn settings_units(
                             },
                             written_unix_ms: k.at_unix_ms,
                             is_head: false,
+                            origin: HeadKind::ThisComputersCopy,
+                            source: k.from.as_ref().and_then(|c| names.get(c).cloned()),
+                            size_bytes: k.size,
+                            seq: 0,
                         })
                         .collect()
                 })
