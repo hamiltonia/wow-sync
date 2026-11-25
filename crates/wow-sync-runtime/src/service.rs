@@ -3063,7 +3063,8 @@ impl SliceService {
             }
         };
         let provider = self.open_provider()?;
-        let addons = Root::open(&self.addons_path(), ReparsePolicy::RejectAll).map_err(local)?;
+        let addons_dir = self.addons_path();
+        let addons = Root::open(&addons_dir, ReparsePolicy::RejectAll).map_err(local)?;
         let variant_dir = self.variant_dir();
         let area = InstallArea::open(&variant_dir)
             .map_err(local)?
@@ -3204,17 +3205,17 @@ impl SliceService {
                         if let Some(AuthorityRecord::SettingsRevision(r)) =
                             self.plane.ledger.record(h)
                         {
-                            crate::history::record_change(
-                                &self.state,
-                                &crate::changes::settings_published(
-                                    (pass_id, now_unix_ms()),
-                                    r,
-                                    crate::changes::display_of(
-                                        &w.titles,
-                                        &w.inventory,
-                                        &r.unit.folder,
-                                    ),
-                                ),
+                            let rec = crate::changes::settings_published(
+                                (pass_id, now_unix_ms()),
+                                r,
+                                crate::changes::display_of(&w.titles, &w.inventory, &r.unit.folder),
+                            );
+                            crate::history::record_change(&self.state, &rec);
+                            crate::tracking::recorded(
+                                &self.progress,
+                                pass_id,
+                                crate::history::Phase::Settings,
+                                rec,
                             );
                         }
                     }
@@ -3424,7 +3425,8 @@ impl SliceService {
                             &self.state,
                             &plan,
                             prepared,
-                        );
+                        )
+                        .with_addons(addons_dir.clone());
                         fx.inner_mut().set_reporting(progress.clone());
                         progress.announce(&decided);
                         for (k, why) in &plan.skipped {
@@ -3537,15 +3539,19 @@ impl SliceService {
                 let saved = crate::history::load_apply_sources(&self.state);
                 for (_, key, res) in &rec.ops {
                     if matches!(res, PackageResult::Applied { .. }) {
-                        crate::history::record_change(
-                            &self.state,
-                            &crate::changes::recovered(
-                                (pass_id, now_unix_ms()),
-                                key,
-                                &w.titles,
-                                &w.inventory,
-                                saved.get(key.as_str()).cloned(),
-                            ),
+                        let recovered = crate::changes::recovered(
+                            (pass_id, now_unix_ms()),
+                            key,
+                            &w.titles,
+                            &w.inventory,
+                            saved.get(key.as_str()).cloned(),
+                        );
+                        crate::history::record_change(&self.state, &recovered);
+                        crate::tracking::recorded(
+                            &self.progress,
+                            pass_id,
+                            crate::history::Phase::Installing,
+                            recovered,
                         );
                     }
                 }
@@ -3966,6 +3972,7 @@ impl SliceService {
                     track.2,
                 ) {
                     crate::history::record_change(state, &rec);
+                    track.0.recorded(rec);
                 }
                 *last_publish = Some(now_unix_ms());
                 plane.mark_listed(&own_index.newly, seq);

@@ -6909,6 +6909,113 @@ mod tests {
         }
 
         #[test]
+        fn publishing_a_package_announces_its_record_on_the_progress_stream() {
+            let lab = Lab::new();
+            let mut a = lab.pc("a");
+            a.addon("Alpha", "alpha-v1");
+            let g = a.create();
+            let rx = a.svc.progress_hub().subscribe();
+            synced(&mut a);
+            let _ = g;
+            let done: Vec<_> = rx
+                .try_iter()
+                .filter_map(|e| e.completed.map(|c| (e.phase, c)))
+                .collect();
+            assert!(
+                done.iter()
+                    .any(|(ph, c)| *ph == Phase::Publishing && c.kind == ChangeKind::Published),
+                "{done:?}"
+            );
+        }
+
+        #[test]
+        fn a_peers_copy_choice_is_recorded_on_the_receiving_computer_as_made_there() {
+            use wow_sync_core::decision::{DecisionId, DecisionKind, OptionLabel};
+            let lab = Lab::new();
+            let (mut a, mut b, _c, g) = alpha_v2_published(&lab);
+            put_mutual_keep_of_alpha(&lab, &g, &a, &b);
+            put_mutual_keep_of_alpha(&lab, &g, &b, &a);
+            for _ in 0..3 {
+                synced(&mut a);
+                synced(&mut b);
+            }
+            let item = a
+                .svc
+                .offered_decisions()
+                .iter()
+                .find(|i| i.reason == DecisionKind::ChoicesDiffer)
+                .expect("the conflict offers a decision")
+                .clone();
+            let copy = item
+                .options
+                .iter()
+                .find(|o| matches!(o.label, OptionLabel::Release { .. }))
+                .unwrap()
+                .id;
+            a.svc
+                .command(Command::Decide {
+                    item: DecisionId(item.scope.clone()),
+                    option: copy,
+                    shown: item.evidence,
+                })
+                .unwrap();
+            for _ in 0..4 {
+                synced(&mut a);
+                synced(&mut b);
+            }
+            let on_b: Vec<_> = changes(&b)
+                .into_iter()
+                .filter(|c| c.kind == ChangeKind::Applied && c.reason != ChangeReason::Recovery)
+                .collect();
+            let on_a: Vec<_> = changes(&a)
+                .into_iter()
+                .filter(|c| c.kind == ChangeKind::Applied && c.reason != ChangeReason::Recovery)
+                .collect();
+            assert_eq!(on_a.len() + on_b.len(), 1, "{on_a:?} {on_b:?}");
+            if let Some(r) = on_b.first() {
+                assert_eq!(r.reason, ChangeReason::Choice(Some("a".into())), "{r:?}");
+            }
+            if let Some(r) = on_a.first() {
+                assert_eq!(r.reason, ChangeReason::Choice(None), "{r:?}");
+            }
+        }
+
+        #[test]
+        fn a_peers_rollback_is_recorded_on_the_receiving_computer_as_a_rollback() {
+            use wow_sync_core::hash::package_hash;
+            let lab = Lab::new();
+            let (mut a, mut b, c, g) = alpha_v2_published(&lab);
+            let v1 = alpha_folder(&lab, &g, &c);
+            let v1_hash = package_hash(&[(v1.key.clone(), v1.tree.unwrap())]);
+            synced(&mut a);
+            a.svc
+                .command(Command::Rollback {
+                    package: v1.key.clone(),
+                    recovered: v1_hash,
+                })
+                .unwrap();
+            synced(&mut a);
+            let mine = changes(&a);
+            let own = mine
+                .iter()
+                .find(|c| c.kind == ChangeKind::RolledBack)
+                .unwrap_or_else(|| panic!("{mine:?}"));
+            assert!(matches!(own.new_version, VersionLabel::Toc(_)), "{own:?}");
+            for _ in 0..3 {
+                synced(&mut b);
+            }
+            let all = changes(&b);
+            let got = all
+                .iter()
+                .find(|c| {
+                    c.new_version == VersionLabel::Toc("2.0".into())
+                        && c.old_version == VersionLabel::Toc("3.0".into())
+                })
+                .unwrap_or_else(|| panic!("{all:?} {:?}", b.read("Alpha/main.lua")));
+            assert_eq!(got.reason, ChangeReason::Rollback, "{got:?}");
+        }
+
+        #[test]
         fn a_restore_is_recorded_as_a_recovery() {
             let lab = Lab::new();
             let mut a = lab.pc("a");

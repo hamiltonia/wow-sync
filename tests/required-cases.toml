@@ -1949,5 +1949,10 @@ tests = [
     "tracking::tests::bytes_never_go_back_across_the_folders_of_one_add_on",
     "e2e::tests::change_history::a_recovered_peer_install_keeps_its_source_and_is_not_a_local_publish",
     "e2e::tests::change_history::a_recovered_install_without_a_saved_source_is_not_called_this_computer",
+        "e2e::tests::change_history::a_peers_copy_choice_is_recorded_on_the_receiving_computer_as_made_there",
+        "e2e::tests::change_history::a_peers_rollback_is_recorded_on_the_receiving_computer_as_a_rollback",
+        "e2e::tests::change_history::publishing_a_package_announces_its_record_on_the_progress_stream",
+        "progress_ui::tests::a_pass_that_publishes_is_logged_and_summarised_as_publishing",
+        "history_ui::tests::an_add_on_pages_rows_name_where_each_change_came_from",
 ]
 # <<< section: R10-history

@@ -20,9 +20,22 @@ pub struct ChangeRow {
     /// Changed paths relative to the add-on folder, already capped.
     pub paths: Vec<String>,
     pub paths_more: u32,
+    /// "from RYZENFISH", or "from this computer".
+    pub from: String,
 }
 
 impl ChangeRow {
+    /// The row with where the change came from, for lists that mix computers.
+    pub fn line_with_source(&self) -> String {
+        let mut parts: Vec<&str> = vec![self.name.as_str(), self.from.as_str()];
+        for p in [&self.what, &self.files, &self.size, &self.reason] {
+            if !p.is_empty() {
+                parts.push(p);
+            }
+        }
+        parts.join(" · ")
+    }
+
     /// The whole row as one sentence, for the screen reader and the list.
     pub fn line(&self) -> String {
         let mut parts: Vec<&str> = vec![self.name.as_str()];
@@ -202,6 +215,10 @@ pub fn row_of(r: &ChangeRecord) -> ChangeRow {
         unix_ms: r.unix_ms,
         paths: r.paths.clone(),
         paths_more: r.paths_more,
+        from: match source_name(&r.source) {
+            Some(n) => format!("from {n}"),
+            None => "from this computer".into(),
+        },
     }
 }
 
@@ -386,6 +403,17 @@ pub(crate) mod tests {
             r.line(),
             "Bagnon · 1.0 \u{2192} 1.1 · +2 ~3 \u{2212}1 files · +2 KB · newer release"
         );
+    }
+
+    #[test]
+    fn an_add_on_pages_rows_name_where_each_change_came_from() {
+        let r = row_of(&rec(ChangeKind::Applied, "Bagnon", Some("RYZENFISH")));
+        assert_eq!(
+            r.line_with_source(),
+            "Bagnon · from RYZENFISH · 1.0 \u{2192} 1.1 · +2 ~3 \u{2212}1 files · +2 KB · newer release"
+        );
+        let own = row_of(&rec(ChangeKind::Applied, "Bagnon", None));
+        assert!(own.line_with_source().contains("from this computer"));
     }
 
     #[test]

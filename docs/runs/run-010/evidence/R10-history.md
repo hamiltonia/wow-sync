@@ -76,6 +76,14 @@ Branch `run010/R10-history`, built on the merged interface (main `33261fe`).
   - Source: with the saved source ignored, both source tests failed at k=6
     (`left: ThisComputer`, `right: Computer("a")` / not `ThisComputer`).
 
+## Round 6 (R10-check findings)
+
+- G3: ledger lookups now match on the record's own folders (Entry.folders is empty for learned decisions), so a peer's copy choice records `Choice(Some(computer))`. A peer rollback arriving as a plain apply is recorded `RolledBack` / `Rollback`. A's own rollback shows the live TOC version. Tests: `a_peers_copy_choice_...` (failed before: NewerRelease vs Choice), `a_peers_rollback_...`.
+- G4: publishing, settings-published and crash-recovered records are now announced on the progress stream (`tracking::recorded`, `completed: Some(rec)`), so the pass summary counts them and phase/record log lines appear. Tests: `publishing_a_package_announces_its_record_on_the_progress_stream`, app `a_pass_that_publishes_is_logged_and_summarised_as_publishing`. App files touched: `progress_ui.rs` (test only), `history_ui.rs`, `pages.rs`.
+- G1: add-on page Recent changes rows use `ChangeRow::line_with_source` ("from <computer>" / "from this computer"). Test `an_add_on_pages_rows_name_where_each_change_came_from`.
+- G2 deferred (settings records untouched). G5: no fixed ports or obvious race found in the update_http TLS tests; root cause not established, no change.
+- No public API break (ChangeRow gained a `from` field; app-internal).
+
 ## Open issues
 
 - Settings records name the folder only; no account/character paths are stored.
