@@ -1,13 +1,15 @@
 //! Speed lab (run 010): enrolls a synthetic group (isolated state and provider) on an install,
 //! then times repeated sync passes with a warm hash cache and counts file-system touches.
 //!
-//!   speed_lab <install root> <variant folder> <shared dir> <state dir> [passes]
+//!   speed_lab <install root> <variant folder> <shared dir> <state dir> [passes] [group id]
 //!
-//! Reads the install; nothing is published into any real group.
+//! Enrols into a throwaway copy (a new group, or group id as a new computer) and may write to the
+//! install, the shared dir and the state dir: point it only at copies, never at a live install or group.
 
 use std::sync::atomic::Ordering::Relaxed;
 use std::time::Instant;
 use wow_sync_adapters::fs_safe::{LISTED_ENTRIES, LISTINGS, STATS};
+use wow_sync_runtime::core::ids::GroupId;
 use wow_sync_runtime::core::plan::Activity;
 use wow_sync_runtime::{
     EnrollRequest, HashCache, JoinChoice, ScanCtl, ScriptedActivity, ServiceConfig, SliceService,
@@ -29,7 +31,11 @@ fn main() {
         recent_ms: 2000,
     };
     let (src, _act) = ScriptedActivity::new(Activity::NotRunning);
-    let mut svc = SliceService::with_activity(cfg.clone(), Box::new(src)).unwrap();
+    let mut svc = if std::env::var_os("SPEED_LAB_REAL_ACTIVITY").is_some() {
+        SliceService::new(cfg.clone()).unwrap()
+    } else {
+        SliceService::with_activity(cfg.clone(), Box::new(src)).unwrap()
+    };
     let cache = HashCache::open(state.as_ref(), "speed-lab");
     svc.set_read_ctl(ScanCtl {
         cache: Some(cache.clone()),
@@ -38,8 +44,11 @@ fn main() {
     if !svc.is_enrolled() {
         let p = svc.inspect();
         svc.enroll(&EnrollRequest {
-            join: JoinChoice::New {
-                name: "SpeedLab".into(),
+            join: match a.get(5) {
+                Some(g) => JoinChoice::Existing(GroupId::parse(g).unwrap()),
+                None => JoinChoice::New {
+                    name: "SpeedLab".into(),
+                },
             },
             identity_confirmed: true,
             scope_confirmed: true,

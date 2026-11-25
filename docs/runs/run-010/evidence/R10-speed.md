@@ -56,3 +56,39 @@ took 562 s here (sampling and Defender included); not compared with v0.3.2.
   files" re-reads everything). Registered in `tests/required-cases.toml`
   (`R10-speed:idle-pass-hashing`).
 - `cargo xtask verify --tier offline`: PASS. `cargo xtask verify --tier native`: PASS.
+
+
+## Round 2 - representative setup (copy of the real group)
+
+Provider: robocopy copy of the real Dropbox group (37,233 files, 3.8 GB) under
+`D:\WoWSyncLab\R10-speed\shared-*`; add-ons: copy of the real `_forever_` (36,142 files, 3.5 GB).
+The lab joins the copy as a new synthetic computer (`speed_lab ... <group id>`), so no identity is
+forged and nothing is written to the real group or `_forever_`. Main (R10-history, a6d898a) is
+merged (e17f3f4).
+
+| Build | Warm passes (ms) | Median | Files visited | Listings |
+|---|---|---|---|---|
+| v0.3.2 | 947, 939, 948, 1017, 902, 918 | ~940 | 108,426 | 8,496 |
+| candidate | 291, 289, 290, 306, 288, 283, 286 | 289 | 36,142 | 1,437 |
+
+Speedup 3.25x (gate >= 3x met). Memory peak unchanged from round 1 (36 MiB vs 100 MiB limit).
+Real-activity probe (`SPEED_LAB_REAL_ACTIVITY=1`) on v0.3.2: 921-981 ms, so process probing is not
+the gap.
+
+Provider copy is no slower than the synthetic provider (~940 ms either way); real Dropbox walks
+timed read-only are no slower than local disk. The owner's live v0.3.2 logs 2.0-9.7 s passes
+(avg 2.9-3.4 s per hour) which the lab does not reproduce; the likely remainder is live-app
+overhead (status/tray observations, concurrent processes, antivirus). Not proven.
+
+First-pass times (27 s / 452 s): the lab's pass 0 on a new join took 278-330 s over 3.8 GB of
+freshly copied files (full hashing plus antivirus on new files). The 452 s pass overlapped the
+owner's own 453 s apply, consistent with disk contention; not independently reproduced.
+
+Real `_forever_` audit: the `.wowsync` directory there was created 11/23 10:49, before my lab
+(started 11/24 3:44 PM); its journal/staging/lock timestamps are earlier than my runs. My lab only
+read add-on files and opened existing directories. Nothing of mine remains there; all writing
+runs used copies.
+
+service.rs edits (R10-speed only): `RECENT_SCAN_MS`, `tree_cache` field and lookup in
+`observe_world_ctl`, `observe_world_recent`, and in `sync_once` the hash-cache attach,
+`scanned_at`/`quiet_cycle`, and re-observe/last-look via `observe_world_recent`.
