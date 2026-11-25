@@ -466,3 +466,143 @@ I probed this with a temporary core test in `plan.rs`, since reverted. It drives
 | Publish probe | `cargo test -p wow-sync-core --lib rvprobe -- --nocapture` | PASS: ordering, the abort and failure matrix, and identical state bytes. Reverted. |
 | GC race probe | `cargo test -p wow-sync-runtime --lib rvprobe -- --nocapture --test-threads=1` | PASS (in round 2 the same probe failed). Reverted. |
 | Offline | `cargo xtask verify --tier offline` | PASS (fmt, clippy, test, required-cases, deny, markdown-links) on `6da3e0f` plus this file. Native not run (review-only change). |
+
+## G13 review (6bd5d54)
+
+- **Scope.** Only the G13 fix: `11936b5`, merged on `main` as `6bd5d54`. That is the diff
+  `git diff 4bb0df7..6bd5d54 -- crates/`:
+  - `settings_cycle.rs`: the override from the master's own ConcurrentPush to Yield
+    (`1316-1336`) and the `seen_heads` status override (`352-354`, `1245-1247`, `1876-1889`);
+  - `e2e.rs`: the two `g13_*` tests (`4138-4225`).
+- **Context read.** `evidence/R11-check.md` G13, `evidence/R11-runtime.md` Round G13, and OD-55.
+- **Data boundaries.** Synthetic e2e lab only. One temporary probe was added and reverted; its
+  log is `D:\WoWSyncLab\R11-review\g13-probe.log`.
+
+### G13 verdict
+
+**One open major (RV11-17).** The fix does what G13 needs: the checker's order of choose, then
+restore, then apply converges, and nothing is republished. But the override cannot tell an edit
+made *before* the master's own selection from one made *after* it. If the master restores,
+chooses or pushes while WoW is running and then plays, every edit from that game session is
+reverted on the master and never published. The status then says up to date. OD-55 describes
+the window as "the few seconds before the apply"; here it lasts the whole game session.
+
+### Answers
+
+1. **Can a genuine master edit be discarded?** Yes. This is RV11-17; the edit is kept as a
+   recovery copy, not lost.
+   - The ordinary paths are safe:
+     - An auto-publish advances `basis = [h]` and `last_applied` when the record is written
+       (`settings_cycle.rs:1432-1433`). A later edit therefore has its heads in the basis and is
+       not ConcurrentPush (`wow-sync-core/src/settings.rs` `target_case`: ConcurrentPush needs
+       heads outside the basis *and* `live != basis_checkpoint`).
+     - Once a master's push, restore or choice has been applied, the Yield path sets the basis to
+       the heads (`settings_cycle.rs` Yield arm, `basis = graph.heads.clone()`). Later edits are
+       ordinary publishable local changes. `g13(true)` and
+       `a_master_restore_then_a_choice_leaves_both_computers_on_the_selected_bytes` cover this.
+   - The unsafe path is an edit made *after* the master's own selection was written but before it
+     was applied. That window lasts the whole game session, because nothing is applied while WoW
+     runs.
+   - My probe, `rvprobe_g13_restore_then_play_then_edit` (reverted):
+     - `a` (the master) publishes v1, then v2, and `b` applies v2.
+     - WoW starts on `a`. `RestoreSettings(v1)` returns `Ok(Written)` while WoW is running. The
+       owner then edits Alpha to `{ played = true }` and WoW closes.
+     - After three passes, `a` and `b` are both on **v1**. `a`'s status is **InSync**, and the
+       played edit is only in `local_copies`.
+     - The assertion that the master's later edit propagates **failed**. Before this fix, the same
+       sequence reached `LocalDifferent(_) if is_authority && changed` (`1358`) and published the
+       edit.
+   - Smaller, crash-only case (note): suppose a crash after `write_own_record` but before the
+     local state is saved, and a further edit before the next pass. That edit is also replaced by
+     the master's own older auto-revision, with a recovery copy kept.
+2. **Re-enrollment, retired computers, mixed issuers.**
+   - The guard compares `r.issuer.enrollment_id == a.own.enrollment_id` (`1324-1328`).
+     - A head from this computer's older enrollment does not match, so the case stays
+       ConcurrentPush and the old behaviour applies.
+     - A retired computer's heads have another enrollment, so they do not match either.
+   - With multiple heads, `all(..)` requires every head to be this enrollment's. With heads from
+     different issuers the override does not apply, even when `head_states.len() == 1`.
+   - The override also needs `is_authority`. When this computer is not the authority, or a
+     per-add-on exception names a peer, the override is skipped.
+3. **`seen_heads` across a restart and while paused.**
+   - The facts are replaced wholesale on every pass (`service.rs:3466`) and are not persisted.
+   - After a restart `seen_heads` is empty, so there is no override. Until the first pass the base
+     status shows, which is the behaviour before this fix (note).
+   - A unit can't stay stuck:
+     - Units skipped before `1245` (blocked, nameless, missing identity, suspect, changed while
+       being read) get no entry, so there is no override.
+     - Any unit that is evaluated records the heads it saw, so the next status matches unless a
+       newer head arrived since.
+     - `heads` comes from the same `graph_from_ledger` in both places, so the order is the same.
+       It does not flicker.
+   - Paused, WoW running, NeedsChoice and the other non-up-to-date statuses come first and are
+     never overridden (`1876-1880` only rewrites Active and InSync).
+   - Remaining gap (note): if a pass evaluates the unit but the Yield fails on a path that records
+     no fact, the status falls back to Active. An example is an exec failure that only adds a
+     note. This predates G13, and the override does not cover it.
+4. **Peers, exceptions and v0.3.3.**
+   - The path for computers that are not the authority is unchanged:
+     - `target_case` already yields there;
+     - the override is guarded by `is_authority`;
+     - the `seen_heads` override only turns up-to-date statuses into "waiting".
+   - The override also triggers briefly on a peer when new heads are ingested between passes. That
+     is truthful.
+   - For a per-add-on exception, `authority_for(&heads, &unit.folder)` decides. The override
+     applies only on the computer that holds that add-on.
+   - v0.3.3 has no settings sync, so a v0.3.3 peer is not involved. Code records are not touched.
+5. **Do the tests follow the checker's sequence?**
+   - Yes for the order. `g13(false)` makes a local master edit while WoW runs, captures it, has
+     the peer share explicitly, then on the master chooses the peer copy and immediately restores
+     v1 with no pass in between (`e2e.rs:4183-4200`).
+   - The test then checks:
+     - the status before any pass is not Active or InSync;
+     - no pass reports up to date while the disk differs;
+     - both computers end on v1;
+     - the history length shows nothing was republished.
+   - Gap (minor, RV11-18): neither test asserts that the master's pre-choice local edit (`local`)
+     is preserved as a recovery copy, which OD-55 promises. Neither test covers an edit made
+     after the selection (RV11-17).
+
+### Findings
+
+#### RV11-17 (major): the master's edits after its own restore, choice or push are reverted, not published
+
+- **Evidence.**
+  - `settings_cycle.rs:1316-1336` turns every own-head `ConcurrentPush` into `Yield`, whenever the
+    live file was edited.
+  - The probe above: `RestoreSettings` is accepted while WoW is running, and the in-game edit
+    afterwards ends in a recovery copy. Both computers stay on the restored bytes, and the master
+    reports **InSync**.
+  - This contradicts OD-55's "few seconds" and R-08 (a master's change propagates). Before the
+    fix, the same sequence published the edit.
+- **Severity.** Rated major, not critical: the edit is preserved and can be restored from the
+  GUI (`local_copies`). But it is silently not shared and is replaced on disk.
+- **Fix.** Apply the override only when the live copy predates the selection. When the master
+  writes a choice, restore or push in `service.rs`, store the live capture seen at that moment in
+  `SettingsLocal` as a pending selection: `{ head, live_at_command }`. In the cycle, override only
+  when `live == live_at_command`. Otherwise keep the existing ConcurrentPush handling. Clear the
+  pending selection once it is applied.
+  - Weaker alternative: require `!changed`, and also capture before accepting the command.
+  - Either way, add the probe above as a regression test.
+
+#### RV11-18 (minor): the G13 tests do not assert the recovery copy that OD-55 promises
+
+- **Evidence.** `e2e.rs:4183-4225` checks convergence and that nothing was republished. It never
+  checks that `local` appears in `a`'s `local_copies` and can be restored.
+- **Fix.** After the loop in `g13`, assert that `local_copies` contains the checkpoint of
+  `local`, then run `RestoreSettings` with it and check the bytes.
+
+#### RV11-19 (note): until the first pass after a restart, status can still say up to date
+
+- `seen_heads` is not persisted (`service.rs:3466`), so between a restart and the first pass an
+  unapplied head can show as Active.
+- A failed Yield that records no fact also shows Active.
+- Fix later: derive "not applied" from the persisted `last_applied` and `basis` against
+  `graph.heads`, not from in-memory facts.
+
+### G13 verification
+
+| Check | Command (from the worktree root) | Result |
+| --- | --- | --- |
+| RV11-17 probe | `cargo test -p wow-sync-runtime --lib rvprobe -- --nocapture --test-threads=1` | FAILED as expected: both computers on v1, the master InSync, the in-game edit only in `local_copies`. Reverted. |
+| Offline | `cargo xtask verify --tier offline` | PASS (fmt, clippy, test, required-cases, deny, markdown-links) on `6bd5d54` plus this file. |
