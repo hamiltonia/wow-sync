@@ -31,4 +31,13 @@ identity on history detail, settings phase in progress/tray, release notes.
 
 ## Decisions made
 
-(none yet)
+- StartSettings enables consent before setting the policy.
+- All accounts ticked by default on both computers (OD-11).
+- Old enable panel kept only when there is no offer.
+- Add-ons list line is generic; detail line names the identity.
+- Not now persisted via settings_offer_dismissed.
+- Folder match is case-insensitive.
+- Retired computer or retired master gets no offer.
+
+Verify: offline tier PASS (fmt, clippy, test, required-cases, deny, links). Native tier not run; live lab screenshots not done.
+

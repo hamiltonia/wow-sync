@@ -580,6 +580,7 @@ impl Shell {
         self.message = msg;
         self.closing_quits = settings.closing_quits;
         self.first_close_done = settings.first_close_seen;
+        self.settings_offer_dismissed = settings.settings_offer_dismissed;
         self.merge_preview(preview);
         self.mark_checking_rows();
         if enrolled_now && self.setup.working {
@@ -831,6 +832,7 @@ impl Shell {
             }
             Act::DismissSettingsOffer => {
                 self.settings_offer_dismissed = true;
+                self.save_settings();
                 self.expanded.remove("ss-consent-open");
             }
             Act::TurnOffTestMode => {
@@ -934,7 +936,7 @@ impl Shell {
         self.send(Cmd::SaveSettings(wow_sync_runtime::AppSettings {
             closing_quits: self.closing_quits,
             first_close_seen: self.first_close_done,
-            settings_offer_dismissed: false,
+            settings_offer_dismissed: self.settings_offer_dismissed,
         }));
     }
 

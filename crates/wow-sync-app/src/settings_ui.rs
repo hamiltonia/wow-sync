@@ -38,7 +38,9 @@ pub enum UnitStatus {
     CaptureFailed,
     NotShared,
     /// The add-on's settings are shared but this character has not been on this computer yet.
-    WaitingForCharacter,
+    WaitingForIdentity {
+        who: Option<String>,
+    },
 }
 
 /// One saved copy of a unit, shown by when and where it came from.
@@ -135,8 +137,11 @@ pub fn status_text(s: &UnitStatus) -> String {
         UnitStatus::Suspect => "Settings may be incomplete after WoW stopped".into(),
         UnitStatus::CaptureFailed => "Settings could not be saved".into(),
         UnitStatus::NotShared => "Not shared (your choice)".into(),
-        UnitStatus::WaitingForCharacter => {
-            "Waiting for this character to log in on this computer".into()
+        UnitStatus::WaitingForIdentity { who: Some(who) } => {
+            format!("Waiting for {who} to log in on this computer")
+        }
+        UnitStatus::WaitingForIdentity { who: None } => {
+            "Waiting for a character to log in on this computer".into()
         }
     }
 }
@@ -503,7 +508,7 @@ fn urgency(s: &UnitStatus) -> u8 {
         UnitStatus::NeedsChoice | UnitStatus::PolicyConflict | UnitStatus::MasterAbsent { .. } => 9,
         UnitStatus::CaptureFailed | UnitStatus::Suspect | UnitStatus::Diagnosed => 8,
         UnitStatus::LocalDifferent(_) => 7,
-        UnitStatus::Waiting { .. } | UnitStatus::WaitingForCharacter => 6,
+        UnitStatus::Waiting { .. } | UnitStatus::WaitingForIdentity { .. } => 6,
         UnitStatus::Paused => 5,
         UnitStatus::NoSharedCopy => 4,
         UnitStatus::Retired => 3,
@@ -523,6 +528,9 @@ pub fn addon_settings_line(w: &World, folder: &str) -> String {
         .map(|u| &u.status)
         .max_by_key(|s| urgency(s));
     match worst {
+        Some(UnitStatus::WaitingForIdentity { .. }) => {
+            status_text(&UnitStatus::WaitingForIdentity { who: None })
+        }
         Some(s) => status_text(s),
         None if w.features.settings.enabled => "Not shared yet".into(),
         None => "Settings not shared".into(),
@@ -1339,20 +1347,22 @@ mod tests {
                 from: "Den PC".into(),
             }),
             {
-                let mut u = unit(UnitStatus::WaitingForCharacter);
+                let mut u = unit(UnitStatus::WaitingForIdentity {
+                    who: Some("character A1".into()),
+                });
                 u.unit.identity = Identity::account("ZED").unwrap();
                 u
             },
         ];
         assert_eq!(
             addon_settings_line(&w, "Details"),
-            "Waiting for this character to log in on this computer"
+            "Waiting for a character to log in on this computer"
         );
         assert_eq!(
             addon_settings_lines(&w, "Details"),
             [
                 "account ERIC: Settings up to date (from Den PC)",
-                "account ZED: Waiting for this character to log in on this computer",
+                "account ZED: Waiting for character A1 to log in on this computer",
             ]
         );
         assert_eq!(addon_settings_line(&w, "Bagnon"), "Not shared yet");
