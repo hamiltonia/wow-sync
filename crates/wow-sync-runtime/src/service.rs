@@ -387,6 +387,9 @@ pub struct StatusSnapshot {
     pub settings: crate::settings_cycle::SettingsSnapshot,
     /// Per settings unit: status, live, competing heads, history and whether Share is possible.
     pub settings_units: Vec<crate::settings_cycle::SettingsUnitRow>,
+    /// Settings units waiting for the owner to choose between competing shared states. The
+    /// headline never says the computer is up to date while this is above zero.
+    pub settings_decisions_pending: u32,
     /// How much is held and why (ops.md §1.6). `None` shows no scope sentence.
     pub hold: wow_sync_core::status::HoldScope,
     /// Set when this computer's own enrollment is retired and the retirement is effective.
@@ -1049,6 +1052,17 @@ impl SliceService {
                 .map_err(|e| CommandError::Service(e.to_string()))?;
             return Ok(CommandOutcome::Recorded);
         }
+        if matches!(cmd, Command::PauseAllSettings | Command::ResumeAllSettings) {
+            let mut l = crate::settings_cycle::load_local(&self.state, &gid);
+            let want = matches!(cmd, Command::PauseAllSettings);
+            if l.paused_all == want {
+                return Ok(CommandOutcome::NothingToDo);
+            }
+            l.paused_all = want;
+            crate::settings_cycle::save_local(&self.state, &gid, &l)
+                .map_err(|e| CommandError::Service(e.to_string()))?;
+            return Ok(CommandOutcome::Recorded);
+        }
         if let Command::PauseSettings { folder } | Command::ResumeSettings { folder, .. } = &cmd {
             use wow_sync_core::settings::ResumeOption::*;
             if !w.inventory.folders.iter().any(|f| &f.key == folder) {
@@ -1345,6 +1359,8 @@ impl SliceService {
                 | Command::ShareSettingsNow { .. }
                 | Command::ShareSettingsWhenReady
                 | Command::PauseSettings { .. }
+                | Command::PauseAllSettings
+                | Command::ResumeAllSettings
                 | Command::ResumeSettings { .. }
                 | Command::UseSharedSettings { .. }
                 | Command::Rollback { .. }
@@ -3096,6 +3112,10 @@ impl SliceService {
             detail: Some(detail),
             peers,
             settings,
+            settings_decisions_pending: settings_units
+                .iter()
+                .filter(|r| r.status == crate::settings_cycle::SettingsUnitStatus::NeedsChoice)
+                .count() as u32,
             settings_units,
             hold,
             this_retirement,

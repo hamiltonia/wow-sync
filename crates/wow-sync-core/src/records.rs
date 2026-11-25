@@ -903,10 +903,31 @@ pub struct LocalUnitState {
 }
 
 /// A local settings copy a shared copy displaced.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KeptCopy {
     pub checkpoint: CheckpointRef,
     pub at_unix_ms: u64,
+    /// Why the copy was set aside; `None` for copies kept by older versions.
+    #[serde(default)]
+    pub why: Option<KeptWhy>,
+    /// The computer whose settings replaced it, when known.
+    #[serde(default)]
+    pub from: Option<ComputerId>,
+    /// Size of the saved file in bytes, when known.
+    #[serde(default)]
+    pub size: Option<u64>,
+}
+
+/// What displaced a local settings copy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum KeptWhy {
+    /// First adoption of the group's shared settings on this computer.
+    FirstAdoption,
+    /// This computer's routine edit yielded to the master's settings.
+    YieldedToMaster,
+    /// A share or push from another computer replaced it.
+    PeerReplaced,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -927,6 +948,10 @@ pub struct SettingsLocal {
     /// captured unit without a shared copy is pushed once, then this clears.
     #[serde(default)]
     pub share_when_ready: bool,
+    /// "Pause all settings" (settings.md §6, T-S12): every unit, also those of add-ons found
+    /// later, is neither published nor replaced until resumed. Local only; code is not paused.
+    #[serde(default)]
+    pub paused_all: bool,
 }
 record!(SettingsLocal, "wowsync.settings-local", 16 * MIB, |self| {
     let mut units = std::collections::BTreeSet::new();

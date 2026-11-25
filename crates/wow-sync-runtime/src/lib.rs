@@ -55,8 +55,8 @@ pub use service::{
     StatusSnapshot, SyncReport,
 };
 pub use settings_cycle::{
-    HeadChoice, PausedFolder, SettingsHistoryEntry, SettingsSnapshot, SettingsUnitRow,
-    SettingsUnitStatus,
+    HeadChoice, HeadKind, PausedFolder, RecoveryCopy, RecoveryKind, SettingsHistoryEntry,
+    SettingsSnapshot, SettingsUnitRow, SettingsUnitStatus,
 };
 pub use updates::{system_clock, Clock, Started, UpdateService, UpdateView};
 
