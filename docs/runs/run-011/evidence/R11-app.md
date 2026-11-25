@@ -80,3 +80,24 @@ Each was viewed and contains only synthetic names (A-demo, B-demo, ACCOUNTONE, A
 - [a5-activity.png](R11-app/a5-activity.png): A, Activity with "Saved settings shared".
 - [b2-consent.png](R11-app/b2-consent.png): B, the other computer's offer and consent.
 - [b4-addons.png](R11-app/b4-addons.png): B, waiting-for-a-character rows.
+
+## Review fixes (RV11-01, -04, -05, -06), app side
+
+- RV11-06 / Q-75 / OD-23: `settings_ui::{share_candidates, first_adoption, share_now_on, pushes, make_master_control}`. The guided consent (this computer as master) and a new "Make this computer the master…" confirmation on Settings sync list units that differ here (`LocalDifferent`) or have no shared copy (`NoSharedCopy`), with a "Share these now" box: off normally, on only when no unit shows any shared state (first adoption). `GroupAction::{StartSettings, SetSettingsPolicy}` carry `share_now`; `backend::dispatch` issues one `ShareSettings` per ticked unit after the policy. The direct "Use this computer as the settings master" button is gone (it skipped the confirmation).
+- RV11-05: "Use shared settings" is offered for every `LocalDifferent` reason (the design table excluded `LocalChange`; the table needs the same edit).
+- RV11-04: Suspect wording is "This add-on's settings file looks damaged; it was not shared". InSync/LocalDifferent/NoSharedCopy wording already existed; they show only when the runtime sends them.
+- RV11-01: `UnitRow.local_copies` and "Restore this computer's copy from <day>…" (confirm names the recovery copy that is kept). Not fed yet.
+- Tests (all fail without their change; checked by mutation: default-on always, push for another master, NoSharedCopy not listed; can_share ignored was caught after adding a non-shareable unit): `share_these_now_lists_only_…`, `making_this_computer_master_pushes_only_…`, `the_guided_consent_pushes_only_when_…`, `this_computers_replaced_copy_can_be_restored`, `a_damaged_settings_file_…`, `every_local_difference_offers_share_and_use_shared`, and the master-choice test now expects no direct "this computer" button.
+
+### Needed from R11-runtime (not delivered; marked TODO)
+
+1. `SettingsUnitStatus::{InSync, LocalDifferent, NoSharedCopy, Suspect}` plus `SettingsUnitRow.local_reason: Option<LocalReason>` and `in_sync_from: Option<String>` (or `waiting_from`). Until then `features::settings_unit_rows` maps only the existing statuses, so the candidate list stays empty and "Use shared settings" does not appear live.
+2. `SettingsUnitRow.local_copies: Vec<SettingsHistoryEntry>` (checkpoint takes `RestoreSettings`, `written_unix_ms`), pinned against pruning. Replace the `local_copies: Vec::new()` TODO in `features.rs`.
+3. Optional: `SettingsSnapshot.group_has_shared_settings: bool`; the app now infers first adoption from the rows (`first_adoption`).
+4. `ShareSettings` must be accepted right after `SetSettingsPolicy` in the same command sequence for units whose capture exists.
+
+### Decisions (Decision / Why / Reversible)
+
+- Decision: "Use shared settings" for all LocalDifferent reasons. Why: RV11-05; it is explicit and keeps a recovery copy. Reversible: yes.
+- Decision: first adoption is inferred from the rows. Why: no runtime flag yet. Reversible: yes.
+- Decision: pushes run after the policy and stop at the first refusal. Why: a failed push should not hide behind later successes. Reversible: yes.

@@ -161,9 +161,12 @@ pub enum GroupAction {
         package: FolderKey,
         recovered: Sha256,
     },
+    /// `share_now`: the add-ons the owner ticked in the confirmation, each pushed explicitly after
+    /// the policy is recorded (settings.md §5.2). Empty means this action shares nothing.
     SetSettingsPolicy {
         master: Option<EnrollmentRef>,
         exceptions: Vec<PolicyRule>,
+        share_now: Vec<(SettingsUnit, Sha256)>,
     },
     ShareSettings {
         unit: SettingsUnit,
@@ -177,6 +180,7 @@ pub enum GroupAction {
         master: Option<EnrollmentRef>,
         exceptions: Vec<PolicyRule>,
         included_accounts: Vec<String>,
+        share_now: Vec<(SettingsUnit, Sha256)>,
     },
     PauseSettings {
         folder: FolderKey,
@@ -280,9 +284,9 @@ impl GroupAction {
             GroupAction::Rollback { package, recovered } => {
                 Command::Rollback { package, recovered }
             }
-            GroupAction::SetSettingsPolicy { master, exceptions } => {
-                Command::SetSettingsPolicy { master, exceptions }
-            }
+            GroupAction::SetSettingsPolicy {
+                master, exceptions, ..
+            } => Command::SetSettingsPolicy { master, exceptions },
             GroupAction::ShareSettings { unit, checkpoint } => {
                 Command::ShareSettings { unit, checkpoint }
             }
@@ -794,6 +798,8 @@ pub fn settings_unit_rows(
                     })
                     .collect(),
                 restore_possible: r.restore_possible,
+                // TODO(R11-runtime): fill from `SettingsUnitRow.local_copies` once it exists.
+                local_copies: Vec::new(),
             }
         })
         .collect()

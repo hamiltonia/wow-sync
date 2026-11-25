@@ -77,6 +77,8 @@ pub struct UnitRow {
     pub shown_heads: Vec<Sha256>,
     /// Older saved copies that "Restore" can bring back.
     pub history: Vec<Copy>,
+    /// Copies of this computer's own settings that a shared copy replaced (recovery copies).
+    pub local_copies: Vec<Copy>,
     pub restore_possible: bool,
 }
 
@@ -144,7 +146,9 @@ pub fn status_text(s: &UnitStatus) -> String {
             "The settings master {name} was retired. Choose a new master to share settings again."
         ),
         UnitStatus::Diagnosed => "WoW Sync can't tell which add-on owns these settings".into(),
-        UnitStatus::Suspect => "Settings may be incomplete after WoW stopped".into(),
+        UnitStatus::Suspect => {
+            "This add-on's settings file looks damaged; it was not shared".into()
+        }
         UnitStatus::CaptureFailed => "Settings could not be saved".into(),
         UnitStatus::NotShared => "Not shared (your choice)".into(),
         UnitStatus::WaitingForIdentity { who: Some(who) } => {
@@ -191,18 +195,16 @@ pub fn unit_controls(w: &World, row: &UnitRow) -> Vec<Control> {
     };
     match &row.status {
         UnitStatus::Active => share(&mut out),
-        UnitStatus::LocalDifferent(reason) => {
+        UnitStatus::LocalDifferent(_) => {
             share(&mut out);
-            if *reason != LocalReason::LocalChange {
-                out.push(control(
-                    w,
-                    ActionKind::UseSharedSettings,
-                    "Use shared settings",
-                    GroupAction::UseSharedSettings {
-                        unit: row.unit.clone(),
-                    },
-                ));
-            }
+            out.push(control(
+                w,
+                ActionKind::UseSharedSettings,
+                "Use shared settings",
+                GroupAction::UseSharedSettings {
+                    unit: row.unit.clone(),
+                },
+            ));
         }
         UnitStatus::NeedsChoice => {
             let shown = row.shown_heads.clone();
@@ -232,15 +234,30 @@ pub fn unit_controls(w: &World, row: &UnitRow) -> Vec<Control> {
 
 /// "Restore" buttons for older saved copies, with the sentence to confirm first.
 pub fn restore_controls(w: &World, row: &UnitRow) -> Vec<(Control, String)> {
+    let local = row.local_copies.iter().map(|c| (c, true));
     row.history
         .iter()
-        .map(|c| {
-            let confirm = format!(
-                "Restore {} for {}? Your current settings are kept as a recovery copy.",
-                c.label,
-                identity_words(&row.unit)
-            );
-            let label = format!("Restore {}…", c.label);
+        .map(|c| (c, false))
+        .chain(local)
+        .map(|(c, mine)| {
+            let confirm = if mine {
+                format!(
+                    "Restore this computer's copy of {} for {}? The settings used now are kept as a recovery copy.",
+                    c.label,
+                    identity_words(&row.unit)
+                )
+            } else {
+                format!(
+                    "Restore {} for {}? Your current settings are kept as a recovery copy.",
+                    c.label,
+                    identity_words(&row.unit)
+                )
+            };
+            let label = if mine {
+                format!("Restore this computer's {}…", c.label)
+            } else {
+                format!("Restore {}…", c.label)
+            };
             let button = if row.restore_possible {
                 control(
                     w,
@@ -346,6 +363,8 @@ pub fn master_controls(w: &World) -> Vec<Control> {
         }));
     let mut out: Vec<Control> = candidates
         .filter(|(_, e)| d.master.as_ref() != Some(*e))
+        // This computer becomes master only through the confirmation (`make_master_control`).
+        .filter(|(_, e)| w.features.this_enrollment.as_ref() != Some(*e))
         .map(|(name, e)| {
             control(
                 w,
@@ -354,11 +373,12 @@ pub fn master_controls(w: &World) -> Vec<Control> {
                 GroupAction::SetSettingsPolicy {
                     master: Some(e.clone()),
                     exceptions: d.exceptions.clone(),
+                    share_now: Vec::new(),
                 },
             )
         })
         .collect();
-    if out.is_empty() && d.master.is_none() {
+    if out.is_empty() && d.master.is_none() && w.features.this_enrollment.is_none() {
         out.push(off(
             "Choose a settings master",
             "No other active computer is known yet. Try again after the next check.",
@@ -372,6 +392,7 @@ pub fn master_controls(w: &World) -> Vec<Control> {
             GroupAction::SetSettingsPolicy {
                 master: None,
                 exceptions: d.exceptions.clone(),
+                share_now: Vec::new(),
             },
         ));
     }
@@ -454,6 +475,7 @@ pub fn exception_controls(w: &World, folder: &FolderKey) -> Vec<Control> {
             GroupAction::SetSettingsPolicy {
                 master: Some(master.clone()),
                 exceptions,
+                share_now: Vec::new(),
             },
         ));
     };
@@ -491,6 +513,7 @@ pub fn exception_controls(w: &World, folder: &FolderKey) -> Vec<Control> {
             GroupAction::SetSettingsPolicy {
                 master: Some(master),
                 exceptions: rest,
+                share_now: Vec::new(),
             },
         ));
     }
@@ -695,9 +718,97 @@ pub fn master_choices(w: &World) -> Vec<MasterChoice> {
     mine.chain(others).collect()
 }
 
+/// One add-on whose settings on this computer differ from the group's or have no shared copy.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShareCandidate {
+    pub unit: SettingsUnit,
+    pub checkpoint: Sha256,
+    pub line: String,
+}
+
+/// The units a new master could push now (settings.md §5.2): they differ here or the group has no
+/// copy, and this computer has a capture to publish. Becoming master never pushes them by itself.
+pub fn share_candidates(w: &World) -> Vec<ShareCandidate> {
+    w.features
+        .settings
+        .units
+        .iter()
+        .filter(|u| u.can_share)
+        .filter_map(|u| {
+            let why = match u.status {
+                UnitStatus::LocalDifferent(_) => "differs from the shared copy",
+                UnitStatus::NoSharedCopy => "has no shared copy yet",
+                _ => return None,
+            };
+            Some(ShareCandidate {
+                unit: u.unit.clone(),
+                checkpoint: u.latest_capture?,
+                line: format!("{} ({}) {why}", u.addon, identity_words(&u.unit)),
+            })
+        })
+        .collect()
+}
+
+/// The first adoption: the group has no shared settings yet, so nothing here can overwrite a
+/// shared copy (OD-23). Any unit with a shared copy or older shared state rules it out.
+pub fn first_adoption(w: &World) -> bool {
+    !w.features.settings.units.iter().any(|u| {
+        !u.history.is_empty()
+            || matches!(
+                u.status,
+                UnitStatus::InSync { .. }
+                    | UnitStatus::Waiting { .. }
+                    | UnitStatus::LocalDifferent(_)
+                    | UnitStatus::NeedsChoice
+            )
+    })
+}
+
+/// "Share these now" is ticked by default only on the first adoption; the owner's flip inverts it.
+pub fn share_now_on(w: &World, flipped: bool) -> bool {
+    first_adoption(w) != flipped
+}
+
+/// What a ticked box pushes: every candidate; nothing when unticked.
+pub fn pushes(cands: &[ShareCandidate], on: bool) -> Vec<(SettingsUnit, Sha256)> {
+    if !on {
+        return Vec::new();
+    }
+    cands
+        .iter()
+        .map(|c| (c.unit.clone(), c.checkpoint))
+        .collect()
+}
+
+/// "Make this computer the master": the confirmation's action. `share_now` is what the ticked
+/// "Share these now" box pushes after the policy is recorded.
+pub fn make_master_control(w: &World, share_now: Vec<(SettingsUnit, Sha256)>) -> Control {
+    let label = "Make this computer the master";
+    let Some(mine) = w.features.this_enrollment.clone() else {
+        return off(label, "This computer is not ready to be chosen yet.");
+    };
+    control(
+        w,
+        ActionKind::SetSettingsPolicy,
+        label,
+        GroupAction::SetSettingsPolicy {
+            master: Some(mine),
+            exceptions: w.features.settings.exceptions.clone(),
+            share_now,
+        },
+    )
+}
+
 /// "Share settings" / "Use settings": the accounts left ticked and, for the choosing computer,
-/// the master picked (`pick` is an index into `master_choices`; `None` is this computer).
-pub fn start_control(w: &World, o: &Offer, chosen: &[String], pick: Option<usize>) -> Control {
+/// the master picked (`pick` is an index into `master_choices`; `None` is this computer). With
+/// this computer as master, `share_now` pushes the ticked add-ons.
+pub fn start_control(
+    w: &World,
+    o: &Offer,
+    chosen: &[String],
+    pick: Option<usize>,
+    share_now: bool,
+) -> Control {
     let label = o.confirm_label();
     let listed: Vec<String> = w
         .features
@@ -720,6 +831,12 @@ pub fn start_control(w: &World, o: &Offer, chosen: &[String], pick: Option<usize
             }
         }
     };
+    let push = match &master {
+        Some(m) if w.features.this_enrollment.as_ref() == Some(m) => {
+            pushes(&share_candidates(w), share_now)
+        }
+        _ => Vec::new(),
+    };
     control(
         w,
         ActionKind::StartSettings,
@@ -728,6 +845,7 @@ pub fn start_control(w: &World, o: &Offer, chosen: &[String], pick: Option<usize
             master,
             exceptions: w.features.settings.exceptions.clone(),
             included_accounts: listed,
+            share_now: push,
         },
     )
 }
@@ -765,6 +883,7 @@ mod tests {
             heads: vec![],
             shown_heads: vec![],
             history: vec![],
+            local_copies: vec![],
             restore_possible: true,
         }
     }
@@ -808,7 +927,7 @@ mod tests {
     }
 
     #[test]
-    fn local_difference_offers_share_and_only_some_offer_use_shared() {
+    fn every_local_difference_offers_share_and_use_shared() {
         let w = world();
         let labels = |r| -> Vec<String> {
             unit_controls(&w, &unit(UnitStatus::LocalDifferent(r)))
@@ -816,7 +935,10 @@ mod tests {
                 .map(|c| c.label)
                 .collect()
         };
-        assert_eq!(labels(LocalReason::LocalChange), ["Share my settings"]);
+        assert_eq!(
+            labels(LocalReason::LocalChange),
+            ["Share my settings", "Use shared settings"]
+        );
         assert_eq!(
             labels(LocalReason::EpochNotClean),
             ["Share my settings", "Use shared settings"]
@@ -897,7 +1019,10 @@ mod tests {
         );
         w.features.settings.master = Some(den());
         let cs = exception_controls(&w, &folder("Details"));
-        let Ok(GroupAction::SetSettingsPolicy { master, exceptions }) = &cs[0].action else {
+        let Ok(GroupAction::SetSettingsPolicy {
+            master, exceptions, ..
+        }) = &cs[0].action
+        else {
             panic!("policy");
         };
         assert_eq!(master, &Some(den()));
@@ -1033,13 +1158,7 @@ mod tests {
         let w = snapshot_world();
         assert_eq!(w.features.master.as_deref(), Some("Den PC"));
         let labels: Vec<String> = master_controls(&w).into_iter().map(|c| c.label).collect();
-        assert_eq!(
-            labels,
-            [
-                "Use this computer as the settings master",
-                "Stop sharing with a master"
-            ]
-        );
+        assert_eq!(labels, ["Stop sharing with a master"]);
         let p = &w.features.settings.paused;
         let a = resume_controls(&w, &p[0].folder, p[0].here_changed, p[0].shared_newer);
         let b = resume_controls(&w, &p[1].folder, p[1].here_changed, p[1].shared_newer);
@@ -1317,26 +1436,28 @@ mod tests {
         assert_eq!(choices[0].label, format!("{} (this computer)", w.computer));
         assert_eq!(choices[1].label, "Den PC");
         let all = ["ACC".to_string(), "ZED".to_string()];
-        let c = start_control(&w, &Offer::Share, &all, None);
+        let c = start_control(&w, &Offer::Share, &all, None, false);
         assert_eq!(
             c.action,
             Ok(GroupAction::StartSettings {
                 master: Some(choices[0].enrollment.clone()),
                 exceptions: vec![],
                 included_accounts: all.to_vec(),
+                share_now: vec![],
             })
         );
-        let den_pick = start_control(&w, &Offer::Share, &["ZED".into()], Some(1));
+        let den_pick = start_control(&w, &Offer::Share, &["ZED".into()], Some(1), false);
         assert_eq!(
             den_pick.action,
             Ok(GroupAction::StartSettings {
                 master: Some(den()),
                 exceptions: vec![],
                 included_accounts: vec!["ZED".into()],
+                share_now: vec![],
             })
         );
         assert_eq!(
-            start_control(&w, &Offer::Share, &[], None).action,
+            start_control(&w, &Offer::Share, &[], None, false).action,
             Err("Choose at least one account.".into())
         );
         assert!(CONSENT_TEXT.starts_with("All addon settings on this computer are shared"));
@@ -1346,13 +1467,14 @@ mod tests {
     fn confirming_a_master_chosen_elsewhere_sets_no_master() {
         let w = offer_world(|s| s.settings.master = Some(den()));
         let o = offer(&w).unwrap();
-        let c = start_control(&w, &o, &["ACC".into(), "NOPE".into()], None);
+        let c = start_control(&w, &o, &["ACC".into(), "NOPE".into()], None, false);
         assert_eq!(
             c.action,
             Ok(GroupAction::StartSettings {
                 master: None,
                 exceptions: vec![],
                 included_accounts: vec!["ACC".into()],
+                share_now: vec![],
             })
         );
         let GroupAction::StartSettings {
@@ -1365,7 +1487,8 @@ mod tests {
             GroupAction::StartSettings {
                 master: None,
                 exceptions: vec![],
-                included_accounts: included_accounts.clone()
+                included_accounts: included_accounts.clone(),
+                share_now: vec![]
             }
             .to_command(),
             wow_sync_runtime::Command::EnableSettings { included_accounts }
@@ -1443,5 +1566,125 @@ mod tests {
             ]
         );
         assert_eq!(addon_settings_line(&w, "Bagnon"), "Not shared yet");
+    }
+
+    fn me() -> EnrollmentRef {
+        EnrollmentRef {
+            computer_id: ComputerId::parse("44444444444444444444444444444444").unwrap(),
+            enrollment_id: EnrollmentId::parse("55555555555555555555555555555555").unwrap(),
+        }
+    }
+
+    fn named(name: &str, status: UnitStatus, cp: u8) -> UnitRow {
+        let mut r = unit(status);
+        r.addon = name.into();
+        r.unit.folder = folder(name);
+        r.latest_capture = Some(Sha256([cp; 32]));
+        r
+    }
+
+    #[test]
+    fn a_damaged_settings_file_is_said_in_plain_words() {
+        assert_eq!(
+            status_text(&UnitStatus::Suspect),
+            "This add-on's settings file looks damaged; it was not shared"
+        );
+    }
+
+    #[test]
+    fn share_these_now_lists_only_differing_or_unshared_units_and_is_off_unless_first_adoption() {
+        let mut w = world();
+        w.features.this_enrollment = Some(me());
+        w.features.settings.units = vec![
+            named("Bagnon", UnitStatus::NoSharedCopy, 1),
+            named(
+                "Details",
+                UnitStatus::LocalDifferent(LocalReason::LocalChange),
+                2,
+            ),
+            named("Plater", UnitStatus::Active, 3),
+            {
+                let mut r = named("Questie", UnitStatus::NoSharedCopy, 4);
+                r.can_share = false;
+                r
+            },
+        ];
+        let c = share_candidates(&w);
+        assert_eq!(c.len(), 2);
+        assert!(c[0].line.starts_with("Bagnon") && c[0].line.ends_with("has no shared copy yet"));
+        assert!(c[1].line.ends_with("differs from the shared copy"));
+        // A differing unit means the group already has shared settings: off by default.
+        assert!(!first_adoption(&w));
+        assert!(!share_now_on(&w, false) && share_now_on(&w, true));
+        assert_eq!(pushes(&c, false), vec![]);
+        assert_eq!(pushes(&c, true).len(), 2);
+        // Nothing shared anywhere yet: first adoption, on by default.
+        w.features.settings.units = vec![named("Bagnon", UnitStatus::NoSharedCopy, 1)];
+        assert!(first_adoption(&w) && share_now_on(&w, false) && !share_now_on(&w, true));
+    }
+
+    #[test]
+    fn making_this_computer_master_pushes_only_what_the_box_ticks() {
+        let mut w = world();
+        w.features.this_enrollment = Some(me());
+        w.features.settings.units = vec![named("Bagnon", UnitStatus::NoSharedCopy, 7)];
+        let c = make_master_control(&w, pushes(&share_candidates(&w), true));
+        let Ok(GroupAction::SetSettingsPolicy {
+            master, share_now, ..
+        }) = c.action
+        else {
+            panic!("not a policy")
+        };
+        assert_eq!(master, Some(me()));
+        assert_eq!(share_now.len(), 1);
+        assert_eq!(share_now[0].1, Sha256([7; 32]));
+        let none = make_master_control(&w, pushes(&share_candidates(&w), false));
+        assert!(matches!(
+            none.action,
+            Ok(GroupAction::SetSettingsPolicy { ref share_now, .. }) if share_now.is_empty()
+        ));
+        // The direct list never makes this computer master without the confirmation.
+        assert!(master_controls(&w).iter().all(|c| !matches!(
+            &c.action,
+            Ok(GroupAction::SetSettingsPolicy { master: Some(m), .. }) if *m == me()
+        )));
+    }
+
+    #[test]
+    fn the_guided_consent_pushes_only_when_this_computer_is_the_master() {
+        let mut w = offer_world(|_| {});
+        w.features.settings.units = vec![named("Bagnon", UnitStatus::NoSharedCopy, 9)];
+        let all = ["ACC".to_string()];
+        let push = |c: Control| match c.action {
+            Ok(GroupAction::StartSettings { share_now, .. }) => share_now,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            push(start_control(&w, &Offer::Share, &all, None, true)).len(),
+            1
+        );
+        assert!(push(start_control(&w, &Offer::Share, &all, None, false)).is_empty());
+        assert!(push(start_control(&w, &Offer::Share, &all, Some(1), true)).is_empty());
+    }
+
+    #[test]
+    fn this_computers_replaced_copy_can_be_restored() {
+        let w = world();
+        let mut r = unit(UnitStatus::Active);
+        r.local_copies = vec![Copy {
+            checkpoint: Sha256([5; 32]),
+            label: "copy from 1 Jan".into(),
+        }];
+        let rs = restore_controls(&w, &r);
+        assert_eq!(rs.len(), 1);
+        assert_eq!(rs[0].0.label, "Restore this computer's copy from 1 Jan…");
+        assert_eq!(
+            rs[0].0.action,
+            Ok(GroupAction::RestoreSettings {
+                unit: r.unit.clone(),
+                checkpoint: Sha256([5; 32]),
+            })
+        );
+        assert!(rs[0].1.contains("kept as a recovery copy"));
     }
 }

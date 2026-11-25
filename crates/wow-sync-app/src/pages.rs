@@ -2036,6 +2036,31 @@ impl Shell {
         if self.expanded.contains("ss-master-open") {
             let cs = crate::settings_ui::master_controls(&self.w);
             m.extend(self.control_buttons("ss-master", cs, cx));
+            if self.w.features.this_enrollment.is_some()
+                && self.w.features.settings.master.as_ref()
+                    != self.w.features.this_enrollment.as_ref()
+            {
+                m.push(
+                    self.btn(
+                        "ss-master-this-open",
+                        "Make this computer the master…",
+                        Bk::Secondary,
+                        Act::ToggleExpand("ss-master-this".into()),
+                        cx,
+                    )
+                    .into_any_element(),
+                );
+                if self.expanded.contains("ss-master-this") {
+                    let (els, on) = self.share_now_block(cx);
+                    m.extend(els);
+                    let pushes = crate::settings_ui::pushes(
+                        &crate::settings_ui::share_candidates(&self.w),
+                        on,
+                    );
+                    let c = crate::settings_ui::make_master_control(&self.w, pushes);
+                    m.extend(self.control_buttons("ss-master-this", vec![c], cx));
+                }
+            }
             m.push(
                 self.btn(
                     "ss-master-close",
@@ -2331,7 +2356,14 @@ impl Shell {
                 );
             }
         }
-        let c = crate::settings_ui::start_control(&self.w, o, &chosen, pick);
+        let this_picked = matches!(o, crate::settings_ui::Offer::Share) && pick == Some(0);
+        let mut share_now = false;
+        if this_picked {
+            let (els, on) = self.share_now_block(cx);
+            a.extend(els);
+            share_now = on;
+        }
+        let c = crate::settings_ui::start_control(&self.w, o, &chosen, pick, share_now);
         match c.action {
             Ok(g) => a.push(
                 self.btn("ss-start", &c.label, Bk::Primary, Act::Group(g), cx)
@@ -2369,6 +2401,35 @@ impl Shell {
             );
         }
         self.panel("Share add-on settings", a).into_any_element()
+    }
+
+    /// "Share these now": the add-ons whose settings differ here or have no shared copy, with a
+    /// checkbox that is on only for the first adoption. Empty when there is nothing to list.
+    fn share_now_block(&mut self, cx: &mut Context<Self>) -> (Vec<AnyElement>, bool) {
+        let cands = crate::settings_ui::share_candidates(&self.w);
+        if cands.is_empty() {
+            return (Vec::new(), false);
+        }
+        let flipped = self.expanded.contains("ss-sharenow-flip");
+        let on = crate::settings_ui::share_now_on(&self.w, flipped);
+        let mut els: Vec<AnyElement> = vec![div()
+            .child("Becoming the master shares nothing by itself. These add-ons' settings here differ from the group's or have no shared copy:")
+            .into_any_element()];
+        for c in &cands {
+            els.push(self.muted(c.line.clone()).into_any_element());
+        }
+        let label = format!("Share these now: {}", if on { "yes" } else { "no" });
+        els.push(
+            self.btn(
+                "ss-sharenow",
+                &label,
+                Bk::Secondary,
+                Act::ToggleExpand("ss-sharenow-flip".into()),
+                cx,
+            )
+            .into_any_element(),
+        );
+        (els, on)
     }
 
     /// A button per control; an unavailable one is disabled and says why.
