@@ -161,9 +161,12 @@ pub enum GroupAction {
         package: FolderKey,
         recovered: Sha256,
     },
+    /// `share_now`: the add-ons the owner ticked in the confirmation, each pushed explicitly after
+    /// the policy is recorded (settings.md §5.2). Empty means this action shares nothing.
     SetSettingsPolicy {
         master: Option<EnrollmentRef>,
         exceptions: Vec<PolicyRule>,
+        share_now: Vec<SettingsUnit>,
     },
     ShareSettings {
         unit: SettingsUnit,
@@ -177,6 +180,7 @@ pub enum GroupAction {
         master: Option<EnrollmentRef>,
         exceptions: Vec<PolicyRule>,
         included_accounts: Vec<String>,
+        share_now: Vec<SettingsUnit>,
     },
     PauseSettings {
         folder: FolderKey,
@@ -280,9 +284,9 @@ impl GroupAction {
             GroupAction::Rollback { package, recovered } => {
                 Command::Rollback { package, recovered }
             }
-            GroupAction::SetSettingsPolicy { master, exceptions } => {
-                Command::SetSettingsPolicy { master, exceptions }
-            }
+            GroupAction::SetSettingsPolicy {
+                master, exceptions, ..
+            } => Command::SetSettingsPolicy { master, exceptions },
             GroupAction::ShareSettings { unit, checkpoint } => {
                 Command::ShareSettings { unit, checkpoint }
             }
@@ -730,6 +734,15 @@ fn apply_settings(f: &mut FeatureData, s: &wow_sync_runtime::SettingsSnapshot) {
     d.exceptions = s.exceptions.clone();
     d.policy_conflict = s.policy_conflict;
     d.paused = s.paused.clone();
+    d.to_share = s
+        .to_share
+        .iter()
+        .map(|o| crate::settings_ui::ShareItem {
+            unit: o.unit.clone(),
+            not_shared_yet: o.not_shared_yet,
+        })
+        .collect();
+    d.group_has_shared_settings = s.group_has_shared_settings;
 }
 
 /// The settings rows as the screen shows them.
@@ -803,6 +816,14 @@ pub fn settings_unit_rows(
                     })
                     .collect(),
                 restore_possible: r.restore_possible,
+                local_copies: r
+                    .local_copies
+                    .iter()
+                    .map(|h| Copy {
+                        checkpoint: h.hash,
+                        label: format!("copy from {}", crate::world::day_text(h.written_unix_ms)),
+                    })
+                    .collect(),
             }
         })
         .collect()

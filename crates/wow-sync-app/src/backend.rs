@@ -65,13 +65,20 @@ pub fn dispatch(svc: &mut SliceService, a: &GroupAction) -> ActionResult {
         GroupAction::StartSettings {
             master: Some(master),
             exceptions,
+            share_now,
             ..
-        } => svc.command(a.to_command()).and_then(|_| {
-            svc.command(wow_sync_runtime::Command::SetSettingsPolicy {
-                master: Some(master.clone()),
-                exceptions: exceptions.clone(),
+        } => svc
+            .command(a.to_command())
+            .and_then(|_| {
+                svc.command(wow_sync_runtime::Command::SetSettingsPolicy {
+                    master: Some(master.clone()),
+                    exceptions: exceptions.clone(),
+                })
             })
-        }),
+            .and_then(|o| push_now(svc, share_now, o)),
+        GroupAction::SetSettingsPolicy { share_now, .. } => svc
+            .command(a.to_command())
+            .and_then(|o| push_now(svc, share_now, o)),
         _ => svc.command(a.to_command()),
     };
     let (ok, line) = group_log_line(a.kind(), &out);
@@ -82,6 +89,21 @@ pub fn dispatch(svc: &mut SliceService, a: &GroupAction) -> ActionResult {
         crate::app::log_warn(&format!("{line} ({ms} ms)"));
     }
     ActionResult::from_outcome(out)
+}
+
+/// The explicit push the owner ticked ("Share these now"): one `ShareSettingsNow` for all the
+/// units, after the policy is recorded. A refusal is what the screen shows.
+fn push_now(
+    svc: &mut SliceService,
+    share_now: &[wow_sync_core::ids::SettingsUnit],
+    done: wow_sync_runtime::CommandOutcome,
+) -> Result<wow_sync_runtime::CommandOutcome, wow_sync_runtime::CommandError> {
+    if share_now.is_empty() {
+        return Ok(done);
+    }
+    svc.command(wow_sync_runtime::Command::ShareSettingsNow {
+        units: share_now.to_vec(),
+    })
 }
 
 /// One log line for what a group command did: its kind, whether it was accepted or refused and

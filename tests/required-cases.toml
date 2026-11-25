@@ -1303,7 +1303,7 @@ id = "R4-app:settings"
 tier = "offline"
 tests = [
     "settings_ui::tests::status_words_follow_the_design",
-    "settings_ui::tests::local_difference_offers_share_and_only_some_offer_use_shared",
+    "settings_ui::tests::every_local_difference_offers_share_and_use_shared",
     "settings_ui::tests::a_choice_names_the_heads_it_was_shown",
     "settings_ui::tests::resume_never_shares_and_stay_paused_is_not_a_command",
     "settings_ui::tests::master_and_exceptions_keep_each_other",
