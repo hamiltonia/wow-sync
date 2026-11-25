@@ -256,20 +256,36 @@ pub fn changes_by_pass(state: &LocalState, limit: usize) -> Vec<PassGroup> {
 /// without a timestamp are the oldest and come last.
 pub fn history(state: &LocalState, limit: usize) -> Vec<HistoryItem> {
     let records = recent_changes(state, limit);
+    let activity = crate::control::read_activity(state, limit);
+    let for_package =
+        |e: &crate::control::ActivityEntry| e.package.as_deref().map(str::to_ascii_lowercase);
+    let is_applied = |e: &crate::control::ActivityEntry| {
+        e.kind == "applied" && e.text == "applied" && e.unix_ms.is_some()
+    };
     let covered = |e: &crate::control::ActivityEntry| {
         let Some(t) = e.unix_ms else { return false };
-        match (e.kind.as_str(), e.text.as_str()) {
-            ("applied", "applied") => records.iter().any(|r| {
-                (r.unix_ms - t).abs() <= 60_000
-                    && e.package.as_deref().is_some_and(|p| {
-                        r.folders.iter().any(|f| f.eq_ignore_ascii_case(p))
-                            || r.name.eq_ignore_ascii_case(p)
-                    })
-            }),
+        if let ("published", text) = (e.kind.as_str(), e.text.as_str()) {
             // A publish that shared nothing new is not a change.
-            ("published", t) => t.ends_with("(0 new objects)"),
-            _ => false,
+            return text.ends_with("(0 new objects)");
         }
+        let Some(p) = for_package(e).filter(|_| is_applied(e)) else {
+            return false;
+        };
+        // The line is written when the pass ends, however long the apply took: it is covered by
+        // a record of the package made after the package's previous such line.
+        let previous = activity
+            .iter()
+            .filter(|o| is_applied(o) && for_package(o).as_deref() == Some(p.as_str()))
+            .filter_map(|o| o.unix_ms)
+            .filter(|u| *u < t)
+            .max()
+            .unwrap_or(i64::MIN);
+        records.iter().any(|r| {
+            r.unix_ms > previous
+                && r.unix_ms <= t + 60_000
+                && (r.folders.iter().any(|f| f.eq_ignore_ascii_case(&p))
+                    || r.name.eq_ignore_ascii_case(&p))
+        })
     };
     let mut items: Vec<(Option<i64>, HistoryItem)> = records
         .iter()
@@ -277,9 +293,10 @@ pub fn history(state: &LocalState, limit: usize) -> Vec<HistoryItem> {
         .map(|r| (Some(r.unix_ms), HistoryItem::Change(r)))
         .collect();
     items.extend(
-        crate::control::read_activity(state, limit)
-            .into_iter()
+        activity
+            .iter()
             .filter(|e| !covered(e))
+            .cloned()
             .map(|e| (e.unix_ms, HistoryItem::Legacy(e))),
     );
     // Stable: equal times keep the structured record before the legacy line.
@@ -483,6 +500,33 @@ mod tests {
             .map(|r| r.name)
             .collect();
         assert_eq!(names, vec!["three", "one"]);
+    }
+
+    #[test]
+    fn a_long_apply_does_not_list_each_package_twice() {
+        let dir = wow_sync_adapters::testkit::TempDir::new();
+        let st = LocalState::open_at(dir.path()).unwrap();
+        let line = |t: i64| {
+            st.append_audit(&format!("{t}\tapplied\tAlpha\tapplied"))
+                .unwrap();
+        };
+        // An older line with no record of its own, then two long applies.
+        line(1_000_000);
+        record_change(&st, &rec("Alpha", 5_000_000));
+        line(5_000_000 + 450_000);
+        record_change(&st, &rec("Alpha", 9_000_000));
+        line(9_000_000 + 300_000);
+        let h = history(&st, 50);
+        let legacy = h
+            .iter()
+            .filter(|i| matches!(i, HistoryItem::Legacy(_)))
+            .count();
+        let changes = h
+            .iter()
+            .filter(|i| matches!(i, HistoryItem::Change(_)))
+            .count();
+        assert_eq!((legacy, changes), (1, 2), "{h:?}");
+        assert!(matches!(&h[2], HistoryItem::Legacy(e) if e.unix_ms == Some(1_000_000)));
     }
 
     #[test]

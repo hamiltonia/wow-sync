@@ -110,6 +110,9 @@ struct Item {
     key: FolderKey,
     started: Option<Instant>,
     done: bool,
+    /// All bytes of the package's new folders, and how many of them are counted as copied.
+    bytes: u64,
+    counted: u64,
 }
 
 struct Inner {
@@ -156,6 +159,8 @@ impl ApplyProgress {
                     key: p.package.clone(),
                     started: None,
                     done: false,
+                    bytes,
+                    counted: 0,
                 },
             );
         }
@@ -236,13 +241,35 @@ impl ApplyProgress {
         self.hub.emit(e);
     }
 
-    /// A package's first file or folder is about to be staged.
-    pub(crate) fn staging(&self, op: &str, bytes: u64) {
+    /// A package's folder is about to be staged. The package's first event is never dropped,
+    /// so the headline names it at once.
+    pub(crate) fn staging(&self, op: &str) {
         let Ok(mut g) = self.inner.lock() else { return };
         let Some(item) = g.items.get_mut(op) else {
             return;
         };
+        let first = item.started.is_none();
         item.started.get_or_insert_with(Instant::now);
+        // A retry from a recovery copy starts the count again.
+        let retried = std::mem::take(&mut item.counted);
+        let (name, source) = (item.record.name.clone(), item.record.source.clone());
+        g.bytes_done = g.bytes_done.saturating_sub(retried);
+        let e = self.event(&g, Some(name), Some(source));
+        drop(g);
+        if first {
+            self.hub.emit(e);
+        } else {
+            self.hub.emit_throttled(e);
+        }
+    }
+
+    /// `bytes` of the package's files were copied into staging.
+    pub(crate) fn copied(&self, op: &str, bytes: u64) {
+        let Ok(mut g) = self.inner.lock() else { return };
+        let Some(item) = g.items.get_mut(op) else {
+            return;
+        };
+        item.counted += bytes;
         let (name, source) = (item.record.name.clone(), item.record.source.clone());
         g.bytes_done += bytes;
         let e = self.event(&g, Some(name), Some(source));
@@ -264,6 +291,11 @@ impl ApplyProgress {
         rec.ms = item.started.map_or(0, |s| {
             s.elapsed().as_millis().min(u128::from(u32::MAX)) as u32
         });
+        // The change landed now, not when the apply was planned.
+        rec.unix_ms = wow_sync_adapters::sysinfo::now_unix_ms();
+        let rest = item.bytes.saturating_sub(item.counted);
+        item.counted = item.bytes;
+        g.bytes_done += rest;
         g.items_done += 1;
         let mut e = self.event(&g, Some(rec.name.clone()), Some(rec.source.clone()));
         drop(g);
@@ -355,6 +387,8 @@ mod tests {
                 key,
                 started: None,
                 done: false,
+                bytes: 0,
+                counted: 0,
             },
         )
     }
@@ -413,6 +447,45 @@ mod tests {
         assert_eq!(announced(vec![rm], &[]).phase, Phase::Removing);
         let add = announced(vec![item("Alpha", from("a"))], &[]);
         assert_eq!(add.phase, Phase::Installing);
+    }
+
+    #[test]
+    fn the_next_package_is_named_at_once_and_bytes_follow_the_copied_files() {
+        let mut first = item("Alpha", from("a"));
+        first.1.bytes = 100;
+        let mut second = item("Beta", from("a"));
+        second.1.bytes = 300;
+        let (op_a, op_b) = (first.0.clone(), second.0.clone());
+        let hub = ProgressHub::with_min_interval(Duration::from_secs(60));
+        let rx = hub.subscribe();
+        let p = ApplyProgress {
+            hub,
+            pass_id: 1,
+            state_dir: PathBuf::new(),
+            inner: Arc::new(Mutex::new(Inner {
+                items: vec![first, second].into_iter().collect(),
+                total: 2,
+                bytes_total: 400,
+                items_done: 0,
+                bytes_done: 0,
+            })),
+        };
+        p.staging(&op_a);
+        p.copied(&op_a, 40);
+        p.complete(&op_a);
+        p.staging(&op_b);
+        p.copied(&op_b, 100);
+        let got: Vec<_> = rx.try_iter().collect();
+        let last = got.last().unwrap();
+        assert_eq!(last.current.as_deref(), Some("Beta Display"), "{got:?}");
+        assert_eq!(last.bytes_done, 100, "{got:?}");
+        // The unthrottled start event names Beta even though a completion just went out.
+        assert!(got
+            .iter()
+            .any(|e| e.current.as_deref() == Some("Beta Display") && e.bytes_done == 100));
+        assert!(got
+            .iter()
+            .any(|e| e.current.as_deref() == Some("Alpha Display") && e.bytes_done == 100));
     }
 
     #[test]

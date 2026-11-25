@@ -7001,6 +7001,129 @@ mod tests {
         }
 
         #[test]
+        fn a_published_update_counts_only_the_files_that_differ() {
+            let lab = Lab::new();
+            let mut a = lab.pc("a");
+            a.addon("Alpha", "alpha-v1");
+            let dir = a.install.addons.join("Alpha");
+            for i in 0..6 {
+                std::fs::write(dir.join(format!("f{i}.lua")), format!("v1 {i}")).unwrap();
+            }
+            a.install.set_old_mtimes();
+            a.create();
+            synced(&mut a);
+            std::fs::write(dir.join("f2.lua"), "edited").unwrap();
+            std::fs::write(dir.join("new.lua"), "new").unwrap();
+            std::fs::remove_file(dir.join("f5.lua")).unwrap();
+            a.install.set_old_mtimes();
+            let r = synced(&mut a);
+            assert!(r.published.is_some(), "{r:?}");
+            let all = changes(&a);
+            let rec = all
+                .iter()
+                .find(|c| c.kind == ChangeKind::Published)
+                .unwrap_or_else(|| panic!("{all:?}"));
+            assert_eq!(
+                (rec.files.added, rec.files.changed, rec.files.removed),
+                (1, 1, 1),
+                "{rec:?}"
+            );
+            assert_eq!(
+                rec.paths,
+                vec!["f2.lua".to_string(), "f5.lua".into(), "new.lua".into()]
+            );
+        }
+
+        #[test]
+        fn an_uninstall_leaves_a_removed_record_on_the_computer_that_made_it() {
+            let lab = Lab::new();
+            let mut a = lab.pc("a");
+            let g = a.create();
+            a_removes_alpha(&mut a, &g);
+            let all = changes(&a);
+            let removed: Vec<_> = all
+                .iter()
+                .filter(|c| c.kind == ChangeKind::Removed)
+                .collect();
+            assert_eq!(removed.len(), 1, "{all:?}");
+            assert_eq!(removed[0].source, ChangeSource::ThisComputer);
+            assert_eq!(removed[0].new_version, VersionLabel::Removed);
+            assert_eq!(removed[0].reason, ChangeReason::Removal);
+            assert!(removed[0].files.removed >= 1);
+            let again = synced(&mut a);
+            assert!(!again.crashed);
+            let n = changes(&a)
+                .iter()
+                .filter(|c| c.kind == ChangeKind::Removed)
+                .count();
+            assert_eq!(n, 1, "recorded once");
+        }
+
+        #[test]
+        fn a_removal_applied_from_a_peer_is_not_also_recorded_as_a_local_removal() {
+            let lab = Lab::new();
+            let mut a = lab.pc("a");
+            let mut b = lab.pc("b");
+            let g = a.create();
+            b.addon("Alpha", "alpha-v1");
+            b.join(&g);
+            synced(&mut b);
+            a_removes_alpha(&mut a, &g);
+            synced(&mut b);
+            synced(&mut b);
+            let removed: Vec<_> = changes(&b)
+                .into_iter()
+                .filter(|c| c.kind == ChangeKind::Removed)
+                .collect();
+            assert_eq!(removed.len(), 1, "{removed:?}");
+            assert_eq!(removed[0].source, ChangeSource::Computer("a".into()));
+        }
+
+        #[test]
+        fn the_checking_files_counter_starts_again_each_pass() {
+            let lab = Lab::new();
+            let mut a = lab.pc("a");
+            a.addon("Alpha", "alpha-v1");
+            a.addon("Beta", "beta-v1");
+            a.create();
+            let ctl = wow_sync_adapters::fs_scan::ScanCtl::default();
+            a.svc.set_read_ctl(ctl.clone());
+            let mut counts = Vec::new();
+            for _ in 0..4 {
+                synced(&mut a);
+                counts.push(ctl.files.load(std::sync::atomic::Ordering::Relaxed));
+            }
+            assert!(counts[1] > 0, "{counts:?}");
+            assert_eq!(counts[2], counts[1], "{counts:?}");
+            assert_eq!(counts[3], counts[1], "{counts:?}");
+        }
+
+        #[test]
+        fn a_crash_recovery_that_finishes_an_install_leaves_a_record() {
+            let mut recorded = false;
+            for k in 0..80 {
+                let lab = Lab::new();
+                let mut a = lab.pc("a");
+                let mut b = lab.pc("b");
+                a.addon("Alpha", "alpha-v1");
+                let g = a.create();
+                synced(&mut a);
+                b.join(&g);
+                b.svc.inject_crash_after(Some(k));
+                let crashed = synced(&mut b).crashed;
+                b.restart();
+                synced(&mut b);
+                recorded |= changes(&b)
+                    .iter()
+                    .any(|c| c.reason == ChangeReason::Recovery);
+                if !crashed {
+                    break;
+                }
+            }
+            assert!(recorded, "no crash point ended in a recovered install");
+        }
+
+        #[test]
         fn older_audit_lines_still_appear_in_the_history() {
             let lab = Lab::new();
             let mut a = lab.pc("a");

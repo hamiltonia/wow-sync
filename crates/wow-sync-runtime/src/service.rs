@@ -3032,6 +3032,10 @@ impl SliceService {
         self.at_risk_apply.clear();
         let pass_id = now_unix_ms() as u64;
         let _pass = crate::tracking::PassGuard::start(&self.progress, pass_id);
+        // The counter is per pass; the hint is what the first look of the last pass counted.
+        self.read_ctl
+            .files
+            .store(0, std::sync::atomic::Ordering::Relaxed);
         let scan_total = self.scan_total_hint;
         let observed = {
             let _tick = crate::tracking::ScanTicker::start(
@@ -3529,6 +3533,19 @@ impl SliceService {
                     self.observe_world_recent(true, &mut scanned_at)?
                 };
                 w = fresh;
+                for (_, key, res) in &rec.ops {
+                    if matches!(res, PackageResult::Applied { .. }) {
+                        crate::history::record_change(
+                            &self.state,
+                            &crate::changes::recovered(
+                                (pass_id, now_unix_ms()),
+                                key,
+                                &w.titles,
+                                &w.inventory,
+                            ),
+                        );
+                    }
+                }
                 let store = match new_report.take() {
                     // Not saved locally: still publish it from memory this cycle.
                     Some(r) => Some(PendingReport {
@@ -3559,6 +3576,7 @@ impl SliceService {
                     .flat_map(|q| {
                         std::iter::once(q.package.clone())
                             .chain(q.folders.iter().map(|f| f.key.clone()))
+                            .chain(q.removes.iter().map(|r| r.key.clone()))
                     })
                     .collect();
                 let publishing = crate::tracking::PublishProgress::new(&self.progress, pass_id);
@@ -3923,9 +3941,22 @@ impl SliceService {
         }
         match run_publish(&plan, &mut ctx, fx) {
             PublishOutcome::Published { uploaded, .. } => {
-                for rec in
-                    crate::changes::published(track.1, w.own_latest.as_ref(), &publishable, track.2)
-                {
+                // The earlier file lists are read only for the folders that changed.
+                let earlier = |h: &Sha256| {
+                    provider
+                        .read(&layout::tree_record(group_id, h), TREE_LIMIT)
+                        .ok()
+                        .and_then(|b| decode_tree(&b, h).ok())
+                        .map(|t| t.files)
+                };
+                for rec in crate::changes::published(
+                    track.1,
+                    w.own_latest.as_ref(),
+                    &publishable,
+                    &w.inventory,
+                    &earlier,
+                    track.2,
+                ) {
                     crate::history::record_change(state, &rec);
                 }
                 *last_publish = Some(now_unix_ms());

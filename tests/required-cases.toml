@@ -1933,5 +1933,12 @@ tests = [
         "e2e::tests::change_history::a_masters_settings_change_is_recorded_on_both_computers_without_paths",
     "tracking::tests::a_removal_pass_reports_removing_and_an_install_pass_installing",
     "e2e::tests::change_history::a_removal_streams_removing_and_a_publish_of_nothing_new_is_not_listed",
+    "tracking::tests::the_next_package_is_named_at_once_and_bytes_follow_the_copied_files",
+    "history::tests::a_long_apply_does_not_list_each_package_twice",
+    "e2e::tests::change_history::a_published_update_counts_only_the_files_that_differ",
+    "e2e::tests::change_history::an_uninstall_leaves_a_removed_record_on_the_computer_that_made_it",
+    "e2e::tests::change_history::a_removal_applied_from_a_peer_is_not_also_recorded_as_a_local_removal",
+    "e2e::tests::change_history::the_checking_files_counter_starts_again_each_pass",
+    "e2e::tests::change_history::a_crash_recovery_that_finishes_an_install_leaves_a_record",
 ]
 # <<< section: R10-history
