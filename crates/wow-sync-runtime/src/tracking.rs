@@ -113,6 +113,7 @@ struct Item {
     /// All bytes of the package's new folders, and how many of them are counted as copied.
     bytes: u64,
     counted: u64,
+    folder_counted: BTreeMap<String, u64>,
 }
 
 struct Inner {
@@ -161,10 +162,18 @@ impl ApplyProgress {
                     done: false,
                     bytes,
                     counted: 0,
+                    folder_counted: BTreeMap::new(),
                 },
             );
         }
         let total = items.len() as u64;
+        crate::history::save_apply_sources(
+            state,
+            &items
+                .values()
+                .map(|i| (i.key.as_str().to_string(), i.record.source.clone()))
+                .collect(),
+        );
         Self {
             hub: hub.clone(),
             pass_id,
@@ -243,15 +252,19 @@ impl ApplyProgress {
 
     /// A package's folder is about to be staged. The package's first event is never dropped,
     /// so the headline names it at once.
-    pub(crate) fn staging(&self, op: &str) {
+    pub(crate) fn staging(&self, op: &str, folder: &str) {
         let Ok(mut g) = self.inner.lock() else { return };
         let Some(item) = g.items.get_mut(op) else {
             return;
         };
         let first = item.started.is_none();
         item.started.get_or_insert_with(Instant::now);
-        // A retry from a recovery copy starts the count again.
-        let retried = std::mem::take(&mut item.counted);
+        // Only a second try at the same folder (from a recovery copy) starts its count again.
+        let retried = item
+            .folder_counted
+            .insert(folder.to_string(), 0)
+            .unwrap_or(0);
+        item.counted -= retried;
         let (name, source) = (item.record.name.clone(), item.record.source.clone());
         g.bytes_done = g.bytes_done.saturating_sub(retried);
         let e = self.event(&g, Some(name), Some(source));
@@ -263,13 +276,14 @@ impl ApplyProgress {
         }
     }
 
-    /// `bytes` of the package's files were copied into staging.
-    pub(crate) fn copied(&self, op: &str, bytes: u64) {
+    /// `bytes` of the package's folder were copied into staging.
+    pub(crate) fn copied(&self, op: &str, folder: &str, bytes: u64) {
         let Ok(mut g) = self.inner.lock() else { return };
         let Some(item) = g.items.get_mut(op) else {
             return;
         };
         item.counted += bytes;
+        *item.folder_counted.entry(folder.to_string()).or_insert(0) += bytes;
         let (name, source) = (item.record.name.clone(), item.record.source.clone());
         g.bytes_done += bytes;
         let e = self.event(&g, Some(name), Some(source));
@@ -389,6 +403,7 @@ mod tests {
                 done: false,
                 bytes: 0,
                 counted: 0,
+                folder_counted: BTreeMap::new(),
             },
         )
     }
@@ -470,11 +485,11 @@ mod tests {
                 bytes_done: 0,
             })),
         };
-        p.staging(&op_a);
-        p.copied(&op_a, 40);
+        p.staging(&op_a, "Alpha");
+        p.copied(&op_a, "Alpha", 40);
         p.complete(&op_a);
-        p.staging(&op_b);
-        p.copied(&op_b, 100);
+        p.staging(&op_b, "Beta");
+        p.copied(&op_b, "Beta", 100);
         let got: Vec<_> = rx.try_iter().collect();
         let last = got.last().unwrap();
         assert_eq!(last.current.as_deref(), Some("Beta Display"), "{got:?}");
@@ -486,6 +501,37 @@ mod tests {
         assert!(got
             .iter()
             .any(|e| e.current.as_deref() == Some("Alpha Display") && e.bytes_done == 100));
+    }
+
+    #[test]
+    fn bytes_never_go_back_across_the_folders_of_one_add_on() {
+        let mut one = item("Alpha", from("a"));
+        one.1.bytes = 100;
+        let op = one.0.clone();
+        let hub = ProgressHub::with_min_interval(Duration::ZERO);
+        let rx = hub.subscribe();
+        let p = ApplyProgress {
+            hub,
+            pass_id: 1,
+            state_dir: PathBuf::new(),
+            inner: Arc::new(Mutex::new(Inner {
+                items: vec![one].into_iter().collect(),
+                total: 1,
+                bytes_total: 100,
+                items_done: 0,
+                bytes_done: 0,
+            })),
+        };
+        p.staging(&op, "Alpha");
+        p.copied(&op, "Alpha", 40);
+        p.copied(&op, "Alpha", 20);
+        p.staging(&op, "Alpha_Options");
+        p.copied(&op, "Alpha_Options", 30);
+        p.copied(&op, "Alpha_Options", 10);
+        p.complete(&op);
+        let bytes: Vec<u64> = rx.try_iter().map(|e| e.bytes_done).collect();
+        assert!(bytes.windows(2).all(|w| w[0] <= w[1]), "{bytes:?}");
+        assert_eq!(bytes.last(), Some(&100));
     }
 
     #[test]

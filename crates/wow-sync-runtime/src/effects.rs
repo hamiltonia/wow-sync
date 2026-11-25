@@ -573,7 +573,7 @@ impl ApplyEffects for RealEffects<'_> {
 
     fn stage_folder(&mut self, op: &OpId, f: &FolderApply) -> Result<(), EffectError> {
         if let Some(p) = &self.reporting {
-            p.staging(op.as_str());
+            p.staging(op.as_str(), &f.name);
         }
         for file in &f.tree.files {
             let rel = blob(&self.group, &file.sha256);
@@ -603,7 +603,7 @@ impl ApplyEffects for RealEffects<'_> {
                 return Err(e);
             }
             if let Some(p) = &self.reporting {
-                p.copied(op.as_str(), file.size);
+                p.copied(op.as_str(), &f.name, file.size);
             }
         }
         Ok(())

@@ -7124,6 +7124,67 @@ mod tests {
         }
 
         #[test]
+        fn a_recovered_peer_install_keeps_its_source_and_is_not_a_local_publish() {
+            let mut checked = false;
+            for k in 0..80 {
+                let lab = Lab::new();
+                let mut a = lab.pc("a");
+                let mut b = lab.pc("b");
+                a.addon("Alpha", "alpha-v1");
+                let g = a.create();
+                synced(&mut a);
+                b.join(&g);
+                b.svc.inject_crash_after(Some(k));
+                let crashed = synced(&mut b).crashed;
+                b.restart();
+                synced(&mut b);
+                let all = changes(&b);
+                if let Some(r) = all.iter().find(|c| c.reason == ChangeReason::Recovery) {
+                    checked = true;
+                    assert_eq!(r.source, ChangeSource::Computer("a".into()), "k={k}");
+                    assert!(
+                        all.iter().all(|c| c.kind != ChangeKind::Published),
+                        "k={k}: {all:?}"
+                    );
+                }
+                if !crashed {
+                    break;
+                }
+            }
+            assert!(checked, "no crash point ended in a recovered install");
+        }
+
+        #[test]
+        fn a_recovered_install_without_a_saved_source_is_not_called_this_computer() {
+            let mut checked = false;
+            for k in 0..80 {
+                let lab = Lab::new();
+                let mut a = lab.pc("a");
+                let mut b = lab.pc("b");
+                a.addon("Alpha", "alpha-v1");
+                let g = a.create();
+                synced(&mut a);
+                b.join(&g);
+                b.svc.inject_crash_after(Some(k));
+                let crashed = synced(&mut b).crashed;
+                let _ = std::fs::remove_file(b.cfg.state_dir.join("apply-sources.json"));
+                b.restart();
+                synced(&mut b);
+                if let Some(r) = changes(&b)
+                    .iter()
+                    .find(|c| c.reason == ChangeReason::Recovery)
+                {
+                    checked = true;
+                    assert_ne!(r.source, ChangeSource::ThisComputer, "k={k}");
+                }
+                if !crashed {
+                    break;
+                }
+            }
+            assert!(checked, "no crash point ended in a recovered install");
+        }
+
+        #[test]
         fn older_audit_lines_still_appear_in_the_history() {
             let lab = Lab::new();
             let mut a = lab.pc("a");

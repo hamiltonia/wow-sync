@@ -488,12 +488,15 @@ pub(crate) fn display_of(
 }
 
 /// An interrupted apply that crash recovery finished. Only the result is known: the version
-/// before the interruption is not, and is shown as an empty content id.
+/// before the interruption is not, and is shown as an empty content id. `source` is where the
+/// install came from as saved when it began; when that is missing (an older version wrote the
+/// journal) it is shown as an unknown other computer, never as this one.
 pub(crate) fn recovered(
     stamp: (u64, i64),
     key: &FolderKey,
     titles: &BTreeMap<String, String>,
     now: &Inventory,
+    source: Option<ChangeSource>,
 ) -> ChangeRecord {
     let name = display_of(titles, now, key);
     let mut rec = base(
@@ -501,7 +504,7 @@ pub(crate) fn recovered(
         ChangeKind::Applied,
         name.clone(),
         vec![name],
-        ChangeSource::ThisComputer,
+        source.unwrap_or_else(|| ChangeSource::Computer(UNKNOWN_COMPUTER.to_string())),
         ChangeReason::Recovery,
     );
     rec.old_version = VersionLabel::ContentId(String::new());

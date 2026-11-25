@@ -3519,8 +3519,9 @@ impl SliceService {
                 let fresh = if applied_plan.is_some() || !rec.ops.is_empty() {
                     // Game files changed: the cycle goes on to publish what it did, so this
                     // look is not abandoned.
-                    // Not cancellable, but still uses the hash cache: files just written are too recent
-                    // for the cache to trust and are re-read.
+                    // Not cancellable, but still uses the hash cache: files this apply installed
+                    // were seeded into it after the rename (when size and mtime match a fresh
+                    // snapshot); any other recently written file is re-read.
                     let keep = ScanCtl {
                         cache: self.read_ctl.cache.clone(),
                         ..ScanCtl::default()
@@ -3533,6 +3534,7 @@ impl SliceService {
                     self.observe_world_recent(true, &mut scanned_at)?
                 };
                 w = fresh;
+                let saved = crate::history::load_apply_sources(&self.state);
                 for (_, key, res) in &rec.ops {
                     if matches!(res, PackageResult::Applied { .. }) {
                         crate::history::record_change(
@@ -3542,6 +3544,7 @@ impl SliceService {
                                 key,
                                 &w.titles,
                                 &w.inventory,
+                                saved.get(key.as_str()).cloned(),
                             ),
                         );
                     }
@@ -3578,6 +3581,11 @@ impl SliceService {
                             .chain(q.folders.iter().map(|f| f.key.clone()))
                             .chain(q.removes.iter().map(|r| r.key.clone()))
                     })
+                    .collect();
+                // An install that crash recovery finished was not made here either.
+                let applied_keys: BTreeSet<FolderKey> = applied_keys
+                    .into_iter()
+                    .chain(rec.ops.iter().map(|(_, k, _)| k.clone()))
                     .collect();
                 let publishing = crate::tracking::PublishProgress::new(&self.progress, pass_id);
                 fx.inner_mut().set_publishing(publishing.clone());

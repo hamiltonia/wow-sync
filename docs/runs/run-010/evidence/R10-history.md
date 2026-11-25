@@ -49,6 +49,33 @@ Branch `run010/R10-history`, built on the merged interface (main `33261fe`).
   version unknown: an empty content id).
 - No public API change.
 
+## Round 5 (recheck fixes)
+
+- RV10-12: byte progress is counted per folder; only a second try at the same folder resets
+  that folder's count. Test: `tracking::tests::bytes_never_go_back_across_the_folders_of_one_add_on`.
+- RV10-13: keys finished by crash recovery are excluded from publishing, so no local
+  `Published`/`Removed` record is made for them. Test:
+  `e2e::tests::change_history::a_recovered_peer_install_keeps_its_source_and_is_not_a_local_publish`.
+- RV10-10: stale hash-cache comment in `service.rs` updated.
+- No public API change (`staging`/`copied` are `pub(crate)`).
+
+## Round 5b (recovery source)
+
+- The apply saves each package's source to `apply-sources.json` in the state dir
+  (`history::save_apply_sources`, no paths or contents) before it touches the game files;
+  recovery reads it (`load_apply_sources`) and `changes::recovered` takes it. A missing file
+  (journal from an older version) gives `Computer("another computer")`, never `ThisComputer`.
+  No public API change; the UI already renders `Computer(n)`.
+- New test `a_recovered_install_without_a_saved_source_is_not_called_this_computer`; the
+  peer-install test now asserts `Computer("a")`.
+- Fails-without-fix proof (fix temporarily reverted, then restored):
+  - Folder bytes: `bytes_never_go_back_across_the_folders_of_one_add_on` failed with
+    `[0, 40, 60, 0, 30, 40, 100]`.
+  - No local publish: `a_recovered_peer_install_keeps_its_source_and_is_not_a_local_publish`
+    failed at k=6 with a `Published`/`ThisComputer` record beside the Recovery record.
+  - Source: with the saved source ignored, both source tests failed at k=6
+    (`left: ThisComputer`, `right: Computer("a")` / not `ThisComputer`).
+
 ## Open issues
 
 - Settings records name the folder only; no account/character paths are stored.
