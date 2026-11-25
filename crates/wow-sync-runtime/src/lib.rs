@@ -4,6 +4,7 @@
 #![forbid(unsafe_code)]
 
 mod activity;
+mod changes;
 mod control;
 mod decisions;
 mod detail;
@@ -17,6 +18,7 @@ mod restore_flow;
 mod rollback_flow;
 mod service;
 mod settings_cycle;
+mod tracking;
 mod updates;
 
 #[cfg(test)]

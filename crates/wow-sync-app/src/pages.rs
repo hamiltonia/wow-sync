@@ -1866,6 +1866,8 @@ impl Shell {
                             cx,
                         )
                         .role(Role::Button)
+                        // A row's click must not also fold its group.
+                        .on_click(|_, _, cx| cx.stop_propagation())
                         .aria_label(SharedString::from(format!(
                             "{}{}",
                             row.line(),

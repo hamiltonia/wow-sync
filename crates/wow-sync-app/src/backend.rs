@@ -326,6 +326,13 @@ fn now_ms() -> i64 {
 /// Closes the progress of a pass in order after every event the service emitted.
 fn end_pass(hub: &wow_sync_runtime::ProgressHub) {
     let last = hub.latest();
+    // The service already ends a pass with Idle; only add one if it did not.
+    if last
+        .as_ref()
+        .is_some_and(|e| e.phase == wow_sync_runtime::Phase::Idle)
+    {
+        return;
+    }
     hub.emit(wow_sync_runtime::ProgressEvent {
         seq: last.as_ref().map_or(1, |e| e.seq + 1),
         pass_id: last.as_ref().map_or(0, |e| e.pass_id),

@@ -277,13 +277,12 @@ fn unavailable_sentence(w: &World) -> Option<String> {
     })
 }
 /// A package that has started applying no longer waits for a decision, whatever the last
-/// status read still says.
+/// status read still says. The service names decided packages by display name.
 pub fn decision_satisfied(w: &World, key: &str) -> bool {
     let Some(p) = &w.progress else { return false };
-    p.satisfied.contains(key)
-        || w.addons
-            .iter()
-            .any(|a| a.key == key && p.satisfied.contains(&a.title))
+    w.addons
+        .iter()
+        .any(|a| a.key == key && p.satisfied.contains(&a.title))
 }
 
 fn waiting_sentence(w: &World) -> String {
@@ -1876,6 +1875,13 @@ mod tests {
         // Progress gone, decision satisfied by an earlier apply: no stale wording either.
         w.progress = Some(crate::progress_ui::ProgressView::default());
         assert!(!decision_satisfied(&w, "other"));
+        let mut p = crate::progress_ui::ProgressView::default();
+        p.satisfied.insert("demo".into());
+        w.progress = Some(p);
+        assert!(
+            !decision_satisfied(&w, "demo"),
+            "a folder key is not a display name"
+        );
         w.progress = None;
         w.view.headline = Headline::Ok;
         w.done_note = Some("Updated 15 add-ons from RYZENFISH \u{2014} see Activity".into());

@@ -27,7 +27,8 @@ pub struct ProgressView {
 fn source_text(s: &Option<ChangeSource>) -> String {
     match s {
         Some(ChangeSource::Computer(n)) => format!(" from {n}"),
-        _ => String::new(),
+        None => " from several computers".into(),
+        Some(_) => String::new(),
     }
 }
 
@@ -70,7 +71,12 @@ pub fn text(e: &ProgressEvent) -> Option<String> {
             } else {
                 "Installing"
             };
-            let from = source_text(&e.source);
+            // One package has one source; None only means several for a bigger batch.
+            let from = if e.source.is_none() && e.items_total <= 1 {
+                String::new()
+            } else {
+                source_text(&e.source)
+            };
             let what = if e.items_total == 1 {
                 match &e.current {
                     Some(c) => c.clone(),
@@ -107,7 +113,7 @@ pub fn text(e: &ProgressEvent) -> Option<String> {
 
 pub fn incoming_text(e: &ProgressEvent) -> Option<String> {
     let i = e.incoming.as_ref()?;
-    let from = source_text(&Some(i.source.clone()));
+    let from = source_text(&i.source);
     Some(format!(
         "Incoming: {}{from}, {}",
         plural(u64::from(i.addons), "add-on", "add-ons"),
@@ -332,11 +338,24 @@ mod tests {
     }
 
     #[test]
+    fn several_sources_never_read_as_this_computer() {
+        let mut e = ev(1, Phase::Installing);
+        e.items_total = 15;
+        e.source = None;
+        assert_eq!(
+            text(&e).unwrap(),
+            "Installing 15 add-ons from several computers: 0 of 15"
+        );
+        e.source = Some(ChangeSource::ThisComputer);
+        assert!(!text(&e).unwrap().contains("this computer"));
+    }
+
+    #[test]
     fn incoming_summary_is_shown_before_the_apply() {
         let mut e = ev(1, Phase::Staging);
         e.incoming = Some(IncomingSummary {
             addons: 15,
-            source: ChangeSource::Computer("RYZENFISH".into()),
+            source: Some(ChangeSource::Computer("RYZENFISH".into())),
             bytes: 1_932_735_283,
         });
         let mut p = Pump::default();

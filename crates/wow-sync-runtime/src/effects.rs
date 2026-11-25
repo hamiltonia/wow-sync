@@ -120,6 +120,8 @@ pub struct RealEffects<'a> {
     pending: Option<PendingSink<'a>>,
     /// Publishing stops between objects when this says a command (or Quit) is waiting.
     yield_to: Option<wow_sync_adapters::fs_scan::ScanCtl>,
+    reporting: Option<crate::tracking::ApplyProgress>,
+    publishing: Option<crate::tracking::PublishProgress>,
 }
 
 impl<'a> RealEffects<'a> {
@@ -147,7 +149,17 @@ impl<'a> RealEffects<'a> {
             just_hashed: None,
             pending: None,
             yield_to: None,
+            reporting: None,
+            publishing: None,
         }
+    }
+
+    pub(crate) fn set_reporting(&mut self, p: crate::tracking::ApplyProgress) {
+        self.reporting = Some(p);
+    }
+
+    pub(crate) fn set_publishing(&mut self, p: crate::tracking::PublishProgress) {
+        self.publishing = Some(p);
     }
 
     /// Lets a waiting command stop an upload at the next object boundary.
@@ -188,6 +200,9 @@ impl<'a> RealEffects<'a> {
         else {
             return Ok(());
         };
+        if let Some(p) = &self.reporting {
+            p.complete(op.as_str());
+        }
         let rec = record_pending(load_pending(sink.state), &sink.group, &sink.enrollment, rep);
         sink.state
             .write_atomic(PENDING_REPORT, &encode(&rec))
@@ -441,6 +456,9 @@ pub(crate) fn local_points(variant_dir: &std::path::Path) -> Vec<LocalPoint> {
 impl PublishEffects for RealEffects<'_> {
     fn stat_object(&mut self, rel: &str) -> Result<ObjectStat, EffectError> {
         self.check_yield()?;
+        if let Some(p) = &self.publishing {
+            p.step();
+        }
         self.just_hashed = None;
         match self
             .provider
@@ -554,6 +572,9 @@ impl ApplyEffects for RealEffects<'_> {
     }
 
     fn stage_folder(&mut self, op: &OpId, f: &FolderApply) -> Result<(), EffectError> {
+        if let Some(p) = &self.reporting {
+            p.staging(op.as_str(), f.tree.files.iter().map(|x| x.size).sum());
+        }
         for file in &f.tree.files {
             let rel = blob(&self.group, &file.sha256);
             let mut src = match self.provider.open_read(&rel, OBJECT_LIMIT) {
