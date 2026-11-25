@@ -6971,6 +6971,36 @@ mod tests {
         }
 
         #[test]
+        fn a_removal_streams_removing_and_a_publish_of_nothing_new_is_not_listed() {
+            let lab = Lab::new();
+            let mut a = lab.pc("a");
+            let mut b = lab.pc("b");
+            let g = a.create();
+            b.addon("Alpha", "alpha-v1");
+            b.join(&g);
+            synced(&mut b);
+            a_removes_alpha(&mut a, &g);
+            let rx = b.svc.progress_hub().subscribe();
+            synced(&mut b);
+            let events: Vec<_> = rx.try_iter().collect();
+            assert!(
+                events.iter().any(|e| e.phase == Phase::Removing),
+                "{events:?}"
+            );
+            assert!(events.iter().all(|e| e.phase != Phase::Installing));
+            let st = LocalState::open_at(&b.cfg.state_dir).unwrap();
+            crate::control::log_activity(&st, "published", None, "published seq 3 (0 new objects)");
+            crate::control::log_activity(&st, "published", None, "published seq 4 (2 new objects)");
+            let h = b.svc.history(50);
+            let text = |t: &str| {
+                h.iter()
+                    .any(|i| matches!(i, HistoryItem::Legacy(e) if e.text == t))
+            };
+            assert!(!text("published seq 3 (0 new objects)"));
+            assert!(text("published seq 4 (2 new objects)"));
+        }
+
+        #[test]
         fn older_audit_lines_still_appear_in_the_history() {
             let lab = Lab::new();
             let mut a = lab.pc("a");
