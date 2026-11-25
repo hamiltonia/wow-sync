@@ -146,3 +146,10 @@ I built close-on-hide (window destroyed, recreated on show, Shell held in a glob
 Decision: reverted the refactor (app.rs/main.rs unchanged from 8ae856c). Why: risk without demonstrated gain. Reversible: yes. The remaining excess is allocator/scan retention, not window renderer memory.
 Counter vs sampler: they agree within 0.1 MiB at steady state; differ up to 10 MiB only at pass transitions because the perf counter is a ~1 s lagging instantaneous value while QueryWorkingSet samples every 25 ms.
 Not done: show/hide cycle test (moot after revert) and refreshed live-lab screenshots for G3-G7 (not captured this round; tests cover the wording).
+
+## Fix round: G9 (main 3c720d2): blocked on a runtime field
+
+Rebuilt the checker's shape in my lab with the release build: two add-ons (titles CheckSharedOne/CheckSharedTwo), each declaring `## SavedVariables: CheckShared` and `## SavedVariablesPerCharacter: CheckShared`, one account-wide `CheckShared.lua` file, group created, settings enabled and shared, app restarted. The Add-ons list reproduces the checker: both read "Not shared yet".
+Cause (runtime, `settings_cycle.rs` ~1068 and ~1100): the `UnitFact::Several` fact is created for `scope.blocked` units, but the rows are built only from `scope.owned` units and units that have ledger revisions. When every declarer is blocked, neither add-on has any unit row, so `SettingsSnapshot` holds nothing naming either add-on: no row, no `shared_with`. My earlier app fallback only works when one declarer has a row (the runtime e2e shape, where Alpha has revisions), so it cannot cover this shape. The app cannot read TOC declarations itself (the snapshot has none).
+Missing runtime field: a row (status `OwnedBySeveral`, `shared_with` filled) for every blocked unit that has a Several fact, or a snapshot list such as `shared_variables: Vec<{ folders/titles: Vec<String> }>`. With either, the app maps it to "Shared with <other add-on>, not synced" (existing `shared_by_other` and row wording). I did not add a test or screenshot for the fix, since no data exists to build it from.
+G10 waits for the runtime fields.
