@@ -3848,6 +3848,10 @@ mod tests {
         let on_b = b.svc.status().settings_units.remove(0);
         assert_eq!(on_b.status, S::InSync, "{on_b:?}");
         assert!(on_b.in_sync_from.is_some());
+        assert_eq!(
+            on_a.in_sync_from, None,
+            "the master does not say it is in sync from itself"
+        );
         assert!(a.svc.status().settings.to_share.is_empty());
     }
 
@@ -7447,6 +7451,80 @@ mod tests {
             );
         }
 
+        #[test]
+        fn explicit_pushes_and_peer_applies_are_recorded_with_versions_size_and_identity() {
+            let lab = Lab::new();
+            let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+            write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+            synced(&mut a);
+            share_now(&mut a);
+            let on_a = changes(&a);
+            let first = on_a
+                .iter()
+                .find(|c| c.kind == ChangeKind::SettingsPublished)
+                .unwrap_or_else(|| panic!("a Share these now push has an Activity row: {on_a:?}"));
+            assert!(matches!(&first.new_version, VersionLabel::ContentId(s) if s.len() == 8));
+            assert_eq!(first.old_version, VersionLabel::New);
+            assert_eq!(first.byte_delta, "AlphaDB = { v = 1 }\n".len() as i64);
+            assert_eq!(first.identity.as_deref(), Some("account-wide"));
+            assert_eq!(first.source, ChangeSource::ThisComputer);
+            synced(&mut b);
+            let applied = changes(&b)
+                .into_iter()
+                .find(|c| c.kind == ChangeKind::SettingsApplied)
+                .expect("the peer apply has an Activity row");
+            assert_eq!(applied.source, ChangeSource::Computer("a".into()));
+            assert_eq!(applied.identity.as_deref(), Some("account-wide"));
+            assert!(matches!(&applied.new_version, VersionLabel::ContentId(s) if s.len() == 8));
+            // A later single push (the Share button) is recorded as well, with the old version.
+            let cp = a.svc.status().settings_units[0].latest_capture.unwrap();
+            write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+            synced(&mut a);
+            let cp2 = a.svc.status().settings_units[0].latest_capture.unwrap();
+            assert_ne!(cp, cp2);
+            let before = changes(&a)
+                .iter()
+                .filter(|c| c.kind == ChangeKind::SettingsPublished)
+                .count();
+            a.svc
+                .command(Command::ShareSettings {
+                    unit: alpha_unit(),
+                    checkpoint: cp2,
+                })
+                .unwrap();
+            let after: Vec<_> = changes(&a)
+                .into_iter()
+                .filter(|c| c.kind == ChangeKind::SettingsPublished)
+                .collect();
+            assert_eq!(after.len(), before + 1, "{after:?}");
+        }
+
+        #[test]
+        fn share_these_now_ticked_at_consent_pushes_the_first_captures_once() {
+            let lab = Lab::new();
+            let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+            write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+            synced(&mut a);
+            assert!(a.svc.settings_history(&alpha_unit()).is_empty());
+            assert_eq!(
+                a.svc.command(Command::ShareSettingsWhenReady),
+                Ok(CommandOutcome::Recorded)
+            );
+            synced(&mut a);
+            assert_eq!(a.svc.settings_history(&alpha_unit()).len(), 1);
+            synced(&mut a);
+            assert_eq!(
+                a.svc.settings_history(&alpha_unit()).len(),
+                1,
+                "the choice is spent after one push"
+            );
+            synced(&mut b);
+            synced(&mut b);
+            assert_eq!(
+                read_wtf(&b, "Alpha").as_deref(),
+                Some("AlphaDB = { v = 1 }\n")
+            );
+        }
         #[test]
         fn a_masters_settings_change_is_recorded_on_both_computers_without_paths() {
             let lab = Lab::new();

@@ -401,6 +401,10 @@ pub enum Command {
     /// Consent to settings sync on this computer for these accounts (settings.md §5.4). Local
     /// only; nothing of WTF is read until it is recorded.
     EnableSettings { included_accounts: Vec<String> },
+    /// The consent step's ticked Share these now: the units only exist once settings sync is
+    /// on, so this records the owner's choice and the next sync pushes every captured add-on
+    /// that has no shared copy yet (one push each), then forgets it. Needs consent first.
+    ShareSettingsWhenReady,
     /// "Pause settings" for one addon folder on this computer (settings.md §6): its units are
     /// neither published nor replaced until resumed. Local only; code is not paused.
     PauseSettings {

@@ -923,6 +923,10 @@ pub struct SettingsLocal {
     pub included_accounts: Vec<String>,
     pub consent: bool,
     pub first_adoption: Option<FirstAdoption>,
+    /// The owner ticked Share these now at consent: once the first capture exists, every
+    /// captured unit without a shared copy is pushed once, then this clears.
+    #[serde(default)]
+    pub share_when_ready: bool,
 }
 record!(SettingsLocal, "wowsync.settings-local", 16 * MIB, |self| {
     let mut units = std::collections::BTreeSet::new();

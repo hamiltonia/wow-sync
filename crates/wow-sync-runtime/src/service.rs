@@ -1041,6 +1041,16 @@ impl SliceService {
                 .map_err(|e| CommandError::Service(e.to_string()))?;
             return Ok(CommandOutcome::Recorded);
         }
+        if matches!(cmd, Command::ShareSettingsWhenReady) {
+            let mut l = crate::settings_cycle::load_local(&self.state, &gid);
+            if !l.consent {
+                return Err(CommandError::NotAllowed);
+            }
+            l.share_when_ready = true;
+            crate::settings_cycle::save_local(&self.state, &gid, &l)
+                .map_err(|e| CommandError::Service(e.to_string()))?;
+            return Ok(CommandOutcome::Recorded);
+        }
         if let Command::PauseSettings { folder } | Command::ResumeSettings { folder, .. } = &cmd {
             use wow_sync_core::settings::ResumeOption::*;
             if !w.inventory.folders.iter().any(|f| &f.key == folder) {
@@ -1201,45 +1211,17 @@ impl SliceService {
                     "this computer cannot share settings right now".into(),
                 ));
             }
-            let local = crate::settings_cycle::load_local(&self.state, &gid);
             let mut next = seq;
-            let mut wrote = false;
-            for unit in units {
-                let Some(cp) = local
-                    .units
-                    .iter()
-                    .find(|u| &u.unit == unit)
-                    .and_then(|u| u.captures.first().copied())
-                else {
-                    continue;
-                };
-                self.share_checkpoint(&provider, w.own.computer_id.as_str(), &cp, unit)?;
-                let Ok(rec) = wow_sync_core::settings::build_push(
-                    &self.plane.ledger,
-                    &derived,
-                    &gid,
-                    Issuer {
-                        computer_id: w.own.computer_id.clone(),
-                        enrollment_id: w.own.enrollment_id.clone(),
-                        issued_at_seq: next,
-                    },
-                    unit.clone(),
-                    cp,
-                    now,
-                ) else {
-                    continue;
-                };
-                write_own_record(
-                    &mut self.plane,
-                    &provider,
-                    &gid,
-                    &w.own.computer_id,
-                    &AuthorityRecord::SettingsRevision(rec),
-                )
-                .map_err(|e| CommandError::Service(e.to_string()))?;
-                next += 1;
-                wrote = true;
-            }
+            let wrote = self.push_units(
+                &provider,
+                &gid,
+                &w.own,
+                units,
+                &mut next,
+                now,
+                &w.titles,
+                &w.inventory,
+            )?;
             if !wrote {
                 return Ok(CommandOutcome::NothingToDo);
             }
@@ -1359,6 +1341,7 @@ impl SliceService {
                 Command::ReEnroll
                 | Command::EnableSettings { .. }
                 | Command::ShareSettingsNow { .. }
+                | Command::ShareSettingsWhenReady
                 | Command::PauseSettings { .. }
                 | Command::ResumeSettings { .. }
                 | Command::UseSharedSettings { .. }
@@ -1563,6 +1546,9 @@ impl SliceService {
                     .save(&self.state)
                     .map_err(|e| CommandError::Service(e.to_string()))?;
                 self.reserve_seq(&w, seq)?;
+                if matches!(&*rec, AuthorityRecord::SettingsRevision(_)) {
+                    self.record_settings_write(&provider, &w.titles, &w.inventory, &h);
+                }
                 if let AuthorityRecord::CodeChoice(c) = &*rec {
                     if let Some(k) =
                         crate::changes::kept((now_unix_ms() as u64, now_unix_ms()), c, &w.inventory)
@@ -1599,6 +1585,114 @@ impl SliceService {
 
     /// Makes `checkpoint` reachable by peers: uploaded from this computer's store, or already in
     /// the shared folder. A checkpoint known nowhere is refused.
+    /// Publishes the newest capture of each listed unit as a push (never an automatic revision).
+    /// Units without a capture are skipped. `next` is the next issuer sequence number.
+    #[allow(clippy::too_many_arguments)]
+    fn push_units(
+        &mut self,
+        provider: &ProviderRoot,
+        gid: &wow_sync_core::ids::GroupId,
+        own: &EnrollmentRef,
+        units: &[wow_sync_core::ids::SettingsUnit],
+        next: &mut u64,
+        now: u64,
+        titles: &BTreeMap<String, String>,
+        inventory: &Inventory,
+    ) -> Result<bool, CommandError> {
+        let derived = derive(&self.plane.ledger, gid, &self.plane.members);
+        let local = crate::settings_cycle::load_local(&self.state, gid);
+        let mut wrote = false;
+        for unit in units {
+            let Some(cp) = local
+                .units
+                .iter()
+                .find(|u| &u.unit == unit)
+                .and_then(|u| u.captures.first().copied())
+            else {
+                continue;
+            };
+            self.share_checkpoint(provider, own.computer_id.as_str(), &cp, unit)?;
+            let Ok(rec) = wow_sync_core::settings::build_push(
+                &self.plane.ledger,
+                &derived,
+                gid,
+                Issuer {
+                    computer_id: own.computer_id.clone(),
+                    enrollment_id: own.enrollment_id.clone(),
+                    issued_at_seq: *next,
+                },
+                unit.clone(),
+                cp,
+                now,
+            ) else {
+                continue;
+            };
+            let h = write_own_record(
+                &mut self.plane,
+                provider,
+                gid,
+                &own.computer_id,
+                &AuthorityRecord::SettingsRevision(rec),
+            )
+            .map_err(|e| CommandError::Service(e.to_string()))?;
+            self.record_settings_write(provider, titles, inventory, &h);
+            *next += 1;
+            wrote = true;
+        }
+        Ok(wrote)
+    }
+
+    /// Carries out a recorded `ShareSettingsWhenReady` at the start of a pass: the previous
+    /// pass captured the units, so each one without a shared copy is pushed once.
+    fn share_when_ready(&mut self) {
+        let Ok(w) = self.observe_for_command(true) else {
+            return;
+        };
+        let gid = w.group.group_id.clone();
+        let mut l = crate::settings_cycle::load_local(&self.state, &gid);
+        if !l.share_when_ready || !l.consent || self.settings_facts.units.is_empty() {
+            return;
+        }
+        let units: Vec<_> = self
+            .settings_facts
+            .units
+            .iter()
+            .filter(|(_, f)| matches!(f, crate::settings_cycle::UnitFact::NoSharedCopy))
+            .map(|(u, _)| u.clone())
+            .collect();
+        l.share_when_ready = false;
+        if crate::settings_cycle::save_local(&self.state, &gid, &l).is_err() {
+            return;
+        }
+        if !units.is_empty() {
+            let _ = self.command(Command::ShareSettingsNow { units });
+        }
+    }
+    /// The Activity row for a settings revision this computer just wrote by command.
+    fn record_settings_write(
+        &self,
+        provider: &ProviderRoot,
+        titles: &BTreeMap<String, String>,
+        inventory: &Inventory,
+        hash: &wow_sync_core::ids::Sha256,
+    ) {
+        let Some(AuthorityRecord::SettingsRevision(r)) = self.plane.ledger.record(hash) else {
+            return;
+        };
+        let Some(info) = crate::settings_cycle::revision_info(&self.plane.ledger, provider, r)
+        else {
+            return;
+        };
+        let at = now_unix_ms();
+        let rec = crate::changes::settings_published(
+            (at as u64, at),
+            r,
+            crate::changes::display_of(titles, inventory, &r.unit.folder),
+            &info,
+        );
+        crate::history::record_change(&self.state, &rec);
+    }
+
     fn share_checkpoint(
         &self,
         provider: &ProviderRoot,
@@ -3115,6 +3209,7 @@ impl SliceService {
     }
 
     pub fn sync_once(&mut self) -> Result<SyncReport, ServiceError> {
+        self.share_when_ready();
         let mut report = SyncReport::default();
         self.at_risk_apply.clear();
         let pass_id = now_unix_ms() as u64;

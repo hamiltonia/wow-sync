@@ -248,6 +248,26 @@ pub(crate) struct SettingsChangeInfo {
     pub identity: String,
 }
 
+/// What a written revision replaced and brought, for its history record.
+pub(crate) fn revision_info(
+    ledger: &wow_sync_core::ledger::Ledger,
+    provider: &ProviderRoot,
+    r: &wow_sync_core::kinds::SettingsRevision,
+) -> Option<SettingsChangeInfo> {
+    let new = manifest_file(provider, &r.checkpoint, &r.unit)?;
+    let old = r.parents.iter().find_map(|p| match ledger.record(p) {
+        Some(AuthorityRecord::SettingsRevision(pr)) => {
+            manifest_file(provider, &pr.checkpoint, &r.unit)
+        }
+        _ => None,
+    });
+    Some(SettingsChangeInfo {
+        old,
+        new,
+        identity: identity_text(&r.unit),
+    })
+}
+
 pub(crate) fn identity_text(unit: &SettingsUnit) -> String {
     match unit.identity.realm_character() {
         None => "account-wide".into(),
@@ -495,6 +515,7 @@ pub fn load_local(state: &LocalState, group: &GroupId) -> SettingsLocal {
             included_accounts: Vec::new(),
             consent: false,
             first_adoption: None,
+            share_when_ready: false,
         })
 }
 
@@ -1433,7 +1454,9 @@ pub fn settings_units(
                     && latest_capture.is_some()
                     && !matches!(status, SettingsUnitStatus::Suspect),
                 in_sync_from: match fact {
-                    Some(UnitFact::InSync(Some(c))) => names.get(c).cloned(),
+                    Some(UnitFact::InSync(Some(c))) if *c != own.computer_id => {
+                        names.get(c).cloned()
+                    }
                     _ => None,
                 },
                 local_copies,
@@ -1610,6 +1633,7 @@ mod tests {
             included_accounts: vec![],
             consent: true,
             first_adoption: None,
+            share_when_ready: false,
         };
         let stable = suspect_units(t.path(), &store, &local, &scope.owned, 1024, &|| {});
         assert!(stable.is_empty(), "{stable:?}");
