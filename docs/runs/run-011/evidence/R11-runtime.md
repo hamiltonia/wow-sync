@@ -449,3 +449,37 @@ change relative to the pre-fix tree, so "before" is 902e720 plus the new tests.
   publish path remains for the applied file; avoids new local-state fields. Reversible: yes.
 - Decision: status gap shown as `WaitingForSharedCopy`. Why: no app change allowed; truthful and
   clears on the next pass. Reversible: yes (a new variant needs an app arm).
+
+## Round RV11-17/18/19 (fix for the G13 fix)
+
+Root cause of RV11-17: the G13 own-head `ConcurrentPush` -> `Yield` override could not tell the stale
+pre-selection file from a genuine master edit made after the master's own choice/restore/push, so a
+real in-game edit was silently reverted.
+
+Design (local state only; no record or provider byte change):
+- `LocalUnitState.pending_selection: Option<CheckpointRef>` (serde default None, so old state files load).
+  Set by the service when the master writes its own selection revision: the unit's live capture at that moment.
+- The Yield override applies only while the live file equals `pending_selection` or equals a shared
+  revision checkpoint of the unit (the already-applied selected bytes). Any other live file is a new
+  edit and takes the original `ConcurrentPush` path (published and offered next to the selection).
+- Cleared when the unit is `InSync` or the live file is a different edit. After an upgrade the field is
+  None, which gives the pre-fix behaviour.
+- RV11-18: g13 tests now assert the displaced earlier master copy is retrievable (it is a shared
+  checkpoint, so it appears in history; otherwise in local_copies) and restoring it converges both computers.
+- RV11-19: with no `seen_heads` entry (after a restart) and a head this computer has not applied
+  (basis != heads), the status is `WaitingForSharedCopy`, not up to date. Residual: a Yield that
+  fails without recording a fact can still show Active.
+
+Fails-without-fix (guard reverted by editing the source, then restored):
+
+| Test | Guard removed | Pending not recorded |
+|---|---|---|
+| a_master_edit_made_after_its_own_restore_is_published_not_reverted | FAILS | passes |
+| g13_a_restore_after_the_choice_was_applied_converges_without_a_republish | passes | FAILS |
+| g13_a_restore_right_after_choosing_the_peer_copy_... | passes | passes |
+| g13_a_restart_between_the_selection_and_its_apply_... | passes | passes |
+
+Note: the restart test passes without the fix too; it guards against regression, not persistence proof.
+
+- Decision: the edit made after the restore produces a decision (edit vs restore), not a silent win.
+  Why: competing intentional choices are never merged. Reversible: yes.

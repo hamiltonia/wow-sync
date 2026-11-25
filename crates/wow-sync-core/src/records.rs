@@ -936,6 +936,11 @@ pub struct LocalUnitState {
     /// against pruning and listed for restore (settings.md §7).
     #[serde(default)]
     pub kept: Vec<KeptCopy>,
+    /// The live capture seen when this computer's own explicit choice, restore or push was
+    /// written: the stale file that selection supersedes. Local state only (never in a record
+    /// or on the provider); cleared once the selection is applied or a different edit shows up.
+    #[serde(default)]
+    pub pending_selection: Option<CheckpointRef>,
 }
 
 /// A local settings copy a shared copy displaced.

@@ -1565,8 +1565,15 @@ impl SliceService {
                     .save(&self.state)
                     .map_err(|e| CommandError::Service(e.to_string()))?;
                 self.reserve_seq(&w, seq)?;
-                if matches!(&*rec, AuthorityRecord::SettingsRevision(_)) {
+                if let AuthorityRecord::SettingsRevision(r) = &*rec {
                     self.record_settings_write(&provider, &w.titles, &w.inventory, &h);
+                    // The file as last seen is the stale one this selection supersedes; an edit
+                    // made after it is a new change (RV11-17).
+                    let mut local = crate::settings_cycle::load_local(&self.state, &gid);
+                    if let Some(u) = local.units.iter_mut().find(|u| u.unit == r.unit) {
+                        u.pending_selection = u.captures.first().copied();
+                        let _ = crate::settings_cycle::save_local(&self.state, &gid, &local);
+                    }
                 }
                 if let AuthorityRecord::CodeChoice(c) = &*rec {
                     if let Some(k) =

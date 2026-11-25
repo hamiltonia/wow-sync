@@ -4136,15 +4136,20 @@ mod tests {
 
     #[test]
     fn g13_a_restore_right_after_choosing_the_peer_copy_converges_without_a_republish() {
-        g13(false);
+        g13(false, false);
+    }
+
+    #[test]
+    fn g13_a_restart_between_the_selection_and_its_apply_still_converges_without_a_republish() {
+        g13(false, true);
     }
 
     #[test]
     fn g13_a_restore_after_the_choice_was_applied_converges_without_a_republish() {
-        g13(true);
+        g13(true, false);
     }
 
-    fn g13(pass_between: bool) {
+    fn g13(pass_between: bool, restart: bool) {
         use crate::settings_cycle::SettingsUnitStatus as S;
         let lab = Lab::new();
         let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
@@ -4201,6 +4206,10 @@ mod tests {
             }),
             Ok(CommandOutcome::Written(_))
         ));
+        if restart {
+            a.restart();
+            a.svc.set_settings_cap_for_tests(Some(1 << 20));
+        }
         let st = a.svc.status();
         assert!(
             !matches!(st.settings_units[0].status, S::Active | S::InSync),
@@ -4226,6 +4235,83 @@ mod tests {
             before,
             "the master republished its own applied file"
         );
+        // The displaced earlier master copy is a recovery copy and can be restored (RV11-18).
+        let local_cp = stored_checkpoint(&a, &unit, local.as_bytes());
+        let row = a.svc.status().settings_units.remove(0);
+        assert!(
+            row.local_copies.iter().any(|c| c.checkpoint == local_cp)
+                || row.history.iter().any(|h| h.checkpoint == local_cp),
+            "{:?}",
+            row.local_copies
+        );
+        assert!(matches!(
+            a.svc.command(Command::RestoreSettings {
+                unit: unit.clone(),
+                checkpoint: local_cp,
+            }),
+            Ok(CommandOutcome::Written(_))
+        ));
+        for _ in 0..3 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        assert_eq!(read_wtf(&a, "Alpha").as_deref(), Some(local));
+        assert_eq!(read_wtf(&b, "Alpha").as_deref(), Some(local));
+    }
+
+    #[test]
+    fn a_master_edit_made_after_its_own_restore_is_published_not_reverted() {
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let unit = alpha_unit();
+        let v1 = "AlphaDB = { v = 1 }\n";
+        let v2 = "AlphaDB = { v = 22 }\n";
+        let ingame = "AlphaDB = { ingame = true }\n";
+        write_wtf(&a, "Alpha", v1);
+        synced(&mut a);
+        share_now(&mut a);
+        write_wtf(&a, "Alpha", v2);
+        synced(&mut a);
+        synced(&mut b);
+        synced(&mut b);
+        let v1_cp = stored_checkpoint(&a, &unit, v1.as_bytes());
+        // The restore is accepted while the game runs (nothing is applied), then the owner edits.
+        a.act.set(Activity::Running { pids: vec![4242] });
+        assert!(matches!(
+            a.svc.command(Command::RestoreSettings {
+                unit: unit.clone(),
+                checkpoint: v1_cp,
+            }),
+            Ok(CommandOutcome::Written(_))
+        ));
+        synced(&mut a);
+        write_wtf(&a, "Alpha", ingame);
+        a.act.set(Activity::NotRunning);
+        for _ in 0..4 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        // The edit is kept and offered next to the restore, never silently reverted.
+        assert_eq!(read_wtf(&a, "Alpha").as_deref(), Some(ingame));
+        let row = a.svc.status().settings_units.remove(0);
+        let edit_cp = stored_checkpoint(&a, &unit, ingame.as_bytes());
+        assert!(
+            row.competing.iter().any(|c| c.checkpoint == edit_cp),
+            "{row:?}"
+        );
+        a.svc
+            .command(Command::ChooseSettings {
+                unit: unit.clone(),
+                checkpoint: edit_cp,
+                shown_heads: row.shown_heads.clone(),
+            })
+            .unwrap();
+        for _ in 0..4 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        assert_eq!(read_wtf(&a, "Alpha").as_deref(), Some(ingame));
+        assert_eq!(read_wtf(&b, "Alpha").as_deref(), Some(ingame));
     }
 
     #[test]
