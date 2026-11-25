@@ -220,14 +220,20 @@ pub struct Pump {
 }
 
 impl Pump {
+    /// Why the pass that starts now was run. Tests never read the process-wide request, which
+    /// the backend tests running in parallel also set.
     #[cfg(test)]
-    fn take_armed(&mut self) -> Option<&'static str> {
-        self.armed.take()
+    fn next_trigger(&mut self) -> &'static str {
+        self.armed.take().unwrap_or(SCHEDULED)
     }
 
     #[cfg(not(test))]
-    fn take_armed(&mut self) -> Option<&'static str> {
-        None
+    fn next_trigger(&mut self) -> &'static str {
+        TRIGGER
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+            .unwrap_or(SCHEDULED)
     }
 
     fn log(&mut self, out: &mut Vec<Out>, line: String) {
@@ -293,14 +299,7 @@ impl Pump {
             self.view = ProgressView::default();
             self.worked = false;
             self.held.clear();
-            let armed = self.take_armed();
-            self.trigger = armed.unwrap_or_else(|| {
-                TRIGGER
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .take()
-                    .unwrap_or(SCHEDULED)
-            });
+            self.trigger = self.next_trigger();
             // A pass that was asked for or follows a change is always logged in full.
             if self.trigger != SCHEDULED {
                 self.start_work(&mut out);
