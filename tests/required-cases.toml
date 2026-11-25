@@ -1063,6 +1063,8 @@ tests = [
     "e2e::tests::only_the_master_shares_in_bulk_but_any_computer_may_push_one_unit",
     "e2e::tests::pausing_all_settings_persists_covers_later_addons_and_resumes",
     "e2e::tests::a_master_restore_after_a_decision_does_not_create_a_decision_between_its_own_copies",
+    "e2e::tests::g13_a_restore_right_after_choosing_the_peer_copy_converges_without_a_republish",
+    "e2e::tests::g13_a_restore_after_the_choice_was_applied_converges_without_a_republish",
     "e2e::tests::a_master_restore_then_a_choice_leaves_both_computers_on_the_selected_bytes",
     "e2e::tests::history_entries_carry_origin_source_size_and_sequence",
     "e2e::tests::two_addons_declaring_one_variable_both_get_rows_even_without_their_own_files",

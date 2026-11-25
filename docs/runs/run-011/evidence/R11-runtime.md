@@ -392,3 +392,60 @@ base was cold on disk.)
   resident table; an out-of-range mtime is a cache miss. File format unchanged. Reversible: yes.
 - Decision: decoded tree cache is cleared at the end of each pass. Why: frees ~5 MiB live;
   a Weak cache re-decoded trees (+45% allocation) and was dropped. Reversible: yes.
+
+## Round G13 (restore right after choosing the peer copy)
+
+### Root cause
+
+A master's own explicit selection (choose, restore, push) writes a revision but does not advance
+the unit's basis; the basis only advances after the copy is applied. So a restore written after
+a choice leaves the basis below the head, the live file (peer bytes, either applied or about to
+be) is not the basis checkpoint, and the master is the authority: `target_case` returned
+`LocalDifferent(ConcurrentPush)`. Two consequences:
+1. the master's own selection was never applied (it was treated as a competing local edit), and
+2. because the applied peer bytes differ from the last capture, the scan counted them as a new
+   local edit (`changed`) and, with the case a LocalDifferent on the authority, auto-published
+   the app's own applied file (the checker's publication 4-7 s after the restore).
+A delay between choice and restore let a pass record the applied file as the basis first, so it
+converged; hence the race. Separately the unit status stayed from the last pass ("up to date")
+after the restore was written.
+
+### Fix (no record or provider byte change)
+
+- `settings_cycle.rs`: when the unit is a single head state, this computer is the authority and
+  every head revision was issued by this enrollment, a `ConcurrentPush` result becomes `Yield`
+  to that head: the selection is applied and nothing is published (the displaced copy is pinned
+  as a recovery copy by the existing code).
+- `SettingsFacts.seen_heads`: the heads each unit was evaluated against. A head written after
+  that (a command) shows the unit as `WaitingForSharedCopy` instead of `Active`/`InSync` until
+  the next pass has applied it. GUI note for R11-app: this reuses an existing status so no app
+  change is required; a dedicated "applying" status/wording would be nicer (optional).
+
+### Fails-without-fix
+
+| Test | Guard reverted | Result |
+|---|---|---|
+| `g13_a_restore_after_the_choice_was_applied_converges_without_a_republish` (b: restore after the choice applied) | own-head Yield | FAILED (master stays on peer bytes) |
+| same test, and `g13_a_restore_right_after_choosing_the_peer_copy_...` (a/c: status never up to date before the restore is applied) | `seen_heads` status | both FAILED |
+| both | none | pass |
+
+### Repetition (service-level e2e with real adapters and files, not a GUI-driven process)
+
+The GUI driver for choose/restore is not scriptable from here, so the checker's sequence is
+reproduced as a service-level e2e (real FS, two services, game running on A during its local
+edit, B shares, A chooses the peer copy, A restores the shared copy). 902e720 contains no crate
+change relative to the pre-fix tree, so "before" is 902e720 plus the new tests.
+
+| Build | Runs | Result |
+|---|---|---|
+| 902e720 + tests | 5 | 5 of 5 FAILED (2 tests each) |
+| fixed | 5 | 5 of 5 passed (2 tests each); converges within the 3-4 passes of the test |
+
+### Decisions
+
+- Decision: an own-issued single head on the authority is applied, never treated as a concurrent
+  local edit. Why: it is the owner's explicit selection. Reversible: yes.
+- Decision: no separate stateful "applied by us" marker. Why: with the case fixed no
+  publish path remains for the applied file; avoids new local-state fields. Reversible: yes.
+- Decision: status gap shown as `WaitingForSharedCopy`. Why: no app change allowed; truthful and
+  clears on the next pass. Reversible: yes (a new variant needs an app arm).
