@@ -148,13 +148,20 @@ Private working set stays under 100 MiB (peak 86 MiB per process). Private commi
 | SharedFromHere reason | a_share_from_a_computer_that_is_not_master_says_shared_from_here | FAILS |
 | Master-only ShareSettingsWhenReady | only_the_master_shares_in_bulk_but_any_computer_may_push_one_unit | FAILS |
 | Master-only ShareSettingsNow | same test | FAILS |
-| Touch on reuse (RV11-12) | a_reused_old_copy_starts_its_age_again_when_content_returns_to_it | not re-run reverted |
-| Keep recent records (RV11-12) | cleanup_keeps_every_copy_a_recent_revision_record_names_even_if_unread_here | not re-run reverted |
-| Waiting for shared copy | a_revision_whose_copy_is_missing_waits_truthfully_and_applies_when_it_returns | not re-run reverted |
-| Omit unavailable history (RV11-13) | settings_history_does_not_offer_a_copy_cleanup_removed | PASSES without the filter: the ledger already prunes those entries in this scenario, so the test is weak; the filter covers a provider-side loss only |
+| Touch on reuse (RV11-12) | a_reused_old_copy_starts_its_age_again_when_content_returns_to_it | FAILS |
+| Keep recent records (RV11-12) | cleanup_keeps_every_copy_a_recent_revision_record_names_even_if_unread_here | FAILS |
+| Waiting for shared copy | a_revision_whose_copy_is_missing_waits_truthfully_and_applies_when_it_returns | FAILS |
+| Omit unavailable history (RV11-13) | settings_history_does_not_offer_a_copy_the_shared_folder_has_lost | FAILS (rewritten: the ledger keeps the entries, the shared folder loses the copies) |
 
 ### Decisions
 - Decision: bulk share commands only for the effective master; ShareSettings (one unit) stays open. Why: design 5.2 / RV11-14. Reversible: yes.
 - Decision: reused blobs and manifests are touched; GC also keeps every checkpoint named by a provider record under 30 days old. Why: Dropbox lag (RV11-12). Reversible: yes.
 - Decision: a record's versions are the unit's manifest (checkpoint) id and total size. Why: units are single-file in practice; the id covers the whole unit. Reversible: yes.
 - Decision: history omits entries whose copy is gone. Why: no dead restores. Reversible: yes.
+### Is the settings-pass memory rise file-size related? (follow-up)
+Same lab and real release app, only the big file shrunk to 100 KB (one byte edited on A, B applies):
+| File | Idle private WS | Pass private WS | Rise | Pass private commit |
+|---|---|---|---|---|
+| 31.9 MiB | 57 MiB | 86 MiB | 29 MiB | 117 MiB |
+| 100 KB | 73 MiB | 99 MiB | 26 MiB | 121 MiB |
+The rise is the same with a tiny file, so it is not proportional to file size and nothing in the settings path still reads whole files; it comes from the app's per-pass work on the 113-add-on lab (status snapshots / GUI), not from file contents. Idle varies run to run (57-94 MiB), and the 100 KB run peaked at 99 MiB, close to the 100 MiB gate: the headroom is thin and comes from the app baseline, which is outside the runtime's files. Flagged as an open issue for R11-app / the owner.
