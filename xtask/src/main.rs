@@ -176,8 +176,32 @@ fn with_failed_names(detail: String, output: &str) -> String {
     if failed.is_empty() {
         detail
     } else {
-        format!("{detail}\nfailed tests:\n  {}", failed.join("\n  "))
+        let mut text = format!("{detail}\nfailed tests:\n  {}", failed.join("\n  "));
+        for name in &failed {
+            if let Some(section) = failure_section(output, name) {
+                text.push_str(&format!("\n--- {name}:\n{section}"));
+            }
+        }
+        text
     }
+}
+
+/// The captured output of one failed test (its panic message), from cargo's `failures:` block.
+fn failure_section(output: &str, name: &str) -> Option<String> {
+    let head = format!("---- {name} stdout ----");
+    let mut lines = output.lines().skip_while(|l| l.trim_end() != head).skip(1);
+    let mut body = Vec::new();
+    for l in lines.by_ref() {
+        if l.starts_with("---- ") || l.trim_end() == "failures:" {
+            break;
+        }
+        body.push(l);
+    }
+    while body.last().is_some_and(|l| l.trim().is_empty()) {
+        body.pop();
+    }
+    body.truncate(20);
+    (!body.is_empty()).then(|| body.join("\n"))
 }
 
 /// Windows native tier: runs the workspace tests and verifies the native cases.
@@ -478,6 +502,17 @@ mod tests {
         let d = with_failed_names("x".into(), out);
         assert!(d.contains("failed tests:") && d.contains("b::flaky"));
         assert_eq!(with_failed_names("x".into(), "test a ... ok\n"), "x");
+    }
+
+    #[test]
+    fn each_failed_test_prints_its_panic_message() {
+        let out = "test b::flaky ... FAILED\ntest c::fine ... ok\n\nfailures:\n\n\
+---- b::flaky stdout ----\nthread 'b::flaky' panicked at src/b.rs:9:5:\ntimed out waiting for the retry\n\
+note: run with `RUST_BACKTRACE=1`\n\n---- d::other stdout ----\nunrelated\n\nfailures:\n    b::flaky\n";
+        let d = with_failed_names("x".into(), out);
+        assert!(d.contains("timed out waiting for the retry"), "{d}");
+        assert!(d.contains("src/b.rs:9:5"));
+        assert!(!d.contains("unrelated"));
     }
 
     #[test]
