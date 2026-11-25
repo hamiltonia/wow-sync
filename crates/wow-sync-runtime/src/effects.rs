@@ -67,6 +67,22 @@ pub(crate) fn map_err(e: FsError) -> EffectError {
     EffectError::new(kind, e.to_string())
 }
 
+/// Like `map_err` for a saved-settings file: the text names no account, realm, character or
+/// folder path, because a failure reaches the activity record and the diagnostic log (RV11-08).
+pub(crate) fn map_settings_err(e: FsError) -> EffectError {
+    let kind = map_err(e.clone()).kind;
+    let what = match kind {
+        EffectErrorKind::NotFound => "a saved-settings file or its folder is missing",
+        EffectErrorKind::Exists => "a saved-settings file already exists",
+        EffectErrorKind::InUse => "a saved-settings file is in use",
+        EffectErrorKind::CloudOnly => "a saved-settings file is not available offline",
+        EffectErrorKind::HashMismatch => "a saved-settings file did not match what was expected",
+        EffectErrorKind::Unsafe => "a saved-settings path was refused as unsafe",
+        _ => "a saved-settings file could not be read or written",
+    };
+    EffectError::new(kind, what)
+}
+
 fn conv(s: &Slot) -> AdSlot<'_> {
     match s {
         Slot::Live { folder } => AdSlot::Live { folder },
@@ -692,9 +708,9 @@ impl ApplyEffects for RealEffects<'_> {
         let Ok(mut src) = self.provider.open_read(&rel, SETTINGS_BLOB_LIMIT) else {
             // A checkpoint captured on this computer (an undone uninstall) is in the local store.
             let local = wow_sync_adapters::settings_store::SettingsStore::open(self.variant_dir)
-                .map_err(map_err)?
+                .map_err(map_settings_err)?
                 .get_blob(&h.0, SETTINGS_BLOB_LIMIT)
-                .map_err(map_err)?
+                .map_err(map_settings_err)?
                 .ok_or_else(|| {
                     EffectError::new(EffectErrorKind::Io, "the settings copy is not available")
                 })?;
@@ -702,22 +718,27 @@ impl ApplyEffects for RealEffects<'_> {
             return self
                 .area
                 .stage_settings(op.as_str(), idx, &mut local.as_slice(), h.0, size)
-                .map_err(map_err);
+                .map_err(map_settings_err);
         };
         let size = src
             .metadata()
-            .map_err(|e| EffectError::new(EffectErrorKind::Io, e.to_string()))?
+            .map_err(|_| {
+                EffectError::new(
+                    EffectErrorKind::Io,
+                    "a saved-settings file could not be read",
+                )
+            })?
             .len();
         self.area
             .stage_settings(op.as_str(), idx, &mut src, h.0, size)
-            .map_err(map_err)
+            .map_err(map_settings_err)
     }
 
     fn settings_hash(&mut self, s: &SettingsSlot) -> Result<Option<Sha256>, EffectError> {
         Ok(self
             .area
             .settings_hash(conv_settings(s))
-            .map_err(map_err)?
+            .map_err(map_settings_err)?
             .map(Sha256))
     }
 
@@ -728,7 +749,7 @@ impl ApplyEffects for RealEffects<'_> {
     ) -> Result<(), EffectError> {
         self.area
             .settings_rename(conv_settings(from), conv_settings(to))
-            .map_err(map_err)
+            .map_err(map_settings_err)
     }
 
     fn discard_settings_staging(&mut self, op: &OpId) -> Result<(), EffectError> {

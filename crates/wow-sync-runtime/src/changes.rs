@@ -698,3 +698,16 @@ pub(crate) fn published(
     all.paths_more = out.len().saturating_sub(MAX_RECORD_PATHS) as u32;
     vec![all]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn record_text_never_carries_texture_or_colour_codes() {
+        assert_eq!(
+            clip("|TInterface\\Icons\\X:16|t |cff112233Alpha|r"),
+            "Alpha"
+        );
+    }
+}

@@ -766,6 +766,15 @@ pub fn settings_unit_rows(
                         with: r.shared_with.clone(),
                     },
                     S::WaitingForWow => UnitStatus::WaitingForWow,
+                    S::Suspect => UnitStatus::Suspect,
+                    S::LocalDifferent(reason) => UnitStatus::LocalDifferent(reason),
+                    S::NoSharedCopy => UnitStatus::NoSharedCopy,
+                    S::InSync => UnitStatus::InSync {
+                        from: r
+                            .in_sync_from
+                            .clone()
+                            .unwrap_or_else(|| "another computer".into()),
+                    },
                     S::Active => UnitStatus::Active,
                 },
                 live: r.live,

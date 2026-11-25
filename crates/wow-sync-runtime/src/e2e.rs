@@ -3541,6 +3541,21 @@ mod tests {
         std::fs::read_to_string(wtf_file(pc, folder)).ok()
     }
 
+    /// The master's explicit "Share these now" for everything the snapshot lists.
+    fn share_now(pc: &mut Pc) -> CommandOutcome {
+        let units: Vec<_> = pc
+            .svc
+            .status()
+            .settings
+            .to_share
+            .iter()
+            .map(|o| o.unit.clone())
+            .collect();
+        let out = pc.svc.command(Command::ShareSettingsNow { units }).unwrap();
+        synced(pc);
+        out
+    }
+
     /// Two computers with the same addon that saves variables, settings consent on both, and
     /// `master` chosen (`a` is the master when true, `b` otherwise). Test cap is on for both.
     fn settings_pair(lab: &Lab, a_is_master: bool, cap: Option<u64>) -> (Pc, Pc, GroupId) {
@@ -3657,6 +3672,59 @@ mod tests {
     }
 
     #[test]
+    fn one_missing_character_waits_alone_and_everything_else_still_applies() {
+        use crate::settings_cycle::SettingsUnitStatus as S;
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let vd = |pc: &Pc, rel: &str| pc.install.variant_dir.join(rel);
+        let there = "WTF/Account/ACC/Realm1/CharA1/SavedVariables/Alpha.lua";
+        let missing = "WTF/Account/ACC/Realm1/CharA2/SavedVariables/Alpha.lua";
+        for rel in [there, missing] {
+            let p = vd(&a, rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, "AlphaChar = { v = 1 }\n").unwrap();
+        }
+        // The peer has the first character but not the second.
+        std::fs::create_dir_all(vd(&b, "WTF/Account/ACC/Realm1/CharA1/SavedVariables")).unwrap();
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        for rel in [there, missing] {
+            std::fs::write(vd(&a, rel), "AlphaChar = { v = 2 }\n").unwrap();
+        }
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 2 }\n"),
+            "the account-wide file applies"
+        );
+        assert_eq!(
+            std::fs::read_to_string(vd(&b, there)).ok().as_deref(),
+            Some("AlphaChar = { v = 2 }\n"),
+            "the character that exists applies"
+        );
+        assert!(!vd(&b, "WTF/Account/ACC/Realm1/CharA2").exists());
+        let rows = b.svc.status().settings_units;
+        let waiting: Vec<_> = rows
+            .iter()
+            .filter(|r| r.status == S::WaitingForIdentity)
+            .collect();
+        assert_eq!(
+            waiting.len(),
+            1,
+            "only the missing character waits: {rows:?}"
+        );
+        assert_eq!(
+            rows.iter()
+                .filter(|r| matches!(r.status, S::Active | S::InSync))
+                .count(),
+            rows.len() - 1
+        );
+    }
+
+    #[test]
     fn with_the_game_running_settings_wait_and_nothing_is_applied() {
         use crate::settings_cycle::SettingsUnitStatus as S;
         let lab = Lab::new();
@@ -3685,6 +3753,60 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_variable_declared_by_two_addons_is_owned_by_several_and_publishes_nothing() {
+        use crate::settings_cycle::SettingsUnitStatus as S;
+        let lab = Lab::new();
+        let (mut a, _b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        a.addon_with("Gamma", "gamma-v1", SV_TOC);
+        synced(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        write_wtf(&a, "Gamma", "AlphaDB = { v = 9 }\n");
+        synced(&mut a);
+        synced(&mut a);
+        let rows = a.svc.status().settings_units;
+        let several: Vec<_> = rows
+            .iter()
+            .filter(|r| r.status == S::OwnedBySeveral)
+            .collect();
+        assert!(!several.is_empty(), "{rows:?}");
+        assert!(
+            several
+                .iter()
+                .any(|r| r.shared_with.iter().any(|n| n == "Gamma")),
+            "{several:?}"
+        );
+        assert!(a.svc.settings_history(&alpha_unit()).is_empty());
+    }
+
+    #[test]
+    fn settings_progress_counts_units_names_the_addon_and_the_origin_when_applying() {
+        use crate::history::Phase;
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let rx_a = a.svc.progress_hub().subscribe();
+        let rx_b = b.svc.progress_hub().subscribe();
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        let on_a: Vec<_> = rx_a
+            .try_iter()
+            .filter(|e| e.phase == Phase::Settings && e.completed.is_none())
+            .collect();
+        assert!(on_a.iter().all(|e| e.source.is_none()), "{on_a:?}");
+        let on_b: Vec<_> = rx_b
+            .try_iter()
+            .filter(|e| e.phase == Phase::Settings)
+            .collect();
+        assert!(
+            on_b.iter().any(|e| e.current.as_deref() == Some("Alpha")
+                && e.source == Some(ChangeSource::Computer("a".into()))),
+            "{on_b:?}"
+        );
+    }
+
     fn alpha_unit() -> wow_sync_core::ids::SettingsUnit {
         wow_sync_core::ids::SettingsUnit {
             folder: wow_sync_core::paths::validate_folder_name("Alpha").unwrap(),
@@ -3710,6 +3832,7 @@ mod tests {
         let (mut a, b, g) = settings_pair(&lab, true, Some(cap));
         write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
         synced(&mut a);
+        share_now(&mut a);
         (lab, a, b, g)
     }
 
@@ -4330,8 +4453,8 @@ mod tests {
         synced(&mut a);
         assert_eq!(
             a.svc.settings_history(&alpha_unit()).len(),
-            2,
-            "a non-master's routine write publishes nothing (the master's two revisions only)"
+            1,
+            "a non-master's routine write publishes nothing (the master's one revision only)"
         );
         write_wtf(&a, "Alpha", "AlphaDB = { v = 3 }\n");
         synced(&mut a);
@@ -4481,6 +4604,7 @@ mod tests {
         let alpha = alpha_unit().folder;
         write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
         synced(&mut a);
+        share_now(&mut a);
         write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
         synced(&mut a);
         synced(&mut b);
@@ -4627,6 +4751,7 @@ mod tests {
         let unit = alpha_unit();
         write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
         synced(&mut a);
+        share_now(&mut a);
         write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
         synced(&mut a);
         synced(&mut b);
@@ -4728,13 +4853,14 @@ mod tests {
         let unit = alpha_unit();
         write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
         synced(&mut a);
+        share_now(&mut a);
         write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
         synced(&mut a);
         synced(&mut b);
         synced(&mut b);
         let calm = b.svc.status().settings_units;
         assert_eq!(calm.len(), 1, "{calm:?}");
-        assert_eq!(calm[0].status, S::Active);
+        assert_eq!(calm[0].status, S::InSync);
         assert!(calm[0].live && calm[0].competing.is_empty() && calm[0].shown_heads.is_empty());
         assert!(calm[0].can_share && calm[0].latest_capture.is_some());
         assert_eq!(calm[0].history.len(), 2);
@@ -4779,7 +4905,7 @@ mod tests {
         synced(&mut a);
         synced(&mut b);
         let after = b.svc.status().settings_units.remove(0);
-        assert_eq!(after.status, S::Active, "{after:?}");
+        assert_eq!(after.status, S::InSync, "{after:?}");
         assert!(after.competing.is_empty());
 
         let earlier = after.history[0].checkpoint;
@@ -4885,6 +5011,7 @@ mod tests {
         let unit = alpha_unit();
         write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
         synced(&mut a);
+        share_now(&mut a);
         write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
         synced(&mut a);
         synced(&mut b);
@@ -5591,6 +5718,21 @@ mod tests {
                 why: wow_sync_core::kinds::ChoiceReason::Ambiguous,
             })
             .is_ok());
+        let kept = b
+            .svc
+            .history(100)
+            .into_iter()
+            .find_map(|i| match i {
+                HistoryItem::Change(c) if c.kind == ChangeKind::Kept => Some(c),
+                _ => None,
+            })
+            .expect("a kept record");
+        assert!(
+            matches!(&kept.new_version, VersionLabel::ContentId(s) if !s.is_empty())
+                || matches!(&kept.new_version, VersionLabel::Toc(_)),
+            "the kept copy's version is shown: {kept:?}"
+        );
+        assert_eq!(kept.old_version, kept.new_version);
         for _ in 0..4 {
             synced(&mut b);
             synced(&mut a);
@@ -7146,6 +7288,9 @@ mod tests {
             assert_eq!(got.byte_delta, "AlphaDB = { v = 2 }\n".len() as i64);
             assert_eq!(got.identity.as_deref(), Some("account-wide"));
             assert!(!format!("{got:?}").contains("ACC"));
+            write_wtf(&a, "Alpha", "AlphaDB = { v = 3 }\n");
+            synced(&mut a);
+            synced(&mut b);
             let on_a = changes(&a);
             let sent = on_a
                 .iter()
@@ -7156,7 +7301,7 @@ mod tests {
                 .iter()
                 .filter(|c| c.kind == ChangeKind::SettingsPublished)
                 .collect();
-            assert_eq!(all.len(), 2, "the first share and the change: {on_a:?}");
+            assert_eq!(all.len(), 2, "the first change and the next: {on_a:?}");
             for c in &all {
                 assert!(
                     matches!(&c.new_version, VersionLabel::ContentId(s) if s.len() == 8),

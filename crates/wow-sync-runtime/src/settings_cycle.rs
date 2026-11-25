@@ -18,17 +18,18 @@ use wow_sync_adapters::wtf::scan_wtf;
 use wow_sync_adapters::FsError;
 use wow_sync_core::authority::AuthorityRecord;
 use wow_sync_core::hash::sha256;
-use wow_sync_core::ids::{CheckpointRef, GroupId, OpId, SettingsUnit, Sha256};
+use wow_sync_core::ids::{CheckpointRef, ComputerId, GroupId, OpId, SettingsUnit, Sha256};
 use wow_sync_core::kinds::{EnrollmentRef, Issuer};
 use wow_sync_core::layout;
 use wow_sync_core::ledger::derive;
 use wow_sync_core::plan::{ExpectedLive, PackageApply};
 use wow_sync_core::records::{
-    decode, encode, CheckpointFile, LocalUnitState, Location, OpKind, RecoverySlot, RootState,
-    SettingsCheckpointManifest, SettingsFileOp, SettingsLocal, SettingsRoot,
+    decode, encode, CheckpointFile, KeptCopy, LocalUnitState, Location, OpKind, RecoverySlot,
+    RootState, SettingsCheckpointManifest, SettingsFileOp, SettingsLocal, SettingsRoot,
 };
 use wow_sync_core::settings::{
-    settings_scope, DeclaringFolder, OwnedFile, SettingsScope, WtfEntry,
+    classify_capture, settings_scope, CaptureClass, DeclaringFolder, FileFact, LocalReason,
+    OwnedFile, SettingsScope, SettleScans, WtfEntry,
 };
 
 #[derive(Debug)]
@@ -269,6 +270,15 @@ pub enum UnitFact {
     TooLarge(u64),
     /// The other add-ons that declare the same saved variables.
     Several(Vec<String>),
+    /// The file looks incomplete (empty, vanished next to a `.bak`, or still changing): it is
+    /// neither captured nor published nor replaced until a later look finds it complete.
+    Suspect,
+    /// This computer's file is the shared copy; the computer that wrote it, when known.
+    InSync(Option<ComputerId>),
+    /// This computer's file differs from the shared copy and is not shared.
+    LocalDifferent(LocalReason),
+    /// Nothing has ever been shared for this unit.
+    NoSharedCopy,
 }
 
 /// Whether the account (and character) folder of `identity` exists on this computer.
@@ -281,6 +291,148 @@ fn identity_present(variant_dir: &Path, unit: &SettingsUnit) -> bool {
         rel = format!("{rel}/{realm}/{ch}");
     }
     scope.root().check_components(&rel).is_ok()
+}
+
+/// A stored one-file checkpoint's file as the capture classification sees it.
+fn local_file_fact(store: &SettingsStore, cp: &CheckpointRef, unit: &SettingsUnit) -> FileFact {
+    let bytes = store.get_manifest(&cp.0).ok().flatten()?;
+    let m: SettingsCheckpointManifest = decode(&bytes, 64 * 1024).ok()?;
+    if &m.unit != unit {
+        return None;
+    }
+    m.files.first().map(|f| (f.size, f.blob))
+}
+
+/// The file's size and hash as of now: `None` when it is absent, an unmatchable fact when it
+/// cannot be read (so it never compares equal to an earlier scan).
+fn read_fact(variant_dir: &Path, rel: &str, cap: u64) -> FileFact {
+    let unreadable = Some((u64::MAX, Sha256([0; 32])));
+    let Ok(Some(scope)) = WtfScope::open(variant_dir, false) else {
+        return unreadable;
+    };
+    let mut f = match scope.root().open_read(rel, cap) {
+        Ok(f) => f,
+        Err(e) if e.kind == wow_sync_adapters::FsErrorKind::NotFound => return None,
+        Err(_) => return unreadable,
+    };
+    let mut bytes = Vec::new();
+    if std::io::Read::read_to_end(&mut f, &mut bytes).is_err() {
+        return unreadable;
+    }
+    Some((bytes.len() as u64, sha256(&bytes)))
+}
+
+/// WoW writes `<file>.bak` beside a saved-variables file it is about to replace.
+fn bak_exists(variant_dir: &Path, rel: &str) -> bool {
+    let Ok(Some(scope)) = WtfScope::open(variant_dir, false) else {
+        return false;
+    };
+    scope.root().check_components(&format!("{rel}.bak")).is_ok()
+}
+
+/// The units whose captured file is suspect (settings.md §2.1, Q-71): every changed file is
+/// looked at a second time after `settle()` (the quiet wait) and must be identical, non-empty
+/// and not a vanished file next to a `.bak`. Unchanged files need no second look.
+pub(crate) fn suspect_units(
+    variant_dir: &Path,
+    store: &SettingsStore,
+    local: &SettingsLocal,
+    owned: &[OwnedFile],
+    cap: u64,
+    settle: &dyn Fn(),
+) -> BTreeSet<SettingsUnit> {
+    let prev_of = |unit: &SettingsUnit| -> FileFact {
+        local
+            .units
+            .iter()
+            .find(|u| &u.unit == unit)
+            .and_then(|u| u.captures.first())
+            .and_then(|c| local_file_fact(store, c, unit))
+    };
+    let looks: Vec<(&OwnedFile, FileFact)> = owned
+        .iter()
+        .map(|o| (o, prev_of(&o.unit)))
+        .filter(|(o, prev)| o.size == 0 || *prev != Some((o.size, o.sha256)))
+        .collect();
+    let mut out = BTreeSet::new();
+    if looks.is_empty() {
+        return out;
+    }
+    settle();
+    for (o, prev) in looks {
+        let second = read_fact(variant_dir, o.rel.as_str(), cap);
+        let scans = SettleScans {
+            first: Some((o.size, o.sha256)),
+            second,
+            hashed: second,
+            wow_running_at_start: false,
+            wow_running_at_end: false,
+            bak_present: bak_exists(variant_dir, o.rel.as_str()),
+        };
+        if classify_capture(prev, &scans) == CaptureClass::Suspect {
+            out.insert(o.unit.clone());
+        }
+    }
+    out
+}
+
+/// The computer that wrote the (single) current head revision of a unit's graph.
+fn heads_issuer(
+    ledger: &wow_sync_core::ledger::Ledger,
+    graph: &wow_sync_core::settings::RevisionGraph,
+) -> Option<ComputerId> {
+    let h = graph.heads.first()?;
+    match ledger.record(h) {
+        Some(AuthorityRecord::SettingsRevision(r)) => Some(r.issuer.computer_id.clone()),
+        _ => None,
+    }
+}
+
+/// Removes the store copies of checkpoints that dropped out of retention, unless something still
+/// names them (another unit's capture, a displaced copy, an applied state or a removal's
+/// captured settings). Store data only; never a live file.
+fn prune_store(
+    store: &SettingsStore,
+    dropped: &BTreeSet<CheckpointRef>,
+    local: &SettingsLocal,
+    ledger: &wow_sync_core::ledger::Ledger,
+) {
+    if dropped.is_empty() {
+        return;
+    }
+    let mut retained: BTreeSet<CheckpointRef> = BTreeSet::new();
+    for u in &local.units {
+        retained.extend(u.captures.iter().copied());
+        retained.extend(u.kept.iter().map(|k| k.checkpoint));
+        retained.extend(u.last_applied);
+    }
+    for e in ledger.entries() {
+        if let Some(AuthorityRecord::Removal(rm)) = ledger.record(&e.hash) {
+            if let wow_sync_core::kinds::RemovalSettings::Checkpoints { roots } = &rm.settings {
+                for r in roots {
+                    if let RootState::Captured { checkpoint, .. } = &r.state {
+                        retained.insert(*checkpoint);
+                    }
+                }
+            }
+        }
+    }
+    let blobs_of = |cp: &CheckpointRef| -> Vec<Sha256> {
+        store
+            .get_manifest(&cp.0)
+            .ok()
+            .flatten()
+            .and_then(|b| decode::<SettingsCheckpointManifest>(&b, 64 * 1024).ok())
+            .map(|m| m.files.iter().map(|f| f.blob).collect())
+            .unwrap_or_default()
+    };
+    let in_use: BTreeSet<Sha256> = retained.iter().flat_map(blobs_of).collect();
+    for cp in dropped.iter().filter(|c| !retained.contains(c)) {
+        for b in blobs_of(cp).into_iter().filter(|b| !in_use.contains(b)) {
+            let _ = store.remove_blob(&b.0);
+        }
+        let _ = store.remove_manifest(&cp.0);
+    }
 }
 
 /// Copies the checkpoint (blob first, then manifest) to the shared folder, write-if-absent.
@@ -321,6 +473,8 @@ pub(crate) fn upload_checkpoint(
 }
 
 const BLOB_LIMIT: u64 = 256 * 1024 * 1024;
+/// Captures kept per unit (current + two previous) and displaced copies kept per unit.
+const KEEP_CAPTURES: usize = 3;
 const LOCAL_LIMIT: usize = 16 * 1024 * 1024;
 
 fn local_name(group: &GroupId) -> String {
@@ -373,6 +527,22 @@ pub struct SettingsSnapshot {
     /// `WTF\Account` folders this computer has that consent could include (V-05). Link or
     /// reparse-point entries are not offered; nothing under them is read.
     pub available_accounts: Vec<String>,
+    /// The add-ons "Share these now" would push: this computer's saved settings that differ from
+    /// the shared copy or have none. Filled by the service; the master confirmation lists them
+    /// and `Command::ShareSettingsNow { units }` pushes the chosen ones. Nothing is shared by
+    /// becoming master.
+    pub to_share: Vec<ShareOffer>,
+    /// Some computer has already shared settings revisions in this group.
+    pub group_has_shared_settings: bool,
+}
+
+/// One add-on's settings that could be shared now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShareOffer {
+    pub unit: SettingsUnit,
+    pub checkpoint: wow_sync_core::ids::CheckpointRef,
+    /// Nothing has ever been shared for this unit (otherwise it replaces the shared copy).
+    pub not_shared_yet: bool,
 }
 
 /// The account folder names under `<variant>\WTF\Account`, sorted. A missing `WTF` or `Account`
@@ -474,6 +644,16 @@ pub fn settings_snapshot(
         policy_conflict,
         paused,
         available_accounts: Vec::new(),
+        to_share: Vec::new(),
+        group_has_shared_settings: ledger.entries().any(|e| {
+            derived.status.get(&e.hash) == Some(&wow_sync_core::ledger::Status::Valid)
+                && matches!(
+                    ledger.record(&e.hash),
+                    Some(wow_sync_core::authority::AuthorityRecord::SettingsRevision(
+                        _
+                    ))
+                )
+        }),
     }
 }
 
@@ -531,6 +711,9 @@ pub fn declaring_folders(
     out
 }
 
+/// Reports (done, total, add-on name, origin computer) as settings units are applied.
+pub(crate) type ProgressTick<'a> = dyn Fn(u64, u64, Option<&str>, Option<&ComputerId>) + 'a;
+
 /// What one settings cycle needs from the service. `cap` is the saved-file size limit (32 MiB,
 /// D-26); with `None` (tests only) nothing is read, captured, published or applied.
 pub(crate) struct StepArgs<'a> {
@@ -544,7 +727,11 @@ pub(crate) struct StepArgs<'a> {
     pub decls: &'a [DeclaringFolder],
     pub game_blocks: bool,
     /// Reports progress: units done, units in all, the add-on being worked on.
-    pub tick: &'a dyn Fn(u64, u64, Option<&str>),
+    /// Progress: units done, units total, the add-on, and the computer a revision being applied
+    /// came from (None for local capture or publish).
+    pub tick: &'a ProgressTick<'a>,
+    /// The quiet wait between the two scans a changed file must survive (Q-71).
+    pub settle: &'a dyn Fn(),
 }
 
 #[derive(Debug, Default)]
@@ -657,8 +844,10 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
     let mut requests_changed = false;
     let total = units.len() as u64;
     out.considered = units.len();
+    let suspect = suspect_units(a.variant_dir, &store, &local, &scope.owned, cap, a.settle);
+    let mut dropped: BTreeSet<CheckpointRef> = BTreeSet::new();
     for (n, unit) in units.into_iter().enumerate() {
-        (a.tick)(n as u64, total, None);
+        (a.tick)(n as u64, total, None, None);
         if scope.blocked.contains(&unit) {
             continue;
         }
@@ -675,6 +864,7 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
             n as u64,
             total,
             Some(&crate::detail::strip_colour_codes(&name)),
+            None,
         );
         let Some(rel) = unit_rel(&unit, &name) else {
             continue;
@@ -687,6 +877,17 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                 Some((realm, ch)) => format!("{ch} on {realm}"),
             };
             out.facts.units.insert(unit.clone(), UnitFact::Waiting(who));
+            continue;
+        }
+        let suspect_now = suspect.contains(&unit)
+            || (owned.is_none()
+                && local
+                    .units
+                    .iter()
+                    .any(|u| u.unit == unit && !u.captures.is_empty())
+                && bak_exists(a.variant_dir, rel.as_str()));
+        if suspect_now {
+            out.facts.units.insert(unit.clone(), UnitFact::Suspect);
             continue;
         }
         let live = match owned {
@@ -710,6 +911,7 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                     last_applied: None,
                     pinned: false,
                     authority_since: None,
+                    kept: Vec::new(),
                 });
                 local.units.len() - 1
             }
@@ -733,10 +935,9 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
         dirty = true;
 
         // Becoming the authority starts a new epoch: the activation capture never publishes.
-        // The one exception is a unit nothing has ever been shared for: the owner's consent and
-        // choice of master is the explicit act that shares its existing settings, and there is
-        // no shared copy to overwrite (decision D1, run-011).
-        let mut first_share = false;
+        // Becoming master publishes nothing by itself (design §5.2, Q-75): sharing is the
+        // explicit "Share these now" / per-add-on share.
+        let mut activation = false;
         if is_authority && local.units[li].authority_since.is_none() {
             let since = eps[ei].capture_seq;
             local.units[li].authority_since = Some(since);
@@ -750,10 +951,7 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
             if let Some(l) = live {
                 local.units[li].captures.insert(0, l);
             }
-            first_share = graph.nodes.is_empty() && live.is_some() && !paused;
-            if !first_share {
-                continue;
-            }
+            activation = true;
         }
         if !is_authority && local.units[li].authority_since.is_some() {
             local.units[li].authority_since = None;
@@ -762,13 +960,17 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
 
         let previous_seq = eps[ei].capture_seq;
         let changed =
-            first_share || (live.is_some() && live != local.units[li].captures.first().copied());
-        if changed && !first_share {
+            !activation && live.is_some() && live != local.units[li].captures.first().copied();
+        if changed {
             eps[ei].capture_seq += 1;
             eps[ei].capture_kind = Some(CaptureKind::SessionEnd);
             if let Some(l) = live {
                 local.units[li].captures.insert(0, l);
-                local.units[li].captures.truncate(8);
+                if local.units[li].captures.len() > KEEP_CAPTURES {
+                    for old in local.units[li].captures.split_off(KEEP_CAPTURES) {
+                        dropped.insert(old);
+                    }
+                }
             }
         }
         let case = target_case(&TargetInput {
@@ -793,6 +995,18 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
         if !paused && use_shared.contains(&unit) {
             use_shared.retain(|u| u != &unit);
             requests_changed = true;
+        }
+        let fact = match &case {
+            Case::InSync { .. } => Some(UnitFact::InSync(heads_issuer(&plane.ledger, &graph))),
+            Case::FirstAdoption(to) if live == Some(*to) => {
+                Some(UnitFact::InSync(heads_issuer(&plane.ledger, &graph)))
+            }
+            Case::LocalDifferent(r) => Some(UnitFact::LocalDifferent(*r)),
+            Case::NoSharedCopy if live.is_some() => Some(UnitFact::NoSharedCopy),
+            _ => None,
+        };
+        if let Some(f) = fact {
+            out.facts.units.insert(unit.clone(), f);
         }
         match case {
             Case::InSync { basis } => {
@@ -870,6 +1084,10 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                         }
                         local.units[li].basis = vec![h];
                         local.units[li].last_applied = Some(cp);
+                        out.facts.units.insert(
+                            unit.clone(),
+                            UnitFact::InSync(Some(a.own.computer_id.clone())),
+                        );
                     }
                     Err(e) => out.notes.push(format!("{name}: not shared ({e})")),
                 }
@@ -884,6 +1102,43 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                         .push(format!("{name}: shared settings are not available yet"));
                     continue;
                 };
+                // The replaced copy stays restorable (RV11-01): a peer's own edit that the
+                // shared copy overwrites is pinned as a displaced copy.
+                if let Some(l) = live.filter(|l| *l != to) {
+                    let kept = &mut local.units[li].kept;
+                    if !kept.iter().any(|k| k.checkpoint == l) {
+                        kept.insert(
+                            0,
+                            KeptCopy {
+                                checkpoint: l,
+                                at_unix_ms: now_unix_ms() as u64,
+                            },
+                        );
+                        if kept.len() > KEEP_CAPTURES {
+                            for old in kept.split_off(KEEP_CAPTURES) {
+                                dropped.insert(old.checkpoint);
+                            }
+                        }
+                    }
+                }
+                let origin =
+                    plane
+                        .ledger
+                        .entries()
+                        .find_map(|e| match plane.ledger.record(&e.hash) {
+                            Some(AuthorityRecord::SettingsRevision(r))
+                                if r.checkpoint == to && r.unit == unit =>
+                            {
+                                Some(r.issuer.computer_id.clone())
+                            }
+                            _ => None,
+                        });
+                (a.tick)(
+                    n as u64,
+                    total,
+                    Some(&crate::detail::strip_colour_codes(&name)),
+                    origin.as_ref().filter(|c| **c != a.own.computer_id),
+                );
                 let op = OpId::parse(&random_id_hex()).expect("random id");
                 if let Some((nb, ns)) = manifest_file(a.provider, &to, &unit) {
                     out.apply_info.insert(
@@ -913,6 +1168,7 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
     if requests_changed {
         let _ = save_use_shared(a.state, a.group, &use_shared);
     }
+    prune_store(&store, &dropped, &local, &plane.ledger);
     if dirty {
         let _ = save_local(a.state, a.group, &local);
         let _ = epochs.save(&eps);
@@ -988,6 +1244,16 @@ pub enum SettingsUnitStatus {
     OwnedBySeveral,
     /// WoW is running; settings are neither read nor replaced until it closes.
     WaitingForWow,
+    /// The file looks incomplete or is still changing; nothing is captured, shared or replaced
+    /// until a later look finds it complete.
+    Suspect,
+    /// This computer's file differs from the shared copy and is not shared; nothing replaces it
+    /// unless the owner chooses "Use shared settings" (`Command::UseSharedSettings`).
+    LocalDifferent(LocalReason),
+    /// Nothing has been shared for this unit yet.
+    NoSharedCopy,
+    /// This computer's file is the shared copy (`SettingsUnitRow::in_sync_from`).
+    InSync,
     Active,
 }
 
@@ -1024,8 +1290,18 @@ pub struct SettingsUnitRow {
     pub size_bytes: Option<u64>,
     /// With `OwnedBySeveral`: the display names of the other add-ons that declare the variable.
     pub shared_with: Vec<String>,
+    /// With `InSync`: the computer whose copy this is, when known.
+    pub in_sync_from: Option<String>,
+    /// This computer's own copies that shared settings replaced, newest first. `checkpoint` is
+    /// what `Command::RestoreSettings` takes; `hash` repeats it and `kind`/`issuer` are
+    /// placeholders (these were never revisions). Kept as the newest three per unit, apart from
+    /// code recovery points.
+    pub local_copies: Vec<SettingsHistoryEntry>,
+    /// With `LocalDifferent`: why the difference is held.
+    pub local_reason: Option<LocalReason>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn settings_units(
     local: &SettingsLocal,
     ledger: &wow_sync_core::ledger::Ledger,
@@ -1033,6 +1309,8 @@ pub fn settings_units(
     retired_self: bool,
     cap_enabled: bool,
     facts: &SettingsFacts,
+    names: &std::collections::BTreeMap<ComputerId, String>,
+    own: &wow_sync_core::kinds::EnrollmentRef,
 ) -> Vec<SettingsUnitRow> {
     use wow_sync_core::authority::AuthorityRecord;
     use wow_sync_core::settings::{authority_for, graph_from_ledger, policy_heads, Authority};
@@ -1087,24 +1365,68 @@ pub fn settings_units(
                 SettingsUnitStatus::TooLarge
             } else if let Some(UnitFact::Several(_)) = fact {
                 SettingsUnitStatus::OwnedBySeveral
+            } else if let Some(UnitFact::Suspect) = fact {
+                SettingsUnitStatus::Suspect
             } else if paused {
                 SettingsUnitStatus::Paused
             } else if !competing.is_empty() {
                 SettingsUnitStatus::NeedsChoice
             } else if let Some(UnitFact::Waiting(_)) = fact {
                 SettingsUnitStatus::WaitingForIdentity
+            } else if let Some(UnitFact::LocalDifferent(r)) = fact {
+                SettingsUnitStatus::LocalDifferent(*r)
+            } else if let Some(UnitFact::NoSharedCopy) = fact {
+                SettingsUnitStatus::NoSharedCopy
+            } else if let Some(UnitFact::InSync(_)) = fact {
+                SettingsUnitStatus::InSync
             } else {
                 SettingsUnitStatus::Active
             };
+            let local_copies = local
+                .units
+                .iter()
+                .find(|u| u.unit == unit)
+                .map(|u| {
+                    u.kept
+                        .iter()
+                        .map(|k| SettingsHistoryEntry {
+                            hash: k.checkpoint,
+                            kind: wow_sync_core::kinds::RevisionKind::Auto,
+                            checkpoint: k.checkpoint,
+                            issuer: wow_sync_core::kinds::Issuer {
+                                computer_id: own.computer_id.clone(),
+                                enrollment_id: own.enrollment_id.clone(),
+                                issued_at_seq: 0,
+                            },
+                            written_unix_ms: k.at_unix_ms,
+                            is_head: false,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             SettingsUnitRow {
                 shown_heads: if competing.is_empty() {
                     Vec::new()
                 } else {
                     graph.heads.clone()
                 },
-                live: status == SettingsUnitStatus::Active,
+                live: matches!(
+                    status,
+                    SettingsUnitStatus::Active | SettingsUnitStatus::InSync
+                ),
                 restore_possible: actionable && !history.is_empty(),
-                can_share: actionable && latest_capture.is_some(),
+                can_share: actionable
+                    && latest_capture.is_some()
+                    && !matches!(status, SettingsUnitStatus::Suspect),
+                in_sync_from: match fact {
+                    Some(UnitFact::InSync(Some(c))) => names.get(c).cloned(),
+                    _ => None,
+                },
+                local_copies,
+                local_reason: match fact {
+                    Some(UnitFact::LocalDifferent(r)) => Some(*r),
+                    _ => None,
+                },
                 waiting_for: match fact {
                     Some(UnitFact::Waiting(w)) => Some(w.clone()),
                     _ => None,
