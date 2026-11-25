@@ -2407,14 +2407,20 @@ impl Shell {
     /// checkbox that is on only for the first adoption. Empty when there is nothing to list.
     fn share_now_block(&mut self, cx: &mut Context<Self>) -> (Vec<AnyElement>, bool) {
         let cands = crate::settings_ui::share_candidates(&self.w);
-        if cands.is_empty() {
+        let will = crate::settings_ui::will_share_line(&self.w);
+        if cands.is_empty() && will.is_none() {
             return (Vec::new(), false);
         }
         let flipped = self.expanded.contains("ss-sharenow-flip");
         let on = crate::settings_ui::share_now_on(&self.w, flipped);
-        let mut els: Vec<AnyElement> = vec![div()
+        let mut els: Vec<AnyElement> = Vec::new();
+        if let Some(line) = will {
+            els.push(div().child(line).into_any_element());
+        } else {
+            els.push(div()
             .child("Becoming the master shares nothing by itself. These add-ons' settings here differ from the group's or have no shared copy:")
-            .into_any_element()];
+            .into_any_element());
+        }
         for c in &cands {
             els.push(self.muted(c.line.clone()).into_any_element());
         }

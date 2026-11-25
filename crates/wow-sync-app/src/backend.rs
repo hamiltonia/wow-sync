@@ -66,6 +66,7 @@ pub fn dispatch(svc: &mut SliceService, a: &GroupAction) -> ActionResult {
             master: Some(master),
             exceptions,
             share_now,
+            share_when_ready,
             ..
         } => svc
             .command(a.to_command())
@@ -75,7 +76,14 @@ pub fn dispatch(svc: &mut SliceService, a: &GroupAction) -> ActionResult {
                     exceptions: exceptions.clone(),
                 })
             })
-            .and_then(|o| push_now(svc, share_now, o)),
+            .and_then(|o| push_now(svc, share_now, o))
+            .and_then(|o| {
+                if *share_when_ready {
+                    svc.command(wow_sync_runtime::Command::ShareSettingsWhenReady)
+                } else {
+                    Ok(o)
+                }
+            }),
         GroupAction::SetSettingsPolicy { share_now, .. } => svc
             .command(a.to_command())
             .and_then(|o| push_now(svc, share_now, o)),

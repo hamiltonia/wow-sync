@@ -20,7 +20,8 @@ pub enum UnitStatus {
     /// Syncing here right now.
     Active,
     InSync {
-        from: String,
+        /// None for this computer's own copy.
+        from: Option<String>,
     },
     Waiting {
         from: String,
@@ -145,7 +146,8 @@ pub fn status_text(s: &UnitStatus) -> String {
         UnitStatus::Off => "Settings not shared".into(),
         UnitStatus::Retired => "This computer is retired; its settings are not shared".into(),
         UnitStatus::Active => "Settings are syncing here".into(),
-        UnitStatus::InSync { from } => format!("Settings up to date (from {from})"),
+        UnitStatus::InSync { from: Some(from) } => format!("Settings up to date (from {from})"),
+        UnitStatus::InSync { from: None } => "Settings up to date".into(),
         UnitStatus::Waiting { from } => {
             format!("New settings from {from} will be used when WoW closes")
         }
@@ -780,6 +782,25 @@ pub fn pushes(cands: &[ShareCandidate], on: bool) -> Vec<SettingsUnit> {
     }
     cands.iter().map(|c| c.unit.clone()).collect()
 }
+/// Before settings sync is on nothing in WTF has been read, so the consent sheet can only say
+/// what will happen: the installed add-ons' settings are shared once WoW Sync has read them.
+pub fn will_share_line(w: &World) -> Option<String> {
+    if w.features.settings.enabled {
+        return None;
+    }
+    let mut names: Vec<&str> = w.addons.iter().map(|a| a.title.as_str()).collect();
+    names.sort_unstable();
+    names.dedup();
+    let list = match names.len() {
+        0 => String::new(),
+        n if n <= 6 => format!(" ({})", names.join(", ")),
+        n => format!(" ({} and {} more)", names[..6].join(", "), n - 6),
+    };
+    Some(format!(
+        "The settings of the add-ons installed on this computer{list} will be shared once WoW Sync has read them."
+    ))
+}
+
 /// "Make this computer the master": the confirmation's action. `share_now` is what the ticked
 /// "Share these now" box pushes after the policy is recorded.
 pub fn make_master_control(w: &World, share_now: Vec<SettingsUnit>) -> Control {
@@ -831,11 +852,11 @@ pub fn start_control(
             }
         }
     };
-    let push = match &master {
-        Some(m) if w.features.this_enrollment.as_ref() == Some(m) => {
-            pushes(&share_candidates(w), share_now)
-        }
-        _ => Vec::new(),
+    let this_master = matches!(&master, Some(m) if w.features.this_enrollment.as_ref() == Some(m));
+    let push = if this_master {
+        pushes(&share_candidates(w), share_now)
+    } else {
+        Vec::new()
     };
     control(
         w,
@@ -846,6 +867,7 @@ pub fn start_control(
             exceptions: w.features.settings.exceptions.clone(),
             included_accounts: listed,
             share_now: push,
+            share_when_ready: this_master && share_now,
         },
     )
 }
@@ -910,9 +932,13 @@ mod tests {
         assert_eq!(status_text(&UnitStatus::Off), "Settings not shared");
         assert_eq!(
             status_text(&UnitStatus::InSync {
-                from: "Den PC".into()
+                from: Some("Den PC".into())
             }),
             "Settings up to date (from Den PC)"
+        );
+        assert_eq!(
+            status_text(&UnitStatus::InSync { from: None }),
+            "Settings up to date"
         );
         assert_eq!(
             status_text(&UnitStatus::LocalDifferent(LocalReason::LocalChange)),
@@ -1087,7 +1113,7 @@ mod tests {
     fn restore_says_the_current_copy_is_kept() {
         let w = world();
         let mut r = unit(UnitStatus::InSync {
-            from: "Den PC".into(),
+            from: Some("Den PC".into()),
         });
         r.history = vec![Copy {
             checkpoint: Sha256([4; 32]),
@@ -1447,6 +1473,7 @@ mod tests {
                 exceptions: vec![],
                 included_accounts: all.to_vec(),
                 share_now: vec![],
+                share_when_ready: false,
             })
         );
         let den_pick = start_control(&w, &Offer::Share, &["ZED".into()], Some(1), false);
@@ -1457,6 +1484,7 @@ mod tests {
                 exceptions: vec![],
                 included_accounts: vec!["ZED".into()],
                 share_now: vec![],
+                share_when_ready: false,
             })
         );
         assert_eq!(
@@ -1478,6 +1506,7 @@ mod tests {
                 exceptions: vec![],
                 included_accounts: vec!["ACC".into()],
                 share_now: vec![],
+                share_when_ready: false,
             })
         );
         let GroupAction::StartSettings {
@@ -1491,7 +1520,8 @@ mod tests {
                 master: None,
                 exceptions: vec![],
                 included_accounts: included_accounts.clone(),
-                share_now: vec![]
+                share_now: vec![],
+                share_when_ready: false,
             }
             .to_command(),
             wow_sync_runtime::Command::EnableSettings { included_accounts }
@@ -1547,7 +1577,7 @@ mod tests {
         assert_eq!(addon_settings_line(&w, "Details"), "Not shared yet");
         w.features.settings.units = vec![
             unit(UnitStatus::InSync {
-                from: "Den PC".into(),
+                from: Some("Den PC".into()),
             }),
             {
                 let mut u = unit(UnitStatus::WaitingForIdentity {
@@ -1657,6 +1687,33 @@ mod tests {
     }
 
     #[test]
+    fn the_guided_consent_asks_to_share_once_ready_only_for_this_master() {
+        let w = offer_world(|_| {});
+        let all = ["ACC".to_string()];
+        let ready = |c: Control| match c.action {
+            Ok(GroupAction::StartSettings {
+                share_when_ready, ..
+            }) => share_when_ready,
+            other => panic!("{other:?}"),
+        };
+        assert!(first_adoption(&w));
+        assert!(ready(start_control(&w, &Offer::Share, &all, None, true)));
+        assert!(!ready(start_control(&w, &Offer::Share, &all, None, false)));
+        assert!(!ready(start_control(
+            &w,
+            &Offer::Share,
+            &all,
+            Some(1),
+            true
+        )));
+        let line = will_share_line(&w).unwrap();
+        assert!(line.contains("will be shared once WoW Sync has read them"));
+        let mut on = w.clone();
+        on.features.settings.enabled = true;
+        assert_eq!(will_share_line(&on), None);
+    }
+
+    #[test]
     fn the_guided_consent_pushes_only_when_this_computer_is_the_master() {
         let mut w = offer_world(|_| {});
         with_one_to_share(&mut w);
@@ -1742,8 +1799,12 @@ mod tests {
         assert_eq!(
             map(s).status,
             UnitStatus::InSync {
-                from: "Den PC".into()
+                from: Some("Den PC".into())
             }
+        );
+        assert_eq!(
+            map(runtime_row(S::InSync)).status,
+            UnitStatus::InSync { from: None }
         );
     }
 }

@@ -119,3 +119,12 @@ Both tiers pass.
 ### Decisions
 - Decision: drop "of" in the local-copy restore sentence. Why: label already says "copy from <day>". Reversible: yes.
 - Decision: leave D4 unchanged. Why: runtime/design question about self-source; low impact. Reversible: yes.
+
+## Re-check against runtime 9ac5912 (D1, D2, D4)
+
+Wired: `StartSettings.share_when_ready` (this computer is master and "Share these now" is ticked, on by default on first adoption) sends `Command::ShareSettingsWhenReady` after `EnableSettings` and the policy. The consent sheet says "The settings of the add-ons installed on this computer (<names>) will be shared once WoW Sync has read them." `UnitStatus::InSync.from` is now optional; the master's own copy reads "Settings up to date".
+Tests that fail without the change (mutation-checked): `the_guided_consent_asks_to_share_once_ready_only_for_this_master` (when_ready forced false fails), `the_runtimes_new_statuses_and_local_copies_reach_the_controls` (own-copy mapping given a source fails), `status_words_follow_the_design`.
+Live (fresh synthetic lab, own state): guided first adoption with the box ticked shared all units without any further click (a2-consent); Activity shows "Saved settings shared" rows with identity, hash version, size (a-activity-expanded); the master reads "Settings up to date" and Plater's 34 MB file reads "Too large to share automatically (34.0 MB)" (a-master-wording). Privacy-checked by viewing.
+Open (runtime): a settings publish from this computer shows the source text "pushed to this computer" (reason PeerPush, no source). Expected wording that says it was shared from this computer; the reason or source for a ShareSettingsWhenReady push needs to say so.
+Decision: when no settings units exist yet the consent lists installed add-on titles (at most 6, then "and N more"). Why: nothing in WTF may be read before consent. Reversible: yes.
+Decision: `share_when_ready` is only requested when this computer is the chosen master. Why: another master's copy must never be pushed from here. Reversible: yes.
