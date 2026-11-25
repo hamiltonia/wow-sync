@@ -266,6 +266,8 @@ pub fn history(state: &LocalState, limit: usize) -> Vec<HistoryItem> {
                             || r.name.eq_ignore_ascii_case(p)
                     })
             }),
+            // A publish that shared nothing new is not a change.
+            ("published", t) => t.ends_with("(0 new objects)"),
             _ => false,
         }
     };
@@ -292,6 +294,8 @@ pub enum Phase {
     Deciding,
     Staging,
     Installing,
+    /// Used instead of `Installing` while a package is being removed.
+    Removing,
     Publishing,
     Idle,
 }
