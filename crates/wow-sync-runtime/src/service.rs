@@ -504,6 +504,7 @@ pub struct SliceService {
     fault: FaultPlan,
     state: LocalState,
     seen_locally: BTreeMap<ComputerId, i64>,
+    /// Decoded provider trees reused by the observations of one pass; emptied when the pass ends.
     tree_cache: BTreeMap<Sha256, (std::time::Instant, TreeAvail)>,
     seen_seq: BTreeMap<ComputerId, u64>,
     last_publish: Option<i64>,
@@ -1981,7 +1982,7 @@ impl SliceService {
                     .files
                     .into_iter()
                     .map(|x| ScannedFile {
-                        rel_path: x.rel_path,
+                        rel_path: x.rel_path.into(),
                         size: x.size,
                         sha256: Sha256(x.sha256),
                     })
@@ -2685,15 +2686,15 @@ impl SliceService {
             if trees.contains_key(&h) {
                 continue;
             }
-            if let Some((at, a)) = self.tree_cache.get(&h) {
+            if let Some((at, w)) = self.tree_cache.get(&h) {
                 if at.elapsed().as_millis() < RECENT_SCAN_MS {
-                    trees.insert(h, a.clone());
+                    trees.insert(h, w.clone());
                     continue;
                 }
             }
             let avail = match provider.read(&layout::tree_record(&group.group_id, &h), TREE_LIMIT) {
                 Ok(b) => match decode_tree(&b, &h) {
-                    Ok(t) => TreeAvail::Ok(t),
+                    Ok(t) => TreeAvail::Ok(t.into()),
                     Err(_) => TreeAvail::Corrupt,
                 },
                 Err(e) if e.kind == FsErrorKind::CloudOnly => TreeAvail::CloudOnly,
@@ -3264,6 +3265,13 @@ impl SliceService {
     }
 
     pub fn sync_once(&mut self) -> Result<SyncReport, ServiceError> {
+        let report = self.sync_pass();
+        // Decoded trees are as large as the add-on file lists; nothing reuses them after a pass.
+        self.tree_cache.clear();
+        report
+    }
+
+    fn sync_pass(&mut self) -> Result<SyncReport, ServiceError> {
         self.share_when_ready();
         let mut report = SyncReport::default();
         self.at_risk_apply.clear();

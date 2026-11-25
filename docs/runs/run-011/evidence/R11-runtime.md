@@ -317,3 +317,78 @@ checker's before-state on this lab, so the before/after memory comparison is the
   sizes. Why: avoids re-reading manifests per query. Reversible: yes.
 - Decision: share inventory entries by `Arc` instead of compacting. Why: removes the clones
   with no change to records or logic. Reversible: yes.
+
+## Round OD-49 (memory margin)
+
+Lab: accumulated lab (113 add-ons, ~36.9k files, 200+ settings revisions incl. a 32 MiB file).
+Release builds; private working set sampled every 25 ms with per-sample window visibility.
+Each build ran 4 fresh processes in sequence on the same restored base state (runs 1-2 normal,
+run 3 `--zoom 1.5`, run 4 `--start-hidden`). Values in MiB.
+
+### Heap (dhat, 3 passes)
+
+| Stage | Open | Live after pass | Peak |
+|---|---|---|---|
+| Before this round (3c720d2 incl. clones) | - | 17.0 | 41.9 |
+| Round start (Arc inventory) | 8.6 | 17.0 | 30.8 |
+| + `Arc<str>` paths, direct tree decode | 8.6 | 18.1 | 25.4 |
+| + compact hash cache | 7.1 | 17.5 | 24.4-25.3 |
+| + tree cache cleared per pass | 7.1 | 12.5 | 24.4-25.3 |
+
+### Memory
+
+| Build | Run | Visible peak | Hidden-after-UI peak | Hidden idle after UI | Hidden-only (start-hidden) peak |
+|---|---|---|---|---|---|
+| pre-round 3c720d2 | 1 | 101.1 | 97.9 | 91.1 | |
+| | 2 | 99.6 | 99.1 | 90.9 | |
+| | 3 (zoom 1.5) | 101.8 | 100.4 | 93.9 | |
+| | 4 hidden | | | 75.2 | 83.3 |
+| round start d396fdb | 1 | 93.5 | 88.5 | 83.7 | |
+| | 2 | 92.3 | 92.1 | 88.5 | |
+| | 3 (zoom 1.5) | 92.2 | 90.9 | 81.5 | |
+| | 4 hidden | | | 65.8 | 74.3 |
+| current | 1 | 81.9 | 81.1 | 74.7 | |
+| | 2 | 81.8 | 81.2 | 75.7 | |
+| | 3 (zoom 1.5) | 82.2 | 80.6 | 75.9 | |
+| | 4 hidden | | | 59.3 | 66.9 |
+
+Result: hidden-after-UI peak 80.6-81.2 (target 80: missed by about 1 MiB); about 10 MiB below
+round start and 19 MiB below pre-round; no growth across runs (81.1/81.2/80.6). Hidden-only 66.9.
+One earlier first run on the same build read 70.2 (hidden-after-UI), so run-to-run spread is
+around 10 MiB; I report the series above. The remaining gap is the renderer plus the ~5-6 MiB
+hash-cache table; further cuts would need dropping the table between passes (slower) or
+cloning less in `observe_world_ctl` (~3.8 MiB at peak).
+
+### Speed (warm unchanged pass, 5 passes after warm-up, median ms)
+
+| Build | Median |
+|---|---|
+| pre-round 3c720d2 | 2643 |
+| round start d396fdb | 2611 |
+| current | 2669 |
+
+No speed regression (within 2%). v0.3.2 was not re-run; the R10 3x gate figure from R10-check
+is unchanged. (The pre-round build's first pass took 422 s only because the freshly copied 8 GB
+base was cold on disk.)
+
+### Tests (new)
+
+- `records::tests::tree_records_decode_directly_with_the_same_bytes_and_the_same_rejections`
+  (decoded value and rejections equal the Value path; duplicate keys now rejected).
+- `records::tests::a_scanned_path_and_its_inventory_entry_share_one_allocation` (ptr_eq; fails
+  if paths are copied per entry).
+- `hash_cache::tests::entries_round_trip_through_the_file_and_an_out_of_range_mtime_is_never_a_hit`.
+  I did not separately revert the guards this round; the ptr_eq test fails by construction on a
+  copying implementation.
+
+### Decisions
+
+- Decision: `RelPath` is `Arc<str>`, shared with scan entries. Why: one allocation per path
+  instead of three. Reversible: yes. Record bytes unchanged.
+- Decision: tree records decode directly into the type, no `serde_json::Value`. Why: removes a
+  transient multi-copy. Note: a repeated key in a tree record is now an error (was last-wins).
+  Reversible: yes.
+- Decision: compact hash-cache entry (i64 mtime, u32 generation, boxed key). Why: smaller
+  resident table; an out-of-range mtime is a cache miss. File format unchanged. Reversible: yes.
+- Decision: decoded tree cache is cleared at the end of each pass. Why: frees ~5 MiB live;
+  a Weak cache re-decoded trees (+45% allocation) and was dropped. Reversible: yes.

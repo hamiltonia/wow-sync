@@ -78,6 +78,42 @@ pub fn encode<T: Record>(r: &T) -> Vec<u8> {
     out.into_bytes()
 }
 
+/// Like decode, but parses straight into T with no intermediate JSON tree, for records with
+/// many entries. Only the envelope is read twice. A repeated key is an error here, not last-wins.
+fn decode_direct<T: Record>(bytes: &[u8], limit: usize) -> Result<T, RecordError> {
+    if bytes.len() > limit {
+        return Err(RecordError::TooLarge);
+    }
+    #[derive(Deserialize)]
+    struct Head {
+        schema: Option<serde_json::Value>,
+    }
+    let head: Head = serde_json::from_slice(bytes).map_err(|e| RecordError::Json(e.to_string()))?;
+    let schema = match head.schema {
+        Some(serde_json::Value::String(s)) => s,
+        _ => return Err(RecordError::SchemaMissing),
+    };
+    let found = check_schema::<T>(schema)?;
+    let rec: T = serde_json::from_slice(bytes).map_err(|e| RecordError::Json(e.to_string()))?;
+    rec.validate().map_err(RecordError::Invalid)?;
+    rec.validate_major(found).map_err(RecordError::Invalid)?;
+    Ok(rec)
+}
+
+fn check_schema<T: Record>(schema: String) -> Result<u32, RecordError> {
+    let Some((name, major)) = schema.rsplit_once('/') else {
+        return Err(RecordError::UnknownSchema(schema));
+    };
+    if name != T::SCHEMA {
+        return Err(RecordError::UnknownSchema(schema));
+    }
+    match major.parse::<u32>() {
+        Ok(m) if accepts_major::<T>(m) => Ok(m),
+        Ok(m) => Err(RecordError::UnsupportedMajor(m)),
+        Err(_) => Err(RecordError::UnknownSchema(schema)),
+    }
+}
+
 pub fn decode<T: Record>(bytes: &[u8], limit: usize) -> Result<T, RecordError> {
     if bytes.len() > limit {
         return Err(RecordError::TooLarge);
@@ -338,7 +374,7 @@ record!(FolderTreeRecord, "wowsync.folder-tree", 32 * MIB, |self| {
 
 /// `name_hash` is the hash in the object's file name; it must equal the recomputed tree hash.
 pub fn decode_tree(bytes: &[u8], name_hash: &Sha256) -> Result<FolderTreeRecord, RecordError> {
-    let rec: FolderTreeRecord = decode(bytes, FolderTreeRecord::LIMIT)?;
+    let rec: FolderTreeRecord = decode_direct(bytes, FolderTreeRecord::LIMIT)?;
     if &rec.tree != name_hash {
         return Err(RecordError::Invalid(
             "tree hash does not match its name".into(),
@@ -1355,6 +1391,61 @@ mod tests {
             3,
             &testkit::inventory(vec![testkit::addon("Suite", Some("1.0"), "a")]),
         )
+    }
+
+    fn tree_record() -> FolderTreeRecord {
+        let mut files: Vec<FileEntry> = ["a.lua", "Libs/b.lua", "z.toc"]
+            .iter()
+            .map(|p| FileEntry {
+                path: crate::paths::validate_rel_path(p).unwrap(),
+                size: 3,
+                sha256: Sha256([7; 32]),
+            })
+            .collect();
+        files.sort_by(|a, b| a.path.cmp(&b.path));
+        FolderTreeRecord {
+            tree: crate::hash::tree_hash(&files),
+            files,
+        }
+    }
+
+    #[test]
+    fn tree_records_decode_directly_with_the_same_bytes_and_the_same_rejections() {
+        let rec = tree_record();
+        let bytes = encode(&rec);
+        assert!(bytes.starts_with(b"{\n  \"schema\": \"wowsync.folder-tree/1\",\n"));
+        assert_eq!(decode_tree(&bytes, &rec.tree).unwrap(), rec);
+        assert_eq!(decode::<FolderTreeRecord>(&bytes, 1 << 20).unwrap(), rec);
+        let text = String::from_utf8(bytes).unwrap();
+        let no_schema = text.replace("\"schema\"", "\"other\"");
+        assert!(matches!(
+            decode_tree(no_schema.as_bytes(), &rec.tree),
+            Err(RecordError::SchemaMissing)
+        ));
+        let future = text.replace("folder-tree/1", "folder-tree/99");
+        assert!(matches!(
+            decode_tree(future.as_bytes(), &rec.tree),
+            Err(RecordError::UnsupportedMajor(99))
+        ));
+        let other = text.replace("folder-tree/1", "folder-trees/1");
+        assert!(matches!(
+            decode_tree(other.as_bytes(), &rec.tree),
+            Err(RecordError::UnknownSchema(_))
+        ));
+        let evil = text.replace("Libs/b.lua", "../b.lua");
+        assert!(decode_tree(evil.as_bytes(), &rec.tree).is_err());
+        assert!(decode_tree(b"[1]", &rec.tree).is_err());
+        assert!(decode_tree(text.as_bytes(), &Sha256([0; 32])).is_err());
+    }
+
+    #[test]
+    fn a_scanned_path_and_its_inventory_entry_share_one_allocation() {
+        let shared: std::sync::Arc<str> = "Libs/b.lua".into();
+        let p = crate::paths::RelPath::share(&shared).unwrap();
+        assert_eq!(p.as_str(), "Libs/b.lua");
+        assert!(std::ptr::eq(p.as_str().as_ptr(), shared.as_ptr()));
+        let bad: std::sync::Arc<str> = "../x".into();
+        assert!(crate::paths::RelPath::share(&bad).is_err());
     }
 
     #[test]

@@ -20,21 +20,22 @@ const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Estimated heap cost of one entry: the key string, the entry and the table slot.
 fn entry_cost(key: &str) -> usize {
-    key.len() + 16 + std::mem::size_of::<String>() + std::mem::size_of::<Entry>() + 16
+    key.len() + 16 + std::mem::size_of::<Box<str>>() + std::mem::size_of::<Entry>() + 16
 }
 
+// Compact on purpose: one slot per file of a large install stays resident.
 struct Entry {
     size: u64,
-    mtime_ns: i128,
+    mtime_ns: i64,
     sha256: [u8; 32],
-    generation: u64,
+    generation: u32,
 }
 
 #[derive(Default)]
 struct Inner {
-    map: HashMap<String, Entry>,
+    map: HashMap<Box<str>, Entry>,
     bytes: usize,
-    generation: u64,
+    generation: u32,
     dirty: bool,
 }
 
@@ -134,7 +135,8 @@ impl HashCache {
     }
 
     pub(crate) fn begin(&self) {
-        self.lock().generation += 1;
+        let mut g = self.lock();
+        g.generation = g.generation.wrapping_add(1);
     }
 
     /// `routine`: a read for a user command, which never acts on the "check all files" request.
@@ -149,6 +151,10 @@ impl HashCache {
             self.misses.fetch_add(1, Ordering::Relaxed);
             return None;
         }
+        let Ok(mtime_ns) = i64::try_from(mtime_ns) else {
+            self.misses.fetch_add(1, Ordering::Relaxed);
+            return None;
+        };
         let mut g = self.lock();
         let generation = g.generation;
         let hit = match g.map.get_mut(key) {
@@ -175,6 +181,9 @@ impl HashCache {
     }
 
     pub(crate) fn store(&self, key: &str, size: u64, mtime_ns: i128, sha256: [u8; 32]) {
+        let Ok(mtime_ns) = i64::try_from(mtime_ns) else {
+            return;
+        };
         if key.contains(['\t', '\n', '\r']) {
             return;
         }
@@ -189,7 +198,7 @@ impl HashCache {
             g.bytes += cost;
         }
         g.map.insert(
-            key.to_string(),
+            key.into(),
             Entry {
                 size,
                 mtime_ns,
@@ -235,8 +244,8 @@ impl HashCache {
     }
 }
 
-fn render(map: &HashMap<String, Entry>) -> String {
-    let mut keys: Vec<&String> = map.keys().collect();
+fn render(map: &HashMap<Box<str>, Entry>) -> String {
+    let mut keys: Vec<&Box<str>> = map.keys().collect();
     keys.sort();
     let mut out = String::with_capacity(map.len() * 120 + 32);
     out.push_str(MAGIC);
@@ -253,7 +262,7 @@ fn render(map: &HashMap<String, Entry>) -> String {
     out
 }
 
-fn parse(text: &str) -> HashMap<String, Entry> {
+fn parse(text: &str) -> HashMap<Box<str>, Entry> {
     let mut lines = text.lines();
     if lines.next() != Some(MAGIC) {
         return HashMap::new();
@@ -268,7 +277,7 @@ fn parse(text: &str) -> HashMap<String, Entry> {
             return HashMap::new();
         };
         let (Ok(size), Ok(mtime_ns), Some(sha256)) =
-            (size.parse::<u64>(), mtime.parse::<i128>(), unhex(hex))
+            (size.parse::<u64>(), mtime.parse::<i64>(), unhex(hex))
         else {
             return HashMap::new();
         };
@@ -277,7 +286,7 @@ fn parse(text: &str) -> HashMap<String, Entry> {
             break;
         }
         map.insert(
-            key.to_string(),
+            key.into(),
             Entry {
                 size,
                 mtime_ns,
@@ -329,6 +338,22 @@ mod tests {
         let reopened = HashCache::open(&dir, "scope");
         assert_eq!(reopened.len(), c.len());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn entries_round_trip_through_the_file_and_an_out_of_range_mtime_is_never_a_hit() {
+        let tmp = crate::testkit::TempDir::new();
+        let dir = tmp.path().to_path_buf();
+        let c = HashCache::open(&dir, "scope");
+        c.begin();
+        c.store("AddOns/A/a.lua", 5, -7, [3; 32]);
+        c.store("AddOns/A/far.lua", 5, i128::MAX, [4; 32]);
+        c.finish(true, false);
+        let again = HashCache::open(&dir, "scope");
+        assert_eq!(again.len(), 1);
+        assert_eq!(again.lookup("AddOns/A/a.lua", 5, -7, true), Some([3; 32]));
+        assert_eq!(again.lookup("AddOns/A/a.lua", 5, -8, true), None);
+        assert_eq!(again.lookup("AddOns/A/far.lua", 5, i128::MAX, true), None);
     }
 
     #[test]

@@ -1070,6 +1070,9 @@ tests = [
     "e2e::tests::the_snapshot_units_carry_the_heads_choose_takes_and_the_history_restore_takes",
     "e2e::tests::two_addons_declaring_one_variable_with_different_bytes_are_owned_by_several_from_the_first_pass",
     "e2e::tests::the_diagnostics_export_with_settings_on_names_no_account_realm_character_or_path",
+    "records::tests::tree_records_decode_directly_with_the_same_bytes_and_the_same_rejections",
+    "records::tests::a_scanned_path_and_its_inventory_entry_share_one_allocation",
+    "hash_cache::tests::entries_round_trip_through_the_file_and_an_out_of_range_mtime_is_never_a_hit",
 ]
 
 [[case]]
