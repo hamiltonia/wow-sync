@@ -3546,6 +3546,10 @@ mod tests {
     fn settings_pair(lab: &Lab, a_is_master: bool, cap: Option<u64>) -> (Pc, Pc, GroupId) {
         let mut a = lab.pc("a");
         let mut b = lab.pc("b");
+        // WoW creates the account folder at first login; the app never does.
+        for pc in [&a, &b] {
+            std::fs::create_dir_all(pc.install.variant_dir.join("WTF/Account/ACC")).unwrap();
+        }
         a.addon_with("Alpha", "alpha-v1", SV_TOC);
         b.addon_with("Alpha", "alpha-v1", SV_TOC);
         let g = a.create();
@@ -3673,8 +3677,9 @@ mod tests {
         );
         assert_eq!(
             read_wtf(&b, "Alpha").as_deref(),
-            Some("AlphaDB = { peer = true }\n"),
-            "the peer restores its own capture"
+            Some("AlphaDB = { v = 1 }\n"),
+            "the peer restores what it held at the uninstall: the master's shared copy, which \
+             replaced its own routine edit"
         );
         synced(&mut a);
         assert_eq!(a.read("Alpha/main.lua").as_deref(), Some("alpha-v1"));
@@ -4257,8 +4262,8 @@ mod tests {
         synced(&mut a);
         assert_eq!(
             a.svc.settings_history(&alpha_unit()).len(),
-            1,
-            "a non-master's routine write publishes nothing"
+            2,
+            "a non-master's routine write publishes nothing (the master's two revisions only)"
         );
         write_wtf(&a, "Alpha", "AlphaDB = { v = 3 }\n");
         synced(&mut a);
@@ -4477,7 +4482,7 @@ mod tests {
         );
         assert_eq!(
             b.svc.settings_history(&alpha_unit()).len(),
-            2,
+            3,
             "resuming wrote no revision"
         );
         assert_eq!(
@@ -4625,7 +4630,7 @@ mod tests {
         );
         assert_eq!(
             b.svc.settings_history(&unit).len(),
-            3,
+            4,
             "refusals wrote nothing"
         );
         assert!(matches!(
@@ -4664,7 +4669,7 @@ mod tests {
         assert_eq!(calm[0].status, S::Active);
         assert!(calm[0].live && calm[0].competing.is_empty() && calm[0].shown_heads.is_empty());
         assert!(calm[0].can_share && calm[0].latest_capture.is_some());
-        assert_eq!(calm[0].history.len(), 1);
+        assert_eq!(calm[0].history.len(), 2);
 
         let mine = stored_checkpoint(&b, &unit, b"AlphaDB = { mine = true }\n");
         let out = b
@@ -4770,7 +4775,7 @@ mod tests {
     fn the_snapshot_units_offer_no_actionable_heads_when_disabled_or_retired() {
         use crate::settings_cycle::SettingsUnitStatus as S;
         let lab = Lab::new();
-        // The production cap is None (Q-77): nothing is actionable.
+        // With no size cap (tests only) nothing is actionable.
         let (mut a, mut b, _g) = settings_pair(&lab, true, None);
         write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
         synced(&mut a);
@@ -4825,8 +4830,8 @@ mod tests {
             Some("AlphaDB = { v = 3 }\n")
         );
         let history = b.svc.settings_history(&unit);
-        assert_eq!(history.len(), 2);
-        let earlier = history[0].checkpoint;
+        assert_eq!(history.len(), 3);
+        let earlier = history[1].checkpoint;
         let ghost = sha256(b"no such copy");
         assert_eq!(
             b.svc.command(Command::RestoreSettings {
@@ -4835,7 +4840,7 @@ mod tests {
             }),
             Err(CommandError::UnknownCheckpoint(ghost))
         );
-        assert_eq!(b.svc.settings_history(&unit).len(), 2);
+        assert_eq!(b.svc.settings_history(&unit).len(), 3);
         assert!(matches!(
             b.svc.command(Command::RestoreSettings {
                 unit: unit.clone(),
@@ -4876,6 +4881,7 @@ mod tests {
         a.svc.set_settings_cap_for_tests(Some(1 << 20));
         b.svc.set_settings_cap_for_tests(Some(1 << 20));
         let master = ref_of(&a);
+        std::fs::create_dir_all(b.install.variant_dir.join("WTF/Account/ACC")).unwrap();
         a.svc
             .command(Command::SetSettingsPolicy {
                 master: Some(master),
@@ -7066,8 +7072,11 @@ mod tests {
             assert_eq!(got.source, ChangeSource::Computer("a".into()));
             assert_eq!(got.reason, ChangeReason::SettingsMaster);
             assert_eq!(got.name, "Alpha settings");
-            assert_eq!(got.files.changed, 1);
-            assert!(got.paths.is_empty());
+            assert_eq!(got.files.added, 1);
+            assert!(matches!(&got.new_version, VersionLabel::ContentId(s) if s.len() == 8));
+            assert_eq!(got.old_version, VersionLabel::New);
+            assert_eq!(got.byte_delta, "AlphaDB = { v = 2 }\n".len() as i64);
+            assert_eq!(got.identity.as_deref(), Some("account-wide"));
             assert!(!format!("{got:?}").contains("ACC"));
             let on_a = changes(&a);
             let sent = on_a
@@ -7075,6 +7084,23 @@ mod tests {
                 .find(|c| c.kind == ChangeKind::SettingsPublished)
                 .unwrap_or_else(|| panic!("{on_a:?}"));
             assert_eq!(sent.source, ChangeSource::ThisComputer);
+            let all: Vec<_> = on_a
+                .iter()
+                .filter(|c| c.kind == ChangeKind::SettingsPublished)
+                .collect();
+            assert_eq!(all.len(), 2, "the first share and the change: {on_a:?}");
+            for c in &all {
+                assert!(
+                    matches!(&c.new_version, VersionLabel::ContentId(s) if s.len() == 8),
+                    "{c:?}"
+                );
+                assert_eq!(c.identity.as_deref(), Some("account-wide"));
+            }
+            assert!(all.iter().any(|c| c.old_version == VersionLabel::New));
+            assert!(all.iter().any(|c| {
+                matches!(&c.old_version, VersionLabel::ContentId(s) if s.len() == 8)
+                    && c.byte_delta == 0
+            }));
         }
 
         #[test]

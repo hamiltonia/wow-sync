@@ -62,6 +62,21 @@ pub(crate) fn phase(hub: &ProgressHub, pass_id: u64, p: Phase) {
     hub.emit(blank(pass_id, p));
 }
 
+/// Settings progress in units; `current` is the add-on whose settings are being looked at.
+pub(crate) fn settings_step(
+    hub: &ProgressHub,
+    pass_id: u64,
+    done: u64,
+    total: u64,
+    current: Option<&str>,
+) {
+    let mut e = blank(pass_id, Phase::Settings);
+    e.items_done = done;
+    e.items_total = total.max(done);
+    e.current = current.map(str::to_string);
+    hub.emit_throttled(e);
+}
+
 /// Polls a scan's file counter and reports it while a scan runs.
 pub(crate) struct ScanTicker {
     stop: Arc<AtomicBool>,

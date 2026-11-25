@@ -211,6 +211,15 @@ pub(crate) fn manifest_blob(
     checkpoint: &CheckpointRef,
     unit: &SettingsUnit,
 ) -> Option<Sha256> {
+    manifest_file(provider, checkpoint, unit).map(|(blob, _)| blob)
+}
+
+/// The file's content hash and size in a checkpoint of a single-file unit.
+pub(crate) fn manifest_file(
+    provider: &ProviderRoot,
+    checkpoint: &CheckpointRef,
+    unit: &SettingsUnit,
+) -> Option<(Sha256, u64)> {
     let bytes = provider
         .read(&layout::settings_manifest(checkpoint), 64 * 1024)
         .ok()?;
@@ -221,11 +230,57 @@ pub(crate) fn manifest_blob(
     if &m.unit != unit {
         return None;
     }
-    let blob = m.files.first()?.blob;
+    let first = m.files.first()?;
+    let (blob, size) = (first.blob, first.size);
     provider
         .open_read(&layout::settings_blob(&blob), BLOB_LIMIT)
         .ok()?;
-    Some(blob)
+    Some((blob, size))
+}
+
+/// What one settings change replaced and brought, for its history record.
+#[derive(Debug, Clone)]
+pub(crate) struct SettingsChangeInfo {
+    pub old: Option<(Sha256, u64)>,
+    pub new: (Sha256, u64),
+    /// "account-wide" or the character, in plain words. Shown in the Activity detail only.
+    pub identity: String,
+}
+
+pub(crate) fn identity_text(unit: &SettingsUnit) -> String {
+    match unit.identity.realm_character() {
+        None => "account-wide".into(),
+        Some((realm, ch)) => format!("{ch} on {realm}"),
+    }
+}
+
+/// Why units of this computer are not syncing, as of the last cycle. Never logged.
+#[derive(Debug, Clone, Default)]
+pub struct SettingsFacts {
+    /// The game was running at the last cycle: settings were neither read nor replaced.
+    pub wow_running: bool,
+    pub units: std::collections::BTreeMap<SettingsUnit, UnitFact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnitFact {
+    /// The account or character folder is missing here; the identity in plain words.
+    Waiting(String),
+    TooLarge(u64),
+    /// The other add-ons that declare the same saved variables.
+    Several(Vec<String>),
+}
+
+/// Whether the account (and character) folder of `identity` exists on this computer.
+fn identity_present(variant_dir: &Path, unit: &SettingsUnit) -> bool {
+    let Ok(Some(scope)) = WtfScope::open(variant_dir, false) else {
+        return false;
+    };
+    let mut rel = format!("Account/{}", unit.identity.account_name());
+    if let Some((realm, ch)) = unit.identity.realm_character() {
+        rel = format!("{rel}/{realm}/{ch}");
+    }
+    scope.root().check_components(&rel).is_ok()
 }
 
 /// Copies the checkpoint (blob first, then manifest) to the shared folder, write-if-absent.
@@ -476,8 +531,8 @@ pub fn declaring_folders(
     out
 }
 
-/// What one settings cycle needs from the service. `cap` is the approved saved-file size; with no
-/// approved value (`None`) nothing is read, captured, published or applied (Q-77).
+/// What one settings cycle needs from the service. `cap` is the saved-file size limit (32 MiB,
+/// D-26); with `None` (tests only) nothing is read, captured, published or applied.
 pub(crate) struct StepArgs<'a> {
     pub cap: Option<u64>,
     pub state: &'a LocalState,
@@ -488,14 +543,21 @@ pub(crate) struct StepArgs<'a> {
     pub inventory: &'a wow_sync_core::inventory::Inventory,
     pub decls: &'a [DeclaringFolder],
     pub game_blocks: bool,
+    /// Reports progress: units done, units in all, the add-on being worked on.
+    pub tick: &'a dyn Fn(u64, u64, Option<&str>),
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct StepOutcome {
     pub applies: Vec<PackageApply>,
     pub notes: Vec<String>,
-    /// Revisions this cycle wrote, in order.
-    pub published: Vec<Sha256>,
+    /// Revisions this cycle wrote, in order, with what each replaced and brought.
+    pub published: Vec<(Sha256, SettingsChangeInfo)>,
+    /// What each planned apply replaces and brings, by operation.
+    pub apply_info: std::collections::BTreeMap<OpId, SettingsChangeInfo>,
+    pub facts: SettingsFacts,
+    /// Units this cycle looked at, for the progress line.
+    pub considered: usize,
 }
 
 fn unit_rel(unit: &SettingsUnit, name: &str) -> Option<wow_sync_core::paths::SettingsPath> {
@@ -542,6 +604,43 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
             .push("the settings store could not be opened".into());
         return out;
     };
+    let display = |k: &wow_sync_core::paths::FolderKey| {
+        a.inventory
+            .folders
+            .iter()
+            .find(|f| &f.key == k)
+            .map_or_else(
+                || k.as_str().to_string(),
+                |f| crate::detail::strip_colour_codes(&f.name),
+            )
+    };
+    for d in &scope.diagnoses {
+        match d {
+            wow_sync_core::settings::ScopeDiagnosis::SharedVariable { folders, .. } => {
+                for u in scope.blocked.iter().filter(|u| folders.contains(&u.folder)) {
+                    let others = folders
+                        .iter()
+                        .filter(|f| **f != u.folder)
+                        .map(&display)
+                        .collect();
+                    out.facts.units.insert(u.clone(), UnitFact::Several(others));
+                }
+            }
+            wow_sync_core::settings::ScopeDiagnosis::TooLarge { file, size } => {
+                for u in &scope.blocked {
+                    let same = unit_rel(u, &display(&u.folder))
+                        .is_some_and(|r| r.as_str().eq_ignore_ascii_case(file));
+                    if same {
+                        out.facts
+                            .units
+                            .entry(u.clone())
+                            .or_insert(UnitFact::TooLarge(*size));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
     let epochs = EpochStore::new(a.state, a.group.clone());
     let mut eps = epochs.load();
     let mut units: BTreeSet<SettingsUnit> = scope.owned.iter().map(|o| o.unit.clone()).collect();
@@ -556,7 +655,10 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
     let mut dirty = false;
     let mut use_shared = load_use_shared(a.state, a.group);
     let mut requests_changed = false;
-    for unit in units {
+    let total = units.len() as u64;
+    out.considered = units.len();
+    for (n, unit) in units.into_iter().enumerate() {
+        (a.tick)(n as u64, total, None);
         if scope.blocked.contains(&unit) {
             continue;
         }
@@ -569,10 +671,24 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
         else {
             continue;
         };
+        (a.tick)(
+            n as u64,
+            total,
+            Some(&crate::detail::strip_colour_codes(&name)),
+        );
         let Some(rel) = unit_rel(&unit, &name) else {
             continue;
         };
         let owned = scope.owned.iter().find(|o| o.unit == unit);
+        if owned.is_none() && !identity_present(a.variant_dir, &unit) {
+            // The app never creates an account, realm or character folder: WoW does.
+            let who = match unit.identity.realm_character() {
+                None => "this account".to_string(),
+                Some((realm, ch)) => format!("{ch} on {realm}"),
+            };
+            out.facts.units.insert(unit.clone(), UnitFact::Waiting(who));
+            continue;
+        }
         let live = match owned {
             Some(o) => match capture_unit(a.variant_dir, &store, o, cap) {
                 Ok(c) => Some(c),
@@ -617,6 +733,10 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
         dirty = true;
 
         // Becoming the authority starts a new epoch: the activation capture never publishes.
+        // The one exception is a unit nothing has ever been shared for: the owner's consent and
+        // choice of master is the explicit act that shares its existing settings, and there is
+        // no shared copy to overwrite (decision D1, run-011).
+        let mut first_share = false;
         if is_authority && local.units[li].authority_since.is_none() {
             let since = eps[ei].capture_seq;
             local.units[li].authority_since = Some(since);
@@ -630,7 +750,10 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
             if let Some(l) = live {
                 local.units[li].captures.insert(0, l);
             }
-            continue;
+            first_share = graph.nodes.is_empty() && live.is_some() && !paused;
+            if !first_share {
+                continue;
+            }
         }
         if !is_authority && local.units[li].authority_since.is_some() {
             local.units[li].authority_since = None;
@@ -638,8 +761,9 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
         }
 
         let previous_seq = eps[ei].capture_seq;
-        let changed = live.is_some() && live != local.units[li].captures.first().copied();
-        if changed {
+        let changed =
+            first_share || (live.is_some() && live != local.units[li].captures.first().copied());
+        if changed && !first_share {
             eps[ei].capture_seq += 1;
             eps[ei].capture_kind = Some(CaptureKind::SessionEnd);
             if let Some(l) = live {
@@ -726,7 +850,24 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                     Ok(h) => {
                         *next_seq += 1;
                         written = true;
-                        out.published.push(h);
+                        let old = local.units[li].basis.iter().find_map(|b| {
+                            match plane.ledger.record(b) {
+                                Some(AuthorityRecord::SettingsRevision(r)) => {
+                                    manifest_file(a.provider, &r.checkpoint, &unit)
+                                }
+                                _ => None,
+                            }
+                        });
+                        if let Some(o) = owned {
+                            out.published.push((
+                                h,
+                                SettingsChangeInfo {
+                                    old,
+                                    new: (o.sha256, o.size),
+                                    identity: identity_text(&unit),
+                                },
+                            ));
+                        }
                         local.units[li].basis = vec![h];
                         local.units[li].last_applied = Some(cp);
                     }
@@ -744,6 +885,16 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                     continue;
                 };
                 let op = OpId::parse(&random_id_hex()).expect("random id");
+                if let Some((nb, ns)) = manifest_file(a.provider, &to, &unit) {
+                    out.apply_info.insert(
+                        op.clone(),
+                        SettingsChangeInfo {
+                            old: owned.map(|o| (o.sha256, o.size)),
+                            new: (nb, ns),
+                            identity: identity_text(&unit),
+                        },
+                    );
+                }
                 out.applies.push(plan_settings_apply(
                     op,
                     owned,
@@ -816,7 +967,7 @@ pub fn settings_history(
 pub enum SettingsUnitStatus {
     /// This computer is retired: it records no settings intent.
     Retired,
-    /// No consent on this computer (or no approved size cap, Q-77): nothing is read or applied.
+    /// No consent on this computer (or no size cap): nothing is read or applied.
     Disabled,
     /// A policy exception keeps this folder's settings on each computer.
     NotShared,
@@ -881,6 +1032,7 @@ pub fn settings_units(
     derived: &wow_sync_core::ledger::Derived,
     retired_self: bool,
     cap_enabled: bool,
+    facts: &SettingsFacts,
 ) -> Vec<SettingsUnitRow> {
     use wow_sync_core::authority::AuthorityRecord;
     use wow_sync_core::settings::{authority_for, graph_from_ledger, policy_heads, Authority};
@@ -891,6 +1043,7 @@ pub fn settings_units(
             units.insert(r.unit.clone());
         }
     }
+    units.extend(facts.units.keys().cloned());
     let heads = policy_heads(ledger, derived);
     units
         .into_iter()
@@ -919,6 +1072,7 @@ pub fn settings_units(
             } else {
                 Vec::new()
             };
+            let fact = facts.units.get(&unit);
             let status = if retired_self {
                 SettingsUnitStatus::Retired
             } else if !local.consent || !cap_enabled {
@@ -927,10 +1081,18 @@ pub fn settings_units(
                 SettingsUnitStatus::NotShared
             } else if authority == Authority::Conflict {
                 SettingsUnitStatus::PolicyConflict
+            } else if facts.wow_running {
+                SettingsUnitStatus::WaitingForWow
+            } else if let Some(UnitFact::TooLarge(_)) = fact {
+                SettingsUnitStatus::TooLarge
+            } else if let Some(UnitFact::Several(_)) = fact {
+                SettingsUnitStatus::OwnedBySeveral
             } else if paused {
                 SettingsUnitStatus::Paused
             } else if !competing.is_empty() {
                 SettingsUnitStatus::NeedsChoice
+            } else if let Some(UnitFact::Waiting(_)) = fact {
+                SettingsUnitStatus::WaitingForIdentity
             } else {
                 SettingsUnitStatus::Active
             };
@@ -943,9 +1105,18 @@ pub fn settings_units(
                 live: status == SettingsUnitStatus::Active,
                 restore_possible: actionable && !history.is_empty(),
                 can_share: actionable && latest_capture.is_some(),
-                waiting_for: None,
-                size_bytes: None,
-                shared_with: Vec::new(),
+                waiting_for: match fact {
+                    Some(UnitFact::Waiting(w)) => Some(w.clone()),
+                    _ => None,
+                },
+                size_bytes: match fact {
+                    Some(UnitFact::TooLarge(s)) => Some(*s),
+                    _ => None,
+                },
+                shared_with: match fact {
+                    Some(UnitFact::Several(v)) => v.clone(),
+                    _ => Vec::new(),
+                },
                 latest_capture,
                 competing,
                 history,

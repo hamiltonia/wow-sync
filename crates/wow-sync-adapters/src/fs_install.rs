@@ -54,7 +54,7 @@ pub enum Slot<'a> {
 }
 
 const JOURNAL_LIMIT: u64 = 4 * 1024 * 1024;
-/// Upper bound for hashing one saved-settings file; the product cap is Q-77 (pending).
+/// Upper bound for hashing one saved-settings file; the product cap is 32 MiB (D-26).
 const SETTINGS_READ_LIMIT: u64 = 256 * 1024 * 1024;
 
 /// A saved-settings file location (contracts.md §2.2): the live file, its staged copy or the
@@ -583,6 +583,13 @@ impl InstallArea {
             Err(e) => return Err(e),
         }
         let parent_rel = trel.rsplit_once('/').map(|x| x.0).unwrap_or("");
+        if matches!(to, SettingsSlot::Live { .. }) {
+            // Only the SavedVariables folder may be created; the account, realm and
+            // character folders must already exist on this computer.
+            if let Some((owner, _)) = parent_rel.rsplit_once('/') {
+                tr.check_components(owner)?;
+            }
+        }
         tr.ensure_dir(parent_rel)?;
         std::fs::rename(&src, &dst).map_err(|e| FsError::from_io(&src, &e))
     }
@@ -660,7 +667,28 @@ mod tests {
         area.stage_settings("op1", 0, &mut &new[..], sha(new), new.len() as u64)
             .unwrap();
         assert_eq!(area.settings_hash(staging).unwrap(), Some(sha(new)));
-        // Installing into a missing WTF creates it inside the variant folder.
+        // Installing into a missing WTF or a missing account folder is refused and creates
+        // no account, realm or character folder.
+        let e = area.settings_rename(staging, live).unwrap_err();
+        assert_eq!(e.kind, FsErrorKind::NotFound);
+        assert!(!inst
+            .variant_dir
+            .join("WTF")
+            .join("Account")
+            .join("ACCT")
+            .exists());
+        let char_rel = "Account/ACCT/Realm/Char/SavedVariables/Alpha.lua";
+        let e = area
+            .settings_rename(staging, SettingsSlot::Live { rel: char_rel })
+            .unwrap_err();
+        assert_eq!(e.kind, FsErrorKind::NotFound);
+        std::fs::create_dir_all(inst.variant_dir.join("WTF/Account/ACCT")).unwrap();
+        let e = area
+            .settings_rename(staging, SettingsSlot::Live { rel: char_rel })
+            .unwrap_err();
+        assert_eq!(e.kind, FsErrorKind::NotFound);
+        assert!(!inst.variant_dir.join("WTF/Account/ACCT/Realm").exists());
+        // Only the SavedVariables folder of an existing account is created.
         area.settings_rename(staging, live).unwrap();
         assert_eq!(area.settings_hash(live).unwrap(), Some(sha(new)));
         assert_eq!(area.settings_hash(staging).unwrap(), None);
