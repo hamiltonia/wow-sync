@@ -28,13 +28,29 @@ more; B applied each. Observed on B:
   relative file paths. Screenshot `R10-app/activity-expanded.png`.
 - Add-on page "Recent changes": `R10-app/addon-recent-changes.png`.
 - Headline during a 240 MB apply, with the incoming line under it:
-  `R10-app/progress-installing-1.png`. UIA text sequence: "Checking files" ->
+  `R10-app/progress-installing.png`. UIA text sequence: "Checking files" ->
   "Installing 3 add-ons from A-demo: 0 B of 240.0 MB" -> "... 120.0 of 240.0 MB
   (MapPack)" -> "... 240.0 of 240.0 MB (VoiceOver)" -> "Updated 3 add-ons from
   A-demo — see Activity".
 - Log (B) shows pass start with trigger, phases, one line per package with
   version/files/bytes/ms, and the pass summary; no paths or file contents.
 Screenshots were taken with PrintWindow because the desktop was locked.
+
+## Round 3 (main 1dfe772)
+- `Phase::Removing`: "Removing Atlas" / "Removing 1 add-on" / "Removing N add-ons:
+  i of N (name)"; never "Installing" for a removal. Mixed passes follow the
+  service's per-package phase. Live: A removed 6 add-ons; B showed
+  "Removing 2 add-ons: 1 of 2 (ZoneArt)" then "Removing 4 add-ons: 1 of 4
+  (SpokenAudio)" (`R10-app/progress-removing.png`). That screenshot predates
+  hiding the "Incoming: ... 0 B" line for a removal (now hidden; unit-tested,
+  not re-captured).
+- Audit lines "published seq N (0 new objects)" are dropped from Activity and
+  the Overview list; "(K new objects)" reads "Shared K new items from this
+  computer" (objects are not add-on counts, so the wording says items). Verified
+  live: the earlier "Shared this computer's add-on changes" lines are gone.
+- Header: fixed 76 px height replaced by a minimum height with vertical padding,
+  so progress and incoming lines grow downward (see screenshots; first line no
+  longer touches the title bar). Fixed at 0.7 zoom only.
 
 ## Not run / limits
 - A multi-source ("several computers") apply was not produced live; covered by
@@ -44,9 +60,5 @@ Screenshots were taken with PrintWindow because the desktop was locked.
 - macOS CI not run locally; the new tests use no Windows-only paths.
 
 ## Open issues
-- A removal pass shows "Installing 1 add-on" in the headline: the progress
-  stream does not say whether a package is being removed.
-- With three header lines (progress + incoming) the headline sits tight against
-  the title bar at 0.7 zoom.
-- "Shared this computer's add-on changes" legacy lines still appear between
-  grouped entries.
+- A mixed update-and-remove pass was not produced live; the removal and install
+  passes were run separately.

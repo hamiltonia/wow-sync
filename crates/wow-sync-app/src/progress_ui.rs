@@ -102,6 +102,19 @@ pub fn text(e: &ProgressEvent) -> Option<String> {
             };
             format!("{verb} {what}{from}{amount}{cur}")
         }
+        // The service switches to Removing per package, so a mixed pass reads honestly.
+        Phase::Removing => match (&e.current, e.items_total) {
+            (Some(c), n) if n <= 1 => format!("Removing {c}"),
+            (Some(c), n) => format!(
+                "Removing {}: {} of {} ({c})",
+                plural(n, "add-on", "add-ons"),
+                e.items_done,
+                n
+            ),
+            (None, 1) => "Removing 1 add-on".into(),
+            (None, n) if n > 1 => format!("Removing {}", plural(n, "add-on", "add-ons")),
+            (None, _) => "Removing add-ons".into(),
+        },
         Phase::Publishing if e.items_total > 0 => format!(
             "Publishing changes: {} of {}",
             group_digits(e.items_done),
@@ -113,6 +126,10 @@ pub fn text(e: &ProgressEvent) -> Option<String> {
 
 pub fn incoming_text(e: &ProgressEvent) -> Option<String> {
     let i = e.incoming.as_ref()?;
+    // A removal brings nothing in.
+    if i.bytes == 0 {
+        return None;
+    }
     let from = source_text(&i.source);
     Some(format!(
         "Incoming: {}{from}, {}",
@@ -127,6 +144,7 @@ fn phase_name(p: Phase) -> &'static str {
         Phase::Deciding => "deciding",
         Phase::Staging => "preparing files",
         Phase::Installing => "installing",
+        Phase::Removing => "removing",
         Phase::Publishing => "publishing",
         Phase::Idle => "idle",
     }
@@ -335,6 +353,20 @@ mod tests {
         e.items_total = 7;
         assert_eq!(text(&e).unwrap(), "Publishing changes: 3 of 7");
         assert_eq!(text(&ev(4, Phase::Idle)), None);
+    }
+
+    #[test]
+    fn a_removal_never_reads_as_an_install() {
+        let mut e = ev(1, Phase::Removing);
+        e.items_total = 1;
+        e.current = Some("Atlas".into());
+        assert_eq!(text(&e).unwrap(), "Removing Atlas");
+        e.current = None;
+        assert_eq!(text(&e).unwrap(), "Removing 1 add-on");
+        e.items_total = 3;
+        e.items_done = 1;
+        e.current = Some("Atlas".into());
+        assert_eq!(text(&e).unwrap(), "Removing 3 add-ons: 1 of 3 (Atlas)");
     }
 
     #[test]

@@ -331,23 +331,38 @@ fn kind_of(p: &PackageRow, peers: &[&MemberRow]) -> Kind {
     }
 }
 
-fn plain_text(t: &str) -> String {
-    if t.starts_with("published seq ") {
-        return "Shared this computer's add-on changes".into();
+/// `None` for a publish that carried nothing new: it is not worth a line.
+fn plain_text(t: &str) -> Option<String> {
+    if let Some(rest) = t.strip_prefix("published seq ") {
+        let objects = rest
+            .split_once('(')
+            .and_then(|(_, c)| c.split_once(' '))
+            .and_then(|(n, _)| n.parse::<u64>().ok());
+        return match objects {
+            Some(0) => None,
+            Some(1) => Some("Shared 1 new item from this computer".into()),
+            Some(n) => Some(format!(
+                "Shared {} new items from this computer",
+                crate::history_ui::group_digits(n)
+            )),
+            None => Some("Shared this computer's add-on changes".into()),
+        };
     }
     if t.starts_with("enrolled group ") {
-        return "This computer joined the add-on group".into();
+        return Some("This computer joined the add-on group".into());
     }
-    t.to_string()
+    Some(t.to_string())
 }
 
 fn activity_items(entries: &[ActivityEntry], now: i64) -> Vec<ActivityItem> {
     let (today, _) = local_parts(now);
     let entries: Vec<ActivityEntry> = entries
         .iter()
-        .map(|e| ActivityEntry {
-            text: plain_text(&e.text),
-            ..e.clone()
+        .filter_map(|e| {
+            Some(ActivityEntry {
+                text: plain_text(&e.text)?,
+                ..e.clone()
+            })
         })
         .collect();
     let entries = &entries[..];
@@ -762,8 +777,15 @@ mod tests {
             ),
         ];
         let items = activity_items(&log, now_ms());
-        assert_eq!(items[0].title, "Shared this computer's add-on changes");
+        assert_eq!(items[0].title, "Shared 6 new items from this computer");
         assert_eq!(items[1].title, "This computer joined the add-on group");
+        let quiet = [
+            entry(t, "published", "published seq 8 (0 new objects)"),
+            entry(t - 1_000, "published", "published seq 9 (1 new object)"),
+        ];
+        let items = activity_items(&quiet, now_ms());
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].title, "Shared 1 new item from this computer");
         let snap = StatusSnapshot::default();
         let w = World::from_snapshot(Inputs {
             snap: &snap,

@@ -1978,7 +1978,9 @@ impl Shell {
             .id("header")
             .role(Role::Banner)
             .aria_label("Status")
-            .h(u(76.))
+            // Grows downward with the progress and incoming lines instead of crowding the title bar.
+            .min_h(u(76.))
+            .py(u(10.))
             .flex_none()
             .flex()
             .items_center()

@@ -1896,6 +1896,7 @@ tests = [
     "progress_ui::tests::headline_text_for_each_phase",
     "progress_ui::tests::incoming_summary_is_shown_before_the_apply",
     "progress_ui::tests::several_sources_never_read_as_this_computer",
+    "progress_ui::tests::a_removal_never_reads_as_an_install",
     "progress_ui::tests::window_updates_are_throttled_and_the_last_one_is_not_lost",
     "progress_ui::tests::a_decision_is_satisfied_at_once_even_inside_the_throttle_gap",
     "progress_ui::tests::logs_carry_phase_package_and_summary_without_paths",
