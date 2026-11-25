@@ -1058,7 +1058,7 @@ tests = [
     "e2e::tests::a_reused_old_copy_starts_its_age_again_when_content_returns_to_it",
     "e2e::tests::cleanup_keeps_every_copy_a_recent_revision_record_names_even_if_unread_here",
     "e2e::tests::a_revision_whose_copy_is_missing_waits_truthfully_and_applies_when_it_returns",
-    "e2e::tests::settings_history_does_not_offer_a_copy_cleanup_removed",
+    "e2e::tests::settings_history_does_not_offer_a_copy_the_shared_folder_has_lost",
     "e2e::tests::only_the_master_shares_in_bulk_but_any_computer_may_push_one_unit",
 ]
 

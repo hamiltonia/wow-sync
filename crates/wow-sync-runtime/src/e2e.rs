@@ -4143,29 +4143,24 @@ mod tests {
     }
 
     #[test]
-    fn settings_history_does_not_offer_a_copy_cleanup_removed() {
+    fn settings_history_does_not_offer_a_copy_the_shared_folder_has_lost() {
         let lab = Lab::new();
-        let (mut a, _b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
         write_wtf(&a, "Alpha", "AlphaDB = { v = 0 }\n");
         synced(&mut a);
         share_now(&mut a);
-        publish_versions(&mut a, 1, 5);
-        age_all_settings_files(&lab, 60);
-        age_authority_records(&lab, 60);
-        publish_versions(&mut a, 6, 6);
-        forget_last_sweep(&a);
-        synced(&mut a);
-        let row = &a.svc.status().settings_units[0];
-        assert!(!row.history.is_empty());
-        for h in &row.history {
-            let m = lab
-                .shared
-                .join("WoWSync/settings/manifests")
-                .join(format!("{}.json", h.checkpoint));
-            assert!(m.exists(), "an entry is listed whose copy is gone");
+        publish_versions(&mut a, 1, 6);
+        synced(&mut b);
+        let listed = b.svc.status().settings_units[0].history.len();
+        assert!(listed >= 5, "{listed}");
+        // The ledger still names every revision, but the shared folder has lost the old copies.
+        for f in provider_settings_files(&lab) {
+            std::fs::remove_file(f).unwrap();
         }
+        synced(&mut b);
+        let after = b.svc.status().settings_units[0].history.len();
+        assert!(after < listed, "{after} of {listed} entries still offered");
     }
-
     #[test]
     fn only_the_master_shares_in_bulk_but_any_computer_may_push_one_unit() {
         let lab = Lab::new();
