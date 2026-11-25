@@ -29,6 +29,26 @@ pub(crate) struct BuildCx<'a> {
     pub ledger: &'a Ledger,
     pub pass_id: u64,
     pub now_ms: i64,
+    /// What each planned settings apply replaces and brings, by operation.
+    pub settings: &'a BTreeMap<wow_sync_core::ids::OpId, crate::settings_cycle::SettingsChangeInfo>,
+}
+
+/// Fills a settings record's versions (the saved file's content id), size change and identity.
+pub(crate) fn with_settings_info(
+    rec: &mut ChangeRecord,
+    info: &crate::settings_cycle::SettingsChangeInfo,
+) {
+    rec.old_version = info.old.map_or(VersionLabel::New, |(h, _)| {
+        VersionLabel::ContentId(short(&h))
+    });
+    rec.new_version = VersionLabel::ContentId(short(&info.new.0));
+    rec.byte_delta = info.new.1 as i64 - info.old.map_or(0, |(_, s)| s as i64);
+    rec.files = FileCounts {
+        added: u32::from(info.old.is_none()),
+        changed: u32::from(info.old.is_some()),
+        removed: 0,
+    };
+    rec.identity = Some(info.identity.clone());
 }
 
 impl BuildCx<'_> {
@@ -87,7 +107,8 @@ fn short(h: &wow_sync_core::ids::Sha256) -> String {
 }
 
 pub(crate) fn clip(s: &str) -> String {
-    s.chars()
+    crate::detail::strip_colour_codes(s)
+        .chars()
         .filter(|c| !c.is_control())
         .take(MAX_VERSION_CHARS)
         .collect()
@@ -434,6 +455,9 @@ pub(crate) fn prepare(p: &PackageApply, cx: &BuildCx) -> Option<ChangeRecord> {
             rec.old_version = VersionLabel::ContentId(String::new());
             rec.new_version = VersionLabel::ContentId(String::new());
             rec.files.changed = p.settings_ops.len() as u32;
+            if let Some(info) = cx.settings.get(&p.op) {
+                with_settings_info(&mut rec, info);
+            }
             return Some(rec);
         }
         OpKind::SettingsCleanup => return None,
@@ -487,19 +511,32 @@ pub(crate) fn base(
 pub(crate) fn kept(
     stamp: (u64, i64),
     c: &wow_sync_core::kinds::CodeChoice,
+    inventory: &Inventory,
 ) -> Option<ChangeRecord> {
     let keep = c.keep.as_ref().filter(|_| c.action == ChoiceAction::Keep)?;
     let mut names: Vec<String> = keep.folders.iter().map(|f| f.name.clone()).collect();
     names.sort();
     let name = names.first().cloned().unwrap_or_default();
-    Some(base(
+    let mut rec = base(
         stamp,
         ChangeKind::Kept,
         name,
         names,
         ChangeSource::ThisComputer,
         ChangeReason::Choice(None),
-    ))
+    );
+    // The kept copy is the one on this computer when it matches; its version is the answer.
+    let installed = keep
+        .folders
+        .iter()
+        .filter_map(|f| inventory.get(&f.key).filter(|s| s.tree == Some(f.tree)))
+        .min_by(|a, b| a.name.cmp(&b.name));
+    if let Some(f) = installed {
+        let v = label(f);
+        rec.old_version = v.clone();
+        rec.new_version = v;
+    }
+    Some(rec)
 }
 
 /// The name the owner knows a folder by: its title, else its folder name as installed.
@@ -546,6 +583,7 @@ pub(crate) fn settings_published(
     stamp: (u64, i64),
     r: &wow_sync_core::kinds::SettingsRevision,
     display: String,
+    info: &crate::settings_cycle::SettingsChangeInfo,
 ) -> ChangeRecord {
     let folder = display;
     let mut rec = base(
@@ -559,9 +597,7 @@ pub(crate) fn settings_published(
             _ => ChangeReason::SettingsMaster,
         },
     );
-    rec.old_version = VersionLabel::ContentId(String::new());
-    rec.new_version = VersionLabel::ContentId(String::new());
-    rec.files.changed = 1;
+    with_settings_info(&mut rec, info);
     rec
 }
 

@@ -510,9 +510,10 @@ pub struct SliceService {
     last_blocks: Vec<PlanBlock>,
     provider_error: Option<String>,
     plane: Plane,
-    /// The approved saved-settings size cap. No value is approved (Q-77), so it is `None` and
-    /// settings sync never touches real data; only tests set one.
+    /// The saved-settings size cap (32 MiB, owner decision D-26); tests may change it.
     settings_cap: Option<u64>,
+    /// Why units are not syncing, as of the latest settings cycle. Never logged.
+    settings_facts: crate::settings_cycle::SettingsFacts,
     /// The text the latest diagnostics preview returned; a previewed save must match it.
     previewed: Option<String>,
     /// The decisions currently offered to the owner and what answering each one does.
@@ -585,6 +586,7 @@ impl SliceService {
             provider_error: None,
             plane,
             settings_cap: wow_sync_core::records::MAX_SETTINGS_FILE_BYTES,
+            settings_facts: Default::default(),
             previewed: None,
             offered: Default::default(),
             at_risk_apply: Vec::new(),
@@ -875,7 +877,8 @@ impl SliceService {
         })
     }
 
-    /// Test-only: a settings size cap, standing in for the unapproved production value (Q-77).
+    /// Test-only: a settings size cap other than the production 32 MiB (`None` turns settings
+    /// sync off).
     #[cfg(test)]
     pub(crate) fn set_settings_cap_for_tests(&mut self, cap: Option<u64>) {
         self.settings_cap = cap;
@@ -1500,7 +1503,8 @@ impl SliceService {
                     .map_err(|e| CommandError::Service(e.to_string()))?;
                 self.reserve_seq(&w, seq)?;
                 if let AuthorityRecord::CodeChoice(c) = &*rec {
-                    if let Some(k) = crate::changes::kept((now_unix_ms() as u64, now_unix_ms()), c)
+                    if let Some(k) =
+                        crate::changes::kept((now_unix_ms() as u64, now_unix_ms()), c, &w.inventory)
                     {
                         crate::history::record_change(&self.state, &k);
                     }
@@ -2753,6 +2757,7 @@ impl SliceService {
             &derived,
             this_retirement.is_some(),
             self.settings_cap.is_some(),
+            &self.settings_facts,
         );
         let unresolved: Vec<FolderKey> = interrupted
             .iter()
@@ -3185,7 +3190,12 @@ impl SliceService {
                     &senv,
                     &mut report,
                 );
+                let mut settings_info = BTreeMap::new();
                 let settings_ops = if w.standing == OwnStanding::Active && !game_blocks {
+                    let hub = self.progress.clone();
+                    let tick = |done: u64, total: u64, current: Option<&str>| {
+                        crate::tracking::settings_step(&hub, pass_id, done, total, current);
+                    };
                     let out = crate::settings_cycle::settings_cycle(
                         &mut self.plane,
                         &crate::settings_cycle::StepArgs {
@@ -3198,10 +3208,18 @@ impl SliceService {
                             inventory: &w.inventory,
                             decls: &w.decls,
                             game_blocks,
+                            tick: &tick,
                         },
                         &mut next_seq,
                     );
-                    for h in &out.published {
+                    self.settings_facts = out.facts;
+                    if !out.notes.is_empty() && report.apply_note.is_none() {
+                        report.apply_note = Some(format!(
+                            "some saved settings were not shared: {}",
+                            out.notes.join("; ")
+                        ));
+                    }
+                    for (h, info) in &out.published {
                         if let Some(AuthorityRecord::SettingsRevision(r)) =
                             self.plane.ledger.record(h)
                         {
@@ -3209,6 +3227,7 @@ impl SliceService {
                                 (pass_id, now_unix_ms()),
                                 r,
                                 crate::changes::display_of(&w.titles, &w.inventory, &r.unit.folder),
+                                info,
                             );
                             crate::history::record_change(&self.state, &rec);
                             crate::tracking::recorded(
@@ -3219,8 +3238,12 @@ impl SliceService {
                             );
                         }
                     }
+                    settings_info = out.apply_info;
                     out.applies
                 } else {
+                    if w.standing == OwnStanding::Active {
+                        self.settings_facts.wow_running = true;
+                    }
                     Vec::new()
                 };
                 let rollback = if w.standing == OwnStanding::Active
@@ -3410,6 +3433,7 @@ impl SliceService {
                                 ledger: &self.plane.ledger,
                                 pass_id,
                                 now_ms: now_unix_ms(),
+                                settings: &settings_info,
                             };
                             plan.packages
                                 .iter()

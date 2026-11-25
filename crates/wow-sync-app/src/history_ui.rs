@@ -157,7 +157,10 @@ pub fn reason_text(r: &ChangeRecord) -> String {
             Some(n) => format!("removed on {n}"),
             None => "removed on this computer".into(),
         },
-        ChangeReason::Rollback => "rolled back for the group".into(),
+        ChangeReason::Rollback => match from {
+            Some(n) => format!("rolled back on {n} for the group"),
+            None => "rolled back on this computer for the group".into(),
+        },
         ChangeReason::Recovery => "restored from recovery".into(),
     }
 }
@@ -455,7 +458,10 @@ pub(crate) mod tests {
             (ChangeReason::SettingsMaster, "settings master"),
             (ChangeReason::PeerPush, "pushed from RYZENFISH"),
             (ChangeReason::Removal, "removed on RYZENFISH"),
-            (ChangeReason::Rollback, "rolled back for the group"),
+            (
+                ChangeReason::Rollback,
+                "rolled back on RYZENFISH for the group",
+            ),
             (ChangeReason::Recovery, "restored from recovery"),
         ];
         for (reason, want) in cases {

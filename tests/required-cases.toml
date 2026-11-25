@@ -1030,6 +1030,14 @@ tests = [
 ]
 
 [[case]]
+id = "R11-runtime:settings-reasons-and-safety"
+tier = "offline"
+tests = [
+    "e2e::tests::a_character_missing_here_waits_and_is_never_created_and_a_big_unit_says_so",
+    "e2e::tests::with_the_game_running_settings_wait_and_nothing_is_applied",
+]
+
+[[case]]
 id = "R4-integrate:settings-choose-restore-confirm"
 tier = "offline"
 tests = [
