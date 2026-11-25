@@ -49,6 +49,16 @@ Branch `run010/R10-history`, built on the merged interface (main `33261fe`).
   version unknown: an empty content id).
 - No public API change.
 
+## Round 5 (recheck fixes)
+
+- RV10-12: byte progress is counted per folder; only a second try at the same folder resets
+  that folder's count. Test: `tracking::tests::bytes_never_go_back_across_the_folders_of_one_add_on`.
+- RV10-13: keys finished by crash recovery are excluded from publishing, so no local
+  `Published`/`Removed` record is made for them. Test:
+  `e2e::tests::change_history::a_recovered_peer_install_keeps_its_source_and_is_not_a_local_publish`.
+- RV10-10: stale hash-cache comment in `service.rs` updated.
+- No public API change (`staging`/`copied` are `pub(crate)`).
+
 ## Open issues
 
 - Settings records name the folder only; no account/character paths are stored.
