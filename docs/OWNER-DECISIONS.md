@@ -209,6 +209,23 @@ Answers from an interactive review session with the orchestrator.
   with this decision. It includes publishing a `v0.2.0` GitHub pre-release
   after its gates pass.
 
+### D-33: WTF (add-on settings) sync; run-011 started autonomously (2026-11-24)
+
+- **Owner direction (2026-11-24):** "after you complete, I want you to get
+  started on the WTF sync, I will be away, I want you to continue as long
+  as you can, you will have to make decisions, collect them all for review
+  when I'm back."
+- **Effect:** the orchestrator may plan and run run-011 without a further
+  approval prompt. Every judgment call is recorded in
+  [run-011 DECISIONS-FOR-REVIEW.md](runs/run-011/DECISIONS-FOR-REVIEW.md)
+  for the owner's review. There is no AIU ceiling (as in D-32); usage is
+  tracked.
+- **Limits that still hold:** SPEC and ACCEPTANCE are unchanged. No write
+  to the real Dropbox group or the owner's running instances. Settings
+  sharing is never switched on in the real group by an agent; the owner
+  does that after release. Product-intent changes wait for the owner.
+- Plan: [run-011 PLAN.md](runs/run-011/PLAN.md).
+
 ### D-32: Visibility into what changed; faster idle passes; run-010 approved (2026-11-24)
 
 - **Trigger:** live use of `v0.3.2` on RYZENFISH and LENOVOFISH.
