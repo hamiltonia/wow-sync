@@ -19,6 +19,25 @@ pub struct WtfFile {
     pub unsafe_path: bool,
 }
 
+/// Size and SHA-256 of one saved-variables file, hashed in fixed chunks. `None` = absent; a file
+/// over `cap` is an error.
+pub fn hash_wtf_file(
+    variant_dir: &Path,
+    rel: &str,
+    cap: u64,
+) -> Result<Option<(u64, [u8; 32])>, FsError> {
+    let Some(scope) = WtfScope::open(variant_dir, false)? else {
+        return Ok(None);
+    };
+    let mut f = match scope.root().open_read(rel, cap) {
+        Ok(f) => f,
+        Err(e) if e.kind == FsErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let path = scope.root().join(rel)?;
+    sha256_stream(&path, &mut f, cap).map(Some)
+}
+
 fn is_settings_name(name: &str) -> bool {
     name.ends_with(".lua") && !name.to_ascii_lowercase().starts_with("blizzard_")
 }

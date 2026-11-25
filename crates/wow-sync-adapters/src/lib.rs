@@ -22,6 +22,13 @@ pub mod wtf;
 #[cfg(any(test, feature = "testkit"))]
 pub mod testkit;
 
+#[cfg(test)]
+mod stream_guard;
+
+#[cfg(test)]
+#[global_allocator]
+static COUNTING: stream_guard::Counting = stream_guard::Counting;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FsErrorKind {
     NotFound,

@@ -83,13 +83,14 @@ pub fn capture_unit(
         .ok_or_else(|| CaptureError::Manifest("WTF is missing".into()))?;
     let root = scope.root();
     let mut file = root.open_read(owned.rel.as_str(), size_cap)?;
-    let mut bytes = Vec::new();
-    std::io::Read::read_to_end(&mut file, &mut bytes)
-        .map_err(|e| FsError::from_io(&root.path().join(owned.rel.as_str()), &e))?;
-    if sha256(&bytes) != owned.sha256 || bytes.len() as u64 != owned.size {
-        return Err(CaptureError::Changed);
+    match store.put_blob_stream(&mut file, owned.sha256.0, owned.size) {
+        Ok(()) => {}
+        Err(e) if e.kind == wow_sync_adapters::FsErrorKind::HashMismatch => {
+            return Err(CaptureError::Changed)
+        }
+        Err(e) => return Err(e.into()),
     }
-    let blob = store.put_blob(&bytes)?;
+    let blob = owned.sha256.0;
     let name = owned
         .rel
         .as_str()
@@ -327,19 +328,11 @@ fn local_file_fact(store: &SettingsStore, cp: &CheckpointRef, unit: &SettingsUni
 /// cannot be read (so it never compares equal to an earlier scan).
 fn read_fact(variant_dir: &Path, rel: &str, cap: u64) -> FileFact {
     let unreadable = Some((u64::MAX, Sha256([0; 32])));
-    let Ok(Some(scope)) = WtfScope::open(variant_dir, false) else {
-        return unreadable;
-    };
-    let mut f = match scope.root().open_read(rel, cap) {
-        Ok(f) => f,
-        Err(e) if e.kind == wow_sync_adapters::FsErrorKind::NotFound => return None,
-        Err(_) => return unreadable,
-    };
-    let mut bytes = Vec::new();
-    if std::io::Read::read_to_end(&mut f, &mut bytes).is_err() {
-        return unreadable;
+    match wow_sync_adapters::wtf::hash_wtf_file(variant_dir, rel, cap) {
+        Ok(None) => None,
+        Ok(Some((size, h))) => Some((size, Sha256(h))),
+        Err(_) => unreadable,
     }
-    Some((bytes.len() as u64, sha256(&bytes)))
 }
 
 /// WoW writes `<file>.bak` beside a saved-variables file it is about to replace.
@@ -455,6 +448,123 @@ fn prune_store(
     }
 }
 
+/// Shared settings copies stay at least this long after their file was written, whatever
+/// the ledger says: an upload that is still in flight, or a revision this computer has not
+/// read yet, is never mistaken for garbage.
+const GC_MIN_AGE_MS: i128 = 30 * 24 * 3600 * 1000;
+/// The shared folder is swept at most this often.
+const GC_EVERY_MS: u64 = 24 * 3600 * 1000;
+
+/// The checkpoints the shared folder must keep (OD-30): per unit the current head(s) and the two
+/// revisions before the newest (three states), and every captured copy a removal still names.
+pub(crate) fn retained_checkpoints(
+    ledger: &wow_sync_core::ledger::Ledger,
+    derived: &wow_sync_core::ledger::Derived,
+) -> Option<BTreeSet<CheckpointRef>> {
+    let mut units: BTreeSet<SettingsUnit> = BTreeSet::new();
+    for e in ledger.entries() {
+        if let Some(AuthorityRecord::SettingsRevision(r)) = ledger.record(&e.hash) {
+            units.insert(r.unit.clone());
+        }
+    }
+    if units.is_empty() {
+        return None;
+    }
+    let mut keep = BTreeSet::new();
+    for u in &units {
+        let history = settings_history(ledger, derived, u);
+        keep.extend(history.iter().filter(|h| h.is_head).map(|h| h.checkpoint));
+        keep.extend(
+            history
+                .iter()
+                .rev()
+                .take(KEEP_CAPTURES)
+                .map(|h| h.checkpoint),
+        );
+    }
+    for e in ledger.entries() {
+        if let Some(AuthorityRecord::Removal(rm)) = ledger.record(&e.hash) {
+            if let wow_sync_core::kinds::RemovalSettings::Checkpoints { roots } = &rm.settings {
+                for r in roots {
+                    if let RootState::Captured { checkpoint, .. } = &r.state {
+                        keep.insert(*checkpoint);
+                    }
+                }
+            }
+        }
+    }
+    Some(keep)
+}
+
+/// Deletes shared settings manifests and blobs that no kept checkpoint names and that are older
+/// than `GC_MIN_AGE_MS`. Gives up (`None`) when a kept manifest cannot be read, because then the
+/// blobs it names are unknown. Returns the number of files removed.
+pub(crate) fn sweep_provider(
+    provider: &ProviderRoot,
+    keep: &BTreeSet<CheckpointRef>,
+    now_ms: u64,
+) -> Option<usize> {
+    let mut keep_blobs: BTreeSet<String> = BTreeSet::new();
+    let mut keep_manifests: BTreeSet<String> = BTreeSet::new();
+    for cp in keep {
+        keep_manifests.insert(format!("{cp}.json"));
+        match provider.read(&layout::settings_manifest(cp), 64 * 1024) {
+            Ok(b) => {
+                let m: SettingsCheckpointManifest = decode(&b, 64 * 1024).ok()?;
+                keep_blobs.extend(m.files.iter().map(|f| f.blob.to_string()));
+            }
+            Err(e) if e.kind == wow_sync_adapters::FsErrorKind::NotFound => {}
+            Err(_) => return None,
+        }
+    }
+    let cutoff_ns = (now_ms as i128 - GC_MIN_AGE_MS) * 1_000_000;
+    let mut removed = 0;
+    let mut sweep = |dir: &str, keep: &BTreeSet<String>| -> Option<()> {
+        let entries = match provider.list(dir) {
+            Ok(v) => v,
+            Err(e) if e.kind == wow_sync_adapters::FsErrorKind::NotFound => return Some(()),
+            Err(_) => return None,
+        };
+        for e in entries {
+            let stale = e.mtime_ns < cutoff_ns;
+            let plain = !e.is_dir && e.state == wow_sync_adapters::provider::EntryState::Local;
+            let doomed = plain && stale && !keep.contains(&e.name);
+            if doomed && provider.remove_file(&format!("{dir}/{}", e.name)).is_ok() {
+                removed += 1;
+            }
+        }
+        Some(())
+    };
+    sweep("settings/manifests", &keep_manifests)?;
+    sweep("settings/blobs", &keep_blobs)?;
+    Some(removed)
+}
+
+/// The daily sweep of the shared folder; a failure changes nothing and is tried again later.
+fn gc_provider(
+    a: &StepArgs,
+    ledger: &wow_sync_core::ledger::Ledger,
+    derived: &wow_sync_core::ledger::Derived,
+) {
+    let now = now_unix_ms() as u64;
+    let stamp = format!("settings-gc-{}.txt", a.group);
+    let last = a
+        .state
+        .read(&stamp, 64)
+        .ok()
+        .flatten()
+        .and_then(|b| String::from_utf8(b).ok())
+        .and_then(|s| s.trim().parse::<u64>().ok());
+    if last.is_some_and(|l| now.saturating_sub(l) < GC_EVERY_MS) {
+        return;
+    }
+    let Some(keep) = retained_checkpoints(ledger, derived) else {
+        return;
+    };
+    if sweep_provider(a.provider, &keep, now).is_some() {
+        let _ = a.state.write_atomic(&stamp, now.to_string().as_bytes());
+    }
+}
 /// Copies the checkpoint (blob first, then manifest) to the shared folder, write-if-absent.
 pub(crate) fn upload_checkpoint(
     provider: &ProviderRoot,
@@ -468,18 +578,20 @@ pub(crate) fn upload_checkpoint(
         .ok_or("the checkpoint is not in the local store")?;
     let m: SettingsCheckpointManifest = decode(&manifest, 64 * 1024).map_err(|e| e.to_string())?;
     for f in &m.files {
-        let blob = store
-            .get_blob(&f.blob.0, BLOB_LIMIT)
+        let rel = layout::settings_blob(&f.blob);
+        if matches!(
+            provider.check_object(&rel, BLOB_LIMIT),
+            Ok(wow_sync_adapters::provider::ObjectObs::Local { sha256, .. }) if sha256 == f.blob.0
+        ) {
+            continue;
+        }
+        let (mut blob, _) = store
+            .open_blob(&f.blob.0, BLOB_LIMIT)
             .map_err(|e| e.to_string())?
             .ok_or("the blob is not in the local store")?;
-        authority_store::put_record(
-            provider,
-            &layout::settings_blob(&f.blob),
-            &blob,
-            BLOB_LIMIT,
-            me,
-        )
-        .map_err(|e| e.to_string())?;
+        provider
+            .put_object_reader(&rel, &mut blob, f.blob.0, me)
+            .map_err(|e| e.to_string())?;
     }
     authority_store::put_record(
         provider,
@@ -1204,6 +1316,7 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
         let _ = save_use_shared(a.state, a.group, &use_shared);
     }
     prune_store(&store, &dropped, &local, &plane.ledger);
+    gc_provider(a, &plane.ledger, &derived);
     if dirty {
         let _ = save_local(a.state, a.group, &local);
         let _ = epochs.save(&eps);
@@ -1489,6 +1602,26 @@ pub fn settings_units(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// OD-30: the live code of the settings path reads files in fixed buffers only. The
+    /// allocator guard in `wow-sync-adapters` measures the streams; this keeps the callers from
+    /// reading a file whole.
+    #[test]
+    fn the_settings_path_never_reads_a_whole_file_into_memory() {
+        for (name, src) in [
+            ("settings_cycle", include_str!("settings_cycle.rs")),
+            ("effects", include_str!("effects.rs")),
+            ("service", include_str!("service.rs")),
+        ] {
+            let live = src.split("#[cfg(test)]").next().unwrap();
+            for whole in ["read_to_end(", "fs::read(", ".get_blob(", "read_to_string("] {
+                assert!(
+                    !live.contains(whole),
+                    "{name} reads a whole file with {whole}"
+                );
+            }
+        }
+    }
     use wow_sync_adapters::testkit::TempDir;
     use wow_sync_core::explain::Explanation;
     use wow_sync_core::ids::{ComputerId, Identity};
