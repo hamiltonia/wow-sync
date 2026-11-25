@@ -1879,3 +1879,18 @@ tests = [
     "e2e::tests::a_change_inside_the_decided_folder_still_makes_the_answer_stale",
 ]
 # <<< section: R9-decide
+
+# >>> section: R10-history
+[[case]]
+id = "R10-history:change-history-and-progress"
+tier = "offline"
+tests = [
+    "history::tests::throttled_events_are_dropped_inside_the_interval_but_forced_ones_are_not",
+    "history::tests::a_torn_last_line_is_skipped_and_the_next_record_is_not_joined_to_it",
+    "history::tests::a_record_without_a_duration_still_reads",
+    "e2e::tests::change_history::an_install_then_an_update_record_source_versions_counts_and_reason",
+    "e2e::tests::change_history::a_removal_is_recorded_with_its_author_and_no_new_version",
+    "e2e::tests::change_history::progress_runs_scanning_to_idle_in_order_and_reports_each_record",
+    "e2e::tests::change_history::older_audit_lines_still_appear_in_the_history",
+]
+# <<< section: R10-history
