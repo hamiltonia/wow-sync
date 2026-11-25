@@ -1728,7 +1728,9 @@ impl SliceService {
         let rec = crate::changes::settings_published(
             (at as u64, at),
             crate::settings_cycle::issued_by_master(&self.plane.ledger, &derived, r),
+            r.kind,
             crate::changes::display_of(titles, inventory, &r.unit.folder),
+            r.unit.folder.as_str(),
             &info,
         );
         crate::history::record_change(&self.state, &rec);
@@ -3058,11 +3060,20 @@ impl SliceService {
             app_version: self.cfg.app_version.clone(),
             game_build,
         };
+        let settings_decisions_pending = settings_units
+            .iter()
+            .filter(|r| r.status == crate::settings_cycle::SettingsUnitStatus::NeedsChoice)
+            .count() as u32;
         StatusSnapshot {
             test_mode: false,
             test_mode_blocked: false,
             enrolled: true,
-            headline: render_headline(&sv),
+            // A pending settings choice is never "up to date".
+            headline: if settings_decisions_pending > 0 && sv.headline == Headline::Ok {
+                "Saved settings need your choice".to_string()
+            } else {
+                render_headline(&sv)
+            },
             group_name: w.group.display_name.clone(),
             computer_name: w.computer.display_name.clone(),
             identity_line: format!(
@@ -3112,10 +3123,8 @@ impl SliceService {
             detail: Some(detail),
             peers,
             settings,
-            settings_decisions_pending: settings_units
-                .iter()
-                .filter(|r| r.status == crate::settings_cycle::SettingsUnitStatus::NeedsChoice)
-                .count() as u32,
+            settings_decisions_pending,
+
             settings_units,
             hold,
             this_retirement,
@@ -3463,7 +3472,9 @@ impl SliceService {
                                     &derive(&self.plane.ledger, &group_id, &self.plane.members),
                                     r,
                                 ),
+                                r.kind,
                                 crate::changes::display_of(&w.titles, &w.inventory, &r.unit.folder),
+                                r.unit.folder.as_str(),
                                 info,
                             );
                             crate::history::record_change(&self.state, &rec);

@@ -24,8 +24,9 @@ use wow_sync_core::layout;
 use wow_sync_core::ledger::derive;
 use wow_sync_core::plan::{ExpectedLive, PackageApply};
 use wow_sync_core::records::{
-    decode, encode, CheckpointFile, KeptCopy, LocalUnitState, Location, OpKind, RecoverySlot,
-    RootState, SettingsCheckpointManifest, SettingsFileOp, SettingsLocal, SettingsRoot,
+    decode, encode, CheckpointFile, KeptCopy, KeptWhy, LocalUnitState, Location, OpKind,
+    RecoverySlot, RootState, SettingsCheckpointManifest, SettingsFileOp, SettingsLocal,
+    SettingsRoot,
 };
 use wow_sync_core::settings::{
     classify_capture, settings_scope, CaptureClass, DeclaringFolder, FileFact, LocalReason,
@@ -1189,6 +1190,13 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
             }
         };
         let graph = graph_from_ledger(&plane.ledger, &derived, &unit);
+        if graph.head_states.len() > 1 {
+            for c in graph.head_states.keys() {
+                if let Some((_, size)) = manifest_unit(a.provider, c, &unit) {
+                    out.facts.sizes.insert(*c, size);
+                }
+            }
+        }
         let authority = authority_for(&heads, &unit.folder);
         let is_authority = matches!(&authority, Authority::Holder(h) if h == a.own);
         let paused = local.paused_all || local.paused_folders.contains(&unit.folder);
@@ -1364,6 +1372,7 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                 local.units[li].last_applied = live;
             }
             Case::FirstAdoption(to) | Case::Yield { to, .. } => {
+                let first_adoption = matches!(case, Case::FirstAdoption(_));
                 let Some(blob) = manifest_blob(a.provider, &to, &unit) else {
                     out.facts
                         .units
@@ -1383,6 +1392,28 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                 if let Some(l) = live.filter(|l| {
                     *l != to && Some(*l) != local.units[li].last_applied && !is_shared(*l)
                 }) {
+                    let incoming =
+                        plane
+                            .ledger
+                            .entries()
+                            .find_map(|e| match plane.ledger.record(&e.hash) {
+                                Some(AuthorityRecord::SettingsRevision(r))
+                                    if r.checkpoint == to && r.unit == unit =>
+                                {
+                                    Some(r)
+                                }
+                                _ => None,
+                            });
+                    let why = if first_adoption {
+                        KeptWhy::FirstAdoption
+                    } else if incoming.is_some_and(|r| issued_by_master(&plane.ledger, &derived, r))
+                    {
+                        KeptWhy::YieldedToMaster
+                    } else {
+                        KeptWhy::PeerReplaced
+                    };
+                    let from = incoming.map(|r| r.issuer.computer_id.clone());
+                    let size = local_file_fact(&store, &l, &unit).map(|(s, _)| s);
                     let kept = &mut local.units[li].kept;
                     if !kept.iter().any(|k| k.checkpoint == l) {
                         kept.insert(
@@ -1390,9 +1421,9 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                             KeptCopy {
                                 checkpoint: l,
                                 at_unix_ms: now_unix_ms() as u64,
-                                why: None,
-                                from: None,
-                                size: None,
+                                why: Some(why),
+                                from,
+                                size,
                             },
                         );
                         if kept.len() > KEEP_CAPTURES {
@@ -1674,13 +1705,33 @@ pub fn settings_units(
                 graph
                     .head_states
                     .iter()
-                    .map(|(c, r)| HeadChoice {
-                        checkpoint: *c,
-                        revisions: r.clone(),
-                        source: None,
-                        kind: HeadKind::SharedFrom,
-                        written_unix_ms: 0,
-                        size_bytes: facts.sizes.get(c).copied(),
+                    .map(|(c, r)| {
+                        // The newest revision at this state says who wrote it and when.
+                        let newest = r
+                            .iter()
+                            .filter_map(|h| match ledger.record(h) {
+                                Some(AuthorityRecord::SettingsRevision(rev)) => Some(rev),
+                                _ => None,
+                            })
+                            .max_by_key(|rev| rev.written_unix_ms);
+                        let kind = match newest {
+                            Some(rev) if issued_by_master(ledger, derived, rev) => {
+                                HeadKind::MastersRevision
+                            }
+                            Some(rev) if rev.issuer.computer_id == own.computer_id => {
+                                HeadKind::ThisComputersCopy
+                            }
+                            _ => HeadKind::SharedFrom,
+                        };
+                        HeadChoice {
+                            checkpoint: *c,
+                            revisions: r.clone(),
+                            source: newest
+                                .and_then(|rev| names.get(&rev.issuer.computer_id).cloned()),
+                            kind,
+                            written_unix_ms: newest.map_or(0, |rev| rev.written_unix_ms),
+                            size_bytes: facts.sizes.get(c).copied(),
+                        }
                     })
                     .collect()
             } else {
@@ -1720,7 +1771,28 @@ pub fn settings_units(
             } else {
                 SettingsUnitStatus::Active
             };
-            let recovery_copies: Vec<RecoveryCopy> = Vec::new();
+            let recovery_copies: Vec<RecoveryCopy> = local
+                .units
+                .iter()
+                .find(|u| u.unit == unit)
+                .map(|u| {
+                    u.kept
+                        .iter()
+                        .map(|k| RecoveryCopy {
+                            checkpoint: k.checkpoint,
+                            kind: match k.why {
+                                Some(KeptWhy::FirstAdoption) => RecoveryKind::FirstAdoption,
+                                Some(KeptWhy::YieldedToMaster) => RecoveryKind::YieldedToMaster,
+                                Some(KeptWhy::PeerReplaced) => RecoveryKind::PeerReplaced,
+                                None => RecoveryKind::Unknown,
+                            },
+                            source: k.from.as_ref().and_then(|c| names.get(c).cloned()),
+                            at_unix_ms: k.at_unix_ms,
+                            size_bytes: k.size,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             let local_copies = local
                 .units
                 .iter()

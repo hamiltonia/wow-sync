@@ -1061,6 +1061,11 @@ tests = [
     "e2e::tests::a_revision_whose_copy_is_missing_waits_truthfully_and_applies_when_it_returns",
     "e2e::tests::settings_history_does_not_offer_a_copy_the_shared_folder_has_lost",
     "e2e::tests::only_the_master_shares_in_bulk_but_any_computer_may_push_one_unit",
+    "e2e::tests::pausing_all_settings_persists_covers_later_addons_and_resumes",
+    "e2e::tests::a_settings_record_is_found_by_the_addons_own_folder_name",
+    "e2e::tests::the_snapshot_units_carry_the_heads_choose_takes_and_the_history_restore_takes",
+    "e2e::tests::two_addons_declaring_one_variable_with_different_bytes_are_owned_by_several_from_the_first_pass",
+    "e2e::tests::the_diagnostics_export_with_settings_on_names_no_account_realm_character_or_path",
 ]
 
 [[case]]

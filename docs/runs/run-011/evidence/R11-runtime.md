@@ -181,3 +181,80 @@ Fix: the code publish now streams its objects one folder at a time (blobs, then 
 - Decision: stream publish objects lazily; keep `plan_publish` returning full objects for tests. Why: removes the largest transient (~25 MiB). Reversible: yes.
 - Decision: a source file whose hash no longer matches at upload aborts the publish as Unstable (was a failure). Why: same meaning as the existing source-changed check. Reversible: yes.
 - Heap harness `examples/heap_lab.rs` (lab path as argument) is committed.
+
+## R11-check fix round (G2–G7, OD-40..44)
+
+Interface commit 8bb2205 (G4 `PauseAllSettings`/`ResumeAllSettings`, G3 `HeadChoice` fields,
+`settings_decisions_pending`, G5 `RestoredFromRecovery`, `RecoveryCopy`); behaviour in the
+commit after it.
+
+### Fails-without-fix (this round)
+
+| Guard | Test | With the guard reverted |
+|---|---|---|
+| Restore-kind revision applied from a peer is `RestoredFromRecovery` | `a_copy_replaced_by_the_masters_is_listed_restorable_and_survives_later_applies` | fails |
+| Restore-kind revision published here is `RestoredFromRecovery` | same | fails |
+| `paused_all` pauses every unit, also later-discovered add-ons | `pausing_all_settings_persists_covers_later_addons_and_resumes` | fails |
+| Headline never says "up to date" with a pending settings decision | `the_snapshot_units_carry_the_heads_choose_takes_and_the_history_restore_takes` | fails |
+| Settings records carry the add-on's folder key (applied) | `a_settings_record_is_found_by_the_addons_own_folder_name` | fails |
+| Settings records carry the add-on's folder key (published) | same | fails |
+| Head choices carry source/kind/time/size; recovery entries carry kind/source/time/size | the two tests above | fail against the interface stubs (all `None`/`Unknown`) |
+| G7 shared variable | `two_addons_declaring_one_variable_with_different_bytes_are_owned_by_several_from_the_first_pass` | **passes without any change** (see below) |
+| OD-44 export privacy | `the_diagnostics_export_with_settings_on_names_no_account_realm_character_or_path` | **passes without any change** (see below) |
+
+### G7 and OD-44: not reproduced in the runtime
+
+Both add-ons declaring one SavedVariables name, different bytes on A and B, shared by the
+master: every unit row on both computers is `OwnedBySeveral` and names the other add-on
+from the first pass, and nothing is published. The same holds when one TOC also lists
+other variables. The runtime already produces the status; "Not shared yet" is the app's
+text for an add-on with no unit rows or for `NoSharedCopy`. If R11-check still sees it,
+the app side (R11-app) is where to look: `addon_settings_line` in `settings_ui.rs` falls
+back to "Not shared yet" when the add-on has no row. The test is kept as a regression guard.
+
+The diagnostics export with settings on, character-scoped units present and synthetic
+realm/character folders planted contains none of those names and no variant or provider
+path, on both computers. The redaction context already reads the WTF folder names.
+
+### G2 memory (release app, 113 add-ons, ~36k files, private working set)
+
+Sampler: `QueryWorkingSet` private pages every 25 ms (about 6,000 samples per run), checked
+against the `\Process(*)\Working Set - Private` counter (69.6 vs 69.6 MiB in run 1). Each run
+starts the window visible on the page named, lets a settings edit and a code edit run while
+visible, hides the window at 40 s, then in the hidden state runs: idle 30 s, a settings
+pass, a code update, an add-on add, an add-on remove and a second settings pass.
+
+| Run | Window / page | Visible peak | Hidden idle after UI use | Hidden-only peak (incl. all passes) |
+|---|---|---|---|---|
+| 1 | Settings sync, zoom 1.0 | 85.1 | 67.9 | 73.8 |
+| 2 | Add-on detail then Add-ons list, zoom 1.0 | 85.3 | 71.1 | 76.3 |
+| 3 | Settings sync, zoom 1.5 | 93.7 | 87.1 | 93.2 |
+
+All hidden samples are at or below 100 MiB (maximum 93.2 MiB), but this scripted scenario
+cannot click, so it does not perform the GUI share/choose/restore clicks the checker did;
+the settings and code passes themselves ran in all three.
+
+What is resident: the visible peaks are the start-up scan (about 85 MiB in the first 5 s,
+before the window is shown). After hiding, a window that was shown stays about 10–14 MiB
+above one that never was: at zoom 1.5, started hidden, hidden max 79.8 MiB, against 92.4 MiB
+for shown then hidden. The window is only `SW_HIDE`n, so its renderer buffers remain while
+the process lives. Skipping the repaint request while hidden made no difference (92.4 MiB),
+so that was not applied. Releasing it needs closing and recreating the GPUI window on
+hide/show, which `Shell` (window-bound handles and focus) does not support today. Not done;
+for the owner/orchestrator to decide. Manifest rewrites, hash-cache writes and the settings
+pass add only about 4–6 MiB over idle (visible in the 5 s maxima: 67–68 MiB idle, 73–74 MiB
+in a pass).
+
+### Decisions (this round)
+
+- Decision: any Restore-kind revision (history restore or recovery-copy restore) is
+  `RestoredFromRecovery` on the restoring and the receiving computer. Why: one command, one
+  kind; both are "put an earlier copy back". Reversible: yes (one match arm in `changes.rs`).
+- Decision: settings change records list the folder key next to the display name. Why: the
+  add-on's own "Recent changes" matches by folder key. Reversible: yes.
+- Decision: while a settings decision is pending the runtime headline reads "Saved settings
+  need your choice" instead of the OK headline. Why: never "up to date" with a decision
+  waiting. Reversible: yes.
+- Decision: G7 and OD-44 are covered by regression tests only; no runtime change. Why: not
+  reproducible in the runtime (above). Reversible: n/a.
+- Decision: no renderer change this round (above). Reversible: n/a.
