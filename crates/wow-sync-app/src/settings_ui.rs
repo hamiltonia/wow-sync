@@ -41,6 +41,16 @@ pub enum UnitStatus {
     WaitingForIdentity {
         who: Option<String>,
     },
+    /// The settings file is too big to share automatically.
+    TooLarge {
+        size: Option<u64>,
+    },
+    /// Other add-ons declare the same saved variable, so ownership is not clear.
+    OwnedBySeveral {
+        with: Vec<String>,
+    },
+    /// New settings are ready but WoW is running.
+    WaitingForWow,
 }
 
 /// One saved copy of a unit, shown by when and where it came from.
@@ -143,6 +153,19 @@ pub fn status_text(s: &UnitStatus) -> String {
         UnitStatus::WaitingForIdentity { who: None } => {
             "Waiting for a character to log in on this computer".into()
         }
+        UnitStatus::TooLarge { size: Some(n) } => format!(
+            "Too large to share automatically ({})",
+            crate::history_ui::size_text(*n)
+        ),
+        UnitStatus::TooLarge { size: None } => "Too large to share automatically".into(),
+        UnitStatus::OwnedBySeveral { with } if with.is_empty() => {
+            "Also used by other add-ons, so not shared automatically".into()
+        }
+        UnitStatus::OwnedBySeveral { with } => format!(
+            "Also used by {}, so not shared automatically",
+            with.join(", ")
+        ),
+        UnitStatus::WaitingForWow => "New settings will be used when WoW closes".into(),
     }
 }
 
@@ -506,9 +529,15 @@ pub fn enable_control(w: &World, chosen: &[String]) -> Control {
 fn urgency(s: &UnitStatus) -> u8 {
     match s {
         UnitStatus::NeedsChoice | UnitStatus::PolicyConflict | UnitStatus::MasterAbsent { .. } => 9,
-        UnitStatus::CaptureFailed | UnitStatus::Suspect | UnitStatus::Diagnosed => 8,
+        UnitStatus::CaptureFailed
+        | UnitStatus::Suspect
+        | UnitStatus::Diagnosed
+        | UnitStatus::TooLarge { .. }
+        | UnitStatus::OwnedBySeveral { .. } => 8,
         UnitStatus::LocalDifferent(_) => 7,
-        UnitStatus::Waiting { .. } | UnitStatus::WaitingForIdentity { .. } => 6,
+        UnitStatus::Waiting { .. }
+        | UnitStatus::WaitingForIdentity { .. }
+        | UnitStatus::WaitingForWow => 6,
         UnitStatus::Paused => 5,
         UnitStatus::NoSharedCopy => 4,
         UnitStatus::Retired => 3,
@@ -1113,6 +1142,8 @@ mod tests {
             latest_capture: Some(Sha256([9; 32])),
             can_share: true,
             waiting_for: None,
+            size_bytes: None,
+            shared_with: Vec::new(),
         }
     }
 
@@ -1334,6 +1365,27 @@ mod tests {
             by: "Den PC".into(),
         };
         assert_eq!(offer(&w), None);
+    }
+
+    #[test]
+    fn the_new_attention_statuses_read_in_plain_words() {
+        assert_eq!(
+            status_text(&UnitStatus::TooLarge {
+                size: Some(5_242_880)
+            }),
+            "Too large to share automatically (5.0 MB)"
+        );
+        assert_eq!(
+            status_text(&UnitStatus::OwnedBySeveral {
+                with: vec!["Alpha".into(), "Beta".into()]
+            }),
+            "Also used by Alpha, Beta, so not shared automatically"
+        );
+        assert_eq!(
+            status_text(&UnitStatus::WaitingForWow),
+            "New settings will be used when WoW closes"
+        );
+        assert!(urgency(&UnitStatus::TooLarge { size: None }) > urgency(&UnitStatus::NoSharedCopy));
     }
 
     #[test]

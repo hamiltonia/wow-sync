@@ -761,6 +761,11 @@ pub fn settings_unit_rows(
                     S::WaitingForIdentity => UnitStatus::WaitingForIdentity {
                         who: r.waiting_for.clone(),
                     },
+                    S::TooLarge => UnitStatus::TooLarge { size: r.size_bytes },
+                    S::OwnedBySeveral => UnitStatus::OwnedBySeveral {
+                        with: r.shared_with.clone(),
+                    },
+                    S::WaitingForWow => UnitStatus::WaitingForWow,
                     S::Active => UnitStatus::Active,
                 },
                 live: r.live,

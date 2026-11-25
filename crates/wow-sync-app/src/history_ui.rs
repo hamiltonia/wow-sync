@@ -199,7 +199,7 @@ pub fn row_of(r: &ChangeRecord) -> ChangeRow {
     };
     ChangeRow {
         name: r.name.clone(),
-        identity: None,
+        identity: r.identity.clone(),
         what,
         files: files_text(&r.files),
         size: signed_size(r.byte_delta),
@@ -381,6 +381,7 @@ pub(crate) mod tests {
             paths: vec!["Core.lua".into()],
             paths_more: 0,
             ms: 0,
+            identity: None,
         }
     }
 
@@ -491,10 +492,12 @@ pub(crate) mod tests {
 
     #[test]
     fn a_settings_row_names_whose_settings_changed() {
-        let mut row = row_of(&rec(ChangeKind::SettingsApplied, "Details", Some("Den PC")));
+        let mut r = rec(ChangeKind::SettingsApplied, "Details", Some("Den PC"));
+        let row = row_of(&r);
         assert_eq!(row.identity, None);
         assert!(!row.line().contains("account"));
-        row.identity = Some("account A".into());
+        r.identity = Some("account A".into());
+        let row = row_of(&r);
         assert!(row.line().starts_with("Details · account A"));
     }
 
