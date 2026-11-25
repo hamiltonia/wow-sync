@@ -128,3 +128,9 @@ Live (fresh synthetic lab, own state): guided first adoption with the box ticked
 Open (runtime): a settings publish from this computer shows the source text "pushed to this computer" (reason PeerPush, no source). Expected wording that says it was shared from this computer; the reason or source for a ShareSettingsWhenReady push needs to say so.
 Decision: when no settings units exist yet the consent lists installed add-on titles (at most 6, then "and N more"). Why: nothing in WTF may be read before consent. Reversible: yes.
 Decision: `share_when_ready` is only requested when this computer is the chosen master. Why: another master's copy must never be pushed from here. Reversible: yes.
+
+## Merge of 36fcbd0 (WaitingForSharedCopy, SharedFromHere)
+
+Decision: wording "Waiting for the shared settings to arrive". Why: the status carries no computer name, so the suggested "<computer>" form can't be filled honestly; it matches "Waiting for <character> to log in" in tone. Reversible: yes.
+Decision: WaitingForSharedCopy keeps urgency 6 (same as other waiting states), so the Add-ons list never reads "up to date" while any identity waits for its copy. Test: `the_new_attention_statuses_read_in_plain_words` (mutation: urgency 1 fails).
+Activity: a non-master's single share reads "shared, ... · shared from this computer", never "pushed". Test: `a_single_share_from_a_non_master_computer_reads_as_shared_from_here` (mutation: old wording fails). No screenshot refresh needed (no layout change).
