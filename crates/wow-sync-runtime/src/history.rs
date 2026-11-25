@@ -60,6 +60,8 @@ pub enum ChangeReason {
     Choice(Option<String>),
     SettingsMaster,
     PeerPush,
+    /// An explicit share of saved settings made on this (non-master) computer.
+    SharedFromHere,
     Removal,
     Rollback,
     Recovery,

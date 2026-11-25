@@ -1043,7 +1043,7 @@ impl SliceService {
         }
         if matches!(cmd, Command::ShareSettingsWhenReady) {
             let mut l = crate::settings_cycle::load_local(&self.state, &gid);
-            if !l.consent {
+            if !l.consent || !self.is_settings_master(&gid, &w.own, None) {
                 return Err(CommandError::NotAllowed);
             }
             l.share_when_ready = true;
@@ -1206,6 +1206,10 @@ impl SliceService {
         }
         let derived = derive(&self.plane.ledger, &gid, &self.plane.members);
         if let Command::ShareSettingsNow { units } = &cmd {
+            let folders: Vec<_> = units.iter().map(|u| u.folder.clone()).collect();
+            if !self.is_settings_master(&gid, &w.own, Some(&folders)) {
+                return Err(CommandError::NotAllowed);
+            }
             if w.standing != OwnStanding::Active {
                 return Err(CommandError::Service(
                     "this computer cannot share settings right now".into(),
@@ -1668,6 +1672,28 @@ impl SliceService {
             let _ = self.command(Command::ShareSettingsNow { units });
         }
     }
+    /// Whether this computer is the effective settings master (for each of `folders`, or for the
+    /// group's default master when `None`). Only a master shares in bulk (design §5.2); a single
+    /// explicit push (`ShareSettings`) stays allowed to every active computer.
+    fn is_settings_master(
+        &self,
+        gid: &GroupId,
+        own: &EnrollmentRef,
+        folders: Option<&[wow_sync_core::paths::FolderKey]>,
+    ) -> bool {
+        use wow_sync_core::settings::{authority_for, policy_heads, Authority};
+        let derived = derive(&self.plane.ledger, gid, &self.plane.members);
+        let heads = policy_heads(&self.plane.ledger, &derived);
+        let me = |m: &EnrollmentRef| {
+            m.computer_id == own.computer_id && m.enrollment_id == own.enrollment_id
+        };
+        match folders {
+            Some(fs) => fs
+                .iter()
+                .all(|f| matches!(authority_for(&heads, f), Authority::Holder(h) if me(&h))),
+            None => matches!(heads.as_slice(), [one] if one.master.as_ref().is_some_and(me)),
+        }
+    }
     /// The Activity row for a settings revision this computer just wrote by command.
     fn record_settings_write(
         &self,
@@ -1684,9 +1710,10 @@ impl SliceService {
             return;
         };
         let at = now_unix_ms();
+        let derived = derive(&self.plane.ledger, &r.group_id, &self.plane.members);
         let rec = crate::changes::settings_published(
             (at as u64, at),
-            r,
+            crate::settings_cycle::issued_by_master(&self.plane.ledger, &derived, r),
             crate::changes::display_of(titles, inventory, &r.unit.folder),
             &info,
         );
@@ -3413,7 +3440,11 @@ impl SliceService {
                         {
                             let rec = crate::changes::settings_published(
                                 (pass_id, now_unix_ms()),
-                                r,
+                                crate::settings_cycle::issued_by_master(
+                                    &self.plane.ledger,
+                                    &derive(&self.plane.ledger, &group_id, &self.plane.members),
+                                    r,
+                                ),
                                 crate::changes::display_of(&w.titles, &w.inventory, &r.unit.folder),
                                 info,
                             );

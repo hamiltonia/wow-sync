@@ -240,6 +240,40 @@ pub(crate) fn manifest_file(
     Some((blob, size))
 }
 
+/// Whether the group's single current settings policy names the revision's issuer as master.
+pub(crate) fn issued_by_master(
+    ledger: &wow_sync_core::ledger::Ledger,
+    derived: &wow_sync_core::ledger::Derived,
+    r: &wow_sync_core::kinds::SettingsRevision,
+) -> bool {
+    match wow_sync_core::settings::policy_heads(ledger, derived).as_slice() {
+        [one] => one
+            .master
+            .as_ref()
+            .is_some_and(|m| m.enrollment_id == r.issuer.enrollment_id),
+        _ => false,
+    }
+}
+
+/// The unit-level version of a checkpoint (its id) and the total size of all its files.
+pub(crate) fn manifest_unit(
+    provider: &ProviderRoot,
+    checkpoint: &CheckpointRef,
+    unit: &SettingsUnit,
+) -> Option<(Sha256, u64)> {
+    let bytes = provider
+        .read(&layout::settings_manifest(checkpoint), 64 * 1024)
+        .ok()?;
+    if sha256(&bytes) != *checkpoint {
+        return None;
+    }
+    let m: SettingsCheckpointManifest = decode(&bytes, 64 * 1024).ok()?;
+    if &m.unit != unit || m.files.is_empty() {
+        return None;
+    }
+    Some((*checkpoint, m.files.iter().map(|f| f.size).sum()))
+}
+
 /// What one settings change replaced and brought, for its history record.
 #[derive(Debug, Clone)]
 pub(crate) struct SettingsChangeInfo {
@@ -255,10 +289,10 @@ pub(crate) fn revision_info(
     provider: &ProviderRoot,
     r: &wow_sync_core::kinds::SettingsRevision,
 ) -> Option<SettingsChangeInfo> {
-    let new = manifest_file(provider, &r.checkpoint, &r.unit)?;
+    let new = manifest_unit(provider, &r.checkpoint, &r.unit)?;
     let old = r.parents.iter().find_map(|p| match ledger.record(p) {
         Some(AuthorityRecord::SettingsRevision(pr)) => {
-            manifest_file(provider, &pr.checkpoint, &r.unit)
+            manifest_unit(provider, &pr.checkpoint, &r.unit)
         }
         _ => None,
     });
@@ -282,6 +316,9 @@ pub struct SettingsFacts {
     /// The game was running at the last cycle: settings were neither read nor replaced.
     pub wow_running: bool,
     pub units: std::collections::BTreeMap<SettingsUnit, UnitFact>,
+    /// Older shared states whose saved copy is gone from the shared folder and from this
+    /// computer (cleanup removed it): they are not offered for restore.
+    pub unavailable: BTreeSet<CheckpointRef>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -300,6 +337,8 @@ pub enum UnitFact {
     LocalDifferent(LocalReason),
     /// Nothing has ever been shared for this unit.
     NoSharedCopy,
+    /// A shared revision exists but its saved copy has not arrived (or is gone) yet.
+    WaitingForCopy,
 }
 
 /// Whether the account (and character) folder of `identity` exists on this computer.
@@ -496,17 +535,62 @@ pub(crate) fn retained_checkpoints(
     Some(keep)
 }
 
+/// The checkpoints of every settings revision record on the shared folder that is younger than the
+/// age gate, whether or not this computer has read it yet (a peer's record may still be unknown
+/// here). Gives up (None) when a recent record cannot be listed or read.
+fn recent_revision_checkpoints(
+    provider: &ProviderRoot,
+    group: &GroupId,
+    cutoff_ns: i128,
+) -> Option<BTreeSet<CheckpointRef>> {
+    let mut out = BTreeSet::new();
+    let members = provider.list(&layout::members_dir(group)).ok()?;
+    for m in members.iter().filter(|m| m.is_dir) {
+        let Ok(c) = ComputerId::parse(&m.name) else {
+            continue;
+        };
+        for e in provider.list(&layout::authority_dir(group, &c)).ok()? {
+            if e.is_dir || e.mtime_ns < cutoff_ns {
+                continue;
+            }
+            let Some(h) = e
+                .name
+                .strip_suffix(".json")
+                .and_then(|s| Sha256::parse(s).ok())
+            else {
+                continue;
+            };
+            let bytes = provider
+                .read(
+                    &layout::authority_record(group, &c, &h),
+                    wow_sync_core::kinds::MAX_RECORD_BYTES as u64,
+                )
+                .ok()?;
+            if let Ok(AuthorityRecord::SettingsRevision(r)) =
+                wow_sync_core::authority::decode_authority(&bytes, &h)
+            {
+                out.insert(r.checkpoint);
+            }
+        }
+    }
+    Some(out)
+}
+
 /// Deletes shared settings manifests and blobs that no kept checkpoint names and that are older
 /// than `GC_MIN_AGE_MS`. Gives up (`None`) when a kept manifest cannot be read, because then the
 /// blobs it names are unknown. Returns the number of files removed.
 pub(crate) fn sweep_provider(
     provider: &ProviderRoot,
+    group: &GroupId,
     keep: &BTreeSet<CheckpointRef>,
     now_ms: u64,
 ) -> Option<usize> {
+    let cutoff_ns = (now_ms as i128 - GC_MIN_AGE_MS) * 1_000_000;
+    let mut keep = keep.clone();
+    keep.extend(recent_revision_checkpoints(provider, group, cutoff_ns)?);
     let mut keep_blobs: BTreeSet<String> = BTreeSet::new();
     let mut keep_manifests: BTreeSet<String> = BTreeSet::new();
-    for cp in keep {
+    for cp in &keep {
         keep_manifests.insert(format!("{cp}.json"));
         match provider.read(&layout::settings_manifest(cp), 64 * 1024) {
             Ok(b) => {
@@ -517,7 +601,6 @@ pub(crate) fn sweep_provider(
             Err(_) => return None,
         }
     }
-    let cutoff_ns = (now_ms as i128 - GC_MIN_AGE_MS) * 1_000_000;
     let mut removed = 0;
     let mut sweep = |dir: &str, keep: &BTreeSet<String>| -> Option<()> {
         let entries = match provider.list(dir) {
@@ -538,6 +621,38 @@ pub(crate) fn sweep_provider(
     sweep("settings/manifests", &keep_manifests)?;
     sweep("settings/blobs", &keep_blobs)?;
     Some(removed)
+}
+
+/// Older shared states (outside the kept three) whose copy no longer exists on the shared folder or
+/// in this computer's store, so a restore of them could not work.
+fn unavailable_checkpoints(
+    a: &StepArgs,
+    store: &SettingsStore,
+    ledger: &wow_sync_core::ledger::Ledger,
+    derived: &wow_sync_core::ledger::Derived,
+) -> BTreeSet<CheckpointRef> {
+    let mut units: BTreeSet<SettingsUnit> = BTreeSet::new();
+    for e in ledger.entries() {
+        if let Some(AuthorityRecord::SettingsRevision(r)) = ledger.record(&e.hash) {
+            units.insert(r.unit.clone());
+        }
+    }
+    let mut out = BTreeSet::new();
+    for u in &units {
+        let history = settings_history(ledger, derived, u);
+        for h in history
+            .iter()
+            .rev()
+            .skip(KEEP_CAPTURES)
+            .filter(|h| !h.is_head)
+        {
+            let local = store.get_manifest(&h.checkpoint.0).ok().flatten().is_some();
+            if !local && manifest_blob(a.provider, &h.checkpoint, u).is_none() {
+                out.insert(h.checkpoint);
+            }
+        }
+    }
+    out
 }
 
 /// The daily sweep of the shared folder; a failure changes nothing and is tried again later.
@@ -561,7 +676,7 @@ fn gc_provider(
     let Some(keep) = retained_checkpoints(ledger, derived) else {
         return;
     };
-    if sweep_provider(a.provider, &keep, now).is_some() {
+    if sweep_provider(a.provider, a.group, &keep, now).is_some() {
         let _ = a.state.write_atomic(&stamp, now.to_string().as_bytes());
     }
 }
@@ -583,6 +698,9 @@ pub(crate) fn upload_checkpoint(
             provider.check_object(&rel, BLOB_LIMIT),
             Ok(wow_sync_adapters::provider::ObjectObs::Local { sha256, .. }) if sha256 == f.blob.0
         ) {
+            // Reused: its age restarts, so a sweep by a peer that has not read the new revision
+            // yet cannot take it (RV11-12).
+            provider.touch(&rel).map_err(|e| e.to_string())?;
             continue;
         }
         let (mut blob, _) = store
@@ -601,6 +719,9 @@ pub(crate) fn upload_checkpoint(
         me,
     )
     .map_err(|e| e.to_string())?;
+    provider
+        .touch(&layout::settings_manifest(checkpoint))
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -1204,7 +1325,7 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                         let old = local.units[li].basis.iter().find_map(|b| {
                             match plane.ledger.record(b) {
                                 Some(AuthorityRecord::SettingsRevision(r)) => {
-                                    manifest_file(a.provider, &r.checkpoint, &unit)
+                                    manifest_unit(a.provider, &r.checkpoint, &unit)
                                 }
                                 _ => None,
                             }
@@ -1214,7 +1335,8 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                                 h,
                                 SettingsChangeInfo {
                                     old,
-                                    new: (o.sha256, o.size),
+                                    new: manifest_unit(a.provider, &cp, &unit)
+                                        .unwrap_or((o.sha256, o.size)),
                                     identity: identity_text(&unit),
                                 },
                             ));
@@ -1237,6 +1359,9 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
             }
             Case::FirstAdoption(to) | Case::Yield { to, .. } => {
                 let Some(blob) = manifest_blob(a.provider, &to, &unit) else {
+                    out.facts
+                        .units
+                        .insert(unit.clone(), UnitFact::WaitingForCopy);
                     out.notes
                         .push(format!("{name}: shared settings are not available yet"));
                     continue;
@@ -1287,11 +1412,13 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                     origin.as_ref().filter(|c| **c != a.own.computer_id),
                 );
                 let op = OpId::parse(&random_id_hex()).expect("random id");
-                if let Some((nb, ns)) = manifest_file(a.provider, &to, &unit) {
+                if let Some((nb, ns)) = manifest_unit(a.provider, &to, &unit) {
                     out.apply_info.insert(
                         op.clone(),
                         SettingsChangeInfo {
-                            old: owned.map(|o| (o.sha256, o.size)),
+                            old: live
+                                .and_then(|l| manifest_unit(a.provider, &l, &unit))
+                                .or_else(|| owned.map(|o| (o.sha256, o.size))),
                             new: (nb, ns),
                             identity: identity_text(&unit),
                         },
@@ -1317,6 +1444,7 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
     }
     prune_store(&store, &dropped, &local, &plane.ledger);
     gc_provider(a, &plane.ledger, &derived);
+    out.facts.unavailable = unavailable_checkpoints(a, &store, &plane.ledger, &derived);
     if dirty {
         let _ = save_local(a.state, a.group, &local);
         let _ = epochs.save(&eps);
@@ -1400,6 +1528,9 @@ pub enum SettingsUnitStatus {
     LocalDifferent(LocalReason),
     /// Nothing has been shared for this unit yet.
     NoSharedCopy,
+    /// The shared revision's saved copy is not in the shared folder yet (or is gone); the unit
+    /// applies by itself once it arrives.
+    WaitingForSharedCopy,
     /// This computer's file is the shared copy (`SettingsUnitRow::in_sync_from`).
     InSync,
     Active,
@@ -1476,7 +1607,8 @@ pub fn settings_units(
         .map(|unit| {
             let authority = authority_for(&heads, &unit.folder);
             let graph = graph_from_ledger(ledger, derived, &unit);
-            let history = settings_history(ledger, derived, &unit);
+            let mut history = settings_history(ledger, derived, &unit);
+            history.retain(|h| !facts.unavailable.contains(&h.checkpoint));
             let latest_capture = local
                 .units
                 .iter()
@@ -1521,6 +1653,8 @@ pub fn settings_units(
                 SettingsUnitStatus::NeedsChoice
             } else if let Some(UnitFact::Waiting(_)) = fact {
                 SettingsUnitStatus::WaitingForIdentity
+            } else if let Some(UnitFact::WaitingForCopy) = fact {
+                SettingsUnitStatus::WaitingForSharedCopy
             } else if let Some(UnitFact::LocalDifferent(r)) = fact {
                 SettingsUnitStatus::LocalDifferent(*r)
             } else if let Some(UnitFact::NoSharedCopy) = fact {

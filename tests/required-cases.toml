@@ -1054,6 +1054,12 @@ tests = [
     "settings_cycle::tests::the_settings_path_never_reads_a_whole_file_into_memory",
     "e2e::tests::the_shared_folder_drops_old_unreferenced_settings_copies_and_keeps_the_retained_three",
     "e2e::tests::a_recent_settings_copy_is_never_swept_even_when_nothing_retains_it",
+    "e2e::tests::change_history::a_share_from_a_computer_that_is_not_master_says_shared_from_here",
+    "e2e::tests::a_reused_old_copy_starts_its_age_again_when_content_returns_to_it",
+    "e2e::tests::cleanup_keeps_every_copy_a_recent_revision_record_names_even_if_unread_here",
+    "e2e::tests::a_revision_whose_copy_is_missing_waits_truthfully_and_applies_when_it_returns",
+    "e2e::tests::settings_history_does_not_offer_a_copy_cleanup_removed",
+    "e2e::tests::only_the_master_shares_in_bulk_but_any_computer_may_push_one_unit",
 ]
 
 [[case]]
