@@ -208,3 +208,110 @@ contradict the release notes.
 Commands: `cargo test -p wow-sync-runtime --lib rv_probe -- --nocapture` and
 `cargo test -p wow-sync-app --lib rv_probe`, run in this worktree. The full suites were not run
 by this reviewer; the implementers' evidence files record those runs.
+
+## Recheck (main 63ec305)
+
+Branch `run010/R10-review` fast-forwarded to main `63ec305`, which includes R10-history round 4
+(068b6cb) and R10-app rounds 4–5 (07c1b16, 7c87ff0). Each fix was checked by reading
+`git diff 5697f85 63ec305` and the new tests. Further temporary probes (listed below) were run
+and then reverted. Test runs in this worktree:
+- `cargo test -p wow-sync-runtime -p wow-sync-app --lib`: runtime 246 passed, 0 failed.
+- `cargo test -p wow-sync-app`: 181 passed, 0 failed.
+
+### Status per finding
+
+| ID | Status | Evidence |
+|---|---|---|
+| RV10-01 | **partially fixed** | `tracking.rs:246-266`: a package's first `staging` event is now emitted unthrottled, so the next add-on is named at once. Bytes are now counted per copied file (`effects.rs` `copied`), and `complete` adds any remainder. Test `the_next_package_is_named_at_once_and_bytes_follow_the_copied_files`. Remaining: new finding RV10-12 (bytes go backwards in multi-folder packages). |
+| RV10-02 | **fixed** | `model.rs:228` `progress_headline`: Scanning, Deciding and Publishing never replace Waiting while an unsatisfied decision is pending; they show as the sub-line. Routine checks under `QUIET_MS` (1.5 s) are not shown, so idle passes no longer flicker the tray. The note is cleared only by real work or a non-scheduled pass. Tests `a_routine_check_never_replaces_a_waiting_decision`, `a_quick_idle_pass_is_silent_and_never_flashes_the_headline`, `the_note_survives_idle_passes_for_its_full_lifetime`. Residual design note RV10-14. |
+| RV10-03 | **fixed** (applied lines) | `complete` now stamps `unix_ms` when the package lands. In `history.rs` `covered()`, an `applied` line is hidden by a record of the same package made after that package's previous `applied` line and no later than 60 s after this line, whatever the apply length. Test `a_long_apply_does_not_list_each_package_twice` uses 450 s and 300 s applies. Residual: RV10-15. |
+| RV10-04 | **fixed** | `changes.rs` `file_diff` compares the published file list with the previous tree read from the provider. If that tree cannot be read, it falls back to net counts (documented in a comment). e2e `a_published_update_counts_only_the_files_that_differ` gives (+1, ~1, −1) with exact paths. |
+| RV10-05 | **fixed** | `published()` records a ThisComputer/Removal record for a previously published eligible folder that is absent from the current inventory. Peer removals applied in the same pass are skipped (`applied_keys` now includes `q.removes`). e2e tests: `an_uninstall_leaves_a_removed_record_on_the_computer_that_made_it` (recorded once over two passes) and `a_removal_applied_from_a_peer_is_not_also_recorded_as_a_local_removal`. Edge case: RV10-13. |
+| RV10-06 | **fixed** | `service.rs` resets `read_ctl.files` to 0 at pass start, and the hint is taken after the first look. e2e `the_checking_files_counter_starts_again_each_pass`. |
+| RV10-07 | **fixed** | `progress_ui.rs`: a scheduled pass logs only once it does real work (install, removal, a record, or an incoming summary). Otherwise it logs nothing, or one "slow check" line if it took 2 s or more. Manual and after-change passes are logged in full. `app.rs` logs the tray tooltip only when it changes. |
+| RV10-08 | **fixed** | `service.rs` writes `changes::recovered` (ThisComputer/Recovery, old version `ContentId("")`, shown as "unknown" by `history_ui.rs`) for each op that crash recovery finished as Applied. e2e `a_crash_recovery_that_finishes_an_install_leaves_a_record`. Side effect: RV10-13. |
+| RV10-09 | note, now documented | Known limits in the release notes cover the mixed-source wording and the writer clock. |
+| RV10-10 | not changed (note) | The comment at `service.rs` ("files just written are too recent for the cache to trust and are re-read") is still outdated. Mtime-trust note unchanged. |
+| RV10-11 | **fixed** | The release notes no longer quote "Checking files: X of Y", and now describe the decision, note, quiet-check and log behaviour. See the release-notes check below. |
+
+### New findings
+
+#### RV10-12 — minor — progress bytes go backwards at each folder of a multi-folder package
+
+- `tracking.rs:254`: `staging` treats every call after the first as a retry. It runs
+  `std::mem::take(&mut item.counted)` and subtracts that from `bytes_done`.
+- `exec.rs:538-539` calls `stage_folder`, and so `staging`, once **per folder** of a package.
+- Effect: for a multi-folder add-on (for example DBM-* or ElvUI with its options folders), the
+  headline's "X of Y GB" drops back by the bytes already copied each time a new folder starts.
+  It under-reports until `complete` adds the rest. The final total is correct. Display only.
+- Probe `rv_probe_second_folder_of_a_package_resets_bytes`: package bytes 100; `staging`,
+  `copied(60)`, `staging` (second folder). **`bytes_done` sequence `[0, 60, 0]`.**
+- Fix direction: reset only on a real retry (track bytes per folder key), or do not subtract.
+
+#### RV10-13 — minor — an install finished by crash recovery is also recorded as "published from this computer"
+
+- The `recovered` keys are not in the publish skip set. `applied_keys` (`service.rs`, the publish
+  block) is built only from `applied_plan`. So the publish later in the same pass records the
+  recovered peer install as `Published` / ThisComputer / NewerRelease, in addition to the new
+  `Applied` / Recovery record.
+- A recovered peer removal would likewise get a false local `Removed` record. Its Recovery
+  record also shows `new_version = New`, because the key is gone from the inventory.
+- The same misattribution applies whenever the publish of an applied change is deferred to a
+  later pass (for example after a provider write error), because the skip set covers only the
+  current pass. That last part is by reasoning only.
+- Probe `rv_probe_recovered_install_is_also_recorded_as_a_local_publish`, a copy of the authors'
+  crash loop. At crash points 6–9, b's records were
+  **`[(Published, ThisComputer, NewerRelease), (Applied, ThisComputer, Recovery)]`**, so the
+  user sees a's add-on as published by b.
+- Crash-only path and display only, so minor.
+- Fix direction: add `rec.ops` keys to `applied_keys`. More robustly, skip folders whose
+  published tree equals a tree this computer installed from a peer.
+
+#### RV10-14 — note — any install or removal still replaces a waiting decision
+
+- `progress_headline` lets Staging, Installing and Removing replace the Waiting headline even
+  when the add-on being installed is not the one awaiting a decision.
+- This lasts only for the apply. The release notes state it accurately ("The headline changes
+  only when an install or removal actually starts"). Acceptable, but different from PLAN.md's
+  "only satisfied decisions" wording. The orchestrator should confirm.
+
+#### RV10-15 — note — other legacy lines still appear next to structured records
+
+- `log_cycle` (`service.rs:4064`) still writes `published seq N (K new objects)` (K > 0) and
+  `recovered …` lines.
+- `covered()` hides only `applied` lines and 0-object publishes, so a local publish or a
+  crash-recovered install shows both a structured entry and a plain line.
+- Cosmetic.
+
+### Release notes (docs/release/v0.3.3.md) against the code
+
+- Accurate:
+  - Progress examples: "Installing …", "Removing Atlas", "Publishing changes: 3 of 7".
+  - Twice-a-second display rate (`MIN_GAP_MS` 500).
+  - Routine checks under about 1.5 s are not shown (`QUIET_MS` 1 500).
+  - A waiting decision stays the headline during routine checks.
+  - The note lasts about 20 s (`NOTE_MS`).
+  - "slow check" at two seconds or more (`SLOW_IDLE_MS` 2 000).
+  - Crash-recovered installs show "unknown".
+  - Known limits on mixed sources and clocks.
+- Minor imprecision:
+  - "Later routine checks do not clear it; starting real work does." A manual or after-a-change
+    pass also clears the note at start, even when it does no work (`progress_ui.rs`
+    `start_work` for a non-scheduled trigger).
+  - The "1.2 of 1.8 GB" byte progress can step backwards for multi-folder add-ons (RV10-12).
+  - Neither is worth blocking the release.
+
+### Recheck probes (all reverted)
+
+| Probe | File | Result |
+|---|---|---|
+| `rv_probe_second_folder_of_a_package_resets_bytes` | `crates/wow-sync-runtime/src/tracking.rs` (tests) | failed = bug confirmed (`[0, 60, 0]`) |
+| `rv_probe_recovered_install_is_also_recorded_as_a_local_publish` | `crates/wow-sync-runtime/src/e2e.rs` (`change_history`) | failed = bug confirmed (Published/ThisComputer next to Recovery at crash points 6–9) |
+
+### Recheck verdict
+
+**No open critical or major findings.**
+- RV10-02 through RV10-08 and RV10-11 are fixed. RV10-01 is fixed for its major part (the
+  next add-on is named at once, and bytes follow the copy).
+- New: RV10-12 and RV10-13 are minor; RV10-14 and RV10-15 are notes.
+- Still open from the first review: RV10-09 is now documented, and RV10-10 is a note.
