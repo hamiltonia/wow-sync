@@ -10,6 +10,8 @@ use wow_sync_runtime::{
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChangeRow {
     pub name: String,
+    /// Settings only: whose settings, in plain words ("account A", "A1 on Realm").
+    pub identity: Option<String>,
     /// "1.2 → 1.3", "new", "removed"; may be empty for settings.
     pub what: String,
     pub files: String,
@@ -39,6 +41,9 @@ impl ChangeRow {
     /// The whole row as one sentence, for the screen reader and the list.
     pub fn line(&self) -> String {
         let mut parts: Vec<&str> = vec![self.name.as_str()];
+        if let Some(i) = &self.identity {
+            parts.push(i);
+        }
         for p in [&self.what, &self.files, &self.size, &self.reason] {
             if !p.is_empty() {
                 parts.push(p);
@@ -210,6 +215,7 @@ pub fn row_of(r: &ChangeRecord) -> ChangeRow {
     };
     ChangeRow {
         name: r.name.clone(),
+        identity: r.identity.clone(),
         what,
         files: files_text(&r.files),
         size: signed_size(r.byte_delta),
@@ -516,6 +522,17 @@ pub(crate) mod tests {
             done_note(&v).as_deref(),
             Some("Updated 15 add-ons from RYZENFISH \u{2014} see Activity")
         );
+    }
+
+    #[test]
+    fn a_settings_row_names_whose_settings_changed() {
+        let mut r = rec(ChangeKind::SettingsApplied, "Details", Some("Den PC"));
+        let row = row_of(&r);
+        assert_eq!(row.identity, None);
+        assert!(!row.line().contains("account"));
+        r.identity = Some("account A".into());
+        let row = row_of(&r);
+        assert!(row.line().starts_with("Details · account A"));
     }
 
     #[test]

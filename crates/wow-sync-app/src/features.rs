@@ -37,6 +37,8 @@ pub enum ActionKind {
     SetSettingsPolicy,
     ShareSettings,
     EnableSettings,
+    /// Guided start: consent here and, on the choosing computer, the settings master.
+    StartSettings,
     PauseSettings,
     ResumeSettings,
     UseSharedSettings,
@@ -61,6 +63,7 @@ impl ActionKind {
                 | ActionKind::RestoreRemoved
                 | ActionKind::SetSettingsPolicy
                 | ActionKind::ShareSettings
+                | ActionKind::StartSettings
                 | ActionKind::ChooseSettings
         )
     }
@@ -101,6 +104,7 @@ impl Capabilities {
             SetSettingsPolicy,
             ShareSettings,
             EnableSettings,
+            StartSettings,
             PauseSettings,
             ResumeSettings,
             UseSharedSettings,
@@ -168,6 +172,12 @@ pub enum GroupAction {
     EnableSettings {
         included_accounts: Vec<String>,
     },
+    /// master is None when this computer only confirms a master chosen elsewhere.
+    StartSettings {
+        master: Option<EnrollmentRef>,
+        exceptions: Vec<PolicyRule>,
+        included_accounts: Vec<String>,
+    },
     PauseSettings {
         folder: FolderKey,
     },
@@ -215,6 +225,7 @@ impl GroupAction {
             GroupAction::SetSettingsPolicy { .. } => ActionKind::SetSettingsPolicy,
             GroupAction::ShareSettings { .. } => ActionKind::ShareSettings,
             GroupAction::EnableSettings { .. } => ActionKind::EnableSettings,
+            GroupAction::StartSettings { .. } => ActionKind::StartSettings,
             GroupAction::PauseSettings { .. } => ActionKind::PauseSettings,
             GroupAction::ResumeSettings { .. } => ActionKind::ResumeSettings,
             GroupAction::UseSharedSettings { .. } => ActionKind::UseSharedSettings,
@@ -278,6 +289,9 @@ impl GroupAction {
             GroupAction::EnableSettings { included_accounts } => {
                 Command::EnableSettings { included_accounts }
             }
+            GroupAction::StartSettings {
+                included_accounts, ..
+            } => Command::EnableSettings { included_accounts },
             GroupAction::PauseSettings { folder } => Command::PauseSettings { folder },
             GroupAction::ResumeSettings { folder, choice } => {
                 Command::ResumeSettings { folder, choice }
@@ -744,10 +758,14 @@ pub fn settings_unit_rows(
                     S::PolicyConflict => UnitStatus::PolicyConflict,
                     S::Paused => UnitStatus::Paused,
                     S::NeedsChoice => UnitStatus::NeedsChoice,
-                    // Placeholder until R11-app adds the "waiting" wording; never emitted yet.
-                    S::WaitingForIdentity | S::TooLarge | S::OwnedBySeveral | S::WaitingForWow => {
-                        UnitStatus::Off
-                    }
+                    S::WaitingForIdentity => UnitStatus::WaitingForIdentity {
+                        who: r.waiting_for.clone(),
+                    },
+                    S::TooLarge => UnitStatus::TooLarge { size: r.size_bytes },
+                    S::OwnedBySeveral => UnitStatus::OwnedBySeveral {
+                        with: r.shared_with.clone(),
+                    },
+                    S::WaitingForWow => UnitStatus::WaitingForWow,
                     S::Active => UnitStatus::Active,
                 },
                 live: r.live,
