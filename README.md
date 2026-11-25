@@ -38,8 +38,14 @@ Run-009 (D-31) published the `v0.3.2`
 ([notes](docs/release/v0.3.2.md)). It fixes conflicting choices that could not
 be resolved, a crash that made a restarted computer show setup, click lag, a
 misleading "waiting for Dropbox" headline, and re-reading unchanged files.
-Report: [docs/runs/run-009/REPORT.md](docs/runs/run-009/REPORT.md). The latest
-release is `v0.3.2`.
+Report: [docs/runs/run-009/REPORT.md](docs/runs/run-009/REPORT.md).
+Run-010 (D-32) published the `v0.3.3`
+[pre-release](https://github.com/hamiltonia/wow-sync/releases/tag/v0.3.3)
+([notes](docs/release/v0.3.3.md)). It adds a per-add-on change history that
+shows what changed, from which computer, and why. It also adds live sync
+progress, and makes quiet idle passes about three times faster. Report:
+[docs/runs/run-010/REPORT.md](docs/runs/run-010/REPORT.md). The latest release
+is `v0.3.3`. Run-011 (D-33, add-on settings sync) is in progress.
 Repository layout: [docs/REPO-MAP.md](docs/REPO-MAP.md).
 
 This repository (`hamiltonia/wow-sync`) is the permanent project home. It is not
