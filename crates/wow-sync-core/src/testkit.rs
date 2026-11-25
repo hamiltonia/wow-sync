@@ -142,7 +142,7 @@ pub fn folder_scan(name: &str, files: &[(&str, &[u8])], tocs: &[&str]) -> Folder
             })
             .collect(),
         fingerprint: Some(fingerprint_of(name, &files)),
-        files,
+        files: files.into(),
     }
 }
 
@@ -254,7 +254,7 @@ pub fn member_state(c: &ComputerId, seq: u64, inv: &Inventory) -> CodeState {
     let mut folders = inv.folders.clone();
     for f in &mut folders {
         f.fingerprint = None;
-        f.file_entries.clear();
+        f.file_entries = Default::default();
     }
     CodeState {
         group_id: group_id(),
@@ -388,7 +388,7 @@ impl Scenario {
                     t,
                     TreeAvail::Ok(FolderTreeRecord {
                         tree: t,
-                        files: f.file_entries.clone(),
+                        files: f.file_entries.to_vec(),
                     }),
                 );
             }

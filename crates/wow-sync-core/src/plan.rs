@@ -104,7 +104,7 @@ pub fn publish_objects<'a>(
         .filter_map(|f| f.tree.map(|t| (f, t)))
         .flat_map(move |(f, tree)| {
             let mut out: Vec<ObjectRef> = Vec::new();
-            for e in &f.file_entries {
+            for e in f.file_entries.iter() {
                 if seen.insert((false, e.sha256)) {
                     out.push(ObjectRef {
                         rel: blob(group, &e.sha256),
@@ -119,7 +119,7 @@ pub fn publish_objects<'a>(
             }
             let mut bytes = encode(&FolderTreeRecord {
                 tree,
-                files: f.file_entries.clone(),
+                files: f.file_entries.to_vec(),
             });
             bytes.shrink_to_fit();
             if seen.insert((true, tree)) {
@@ -139,7 +139,7 @@ pub fn count_publish_objects(inv: &Inventory) -> u64 {
     let mut seen: std::collections::HashSet<(bool, Sha256)> = std::collections::HashSet::new();
     for f in inv.folders.iter().filter(|f| f.transfer_eligible()) {
         let Some(tree) = f.tree else { continue };
-        for e in &f.file_entries {
+        for e in f.file_entries.iter() {
             seen.insert((false, e.sha256));
         }
         seen.insert((true, tree));
@@ -410,7 +410,7 @@ pub fn plan_apply(
             };
             let rec = FolderTreeRecord {
                 tree,
-                files: f.file_entries.clone(),
+                files: f.file_entries.to_vec(),
             };
             if crate::hash::tree_hash(&rec.files) != tree {
                 blocked = Some(Explanation::NotAvailableYet {
