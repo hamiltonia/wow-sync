@@ -37,9 +37,24 @@ touched.
 
 The gate is 100 MiB aggregate private resident memory. Typical passes stay near 62 MiB; a pass that
 reads, hashes and stores a file near the 32 MiB cap holds several whole copies and reaches 96 MiB
-working set (104 MiB commit). A 32 MiB file would very likely exceed the gate. This is an open
-issue (see below).
+working set (104 MiB commit). A 32 MiB file would very likely exceed the gate. Superseded by OD-30 below.
 
+### Memory with streaming (OD-30): one add-on file at the cap, before and after
+
+Lab: two computers, one account, one add-on file of the given size; every step is a separate
+process, sampled every 10 ms. Values are the peak of any step (capture, share, download, apply,
+edit-and-republish). "Before" is main 9ac5912, "after" is this commit.
+
+| File | Build | Peak private commit | Peak working set |
+| --- | --- | --- | --- |
+| 32 MiB (the cap) | before | 130.9 MiB | 128 MiB |
+| 32 MiB (the cap) | **after** | **1.7 MiB** | **8.2 MiB** |
+| 31.9 MiB (cap edge) | before | 66.8 MiB | 72.8 MiB |
+| 31.9 MiB (cap edge) | **after** | **1.5 MiB** | **8.2 MiB** |
+
+Files were equal on both computers after apply and after a one-byte edit republish (all four runs).
+The per-process figure excludes the add-on listing a real install adds (62 MiB typical pass, see
+above), which is unchanged; the file-size-dependent part is now constant.
 ## Fails-without-fix table
 
 Each row: the guard was reverted by a one-line source change, the named test run, the guard restored.
@@ -70,6 +85,12 @@ Each row: the guard was reverted by a one-line source change, the named test run
 | D1 "Share these now" ticked at consent | `share_these_now_ticked_at_consent_pushes_the_first_captures_once` | fails |
 | D4 master says nothing "from itself" | `becoming_master_publishes_nothing…` | fails |
 | One missing character | `one_missing_character_waits_alone…` | regression guard only: the all-wait defect did not reproduce in the e2e or in the lab |
+| OD-30 whole-file buffers (alloc peak < 3 MiB, largest < 1 MiB over a 24 MiB file) | stream_guard::a_large_settings_file_is_hashed_stored_uploaded_and_staged_in_fixed_buffers | fails (buffer set to file size) |
+| OD-30 no whole-file read calls in the settings path | settings_cycle::the_settings_path_never_reads_a_whole_file_into_memory | fails (source scan) |
+| Provider GC keeps three retained per unit | 	he_shared_folder_drops_old_unreferenced_settings_copies_and_keeps_the_retained_three | fails (retention 0) |
+| Provider GC age gate (30 days) | _recent_settings_copy_is_never_swept_even_when_nothing_retains_it | fails |
+| Provider GC sweep runs | 	he_shared_folder_drops_old_unreferenced_settings_copies… | fails (call removed) |
+| A publish from here is not PeerPush | xplicit_pushes_and_peer_applies_are_recorded_with_versions_size_and_identity | fails |
 
 ## Decisions made
 
@@ -90,13 +111,24 @@ Each row: the guard was reverted by a one-line source change, the named test run
 - Decision: Suspect units do nothing in the cycle; a master's later edits still auto-publish.
   Reversible: restrict to LocalDifferent.
 - Decision: cycle notes use plain kinds, never error text. Reversible: yes.
-
+- Decision: keep the 32 MiB cap; capture hashing, blob store, provider upload, download, staging and
+  local fallback stream through 256 KiB (store) and 64 KiB (hash) buffers. get_blob is test-only.
+  Why: OD-30. Reversible: yes.
+- Decision: regression guards are a counting allocator over a 24 MiB file in the adapters tests
+  (runtime forbids unsafe) and a source scan of the runtime settings path. Reversible: yes.
+- Decision: provider GC is implemented, conservatively: only settings blobs/manifests that no
+  retained revision (heads + 3 newest per unit + removal captures) references AND older than 30 days;
+  at most daily; gives up if a retained manifest cannot be read. Why: peers may lag or upload before
+  their record lands. Residual risk: a revision older than 30 days this computer never saw could
+  lose its blob. Reversible: remove the gc_provider call.
+- Decision: a publish from this computer is recorded with the existing ChangeReason::SettingsMaster
+  and source this computer; only an applied Push is PeerPush with the origin as source. Why: no new
+  variant, so the GUI needs no change. Caveat: the label reads "settings master" even for a non-master
+  explicit push; a SharedFromHere variant would need a history_ui arm. Reversible: yes.
 ## Open issues
 
-- Peak memory with a near-cap file (96 MiB working set, 104 MiB commit) is at the 100 MiB gate;
-  whole-file reads, hash and staging copies should stream, or the cap be lowered. Needs an owner or
-  orchestrator decision.
-- Provider-side garbage collection of settings blobs and legacy untracked blobs is not done.
+- FAT32/exFAT volumes are untested; the Windows move uses MoveFileExW which supports them.
+- Only the first file of a multi-file unit appears in a record's versions.
 - No pre-consent share preview (nothing of WTF is read before consent, by design).
 - `ShareSettingsWhenReady` takes effect on the pass after the first capture (one cycle later).
 - Unix no-replace is link-then-unlink; not exercised on this machine.

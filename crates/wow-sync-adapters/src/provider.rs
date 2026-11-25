@@ -217,6 +217,18 @@ impl ProviderRoot {
         self.put_stream(rel, &mut r, expect, computer)
     }
 
+    /// Streams `src` into `rel` through a temp file verified against `expect`; only a fixed
+    /// buffer is held.
+    pub fn put_object_reader(
+        &self,
+        rel: &str,
+        src: &mut dyn Read,
+        expect: [u8; 32],
+        computer: &str,
+    ) -> Result<(u64, i128), FsError> {
+        self.put_stream(rel, src, expect, computer)
+    }
+
     fn put_stream(
         &self,
         rel: &str,

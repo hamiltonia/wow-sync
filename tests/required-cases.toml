@@ -1050,6 +1050,10 @@ tests = [
     "fs_install::tests::a_move_never_replaces_a_file_created_after_the_check",
     "e2e::tests::change_history::explicit_pushes_and_peer_applies_are_recorded_with_versions_size_and_identity",
     "e2e::tests::change_history::share_these_now_ticked_at_consent_pushes_the_first_captures_once",
+    "stream_guard::a_large_settings_file_is_hashed_stored_uploaded_and_staged_in_fixed_buffers",
+    "settings_cycle::tests::the_settings_path_never_reads_a_whole_file_into_memory",
+    "e2e::tests::the_shared_folder_drops_old_unreferenced_settings_copies_and_keeps_the_retained_three",
+    "e2e::tests::a_recent_settings_copy_is_never_swept_even_when_nothing_retains_it",
 ]
 
 [[case]]

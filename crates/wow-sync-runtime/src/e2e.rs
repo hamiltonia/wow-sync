@@ -3970,6 +3970,74 @@ mod tests {
         assert!(count(&a) >= 1);
     }
 
+    fn provider_settings_files(lab: &Lab) -> Vec<PathBuf> {
+        ["blobs", "manifests"]
+            .iter()
+            .flat_map(|d| {
+                std::fs::read_dir(lab.shared.join("WoWSync/settings").join(d))
+                    .map(|r| r.flatten().map(|e| e.path()).collect::<Vec<_>>())
+                    .unwrap_or_default()
+            })
+            .collect()
+    }
+
+    fn publish_versions(a: &mut Pc, from: u32, to: u32) {
+        for v in from..=to {
+            write_wtf(a, "Alpha", &format!("AlphaDB = {{ v = {v} }}\n"));
+            synced(a);
+        }
+    }
+
+    fn forget_last_sweep(a: &Pc) {
+        for e in std::fs::read_dir(&a.cfg.state_dir).unwrap().flatten() {
+            if e.file_name().to_string_lossy().starts_with("settings-gc-") {
+                std::fs::remove_file(e.path()).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn the_shared_folder_drops_old_unreferenced_settings_copies_and_keeps_the_retained_three() {
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 0 }\n");
+        synced(&mut a);
+        share_now(&mut a);
+        publish_versions(&mut a, 1, 5);
+        let before = provider_settings_files(&lab).len();
+        assert!(before >= 12, "{before}");
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(60 * 24 * 3600);
+        for f in provider_settings_files(&lab) {
+            wow_sync_adapters::testkit::set_mtime(&f, old);
+        }
+        publish_versions(&mut a, 6, 6);
+        forget_last_sweep(&a);
+        synced(&mut a);
+        // Three kept revisions: a blob and a manifest each.
+        let after = provider_settings_files(&lab).len();
+        assert_eq!(after, 6, "{after} files remain of {before}");
+        // The newest settings still reach a peer.
+        publish_versions(&mut a, 7, 7);
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 7 }\n")
+        );
+    }
+
+    #[test]
+    fn a_recent_settings_copy_is_never_swept_even_when_nothing_retains_it() {
+        let lab = Lab::new();
+        let (mut a, _b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 0 }\n");
+        synced(&mut a);
+        share_now(&mut a);
+        publish_versions(&mut a, 1, 6);
+        let before = provider_settings_files(&lab).len();
+        forget_last_sweep(&a);
+        synced(&mut a);
+        assert_eq!(provider_settings_files(&lab).len(), before);
+    }
     #[test]
     fn a_settings_note_never_names_an_account_realm_or_character() {
         let lab = Lab::new();
@@ -7468,12 +7536,14 @@ mod tests {
             assert_eq!(first.byte_delta, "AlphaDB = { v = 1 }\n".len() as i64);
             assert_eq!(first.identity.as_deref(), Some("account-wide"));
             assert_eq!(first.source, ChangeSource::ThisComputer);
+            assert_ne!(first.reason, ChangeReason::PeerPush, "a share from here");
             synced(&mut b);
             let applied = changes(&b)
                 .into_iter()
                 .find(|c| c.kind == ChangeKind::SettingsApplied)
                 .expect("the peer apply has an Activity row");
             assert_eq!(applied.source, ChangeSource::Computer("a".into()));
+            assert_eq!(applied.reason, ChangeReason::PeerPush);
             assert_eq!(applied.identity.as_deref(), Some("account-wide"));
             assert!(matches!(&applied.new_version, VersionLabel::ContentId(s) if s.len() == 8));
             // A later single push (the Share button) is recorded as well, with the old version.
@@ -7497,6 +7567,11 @@ mod tests {
                 .filter(|c| c.kind == ChangeKind::SettingsPublished)
                 .collect();
             assert_eq!(after.len(), before + 1, "{after:?}");
+            assert!(
+                after.iter().all(|c| c.reason != ChangeReason::PeerPush
+                    && c.source == ChangeSource::ThisComputer),
+                "{after:?}"
+            );
         }
 
         #[test]
