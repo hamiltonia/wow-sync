@@ -3,15 +3,16 @@
 ## Verdict
 
 **DO NOT RELEASE this candidate.** G2, G3 and G4 are major visibility/history
-defects. The complete tray-progress and uncontended 3× speed gates remain
-BLOCKED. Passing developer tests did not establish these GUI requirements.
+defects on the original candidate. The tray-progress gate remains BLOCKED.
+The authorized follow-up below closes the headless speed gate at **3.19×**.
+Passing developer tests did not establish the other GUI requirements.
 
 | Check | Result | Independent result |
 |---|---|---|
 | 1. History | **FAIL** | Update, addition, removal and restart persistence worked. Peer choices/rollback have the wrong reason; settings history lacks versions; addon recent-history rows omit sources. G1–G3. |
 | 2. Live progress | **BLOCKED** | Headline, incoming summary and cleared decision text PASS during a 1 GiB apply. Actual tray tooltip observation was blocked on this desktop. |
 | 3. Logs | **FAIL** | Receiving-side phase/package logs and their privacy PASS. A real publishing pass was reported as an idle check with zero changes, without package lines. G4. |
-| 4. Speed/cache | **BLOCKED** | Candidate headless warm median 306 ms; GUI median 434 ms. No valid uncontended, exact v0.3.2 median was available from its log. Real installation was never enrolled or locked. Cache-seeding test and artifact mutation detection PASS. |
+| 4. Speed/cache | **PASS** | Authorized fair headless follow-up: v0.3.2 median **927 ms**, candidate **291 ms**, **3.19×** faster on the same lab copy. Both read zero files. Cache-seeding test and artifact mutation detection PASS; quiet artifact counter limitation retained below. |
 | 5. Memory | **PASS** | Sampled peak aggregate private working set during 1 GiB GUI apply: **37.85 MiB**; entire 90 s observation: 40.27 MiB. Sampling limitations below. |
 | 6. Artifact smoke | **PASS** | Dispatch provenance/checksum, packaged version, two GUI enrollments, transfer, restart, hide/reopen and explicit GUI quit executed. |
 | 7. GUI idle overhead, report only | **PASS** | Measurements and log-timestamp comparison reported below, including contention and censored baseline results. This is not a passing 3× performance gate or a proven diagnosis of the owner's live instance. |
@@ -77,8 +78,9 @@ Executed in `$WT`, with the prescribed cargo PATH:
   **1 passed**, with cache hits, changed-file and full-read controls.
 - Existing release examples were built with
   `cargo build --locked --release -p wow-sync-runtime --examples`.
-  No baseline headless binary was fabricated or substituted for the
-  published v0.3.2 executable.
+  Initial GUI verification used the published v0.3.2 executable. The later,
+  explicitly authorized headless baseline port/build is documented below;
+  it was not substituted for the published GUI artifact.
 
 ### G5 — minor — intermittent native transport tests
 
@@ -237,6 +239,10 @@ Source log: `A-state\logs\wow-sync.log`.
 
 ## Checks 4 and 7: speed, cache and GUI overhead
 
+The initial comparison and its blocker are retained here as historical
+evidence. **Check 4 is superseded by the fair follow-up below**; check 7's
+GUI observations are unchanged.
+
 Dataset: copies of the approved real AddOns tree, **36,142 files /
 3,772,226,174 bytes / 113 folders**, with identical synthetic build metadata.
 Only copies were enrolled. Warm results, not initial full hashing/publication:
@@ -297,6 +303,93 @@ post-install re-observation reported zero reads; an exact counter line for
 its next quiet scheduled pass was unavailable due log suppression and is
 **not separately claimed proven**.
 
+### Check 4 follow-up — fair headless comparison, 2026-11-24
+
+**PASS: 927 / 291 = 3.185567×**, exceeding the approved ≥3× gate. This
+closes the previously blocked speed comparison on the same lab copy
+explicitly authorized in the orchestrator's follow-up. It does not turn
+the earlier contended GUI comparison into a valid benchmark.
+
+#### Baseline provenance and faithful port
+
+- Created the requested detached `$LAB\v032-src` worktree of `v0.3.2`,
+  resolved to **78c4045580b36dbc9ffa8bbba70a07186a3ca0a0**.
+- That tag has no `speed_lab` example. Ported candidate 374a1a3's example
+  against **only the tag's 0.3.2 core/adapters/runtime crates**.
+- No production file or dependency was changed. All configuration, activity
+  selection, HashCache/ScanCtl setup, enrollment branch, counter resets,
+  `sync_once()` call and `Instant` timing remained identical. The only
+  functional source difference in the harness was removal of unavailable
+  directory-listing/stat telemetry and its output. Existing hash-cache
+  hit/miss counters remained in both harnesses. No candidate runtime or
+  optimization was backported.
+- Built with `cargo build --locked --release -p wow-sync-runtime
+  --example speed_lab`, Rust 1.100.0/MSVC; build completed successfully.
+  Candidate used the already built release example from 374a1a3; comparison
+  of this worker checkout's product sources against that SHA was empty.
+- Retained baseline port in `$LAB\fair032-speed-lab.rs`, SHA-256
+  `0f01705c854231d1db06da44c5a05b22f4fb0a1b5e2309fd23cedef5877839f9`.
+  Baseline executable `$LAB\fair032-benchmark.exe`, SHA-256
+  `707351be2bbcec2372925f895f9c707b1691a8981e8775e65f16a0f1b2d1cda7`.
+  Candidate example SHA-256:
+  `d7ccbfe96939893c95d7799dd05ddaba578af374f01eb310ee53891fbfb99efa`.
+
+#### Fair setup and execution
+
+Both executions used the **same physical** `$LAB\bench033` installation
+and `$LAB\headless033-provider`, with separate identical starting state
+snapshots, `fair032-state` and `fair033-state`. The tree remained 36,142
+files / 3,772,226,174 bytes. Existing verified cache bytes were copied
+unchanged into the harness's `speed-lab` cache scope in both snapshots.
+No invented cache entries, real-install enrollment or live-provider access
+were needed.
+
+Both builds used `ScriptedActivity(NotRunning)` and `recent_ms=2000`, just
+like the original speed harness. Each process ran four passes: pass 0 was
+the explicitly excluded warm-up; **passes 1–3 were all the measured warm
+passes**, with no selection or retry after seeing the ratio.
+
+Immediately before and after the serial pair, process enumeration found
+**zero other lab/product benchmark processes**. No other lab publication
+was active: the shared provider's latest write was **02:53:22.701Z**
+before the pair and remained exactly that timestamp afterwards. The
+R10-check app/sampler processes were stopped, its baseline build had
+completed, and the two benchmarks ran synchronously, not concurrently.
+Nothing belonging to the owner was stopped to obtain these conditions.
+
+```text
+<baseline speed_lab.exe> <same lab install> _forever_ <same provider> <fair032-state> 4
+<candidate speed_lab.exe> <same lab install> _forever_ <same provider> <fair033-state> 4
+```
+
+The baseline process ran **03:19:39.169Z–03:19:46.412Z**; the candidate
+followed immediately and exited at **03:19:47.784Z**. Startup/cache loading
+was outside the timed `sync_once()` calls.
+
+| Build | Excluded warm-up | Warm passes 1–3 | Median | Reused per warm pass | Read |
+|---|---|---|---|---|---|
+| v0.3.2 tag, faithful harness port | 969 ms | **948, 927, 866 ms** | **927 ms** | 108,426 | **0** |
+| Candidate 374a1a3 | 417 ms | **295, 280, 291 ms** | **291 ms** | 36,142 | **0** |
+
+Candidate warm directory listings were 1,426, listed entries 37,676 and
+stat counter 775. These additional counters were not available in the
+unmodified baseline crates and are **not** the gate: the gate is measured
+wall time, whose ratio is **3.185567×**.
+
+Raw outputs: `fair032.log`, `fair033.log`, `fair-pair.log` and
+`fair032-build.log`, retained under the lab.
+
+#### Cleanup and unchanged scope
+
+Removed the sole added baseline example file, then ran
+`git worktree remove "$LAB\v032-src"` without force. The worktree directory
+was absent afterwards and no baseline worktree registration remained.
+No benchmark process survived. Only this evidence file is committed.
+
+The previous cache negative control remains valid and its quiet artifact
+counter limitation remains explicit. This speed follow-up does not
+re-verify G1/G3/G4 fixes, claim G2 was fixed, or authorize release.
+
 ## Artifact GUI lifecycle smoke and remaining limits
 
 Two real artifact windows completed synthetic create/join setup, received
@@ -310,8 +403,8 @@ and reopened that same running PID. **App settings → Quit WoW Sync** then
 terminated it. This was not an owner instance or a forced-termination claim
 masquerading as GUI quit.
 
-Unverified gates remain visible: actual tray progress, strict uncontended
-3× baseline comparison, receiving settings history/convergence, runtime
+Unverified gates remain visible: actual tray progress, receiving settings
+history/convergence, runtime
 model receipt, non-Windows native execution, and the separately larger
 2 GiB workload. No product fixes, relaxed assertions or public release were
 performed by this worker.
