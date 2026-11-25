@@ -6869,7 +6869,7 @@ mod tests {
                 .find_map(|e| e.incoming.as_ref())
                 .expect("a two add-on apply is summarised");
             assert_eq!(inc.addons, 2);
-            assert_eq!(inc.source, ChangeSource::Computer("a".into()));
+            assert_eq!(inc.source, Some(ChangeSource::Computer("a".into())));
             assert!(events.iter().any(|e| e.phase == Phase::Installing));
             assert!(events.iter().any(|e| e.phase == Phase::Publishing));
             assert_eq!(
@@ -6880,6 +6880,94 @@ mod tests {
                     .count(),
                 2
             );
+        }
+
+        #[test]
+        fn a_rollback_a_restore_and_a_settings_change_are_recorded_with_their_reasons() {
+            use wow_sync_core::hash::package_hash;
+            let lab = Lab::new();
+            let (_a, mut b, c, g) = alpha_v2_published(&lab);
+            let v1 = alpha_folder(&lab, &g, &c);
+            let v1_hash = package_hash(&[(v1.key.clone(), v1.tree.unwrap())]);
+            synced(&mut b);
+            b.svc
+                .command(Command::Rollback {
+                    package: v1.key.clone(),
+                    recovered: v1_hash,
+                })
+                .unwrap();
+            synced(&mut b);
+            let all = changes(&b);
+            let rb = all
+                .iter()
+                .find(|c| c.kind == ChangeKind::RolledBack)
+                .unwrap_or_else(|| panic!("{all:?}"));
+            assert_eq!(rb.reason, ChangeReason::Rollback);
+            assert_eq!(rb.source, ChangeSource::ThisComputer);
+            assert_eq!(rb.files.changed, 2, "{rb:?}");
+            assert_ne!(rb.old_version, rb.new_version);
+        }
+
+        #[test]
+        fn a_restore_is_recorded_as_a_recovery() {
+            let lab = Lab::new();
+            let mut a = lab.pc("a");
+            let mut b = lab.pc("b");
+            a.addon("Alpha", "alpha-v1");
+            let g = a.create();
+            synced(&mut a);
+            b.join(&g);
+            synced(&mut b);
+            a_removes_alpha(&mut a, &g);
+            let (ac, _) = pc_ids(&a);
+            let removal = removal_hash(&lab, &g, &ac);
+            synced(&mut b);
+            b.svc.command(Command::RestoreRemoved { removal }).unwrap();
+            for _ in 0..3 {
+                synced(&mut b);
+                synced(&mut a);
+            }
+            let all = changes(&b);
+            let r = all
+                .iter()
+                .find(|c| c.kind == ChangeKind::RecoveryRestored)
+                .unwrap_or_else(|| panic!("{all:?}"));
+            assert_eq!(r.reason, ChangeReason::Recovery);
+            assert_eq!(r.source, ChangeSource::ThisComputer);
+            assert_eq!(r.old_version, VersionLabel::New);
+            assert_eq!(r.files.added, 2, "{r:?}");
+            assert!(
+                matches!(&r.new_version, VersionLabel::ContentId(s) if s.len() == 8),
+                "{r:?}"
+            );
+        }
+
+        #[test]
+        fn a_masters_settings_change_is_recorded_on_both_computers_without_paths() {
+            let lab = Lab::new();
+            let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+            write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+            synced(&mut a);
+            write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+            synced(&mut a);
+            synced(&mut b);
+            let on_b = changes(&b);
+            let got = on_b
+                .iter()
+                .find(|c| c.kind == ChangeKind::SettingsApplied)
+                .unwrap_or_else(|| panic!("{on_b:?}"));
+            assert_eq!(got.source, ChangeSource::Computer("a".into()));
+            assert_eq!(got.reason, ChangeReason::SettingsMaster);
+            assert_eq!(got.name, "Alpha settings");
+            assert_eq!(got.files.changed, 1);
+            assert!(got.paths.is_empty());
+            assert!(!format!("{got:?}").contains("ACC"));
+            let on_a = changes(&a);
+            let sent = on_a
+                .iter()
+                .find(|c| c.kind == ChangeKind::SettingsPublished)
+                .unwrap_or_else(|| panic!("{on_a:?}"));
+            assert_eq!(sent.source, ChangeSource::ThisComputer);
         }
 
         #[test]

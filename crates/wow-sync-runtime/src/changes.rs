@@ -80,6 +80,11 @@ fn written_ms(r: &AuthorityRecord) -> u64 {
     }
 }
 
+/// Eight hex characters of a content hash: enough to tell two releases apart.
+fn short(h: &wow_sync_core::ids::Sha256) -> String {
+    h.0[..4].iter().map(|b| format!("{b:02x}")).collect()
+}
+
 fn clip(s: &str) -> String {
     s.chars()
         .filter(|c| !c.is_control())
@@ -90,7 +95,7 @@ fn clip(s: &str) -> String {
 pub(crate) fn label(f: &FolderState) -> VersionLabel {
     match f.toc.version.as_deref().map(str::trim) {
         Some(v) if !v.is_empty() => VersionLabel::Toc(clip(v)),
-        _ => VersionLabel::ContentId(f.tree.map(|t| t.prefix()).unwrap_or_default()),
+        _ => VersionLabel::ContentId(f.tree.map(|t| short(&t)).unwrap_or_default()),
     }
 }
 
@@ -159,7 +164,7 @@ fn new_label(cx: &BuildCx, p: &PackageApply) -> VersionLabel {
         .iter()
         .find(|f| f.key == p.package)
         .or_else(|| p.folders.first())
-        .map(|f| f.tree.tree.prefix())
+        .map(|f| short(&f.tree.tree))
         .unwrap_or_default();
     VersionLabel::ContentId(tree)
 }
@@ -356,7 +361,7 @@ pub(crate) fn prepare(p: &PackageApply, cx: &BuildCx) -> Option<ChangeRecord> {
                 names = p
                     .settings_ops
                     .iter()
-                    .map(|o| o.unit.folder.as_str().to_string())
+                    .map(|o| display_of(cx.titles, cx.inventory, &o.unit.folder))
                     .collect();
                 names.sort();
                 names.dedup();
@@ -442,12 +447,27 @@ pub(crate) fn kept(
     ))
 }
 
+/// The name the owner knows a folder by: its title, else its folder name as installed.
+pub(crate) fn display_of(
+    titles: &BTreeMap<String, String>,
+    inventory: &Inventory,
+    key: &FolderKey,
+) -> String {
+    if let Some(t) = titles.get(&key.as_str().to_ascii_lowercase()) {
+        return clip(t);
+    }
+    inventory
+        .get(key)
+        .map_or_else(|| key.as_str().to_string(), |f| f.name.clone())
+}
+
 /// A saved-settings revision this computer just published.
 pub(crate) fn settings_published(
     stamp: (u64, i64),
     r: &wow_sync_core::kinds::SettingsRevision,
+    display: String,
 ) -> ChangeRecord {
-    let folder = r.unit.folder.as_str().to_string();
+    let folder = display;
     let mut rec = base(
         stamp,
         ChangeKind::SettingsPublished,

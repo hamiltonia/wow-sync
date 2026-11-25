@@ -3151,7 +3151,15 @@ impl SliceService {
                         {
                             crate::history::record_change(
                                 &self.state,
-                                &crate::changes::settings_published((pass_id, now_unix_ms()), r),
+                                &crate::changes::settings_published(
+                                    (pass_id, now_unix_ms()),
+                                    r,
+                                    crate::changes::display_of(
+                                        &w.titles,
+                                        &w.inventory,
+                                        &r.unit.folder,
+                                    ),
+                                ),
                             );
                         }
                     }

@@ -26,9 +26,15 @@ Branch `run010/R10-history`, built on the merged interface (main `33261fe`).
   counts/reason and restart persistence, removal author, ordered progress with incoming summary
   and completed records, legacy lines still listed).
 
+## Round 2
+
+- `IncomingSummary.source` is now `Option<ChangeSource>`; `None` means several computers sent the
+  add-ons (no new enum variant). `ProgressEvent.source` is `None` in that case too.
+- Tests added: mixed-source summary, `decision_satisfied` (display names only), rollback, restore
+  (recovery) and master settings records. Settings records now use the display name; restore
+  records carry an 8-hex content-id version label.
+
 ## Open issues
 
-- `decision_satisfied` is wired (answered and offered scopes) but has no dedicated test.
-- RolledBack, RecoveryRestored and SettingsApplied records are built but have no dedicated test.
 - Settings records name the folder only; no account/character paths are stored.
 - Not rebased onto R10-speed's scan changes yet.

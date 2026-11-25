@@ -199,6 +199,7 @@ impl ApplyProgress {
             .map(|i| format!("{:?}", i.record.source))
             .collect();
         if g.total >= u64::from(SUMMARY_ADDONS) || g.bytes_total >= SUMMARY_BYTES {
+            // `None` when the add-ons come from more than one computer.
             let source = if sources.len() == 1 {
                 g.items.values().next().map(|i| i.record.source.clone())
             } else {
@@ -206,10 +207,10 @@ impl ApplyProgress {
             };
             e.incoming = Some(IncomingSummary {
                 addons: g.total as u32,
-                source: source.unwrap_or(ChangeSource::ThisComputer),
+                source,
                 bytes: g.bytes_total,
             });
-            e.source = e.incoming.as_ref().map(|i| i.source.clone());
+            e.source = e.incoming.as_ref().and_then(|i| i.source.clone());
         }
         e.decision_satisfied = g
             .items
@@ -306,5 +307,99 @@ impl PublishProgress {
         e.items_done = done;
         e.items_total = self.total.load(Ordering::Relaxed).max(done);
         self.hub.emit_throttled(e);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::history::{ChangeKind, ChangeReason, FileCounts, VersionLabel};
+    use wow_sync_core::paths::validate_folder_name;
+
+    fn item(name: &str, source: ChangeSource) -> (String, Item) {
+        let record = ChangeRecord {
+            unix_ms: 1,
+            pass_id: 1,
+            kind: ChangeKind::Applied,
+            name: format!("{name} Display"),
+            folders: vec![name.into()],
+            source,
+            old_version: VersionLabel::New,
+            new_version: VersionLabel::Toc("1".into()),
+            files: FileCounts::default(),
+            byte_delta: 0,
+            reason: ChangeReason::NewerRelease,
+            paths: vec![],
+            paths_more: 0,
+            ms: 0,
+        };
+        let key = validate_folder_name(name).unwrap();
+        (
+            format!("op-{name}"),
+            Item {
+                record,
+                key,
+                started: None,
+                done: false,
+            },
+        )
+    }
+
+    fn announced(items: Vec<(String, Item)>, decided: &[&str]) -> ProgressEvent {
+        let hub = ProgressHub::new();
+        let rx = hub.subscribe();
+        let total = items.len() as u64;
+        let p = ApplyProgress {
+            hub,
+            pass_id: 1,
+            state_dir: PathBuf::new(),
+            inner: Arc::new(Mutex::new(Inner {
+                items: items.into_iter().collect(),
+                total,
+                bytes_total: 0,
+                items_done: 0,
+                bytes_done: 0,
+            })),
+        };
+        let decided = decided
+            .iter()
+            .map(|n| validate_folder_name(n).unwrap())
+            .collect();
+        p.announce(&decided);
+        rx.try_recv().unwrap()
+    }
+
+    fn from(c: &str) -> ChangeSource {
+        ChangeSource::Computer(c.into())
+    }
+
+    #[test]
+    fn a_summary_names_the_one_source_and_none_when_several_computers_send() {
+        let one = announced(vec![item("Alpha", from("a")), item("Beta", from("a"))], &[]);
+        assert_eq!(one.incoming.unwrap().source, Some(from("a")));
+        let mixed = announced(vec![item("Alpha", from("a")), item("Beta", from("b"))], &[]);
+        let inc = mixed.incoming.unwrap();
+        assert_eq!(inc.addons, 2);
+        assert_eq!(inc.source, None);
+        assert_eq!(mixed.source, None);
+        let mixed_with_self = announced(
+            vec![
+                item("Alpha", from("a")),
+                item("Beta", ChangeSource::ThisComputer),
+            ],
+            &[],
+        );
+        assert_eq!(mixed_with_self.incoming.unwrap().source, None);
+    }
+
+    #[test]
+    fn decision_satisfied_carries_display_names_of_decided_packages_only() {
+        let ev = announced(
+            vec![item("Alpha", from("a")), item("Beta", from("a"))],
+            &["Beta", "Gamma"],
+        );
+        assert_eq!(ev.decision_satisfied, vec!["Beta Display".to_string()]);
+        let none = announced(vec![item("Alpha", from("a"))], &[]);
+        assert!(none.decision_satisfied.is_empty());
     }
 }

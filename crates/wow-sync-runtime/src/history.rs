@@ -300,7 +300,8 @@ pub enum Phase {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IncomingSummary {
     pub addons: u32,
-    pub source: ChangeSource,
+    /// `None` when the incoming add-ons come from more than one computer.
+    pub source: Option<ChangeSource>,
     pub bytes: u64,
 }
 

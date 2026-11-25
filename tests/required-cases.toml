@@ -1892,5 +1892,10 @@ tests = [
     "e2e::tests::change_history::a_removal_is_recorded_with_its_author_and_no_new_version",
     "e2e::tests::change_history::progress_runs_scanning_to_idle_in_order_and_reports_each_record",
     "e2e::tests::change_history::older_audit_lines_still_appear_in_the_history",
+        "tracking::tests::a_summary_names_the_one_source_and_none_when_several_computers_send",
+        "tracking::tests::decision_satisfied_carries_display_names_of_decided_packages_only",
+        "e2e::tests::change_history::a_rollback_a_restore_and_a_settings_change_are_recorded_with_their_reasons",
+        "e2e::tests::change_history::a_restore_is_recorded_as_a_recovery",
+        "e2e::tests::change_history::a_masters_settings_change_is_recorded_on_both_computers_without_paths",
 ]
 # <<< section: R10-history
