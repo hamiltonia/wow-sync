@@ -37,6 +37,8 @@ pub enum ActionKind {
     SetSettingsPolicy,
     ShareSettings,
     EnableSettings,
+    /// Guided start: consent here and, on the choosing computer, the settings master.
+    StartSettings,
     PauseSettings,
     ResumeSettings,
     UseSharedSettings,
@@ -61,6 +63,7 @@ impl ActionKind {
                 | ActionKind::RestoreRemoved
                 | ActionKind::SetSettingsPolicy
                 | ActionKind::ShareSettings
+                | ActionKind::StartSettings
                 | ActionKind::ChooseSettings
         )
     }
@@ -101,6 +104,7 @@ impl Capabilities {
             SetSettingsPolicy,
             ShareSettings,
             EnableSettings,
+            StartSettings,
             PauseSettings,
             ResumeSettings,
             UseSharedSettings,
@@ -168,6 +172,12 @@ pub enum GroupAction {
     EnableSettings {
         included_accounts: Vec<String>,
     },
+    /// master is None when this computer only confirms a master chosen elsewhere.
+    StartSettings {
+        master: Option<EnrollmentRef>,
+        exceptions: Vec<PolicyRule>,
+        included_accounts: Vec<String>,
+    },
     PauseSettings {
         folder: FolderKey,
     },
@@ -215,6 +225,7 @@ impl GroupAction {
             GroupAction::SetSettingsPolicy { .. } => ActionKind::SetSettingsPolicy,
             GroupAction::ShareSettings { .. } => ActionKind::ShareSettings,
             GroupAction::EnableSettings { .. } => ActionKind::EnableSettings,
+            GroupAction::StartSettings { .. } => ActionKind::StartSettings,
             GroupAction::PauseSettings { .. } => ActionKind::PauseSettings,
             GroupAction::ResumeSettings { .. } => ActionKind::ResumeSettings,
             GroupAction::UseSharedSettings { .. } => ActionKind::UseSharedSettings,
@@ -278,6 +289,9 @@ impl GroupAction {
             GroupAction::EnableSettings { included_accounts } => {
                 Command::EnableSettings { included_accounts }
             }
+            GroupAction::StartSettings {
+                included_accounts, ..
+            } => Command::EnableSettings { included_accounts },
             GroupAction::PauseSettings { folder } => Command::PauseSettings { folder },
             GroupAction::ResumeSettings { folder, choice } => {
                 Command::ResumeSettings { folder, choice }

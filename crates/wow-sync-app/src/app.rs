@@ -96,6 +96,15 @@ pub enum Act {
     NeedsAddonsFiltered,
     TryAgainShared,
     ToggleExpand(String),
+    /// A radio choice: only `key` stays set among the keys that start with `group`.
+    Pick {
+        group: String,
+        key: String,
+    },
+    /// "Set up…" on the settings offer: open the Settings sync page with the consent showing.
+    OpenSettingsConsent,
+    /// "Not now" on the settings offer, remembered until settings are turned on.
+    DismissSettingsOffer,
     Toggle(String),
     TurnOffTestMode,
     Theme(ThemeChoice),
@@ -239,6 +248,8 @@ pub struct Shell {
     pub in_sheet: bool,
     pub first_close_done: bool,
     pub expanded: HashSet<String>,
+    /// "Not now" on the settings offer; kept in memory until the runtime stores it.
+    pub settings_offer_dismissed: bool,
     pub setup: SetupState,
     pub reconf: ReconfState,
     pub handles: HashMap<String, FocusHandle>,
@@ -350,6 +361,7 @@ impl Shell {
             in_sheet: false,
             first_close_done: false,
             expanded: HashSet::new(),
+            settings_offer_dismissed: false,
             setup: SetupState::default(),
             reconf: ReconfState::default(),
             handles: HashMap::new(),
@@ -808,6 +820,18 @@ impl Shell {
                 if opened {
                     self.expanded.insert(k);
                 }
+            }
+            Act::Pick { group, key } => {
+                self.expanded.retain(|k| !k.starts_with(&group));
+                self.expanded.insert(key);
+            }
+            Act::OpenSettingsConsent => {
+                self.nav(Page::SettingsSync);
+                self.expanded.insert("ss-consent-open".into());
+            }
+            Act::DismissSettingsOffer => {
+                self.settings_offer_dismissed = true;
+                self.expanded.remove("ss-consent-open");
             }
             Act::TurnOffTestMode => {
                 self.send(Cmd::SetTestMode(false, None));
@@ -1980,6 +2004,39 @@ impl Shell {
         } else {
             sync.border_color(rgb(pal.divider))
         };
+        let offer_row = crate::settings_ui::headline_offer(&self.w, self.settings_offer_dismissed)
+            .map(|o| {
+                let set_up = self.btn(
+                    "hdr-offer-setup",
+                    "Set up…",
+                    Bk::Secondary,
+                    Act::OpenSettingsConsent,
+                    cx,
+                );
+                let not_now = self.btn(
+                    "hdr-offer-later",
+                    "Not now",
+                    Bk::Secondary,
+                    Act::DismissSettingsOffer,
+                    cx,
+                );
+                div()
+                    .id("hdr-offer")
+                    .role(Role::Group)
+                    .aria_label(SharedString::from(o.question()))
+                    .mt(u(4.))
+                    .flex()
+                    .items_center()
+                    .gap(u(10.))
+                    .child(
+                        div()
+                            .text_size(u(13.))
+                            .child(SharedString::from(o.question())),
+                    )
+                    .child(set_up)
+                    .child(not_now)
+                    .into_any_element()
+            });
         let mut head = div()
             .id("header")
             .role(Role::Banner)
@@ -2036,6 +2093,7 @@ impl Shell {
                             SharedString::from(model::headline_sub(&self.w).unwrap_or_default()),
                         ))
                     })
+                    .when_some(offer_row, |d, r| d.child(r))
                     .when(matches!(self.w.busy, Some(Busy::Syncing { .. })), |d| {
                         let (done, total) = match self.w.busy {
                             Some(Busy::Syncing { done, total }) => (done, total),

@@ -8,10 +8,10 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
-wow-sync-core = { version = "0.3.3", path = "../wow-sync-core" }
-wow-sync-adapters = { version = "0.3.3", path = "../wow-sync-adapters" }
+wow-sync-core = { version = "0.4.0", path = "../wow-sync-core" }
+wow-sync-adapters = { version = "0.4.0", path = "../wow-sync-adapters" }
 serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
-wow-sync-adapters = { version = "0.3.3", path = "../wow-sync-adapters", features = ["testkit"] }
+wow-sync-adapters = { version = "0.4.0", path = "../wow-sync-adapters", features = ["testkit"] }

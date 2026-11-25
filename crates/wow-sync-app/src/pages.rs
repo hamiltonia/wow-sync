@@ -750,7 +750,11 @@ impl Shell {
                     i,
                     n,
                     &r.key,
-                    r.a11y.clone(),
+                    format!(
+                        "{}, {}",
+                        r.a11y,
+                        crate::settings_ui::addon_settings_line(&self.w, &r.key)
+                    ),
                     Act::OpenAddon(r.key.clone()),
                     cx,
                 )
@@ -794,6 +798,16 @@ impl Shell {
                         .truncate()
                         .text_color(rgb(pal.muted))
                         .child(SharedString::from(r.confirmed_by.clone())),
+                )
+                .child(
+                    div()
+                        .w(u(200.))
+                        .flex_none()
+                        .truncate()
+                        .text_color(rgb(pal.muted))
+                        .child(SharedString::from(crate::settings_ui::addon_settings_line(
+                            &self.w, &r.key,
+                        ))),
                 );
             els.push(el.into_any_element());
         }
@@ -806,7 +820,8 @@ impl Shell {
             .child(div().flex_1().child("Name"))
             .child(div().w(u(90.)).flex_none().child("Version here"))
             .child(div().w(u(250.)).flex_none().child("Status"))
-            .child(div().w(u(160.)).flex_none().child("Confirmed by"));
+            .child(div().w(u(160.)).flex_none().child("Confirmed by"))
+            .child(div().w(u(200.)).flex_none().child("Settings"));
         let sh = self.scroll("addons");
         let max_h = (self.window_h - 76.0 - 26.0 - 200.0).max(200.0);
         let list = div()
@@ -1256,7 +1271,7 @@ impl Shell {
             .iter()
             .cloned()
             .enumerate()
-            .filter(|(_, r)| r.unit.folder.as_str() == key)
+            .filter(|(_, r)| r.unit.folder.as_str().eq_ignore_ascii_case(key))
             .collect();
         for (i, row) in units {
             for (j, (c, sentence)) in crate::settings_ui::restore_controls(&self.w, &row)
@@ -1308,6 +1323,11 @@ impl Shell {
                     .collect()
             }
         };
+        let settings_lines: Vec<AnyElement> =
+            crate::settings_ui::addon_settings_lines(&self.w, key)
+                .into_iter()
+                .map(|l| div().child(SharedString::from(l)).into_any_element())
+                .collect();
         let why: Vec<AnyElement> = s
             .why
             .iter()
@@ -1339,6 +1359,7 @@ impl Shell {
             .child(self.panel("Next step", next))
             .child(self.panel("Change decision", change))
             .child(self.panel("On each computer", comps))
+            .child(self.panel("Settings", settings_lines))
             .child(self.panel("Recent changes", recent))
             .child(self.panel("Folders", folders))
             .child(self.panel("Recovery copies", rec))
@@ -1958,7 +1979,12 @@ impl Shell {
             .child(self.heading("Settings sync", 1))
             .child(banner);
 
-        if !self.w.features.settings.enabled {
+        let offer = crate::settings_ui::offer(&self.w);
+        if let Some(o) = offer.clone() {
+            let p = self.settings_offer_panel(&o, cx);
+            col = col.child(p);
+        }
+        if offer.is_none() && !self.w.features.settings.enabled {
             let accounts = self.w.features.settings.available_accounts.clone();
             let mut a: Vec<AnyElement> = vec![div()
                 .child("Choose which WoW accounts share their add-on settings. Nothing is included until you choose.")
@@ -2198,6 +2224,136 @@ impl Shell {
             );
         }
         s
+    }
+
+    /// The guided offer and, once "Set up…" is chosen, the §5.4 consent: the exact text, the
+    /// accounts (all ticked until unticked) and, for the first choice, the master.
+    fn settings_offer_panel(
+        &mut self,
+        o: &crate::settings_ui::Offer,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let mut a: Vec<AnyElement> = vec![div()
+            .child(SharedString::from(o.question()))
+            .into_any_element()];
+        let share = matches!(o, crate::settings_ui::Offer::Share);
+        if share && !self.expanded.contains("ss-consent-open") {
+            let label = "Set up…";
+            a.push(
+                self.btn(
+                    "ss-offer-open",
+                    label,
+                    Bk::Primary,
+                    Act::ToggleExpand("ss-consent-open".into()),
+                    cx,
+                )
+                .into_any_element(),
+            );
+            return self.panel("Share add-on settings", a).into_any_element();
+        }
+        a.push(
+            self.muted(crate::settings_ui::CONSENT_TEXT)
+                .into_any_element(),
+        );
+        a.push(div().child("Accounts on this computer").into_any_element());
+        let accounts = self.w.features.settings.available_accounts.clone();
+        let mut chosen = Vec::new();
+        for name in &accounts {
+            let key = format!("ss-acct-off-{name}");
+            let on = !self.expanded.contains(&key);
+            if on {
+                chosen.push(name.clone());
+            }
+            let label = format!(
+                "Account {name}: {}",
+                if on { "included" } else { "not included" }
+            );
+            a.push(
+                self.btn(
+                    &format!("ss-acct-{name}"),
+                    &label,
+                    Bk::Secondary,
+                    Act::ToggleExpand(key),
+                    cx,
+                )
+                .into_any_element(),
+            );
+        }
+        let mut pick = None;
+        if matches!(o, crate::settings_ui::Offer::Share) {
+            a.push(
+                div()
+                    .child("Which computer's add-on settings should the others use? This is the settings master.")
+                    .into_any_element(),
+            );
+            let choices = crate::settings_ui::master_choices(&self.w);
+            let picked = (0..choices.len())
+                .find(|i| self.expanded.contains(&format!("ss-pick-{i}")))
+                .unwrap_or(0);
+            pick = Some(picked);
+            for (i, c) in choices.iter().enumerate() {
+                let label = format!(
+                    "{}: {}",
+                    c.label,
+                    if i == picked {
+                        "master"
+                    } else {
+                        "not the master"
+                    }
+                );
+                a.push(
+                    self.btn(
+                        &format!("ss-pick-{i}"),
+                        &label,
+                        Bk::Secondary,
+                        Act::Pick {
+                            group: "ss-pick-".into(),
+                            key: format!("ss-pick-{i}"),
+                        },
+                        cx,
+                    )
+                    .into_any_element(),
+                );
+            }
+        }
+        let c = crate::settings_ui::start_control(&self.w, o, &chosen, pick);
+        match c.action {
+            Ok(g) => a.push(
+                self.btn("ss-start", &c.label, Bk::Primary, Act::Group(g), cx)
+                    .into_any_element(),
+            ),
+            Err(why) => {
+                a.push(
+                    self.btn_off("ss-start", &c.label, &why, cx)
+                        .into_any_element(),
+                );
+                a.push(self.muted(why).into_any_element());
+            }
+        }
+        if share {
+            a.push(
+                self.btn(
+                    "ss-cancel",
+                    "Cancel",
+                    Bk::Secondary,
+                    Act::ToggleExpand("ss-consent-open".into()),
+                    cx,
+                )
+                .into_any_element(),
+            );
+        } else {
+            a.push(
+                self.btn(
+                    "ss-later",
+                    "Not now",
+                    Bk::Secondary,
+                    Act::DismissSettingsOffer,
+                    cx,
+                )
+                .into_any_element(),
+            );
+        }
+        self.panel("Share add-on settings", a).into_any_element()
     }
 
     /// A button per control; an unavailable one is disabled and says why.

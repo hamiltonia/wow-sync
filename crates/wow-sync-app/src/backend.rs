@@ -59,7 +59,21 @@ pub struct GroupResult {
 /// runtime command.
 pub fn dispatch(svc: &mut SliceService, a: &GroupAction) -> ActionResult {
     let started = Instant::now();
-    let out = svc.command(a.to_command());
+    // Consent first: a master chosen without consent here would publish nothing, but a consent
+    // without a master is harmless, so a failure in between leaves the safe state.
+    let out = match a {
+        GroupAction::StartSettings {
+            master: Some(master),
+            exceptions,
+            ..
+        } => svc.command(a.to_command()).and_then(|_| {
+            svc.command(wow_sync_runtime::Command::SetSettingsPolicy {
+                master: Some(master.clone()),
+                exceptions: exceptions.clone(),
+            })
+        }),
+        _ => svc.command(a.to_command()),
+    };
     let (ok, line) = group_log_line(a.kind(), &out);
     let ms = started.elapsed().as_millis();
     if ok {

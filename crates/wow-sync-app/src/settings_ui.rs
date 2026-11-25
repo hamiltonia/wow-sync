@@ -37,6 +37,8 @@ pub enum UnitStatus {
     Suspect,
     CaptureFailed,
     NotShared,
+    /// The add-on's settings are shared but this character has not been on this computer yet.
+    WaitingForCharacter,
 }
 
 /// One saved copy of a unit, shown by when and where it came from.
@@ -133,6 +135,9 @@ pub fn status_text(s: &UnitStatus) -> String {
         UnitStatus::Suspect => "Settings may be incomplete after WoW stopped".into(),
         UnitStatus::CaptureFailed => "Settings could not be saved".into(),
         UnitStatus::NotShared => "Not shared (your choice)".into(),
+        UnitStatus::WaitingForCharacter => {
+            "Waiting for this character to log in on this computer".into()
+        }
     }
 }
 
@@ -487,6 +492,189 @@ pub fn enable_control(w: &World, chosen: &[String]) -> Control {
         ActionKind::EnableSettings,
         "Turn on settings sync",
         GroupAction::EnableSettings {
+            included_accounts: listed,
+        },
+    )
+}
+
+/// How urgent a unit status is for the one-line summary of an add-on; higher is shown first.
+fn urgency(s: &UnitStatus) -> u8 {
+    match s {
+        UnitStatus::NeedsChoice | UnitStatus::PolicyConflict | UnitStatus::MasterAbsent { .. } => 9,
+        UnitStatus::CaptureFailed | UnitStatus::Suspect | UnitStatus::Diagnosed => 8,
+        UnitStatus::LocalDifferent(_) => 7,
+        UnitStatus::Waiting { .. } | UnitStatus::WaitingForCharacter => 6,
+        UnitStatus::Paused => 5,
+        UnitStatus::NoSharedCopy => 4,
+        UnitStatus::Retired => 3,
+        UnitStatus::NotShared | UnitStatus::Off => 2,
+        UnitStatus::Active | UnitStatus::InSync { .. } => 1,
+    }
+}
+
+/// The settings line of the Add-ons list: the most urgent status among the add-on's identities.
+pub fn addon_settings_line(w: &World, folder: &str) -> String {
+    let worst = w
+        .features
+        .settings
+        .units
+        .iter()
+        .filter(|u| u.unit.folder.as_str().eq_ignore_ascii_case(folder))
+        .map(|u| &u.status)
+        .max_by_key(|s| urgency(s));
+    match worst {
+        Some(s) => status_text(s),
+        None if w.features.settings.enabled => "Not shared yet".into(),
+        None => "Settings not shared".into(),
+    }
+}
+
+/// One line per identity for Add-on detail, in plain words ("Thrall on Argent Dawn: ...").
+pub fn addon_settings_lines(w: &World, folder: &str) -> Vec<String> {
+    let lines: Vec<String> = w
+        .features
+        .settings
+        .units
+        .iter()
+        .filter(|u| u.unit.folder.as_str().eq_ignore_ascii_case(folder))
+        .map(|u| format!("{}: {}", identity_words(&u.unit), status_text(&u.status)))
+        .collect();
+    if lines.is_empty() {
+        vec![addon_settings_line(w, folder)]
+    } else {
+        lines
+    }
+}
+
+/// The guided offer to share add-on settings, shown only while nothing about settings is on here.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Offer {
+    /// No settings policy exists: this computer may choose the master.
+    Share,
+    /// A master was chosen on another computer and this one has not confirmed.
+    UseMaster { master: String },
+}
+
+pub const OFFER_SHARE_QUESTION: &str = "Share add-on settings between your computers?";
+
+/// The consent text of settings.md §5.4, shown before anything is shared.
+pub const CONSENT_TEXT: &str = "All addon settings on this computer are shared, including addons you install later. WoW's own settings, key bindings, macros and layout are not shared. Settings stay inside each account and character.";
+
+impl Offer {
+    pub fn question(&self) -> String {
+        match self {
+            Offer::Share => OFFER_SHARE_QUESTION.into(),
+            Offer::UseMaster { master } => {
+                let mut c = master.chars();
+                let first: String = c
+                    .next()
+                    .map(|f| f.to_uppercase().collect())
+                    .unwrap_or_default();
+                format!(
+                    "{first}{} is now the settings master. Use its add-on settings here?",
+                    c.as_str()
+                )
+            }
+        }
+    }
+
+    pub fn confirm_label(&self) -> &'static str {
+        match self {
+            Offer::Share => "Share settings",
+            Offer::UseMaster { .. } => "Use settings",
+        }
+    }
+}
+
+/// The offer this computer would make, ignoring "Not now" and whether the headline is calm.
+pub fn offer(w: &World) -> Option<Offer> {
+    let d = &w.features.settings;
+    if !w.enrolled
+        || d.enabled
+        || d.policy_conflict
+        || d.available_accounts.is_empty()
+        || !matches!(w.features.standing, crate::features::Standing::Active)
+    {
+        return None;
+    }
+    match (&d.master, active_master(w)) {
+        (None, _) => Some(Offer::Share),
+        (Some(_), Some(m)) => Some(Offer::UseMaster {
+            master: computer_name(w, m),
+        }),
+        (Some(_), None) => None,
+    }
+}
+
+/// The offer for the headline area: add-ons are up to date, no decision waits and the owner has
+/// not said "Not now".
+pub fn headline_offer(w: &World, dismissed: bool) -> Option<Offer> {
+    if dismissed
+        || !w.features.decisions.is_empty()
+        || crate::model::headline(w).tone != crate::theme::Tone::Ok
+    {
+        return None;
+    }
+    offer(w)
+}
+
+/// A computer the consent can name as the master.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MasterChoice {
+    pub label: String,
+    pub enrollment: EnrollmentRef,
+}
+
+/// Enrolled computers, this one first. This computer is the default.
+pub fn master_choices(w: &World) -> Vec<MasterChoice> {
+    let mine = w.features.this_enrollment.iter().map(|e| MasterChoice {
+        label: format!("{} (this computer)", w.computer),
+        enrollment: e.clone(),
+    });
+    let others = w.features.enrollments.iter().map(|(id, e)| MasterChoice {
+        label: w
+            .peers
+            .iter()
+            .find(|p| p.id == *id)
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| "another computer".into()),
+        enrollment: e.clone(),
+    });
+    mine.chain(others).collect()
+}
+
+/// "Share settings" / "Use settings": the accounts left ticked and, for the choosing computer,
+/// the master picked (`pick` is an index into `master_choices`; `None` is this computer).
+pub fn start_control(w: &World, o: &Offer, chosen: &[String], pick: Option<usize>) -> Control {
+    let label = o.confirm_label();
+    let listed: Vec<String> = w
+        .features
+        .settings
+        .available_accounts
+        .iter()
+        .filter(|a| chosen.contains(a))
+        .cloned()
+        .collect();
+    if listed.is_empty() {
+        return off(label, "Choose at least one account.");
+    }
+    let master = match o {
+        Offer::UseMaster { .. } => None,
+        Offer::Share => {
+            let choices = master_choices(w);
+            match choices.get(pick.unwrap_or(0)) {
+                Some(c) => Some(c.enrollment.clone()),
+                None => return off(label, "This computer is not ready to be chosen yet."),
+            }
+        }
+    };
+    control(
+        w,
+        ActionKind::StartSettings,
+        label,
+        GroupAction::StartSettings {
+            master,
+            exceptions: w.features.settings.exceptions.clone(),
             included_accounts: listed,
         },
     )
@@ -1003,5 +1191,169 @@ mod tests {
         assert!(unit_controls(&w, &row).is_empty());
         let (_, retired) = controls_for(|_| {}, S::Retired, true);
         assert_eq!(retired.status, UnitStatus::Retired);
+    }
+
+    fn offer_world(edit: impl FnOnce(&mut wow_sync_runtime::StatusSnapshot)) -> World {
+        let mut w = snapshot_world_with(|s| {
+            s.settings.enabled = false;
+            s.settings.master = None;
+            s.settings.master_name = None;
+            s.settings.available_accounts = vec!["ACC".into(), "ZED".into()];
+            edit(s);
+        });
+        w.view.headline = wow_sync_core::status::Headline::Ok;
+        w.checking = false;
+        w
+    }
+
+    #[test]
+    fn the_offer_follows_policy_and_consent_and_never_shows_when_it_cannot_act() {
+        let w = offer_world(|_| {});
+        assert_eq!(offer(&w), Some(Offer::Share));
+        assert_eq!(
+            Offer::Share.question(),
+            "Share add-on settings between your computers?"
+        );
+        let other = offer_world(|s| {
+            s.settings.master = Some(den());
+            s.settings.master_name = Some("Den PC".into());
+        });
+        let o = offer(&other).unwrap();
+        assert_eq!(
+            o.question(),
+            "Den PC is now the settings master. Use its add-on settings here?"
+        );
+        assert_eq!(o.confirm_label(), "Use settings");
+        assert_eq!(offer(&offer_world(|s| s.settings.enabled = true)), None);
+        assert_eq!(
+            offer(&offer_world(|s| s.settings.policy_conflict = true)),
+            None
+        );
+        assert_eq!(
+            offer(&offer_world(|s| s.settings.available_accounts.clear())),
+            None
+        );
+        // A master that is no longer an active computer is not offered.
+        let gone = offer_world(|s| {
+            s.settings.master = Some(EnrollmentRef {
+                computer_id: ComputerId::parse("44444444444444444444444444444444").unwrap(),
+                enrollment_id: EnrollmentId::parse("55555555555555555555555555555555").unwrap(),
+            });
+        });
+        assert_eq!(offer(&gone), None);
+    }
+
+    #[test]
+    fn not_now_and_busy_headlines_hide_only_the_headline_offer() {
+        let w = offer_world(|_| {});
+        assert_eq!(headline_offer(&w, false), Some(Offer::Share));
+        assert_eq!(headline_offer(&w, true), None);
+        assert_eq!(offer(&w), Some(Offer::Share));
+        let mut waiting = w.clone();
+        waiting.view.headline = wow_sync_core::status::Headline::Waiting;
+        assert_eq!(headline_offer(&waiting, false), None);
+        assert_eq!(offer(&waiting), Some(Offer::Share));
+    }
+
+    #[test]
+    fn the_consent_ticks_every_account_and_picks_this_computer_by_default() {
+        let w = offer_world(|_| {});
+        let choices = master_choices(&w);
+        assert_eq!(choices[0].label, format!("{} (this computer)", w.computer));
+        assert_eq!(choices[1].label, "Den PC");
+        let all = ["ACC".to_string(), "ZED".to_string()];
+        let c = start_control(&w, &Offer::Share, &all, None);
+        assert_eq!(
+            c.action,
+            Ok(GroupAction::StartSettings {
+                master: Some(choices[0].enrollment.clone()),
+                exceptions: vec![],
+                included_accounts: all.to_vec(),
+            })
+        );
+        let den_pick = start_control(&w, &Offer::Share, &["ZED".into()], Some(1));
+        assert_eq!(
+            den_pick.action,
+            Ok(GroupAction::StartSettings {
+                master: Some(den()),
+                exceptions: vec![],
+                included_accounts: vec!["ZED".into()],
+            })
+        );
+        assert_eq!(
+            start_control(&w, &Offer::Share, &[], None).action,
+            Err("Choose at least one account.".into())
+        );
+        assert!(CONSENT_TEXT.starts_with("All addon settings on this computer are shared"));
+    }
+
+    #[test]
+    fn confirming_a_master_chosen_elsewhere_sets_no_master() {
+        let w = offer_world(|s| s.settings.master = Some(den()));
+        let o = offer(&w).unwrap();
+        let c = start_control(&w, &o, &["ACC".into(), "NOPE".into()], None);
+        assert_eq!(
+            c.action,
+            Ok(GroupAction::StartSettings {
+                master: None,
+                exceptions: vec![],
+                included_accounts: vec!["ACC".into()],
+            })
+        );
+        let GroupAction::StartSettings {
+            included_accounts, ..
+        } = c.action.unwrap()
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            GroupAction::StartSettings {
+                master: None,
+                exceptions: vec![],
+                included_accounts: included_accounts.clone()
+            }
+            .to_command(),
+            wow_sync_runtime::Command::EnableSettings { included_accounts }
+        );
+    }
+
+    #[test]
+    fn a_retired_computer_is_not_offered_settings() {
+        let mut w = offer_world(|_| {});
+        w.features.standing = Standing::Retired {
+            on: "1 Jan".into(),
+            by: "Den PC".into(),
+        };
+        assert_eq!(offer(&w), None);
+    }
+
+    #[test]
+    fn add_on_status_lines_say_the_most_urgent_thing_in_plain_words() {
+        let mut w = world();
+        assert_eq!(addon_settings_line(&w, "Details"), "Settings not shared");
+        w.features.settings.enabled = true;
+        assert_eq!(addon_settings_line(&w, "Details"), "Not shared yet");
+        w.features.settings.units = vec![
+            unit(UnitStatus::InSync {
+                from: "Den PC".into(),
+            }),
+            {
+                let mut u = unit(UnitStatus::WaitingForCharacter);
+                u.unit.identity = Identity::account("ZED").unwrap();
+                u
+            },
+        ];
+        assert_eq!(
+            addon_settings_line(&w, "Details"),
+            "Waiting for this character to log in on this computer"
+        );
+        assert_eq!(
+            addon_settings_lines(&w, "Details"),
+            [
+                "account ERIC: Settings up to date (from Den PC)",
+                "account ZED: Waiting for this character to log in on this computer",
+            ]
+        );
+        assert_eq!(addon_settings_line(&w, "Bagnon"), "Not shared yet");
     }
 }
