@@ -3807,6 +3807,192 @@ mod tests {
         );
     }
 
+    #[test]
+    fn becoming_master_publishes_nothing_and_share_now_publishes_the_listed_units() {
+        use crate::settings_cycle::SettingsUnitStatus as S;
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        synced(&mut a);
+        synced(&mut b);
+        assert!(
+            a.svc.settings_history(&alpha_unit()).is_empty(),
+            "becoming master publishes nothing by itself"
+        );
+        assert_eq!(read_wtf(&b, "Alpha"), None);
+        let snap = a.svc.status().settings;
+        assert!(!snap.group_has_shared_settings);
+        let offer = snap
+            .to_share
+            .iter()
+            .find(|o| o.unit == alpha_unit())
+            .expect("listed");
+        assert!(offer.not_shared_yet);
+        let row = a.svc.status().settings_units.remove(0);
+        assert_eq!(row.status, S::NoSharedCopy, "{row:?}");
+
+        share_now(&mut a);
+        assert_eq!(a.svc.settings_history(&alpha_unit()).len(), 1);
+        synced(&mut b);
+        synced(&mut b);
+        synced(&mut b);
+        synced(&mut a);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 1 }\n")
+        );
+        assert!(a.svc.status().settings.group_has_shared_settings);
+        let on_a = a.svc.status().settings_units.remove(0);
+        assert_eq!(on_a.status, S::InSync, "{on_a:?}");
+        let on_b = b.svc.status().settings_units.remove(0);
+        assert_eq!(on_b.status, S::InSync, "{on_b:?}");
+        assert!(on_b.in_sync_from.is_some());
+        assert_eq!(
+            on_a.in_sync_from, None,
+            "the master does not say it is in sync from itself"
+        );
+        assert!(a.svc.status().settings.to_share.is_empty());
+    }
+
+    #[test]
+    fn a_local_edit_that_is_not_shared_is_local_different_not_syncing() {
+        use crate::settings_cycle::SettingsUnitStatus as S;
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        share_now(&mut a);
+        synced(&mut b);
+        synced(&mut b);
+        write_wtf(&b, "Alpha", "AlphaDB = { mine = true }\n");
+        synced(&mut b);
+        let row = b.svc.status().settings_units.remove(0);
+        assert!(matches!(row.status, S::LocalDifferent(_)), "{row:?}");
+        assert!(row.local_reason.is_some());
+        assert!(
+            a.svc.settings_history(&alpha_unit()).len() == 1,
+            "a non-master's edit is not published"
+        );
+    }
+
+    #[test]
+    fn a_zero_byte_file_next_to_a_backup_is_suspect_and_never_published() {
+        use crate::settings_cycle::SettingsUnitStatus as S;
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        share_now(&mut a);
+        let live = wtf_file(&a, "Alpha");
+        std::fs::write(&live, b"").unwrap();
+        std::fs::write(live.with_extension("lua.bak"), "AlphaDB = { v = 1 }\n").unwrap();
+        synced(&mut a);
+        synced(&mut a);
+        synced(&mut b);
+        let row = a.svc.status().settings_units.remove(0);
+        assert_eq!(row.status, S::Suspect, "{row:?}");
+        assert!(!row.can_share);
+        assert_eq!(a.svc.settings_history(&alpha_unit()).len(), 1);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 1 }\n")
+        );
+    }
+
+    #[test]
+    fn a_copy_replaced_by_the_masters_is_listed_restorable_and_survives_later_applies() {
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        share_now(&mut a);
+        synced(&mut b);
+        synced(&mut b);
+        write_wtf(&b, "Alpha", "AlphaDB = { mine = true }\n");
+        synced(&mut b);
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 2 }\n")
+        );
+        let copies = b.svc.status().settings_units.remove(0).local_copies;
+        assert_eq!(copies.len(), 1, "{copies:?}");
+        let kept = copies[0].checkpoint;
+
+        for v in 3..=5 {
+            write_wtf(&a, "Alpha", &format!("AlphaDB = {{ v = {v} }}\n"));
+            synced(&mut a);
+            synced(&mut b);
+        }
+        synced(&mut b);
+        let later = b.svc.status().settings_units.remove(0).local_copies;
+        assert!(
+            later.iter().any(|c| c.checkpoint == kept),
+            "later applies keep the replaced copy: {later:?}"
+        );
+        assert!(matches!(
+            b.svc.command(Command::RestoreSettings {
+                unit: alpha_unit(),
+                checkpoint: kept,
+            }),
+            Ok(CommandOutcome::Written(_))
+        ));
+        synced(&mut b);
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { mine = true }\n")
+        );
+    }
+
+    #[test]
+    fn old_settings_copies_are_pruned_to_the_retention() {
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 0 }\n");
+        synced(&mut a);
+        share_now(&mut a);
+        for v in 1..=8 {
+            write_wtf(&a, "Alpha", &format!("AlphaDB = {{ v = {v} }}\n"));
+            synced(&mut a);
+            synced(&mut b);
+        }
+        let count = |pc: &Pc| {
+            std::fs::read_dir(pc.install.variant_dir.join(".wowsync/settings/manifests"))
+                .map(|d| d.flatten().count())
+                .unwrap_or(0)
+        };
+        assert!(count(&a) <= 4, "a keeps {}", count(&a));
+        assert!(count(&b) <= 4, "b keeps {}", count(&b));
+        assert!(count(&a) >= 1);
+    }
+
+    #[test]
+    fn a_settings_note_never_names_an_account_realm_or_character() {
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let rel = "WTF/Account/ACC/RealmSecret/CharSecret/SavedVariables/Alpha.lua";
+        let on_a = a.install.variant_dir.join(rel);
+        std::fs::create_dir_all(on_a.parent().unwrap()).unwrap();
+        std::fs::write(&on_a, "AlphaChar = { v = 1 }\n").unwrap();
+        synced(&mut a);
+        share_now(&mut a);
+        std::fs::write(&on_a, "AlphaChar = { v = 2 }\n").unwrap();
+        synced(&mut a);
+        let r = synced(&mut b);
+        let all = texts(&r);
+        let ra = texts(&synced(&mut a));
+        for t in [&all, &ra] {
+            assert!(
+                !t.contains("RealmSecret") && !t.contains("CharSecret") && !t.contains("WTF"),
+                "{t}"
+            );
+        }
+    }
+
     fn alpha_unit() -> wow_sync_core::ids::SettingsUnit {
         wow_sync_core::ids::SettingsUnit {
             folder: wow_sync_core::paths::validate_folder_name("Alpha").unwrap(),
@@ -7265,6 +7451,80 @@ mod tests {
             );
         }
 
+        #[test]
+        fn explicit_pushes_and_peer_applies_are_recorded_with_versions_size_and_identity() {
+            let lab = Lab::new();
+            let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+            write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+            synced(&mut a);
+            share_now(&mut a);
+            let on_a = changes(&a);
+            let first = on_a
+                .iter()
+                .find(|c| c.kind == ChangeKind::SettingsPublished)
+                .unwrap_or_else(|| panic!("a Share these now push has an Activity row: {on_a:?}"));
+            assert!(matches!(&first.new_version, VersionLabel::ContentId(s) if s.len() == 8));
+            assert_eq!(first.old_version, VersionLabel::New);
+            assert_eq!(first.byte_delta, "AlphaDB = { v = 1 }\n".len() as i64);
+            assert_eq!(first.identity.as_deref(), Some("account-wide"));
+            assert_eq!(first.source, ChangeSource::ThisComputer);
+            synced(&mut b);
+            let applied = changes(&b)
+                .into_iter()
+                .find(|c| c.kind == ChangeKind::SettingsApplied)
+                .expect("the peer apply has an Activity row");
+            assert_eq!(applied.source, ChangeSource::Computer("a".into()));
+            assert_eq!(applied.identity.as_deref(), Some("account-wide"));
+            assert!(matches!(&applied.new_version, VersionLabel::ContentId(s) if s.len() == 8));
+            // A later single push (the Share button) is recorded as well, with the old version.
+            let cp = a.svc.status().settings_units[0].latest_capture.unwrap();
+            write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+            synced(&mut a);
+            let cp2 = a.svc.status().settings_units[0].latest_capture.unwrap();
+            assert_ne!(cp, cp2);
+            let before = changes(&a)
+                .iter()
+                .filter(|c| c.kind == ChangeKind::SettingsPublished)
+                .count();
+            a.svc
+                .command(Command::ShareSettings {
+                    unit: alpha_unit(),
+                    checkpoint: cp2,
+                })
+                .unwrap();
+            let after: Vec<_> = changes(&a)
+                .into_iter()
+                .filter(|c| c.kind == ChangeKind::SettingsPublished)
+                .collect();
+            assert_eq!(after.len(), before + 1, "{after:?}");
+        }
+
+        #[test]
+        fn share_these_now_ticked_at_consent_pushes_the_first_captures_once() {
+            let lab = Lab::new();
+            let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+            write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+            synced(&mut a);
+            assert!(a.svc.settings_history(&alpha_unit()).is_empty());
+            assert_eq!(
+                a.svc.command(Command::ShareSettingsWhenReady),
+                Ok(CommandOutcome::Recorded)
+            );
+            synced(&mut a);
+            assert_eq!(a.svc.settings_history(&alpha_unit()).len(), 1);
+            synced(&mut a);
+            assert_eq!(
+                a.svc.settings_history(&alpha_unit()).len(),
+                1,
+                "the choice is spent after one push"
+            );
+            synced(&mut b);
+            synced(&mut b);
+            assert_eq!(
+                read_wtf(&b, "Alpha").as_deref(),
+                Some("AlphaDB = { v = 1 }\n")
+            );
+        }
         #[test]
         fn a_masters_settings_change_is_recorded_on_both_computers_without_paths() {
             let lab = Lab::new();

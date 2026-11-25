@@ -159,6 +159,9 @@ fn main() {
             }
         }
         "status" => {
+            if std::env::var("LAB_SYNC_FIRST").is_ok_and(|v| v == "1") {
+                let _ = svc.sync_once();
+            }
             let s = svc.status();
             println!("headline: {}", s.headline);
             for p in &s.peers {
@@ -191,6 +194,11 @@ fn main() {
                 }
             }
             println!("units {} by status {:?}", s.settings_units.len(), by);
+            println!(
+                "to_share {} group_has_shared={}",
+                st.to_share.len(),
+                st.group_has_shared_settings
+            );
             for l in s
                 .blocks
                 .iter()
@@ -265,6 +273,18 @@ fn main() {
                     checkpoint: r.latest_capture.unwrap(),
                 })
             );
+        }
+        "sharenow" => {
+            let _ = svc.sync_once();
+            let units: Vec<_> = svc
+                .status()
+                .settings
+                .to_share
+                .iter()
+                .map(|o| o.unit.clone())
+                .collect();
+            println!("sharing {}", units.len());
+            println!("{:?}", svc.command(Command::ShareSettingsNow { units }));
         }
         "usesh" => {
             let u = pick(&mut svc, &rest[0]);

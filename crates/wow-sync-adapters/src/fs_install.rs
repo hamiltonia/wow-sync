@@ -608,9 +608,37 @@ impl InstallArea {
 }
 
 /// Moves a file without ever replacing an existing destination, so a file created between the
-/// caller's check and the move is kept (RV11-09). A hard link fails when the destination exists;
-/// the source name is removed once the link is made. Where links are unsupported the destination
-/// is checked again immediately before a plain rename.
+/// caller's check and the move is kept (RV11-09).
+///
+/// Windows: `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING`, which is atomic and works on NTFS,
+/// FAT32 and exFAT alike (no hard links needed). Elsewhere: a hard link, which fails when the
+/// destination exists, then the source name is removed. Where links are unsupported the
+/// destination is checked again immediately before a plain rename; that last fallback keeps a
+/// small window between the check and the rename.
+#[cfg(windows)]
+fn move_no_replace(src: &Path, dst: &Path) -> Result<(), FsError> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, ERROR_FILE_EXISTS};
+    use windows_sys::Win32::Storage::FileSystem::MoveFileExW;
+
+    let wide = |p: &Path| -> Vec<u16> { p.as_os_str().encode_wide().chain(Some(0)).collect() };
+    let (s, d) = (wide(src), wide(dst));
+    // SAFETY: both paths are NUL-terminated UTF-16 buffers that outlive the call.
+    if unsafe { MoveFileExW(s.as_ptr(), d.as_ptr(), 0) } != 0 {
+        return Ok(());
+    }
+    let e = std::io::Error::last_os_error();
+    match e.raw_os_error().map(|c| c as u32) {
+        Some(ERROR_ALREADY_EXISTS | ERROR_FILE_EXISTS) => Err(FsError::new(
+            FsErrorKind::AlreadyExists,
+            dst,
+            "destination exists",
+        )),
+        _ => Err(FsError::from_io(src, &e)),
+    }
+}
+
+#[cfg(not(windows))]
 fn move_no_replace(src: &Path, dst: &Path) -> Result<(), FsError> {
     match std::fs::hard_link(src, dst) {
         Ok(()) => {
@@ -638,7 +666,6 @@ fn move_no_replace(src: &Path, dst: &Path) -> Result<(), FsError> {
         }
     }
 }
-
 fn read_all(root: &Root, rel: &str, limit: u64) -> Result<Vec<u8>, FsError> {
     let f = root.open_read(rel, limit)?;
     let path = root.join(rel)?;

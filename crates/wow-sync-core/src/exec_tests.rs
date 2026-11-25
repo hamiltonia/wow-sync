@@ -1309,6 +1309,70 @@ mod v2 {
         }
     }
 
+    fn count_points(fx: &FakeEffects) -> (usize, usize) {
+        let (mut code, mut settings) = (0, 0);
+        for bytes in fx.points.values() {
+            match decode_point(bytes).expect("point decodes") {
+                AnyPoint::V2(p) if p.kind == OpKind::Settings => settings += 1,
+                _ => code += 1,
+            }
+        }
+        (code, settings)
+    }
+
+    #[test]
+    fn settings_and_code_recovery_points_never_evict_each_other() {
+        let (tplan, mut template_fx) = case(OpKind::Settings);
+        run_apply(&tplan, &mut template_fx);
+        let template = template_fx
+            .points
+            .values()
+            .find_map(|b| match decode_point(b) {
+                Ok(AnyPoint::V2(p)) => Some(p),
+                _ => None,
+            })
+            .expect("a settings point");
+        let older = |n: u8, created: u64| {
+            let mut p = template.clone();
+            p.op = op(n);
+            p.created_unix_ms = created;
+            p.pinned = false;
+            p
+        };
+        let code_point = |n: u8, created: u64| RecoveryPoint {
+            op: op(n),
+            package: key("alpha"),
+            created_unix_ms: created,
+            replaced: vec![],
+            installed: vec![],
+            reason: "apply".into(),
+            pinned: false,
+        };
+
+        // A settings apply with two code points and one older settings point present.
+        let (plan, mut fx) = case(OpKind::Settings);
+        fx.write_recovery_point(&code_point(0xC1, 1)).unwrap();
+        fx.write_recovery_point(&code_point(0xC2, 2)).unwrap();
+        fx.write_recovery_point_v2(&older(0xD1, 3)).unwrap();
+        run_apply(&plan, &mut fx);
+        assert_eq!(
+            count_points(&fx),
+            (2, 2),
+            "code points survive a settings apply"
+        );
+
+        // A code apply with two settings points present.
+        let (plan, mut fx) = case(OpKind::Apply);
+        fx.write_recovery_point_v2(&older(0xD1, 1)).unwrap();
+        fx.write_recovery_point_v2(&older(0xD2, 2)).unwrap();
+        run_apply(&plan, &mut fx);
+        assert_eq!(
+            count_points(&fx),
+            (1, 2),
+            "settings points survive a code apply"
+        );
+    }
+
     #[test]
     fn crash_slots_recover_to_exactly_old_or_new_for_every_kind() {
         // T-C06c-jrn-crash-slots

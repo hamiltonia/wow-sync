@@ -248,6 +248,26 @@ pub(crate) struct SettingsChangeInfo {
     pub identity: String,
 }
 
+/// What a written revision replaced and brought, for its history record.
+pub(crate) fn revision_info(
+    ledger: &wow_sync_core::ledger::Ledger,
+    provider: &ProviderRoot,
+    r: &wow_sync_core::kinds::SettingsRevision,
+) -> Option<SettingsChangeInfo> {
+    let new = manifest_file(provider, &r.checkpoint, &r.unit)?;
+    let old = r.parents.iter().find_map(|p| match ledger.record(p) {
+        Some(AuthorityRecord::SettingsRevision(pr)) => {
+            manifest_file(provider, &pr.checkpoint, &r.unit)
+        }
+        _ => None,
+    });
+    Some(SettingsChangeInfo {
+        old,
+        new,
+        identity: identity_text(&r.unit),
+    })
+}
+
 pub(crate) fn identity_text(unit: &SettingsUnit) -> String {
     match unit.identity.realm_character() {
         None => "account-wide".into(),
@@ -495,6 +515,7 @@ pub fn load_local(state: &LocalState, group: &GroupId) -> SettingsLocal {
             included_accounts: Vec::new(),
             consent: false,
             first_adoption: None,
+            share_when_ready: false,
         })
 }
 
@@ -1044,14 +1065,18 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                 ) {
                     Ok(r) => r,
                     Err(e) => {
-                        out.notes.push(format!("{name}: not shared ({e:?})"));
+                        let _ = e;
+                        out.notes
+                            .push(format!("{name}: not shared (could not be prepared)"));
                         continue;
                     }
                 };
                 if let Err(e) =
                     upload_checkpoint(a.provider, &store, &cp, a.own.computer_id.as_str())
                 {
-                    out.notes.push(format!("{name}: not shared ({e})"));
+                    let _ = e;
+                    out.notes
+                        .push(format!("{name}: not shared (could not be uploaded)"));
                     continue;
                 }
                 match write_own_record(
@@ -1089,7 +1114,9 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                             UnitFact::InSync(Some(a.own.computer_id.clone())),
                         );
                     }
-                    Err(e) => out.notes.push(format!("{name}: not shared ({e})")),
+                    Err(_) => out
+                        .notes
+                        .push(format!("{name}: not shared (could not be recorded)")),
                 }
             }
             Case::FirstAdoption(to) if live == Some(to) => {
@@ -1104,7 +1131,15 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                 };
                 // The replaced copy stays restorable (RV11-01): a peer's own edit that the
                 // shared copy overwrites is pinned as a displaced copy.
-                if let Some(l) = live.filter(|l| *l != to) {
+                let is_shared = |l: wow_sync_core::ids::CheckpointRef| {
+                    plane.ledger.entries().any(|e| {
+                        matches!(plane.ledger.record(&e.hash),
+                            Some(AuthorityRecord::SettingsRevision(r)) if r.checkpoint == l && r.unit == unit)
+                    })
+                };
+                if let Some(l) = live.filter(|l| {
+                    *l != to && Some(*l) != local.units[li].last_applied && !is_shared(*l)
+                }) {
                     let kept = &mut local.units[li].kept;
                     if !kept.iter().any(|k| k.checkpoint == l) {
                         kept.insert(
@@ -1419,7 +1454,9 @@ pub fn settings_units(
                     && latest_capture.is_some()
                     && !matches!(status, SettingsUnitStatus::Suspect),
                 in_sync_from: match fact {
-                    Some(UnitFact::InSync(Some(c))) => names.get(c).cloned(),
+                    Some(UnitFact::InSync(Some(c))) if *c != own.computer_id => {
+                        names.get(c).cloned()
+                    }
                     _ => None,
                 },
                 local_copies,
@@ -1580,6 +1617,31 @@ mod tests {
         assert!(matches!(err, CaptureError::Changed), "{err:?}");
         let blobs = t.path().join(".wowsync").join("settings").join("blobs");
         assert!(!blobs.exists() || std::fs::read_dir(blobs).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn a_file_still_changing_across_the_settle_wait_is_suspect_and_a_stable_one_is_not() {
+        let t = TempDir::new();
+        let wtf = t.path().join("WTF");
+        let rel = "Account/ERIC/SavedVariables/Details.lua";
+        put(&wtf, rel, b"DetailsDB = { v = 1 }");
+        let scope = observe_scope(t.path(), &decls(), &included(), Some(1024)).unwrap();
+        let store = SettingsStore::open(t.path()).unwrap();
+        let local = SettingsLocal {
+            units: vec![],
+            paused_folders: vec![],
+            included_accounts: vec![],
+            consent: true,
+            first_adoption: None,
+            share_when_ready: false,
+        };
+        let stable = suspect_units(t.path(), &store, &local, &scope.owned, 1024, &|| {});
+        assert!(stable.is_empty(), "{stable:?}");
+        let live = wtf.join("Account/ERIC/SavedVariables/Details.lua");
+        let busy = suspect_units(t.path(), &store, &local, &scope.owned, 1024, &|| {
+            std::fs::write(&live, b"DetailsDB = { v = 2 }").unwrap();
+        });
+        assert_eq!(busy.len(), 1, "a file that changed during the wait waits");
     }
 
     #[test]
