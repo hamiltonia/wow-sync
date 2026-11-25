@@ -3534,6 +3534,7 @@ impl SliceService {
                     self.observe_world_recent(true, &mut scanned_at)?
                 };
                 w = fresh;
+                let saved = crate::history::load_apply_sources(&self.state);
                 for (_, key, res) in &rec.ops {
                     if matches!(res, PackageResult::Applied { .. }) {
                         crate::history::record_change(
@@ -3543,6 +3544,7 @@ impl SliceService {
                                 key,
                                 &w.titles,
                                 &w.inventory,
+                                saved.get(key.as_str()).cloned(),
                             ),
                         );
                     }

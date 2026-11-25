@@ -167,6 +167,13 @@ impl ApplyProgress {
             );
         }
         let total = items.len() as u64;
+        crate::history::save_apply_sources(
+            state,
+            &items
+                .values()
+                .map(|i| (i.key.as_str().to_string(), i.record.source.clone()))
+                .collect(),
+        );
         Self {
             hub: hub.clone(),
             pass_id,
