@@ -1762,6 +1762,72 @@ mod tests {
     }
 
     #[test]
+    fn rows_the_runtime_emits_for_two_blocked_declarers_both_read_as_shared_not_synced() {
+        use wow_sync_runtime::SettingsUnitStatus as S;
+        let mut w = world();
+        w.features.settings.enabled = true;
+        w.addons = vec![
+            test_addon("checksharedone", "CheckSharedOne"),
+            test_addon("checksharedtwo", "CheckSharedTwo"),
+        ];
+        let row = |folder_key: &str, other: &str| {
+            let mut r = runtime_row(S::OwnedBySeveral);
+            r.unit.folder = folder(folder_key);
+            r.shared_with = vec![other.into()];
+            r
+        };
+        w.features.settings.units = crate::features::settings_unit_rows(&[
+            row("checksharedone", "CheckSharedTwo"),
+            row("checksharedtwo", "CheckSharedOne"),
+        ]);
+        assert_eq!(
+            addon_settings_line(&w, "checksharedone"),
+            "Shared with CheckSharedTwo, not synced"
+        );
+        assert_eq!(
+            addon_settings_line(&w, "checksharedtwo"),
+            "Shared with CheckSharedOne, not synced"
+        );
+    }
+
+    #[test]
+    fn shared_checkpoint_entries_show_source_kind_size_and_tell_same_minute_copies_apart() {
+        use wow_sync_runtime::HeadKind as K;
+        let base = runtime_row(wow_sync_runtime::SettingsUnitStatus::InSync).history[0].clone();
+        let mk = |n: u8, origin: K, source: &str, ms: u64, seq: u64| {
+            let mut e = base.clone();
+            e.hash = Sha256([n; 32]);
+            e.checkpoint = Sha256([n; 32]);
+            e.is_head = false;
+            e.origin = origin;
+            e.source = Some(source.into());
+            e.size_bytes = Some(2048);
+            e.written_unix_ms = ms;
+            e.seq = seq;
+            e
+        };
+        let t = 1_700_000_000_000;
+        let copies = crate::features::history_copies(&[
+            mk(1, K::MastersRevision, "Desk", t, 7),
+            mk(2, K::SharedFrom, "Laptop", t + 3_000, 2),
+            mk(3, K::SharedFrom, "Laptop", t + 3_000, 3),
+        ]);
+        assert!(
+            copies[0].label.contains("settings master Desk"),
+            "{copies:?}"
+        );
+        assert!(copies[0].label.contains("2 KB"), "{copies:?}");
+        assert!(copies[1].label.contains("shared from Laptop"));
+        assert!(copies[1].label.ends_with("earlier"), "{copies:?}");
+        assert!(copies[2].label.ends_with("later"), "{copies:?}");
+        assert_ne!(copies[0].label, copies[1].label);
+        let secs = crate::world::date_time_seconds_text(t);
+        let secs2 = crate::world::date_time_seconds_text(t + 3_000);
+        assert_ne!(secs, secs2);
+        assert!(copies[0].label.contains(&secs), "{copies:?}");
+    }
+
+    #[test]
     fn competing_choices_name_their_source_kind_time_and_size() {
         use crate::features::{head_label, recovery_label};
         use wow_sync_runtime::{HeadKind as H, RecoveryKind as R};

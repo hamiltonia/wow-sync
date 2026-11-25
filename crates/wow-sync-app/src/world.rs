@@ -86,6 +86,13 @@ pub fn date_time_text(unix_ms: u64) -> String {
     format!("{d} {} {hm}", MONTHS[m])
 }
 
+/// Like `date_time_text` with seconds, to tell copies written in the same minute apart.
+pub fn date_time_seconds_text(unix_ms: u64) -> String {
+    let (days, hm) = local_parts(i64::try_from(unix_ms).unwrap_or(i64::MAX / 2));
+    let (_, m, d) = civil(days);
+    format!("{d} {} {hm}:{:02}", MONTHS[m], (unix_ms / 1000) % 60)
+}
+
 /// Absolute local time of something `secs` ago, e.g. "21:02 on 16 November".
 pub fn absolute(secs: i64) -> String {
     let at = now_ms() - secs.max(0) * 1000;

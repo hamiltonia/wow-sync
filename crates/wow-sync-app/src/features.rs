@@ -790,6 +790,58 @@ pub fn recovery_label(
     }
 }
 
+/// Names a shared checkpoint by its kind, source computer, time to the second and size; copies
+/// that still read alike get "earlier"/"later" (or a number) in the order they were written.
+pub fn history_copies(
+    history: &[wow_sync_runtime::SettingsHistoryEntry],
+) -> Vec<crate::settings_ui::Copy> {
+    use wow_sync_runtime::HeadKind as K;
+    let shown: Vec<_> = history.iter().filter(|h| !h.is_head).collect();
+    let mut labels: Vec<String> = shown
+        .iter()
+        .map(|h| {
+            let who = match (h.origin, h.source.as_deref()) {
+                (K::MastersRevision, Some(n)) => format!("settings master {n}"),
+                (K::MastersRevision, None) => "the settings master".into(),
+                (K::ThisComputersCopy, _) => "this computer".into(),
+                (K::SharedFrom, Some(n)) => format!("shared from {n}"),
+                (K::SharedFrom, None) => "shared from another computer".into(),
+            };
+            let size = h
+                .size_bytes
+                .map(|b| format!(", {}", crate::history_ui::size_text(b)))
+                .unwrap_or_default();
+            format!(
+                "the copy from {who} ({}{size})",
+                crate::world::date_time_seconds_text(h.written_unix_ms)
+            )
+        })
+        .collect();
+    let base = labels.clone();
+    for (i, label) in base.iter().enumerate() {
+        let mut same: Vec<usize> = (0..base.len()).filter(|&j| &base[j] == label).collect();
+        if same.len() < 2 {
+            continue;
+        }
+        same.sort_by_key(|&j| (shown[j].written_unix_ms, shown[j].seq));
+        let pos = same.iter().position(|&j| j == i).unwrap_or(0);
+        let tag = match (same.len(), pos) {
+            (2, 0) => "earlier".to_string(),
+            (2, _) => "later".to_string(),
+            (n, p) => format!("{} of {n}", p + 1),
+        };
+        labels[i] = format!("{label}, {tag}");
+    }
+    shown
+        .iter()
+        .zip(labels)
+        .map(|(h, label)| crate::settings_ui::Copy {
+            checkpoint: h.checkpoint,
+            label,
+        })
+        .collect()
+}
+
 /// The settings rows as the screen shows them.
 pub fn settings_unit_rows(
     rows: &[wow_sync_runtime::SettingsUnitRow],
@@ -848,18 +900,7 @@ pub fn settings_unit_rows(
                     })
                     .collect(),
                 shown_heads: r.shown_heads.clone(),
-                history: r
-                    .history
-                    .iter()
-                    .filter(|h| !h.is_head)
-                    .map(|h| Copy {
-                        checkpoint: h.checkpoint,
-                        label: format!(
-                            "the copy from {}",
-                            crate::world::date_time_text(h.written_unix_ms)
-                        ),
-                    })
-                    .collect(),
+                history: history_copies(&r.history),
                 restore_possible: r.restore_possible,
                 local_copies: if r.recovery_copies.is_empty() {
                     r.local_copies
