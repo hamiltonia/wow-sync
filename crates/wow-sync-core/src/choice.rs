@@ -450,7 +450,7 @@ fn absent_copy(p: &Package, keep: &KeepEntry, rel: &Release) -> Copy {
             files: 0,
             bytes: 0,
             toc: TocSummary::empty(TocKind::None),
-            file_entries: Vec::new(),
+            file_entries: Default::default(),
         })
         .collect();
     Copy {

@@ -422,15 +422,16 @@ fn attach_trees(version: &mut PackageVersion, input: &TargetInput) -> Result<(),
         let Some(tree) = f.tree else { continue };
         match input.trees.get(&tree) {
             Some(TreeAvail::Ok(rec)) => {
-                f.file_entries = rec
-                    .files
-                    .iter()
-                    .map(|e| FileEntry {
-                        path: e.path.clone(),
-                        size: e.size,
-                        sha256: e.sha256,
-                    })
-                    .collect();
+                f.file_entries = std::sync::Arc::new(
+                    rec.files
+                        .iter()
+                        .map(|e| FileEntry {
+                            path: e.path.clone(),
+                            size: e.size,
+                            sha256: e.sha256,
+                        })
+                        .collect(),
+                );
             }
             Some(TreeAvail::Corrupt) => corrupt = corrupt.or(Some(tree)),
             Some(TreeAvail::Missing | TreeAvail::CloudOnly) | None => missing.push(tree),

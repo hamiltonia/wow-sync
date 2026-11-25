@@ -258,7 +258,7 @@ fn parse(text: &str) -> HashMap<String, Entry> {
     if lines.next() != Some(MAGIC) {
         return HashMap::new();
     }
-    let mut map = HashMap::new();
+    let mut map = HashMap::with_capacity(text.len() / 100);
     let mut bytes = 0usize;
     for line in lines {
         let mut p = line.splitn(4, '\t');

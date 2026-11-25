@@ -1540,7 +1540,7 @@ mod tests {
         let f = &inv.folders[0];
         let rec = FolderTreeRecord {
             tree: f.tree.unwrap(),
-            files: f.file_entries.clone(),
+            files: f.file_entries.to_vec(),
         };
         let bytes = encode(&rec);
         assert_eq!(decode_tree(&bytes, &rec.tree).unwrap(), rec);
@@ -1563,7 +1563,7 @@ mod tests {
         let inv = testkit::inventory(vec![testkit::addon("Suite", Some("1.0"), "a")]);
         let rec = FolderTreeRecord {
             tree: inv.folders[0].tree.unwrap(),
-            files: inv.folders[0].file_entries.clone(),
+            files: inv.folders[0].file_entries.to_vec(),
         };
         let text = String::from_utf8(encode(&rec)).unwrap();
         for bad in ["../evil.lua", "C:/x", "a/../b", "CON.lua", "/abs"] {

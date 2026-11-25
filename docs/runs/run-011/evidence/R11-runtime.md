@@ -258,3 +258,62 @@ in a pass).
 - Decision: G7 and OD-44 are covered by regression tests only; no runtime change. Why: not
   reproducible in the runtime (above). Reversible: n/a.
 - Decision: no renderer change this round (above). Reversible: n/a.
+## Round G9-G12 (restore, history entries, memory)
+
+### Fails-without-fix
+
+| Fix | Test | Without the fix |
+|---|---|---|
+| G11 restore parents include the issuer's own heads (core `build_restore`) | `a_master_restore_after_a_decision_does_not_create_a_decision_between_its_own_copies` | NeedsChoice between the master's own copies |
+| G9 rows for every declaring add-on (`settings_cycle`) | `two_addons_declaring_one_variable_both_get_rows_even_without_their_own_files` | no row names the add-ons |
+| G10 entries carry origin, source, size, seq | `history_entries_carry_origin_source_size_and_sequence` | stub has source None |
+| `a_master_restore_then_a_choice_leaves_both_computers_on_the_selected_bytes` | guard; passes either way | n/a |
+
+G12 changes are allocation reductions with no behaviour change; the existing suites cover them
+(no new test: a heap-size assertion would be machine-dependent).
+
+### Heap (dhat, accumulated lab: 113 add-ons, ~36.9k files, ~243 settings revisions, a 31.9 MiB file)
+
+Ledger and settings history are ~0.13 MiB; what scales is the per-file inventory.
+
+| | Before | After |
+|---|---|---|
+| Peak live heap (max) | 41.9 MiB | 30.8 MiB |
+| Live after a pass | 17.0 MiB | 17.0 MiB |
+
+Peak contributors before: inventory `Vec<FileEntry>` clones 6.4, hash-cache map growth 6.1,
+`Vec<ScannedFile>` clones 3.7+3.7+3.7, FolderState clones 2.8. Fixes: `file_entries` and
+scan `files` are `Arc<Vec<_>>` (clones share), and the hash-cache parse pre-sizes its map
+instead of doubling. Records on disk and on the provider are unchanged (v0.3.3 compatible).
+Remaining at peak: hash cache 2.1 (retained), tree record decode 3.6, scan 2.3+1.4,
+build_inventory 2.2+2.2+1.4.
+
+### Memory (release build, accumulated state, private working set, 25 ms samples with
+per-sample window visibility via EnumWindows/IsWindowVisible; three fresh processes on the
+same growing state; visible at start, hidden after 40 s, then settings and code edit, add and
+remove passes)
+
+| Run | Visible peak | Hidden-after-UI peak (all hidden samples) | Hidden idle after UI |
+|---|---|---|---|
+| 1 | 85.4 | 86.4 | 80.2 |
+| 2 | 91.6 | 88.3 | 82.0 |
+| 3 (zoom 1.5) | 92.1 | 89.0 | 83.2 |
+
+Hidden-only (never shown) was not re-measured on this state; the window starts visible.
+Reading: all hidden samples are at or under 90 MiB, but only 1 to 3.6 MiB of drift upward over
+the three runs (the state also grows by a pass each run), so margin to 100 is ~11 MiB and the
+headroom is not large. Idle floor (~80) is mostly the renderer (~10-14 MiB retained after hide)
+plus the 17 MiB inventory. Further reduction would need a compact per-file inventory
+(interned paths, fixed hashes) or dropping the resident inventory between passes.
+No working-set trimming, helper process or measurement change was used. I did not measure the
+checker's before-state on this lab, so the before/after memory comparison is the heap table.
+
+### Decisions
+- Decision: restore parents also include this issuer's own current heads. Why: otherwise a
+  restore right after the master's own choice competes with it. Reversible: yes.
+- Decision: G9 emits account-identity rows for each declaring add-on even without own files.
+  Why: the checker's shape has a file no folder owns. Reversible: yes.
+- Decision: history sizes come from a bounded (4096) process cache of immutable checkpoint
+  sizes. Why: avoids re-reading manifests per query. Reversible: yes.
+- Decision: share inventory entries by `Arc` instead of compacting. Why: removes the clones
+  with no change to records or logic. Reversible: yes.

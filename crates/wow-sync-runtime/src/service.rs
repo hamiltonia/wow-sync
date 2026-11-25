@@ -1985,7 +1985,8 @@ impl SliceService {
                         size: x.size,
                         sha256: Sha256(x.sha256),
                     })
-                    .collect(),
+                    .collect::<Vec<_>>()
+                    .into(),
                 tocs: f
                     .tocs
                     .into_iter()
