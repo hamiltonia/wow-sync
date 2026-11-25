@@ -167,6 +167,13 @@ impl HashCache {
         hit
     }
 
+    /// Records a hash already known for an installed file; a later lookup with the same size and
+    /// mtime then serves it without a read. Unlike a scan's own stores this does not wait for
+    /// the file to be old: the caller has just verified the content.
+    pub(crate) fn seed(&self, key: &str, size: u64, mtime_ns: i128, sha256: [u8; 32]) {
+        self.store(key, size, mtime_ns, sha256);
+    }
+
     pub(crate) fn store(&self, key: &str, size: u64, mtime_ns: i128, sha256: [u8; 32]) {
         if key.contains(['\t', '\n', '\r']) {
             return;

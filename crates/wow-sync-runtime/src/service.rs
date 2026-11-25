@@ -211,6 +211,8 @@ pub fn block_text(r: &BlockReason) -> &'static str {
 const SMALL: u64 = 64 * 1024;
 const STATE_LIMIT: u64 = 16 * 1024 * 1024;
 const TREE_LIMIT: u64 = 32 * 1024 * 1024;
+/// A scan this young is reused within one sync pass when nothing in the pass changed the install.
+const RECENT_SCAN_MS: u128 = 10_000;
 
 #[derive(Debug, Clone)]
 pub struct ServiceConfig {
@@ -498,6 +500,7 @@ pub struct SliceService {
     fault: FaultPlan,
     state: LocalState,
     seen_locally: BTreeMap<ComputerId, i64>,
+    tree_cache: BTreeMap<Sha256, (std::time::Instant, TreeAvail)>,
     seen_seq: BTreeMap<ComputerId, u64>,
     last_publish: Option<i64>,
     applied_here: Vec<(FolderKey, wow_sync_core::explain::Explanation)>,
@@ -569,6 +572,7 @@ impl SliceService {
             fault: FaultPlan::default(),
             state,
             seen_locally: BTreeMap::new(),
+            tree_cache: BTreeMap::new(),
             seen_seq: BTreeMap::new(),
             last_publish: None,
             applied_here: Vec::new(),
@@ -2296,6 +2300,37 @@ impl SliceService {
         (group, computer, e.variant_folder)
     }
 
+    /// Like `observe_world`, but when the newest complete scan is younger than `RECENT_SCAN_MS`
+    /// and has no unstable folder, the install is not scanned again: nothing this pass did
+    /// changed it. `scanned_at` is moved forward when a scan was actually made.
+    fn observe_world_recent(
+        &mut self,
+        persist: bool,
+        scanned_at: &mut std::time::Instant,
+    ) -> Result<World, ServiceError> {
+        let settled = self
+            .last_scan
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .is_some_and(|(folders, stable)| {
+                *stable
+                    && !folders
+                        .iter()
+                        .any(|f| matches!(f.status, ScanStatus::Unstable(_)))
+            });
+        let reuse = settled && scanned_at.elapsed().as_millis() < RECENT_SCAN_MS;
+        self.reuse_scan
+            .store(reuse, std::sync::atomic::Ordering::Relaxed);
+        let w = self.observe_world(persist);
+        self.reuse_scan
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        if !reuse {
+            *scanned_at = std::time::Instant::now();
+        }
+        w
+    }
+
     fn observe_world(&mut self, persist: bool) -> Result<World, ServiceError> {
         let ctl = self.read_ctl.clone();
         self.observe_world_ctl(persist, &ctl)
@@ -2436,6 +2471,12 @@ impl SliceService {
             if trees.contains_key(&h) {
                 continue;
             }
+            if let Some((at, a)) = self.tree_cache.get(&h) {
+                if at.elapsed().as_millis() < RECENT_SCAN_MS {
+                    trees.insert(h, a.clone());
+                    continue;
+                }
+            }
             let avail = match provider.read(&layout::tree_record(&group.group_id, &h), TREE_LIMIT) {
                 Ok(b) => match decode_tree(&b, &h) {
                     Ok(t) => TreeAvail::Ok(t),
@@ -2445,8 +2486,14 @@ impl SliceService {
                 Err(e) if is_missing(&e) => TreeAvail::Missing,
                 Err(_) => TreeAvail::Corrupt,
             };
+            if matches!(avail, TreeAvail::Ok(_)) {
+                self.tree_cache
+                    .insert(h, (std::time::Instant::now(), avail.clone()));
+            }
             trees.insert(h, avail);
         }
+        self.tree_cache
+            .retain(|_, (at, _)| at.elapsed().as_millis() < RECENT_SCAN_MS);
         if inventory.listing_stable {
             let hooks =
                 RemovalBehaviour::new(&self.plane.ledger, &group.group_id, &self.plane.members);
@@ -2987,7 +3034,11 @@ impl SliceService {
         let provider = self.open_provider()?;
         let addons = Root::open(&self.addons_path(), ReparsePolicy::RejectAll).map_err(local)?;
         let variant_dir = self.variant_dir();
-        let area = InstallArea::open(&variant_dir).map_err(local)?;
+        let area = InstallArea::open(&variant_dir)
+            .map_err(local)?
+            .with_hash_cache(self.read_ctl.cache.clone());
+        let mut scanned_at = std::time::Instant::now();
+        let mut quiet_cycle = false;
         let group_id = w.group.group_id.clone();
         let me = w.computer.computer_id.as_str().to_string();
         let enrollment_id = w.enrollment.enrollment_id.clone();
@@ -3383,9 +3434,12 @@ impl SliceService {
                         cache: self.read_ctl.cache.clone(),
                         ..ScanCtl::default()
                     };
-                    self.observe_world_ctl(true, &keep)?
+                    let w = self.observe_world_ctl(true, &keep)?;
+                    scanned_at = std::time::Instant::now();
+                    w
                 } else {
-                    self.observe_world(true)?
+                    quiet_cycle = true;
+                    self.observe_world_recent(true, &mut scanned_at)?
                 };
                 w = fresh;
                 let store = match new_report.take() {
@@ -3426,6 +3480,7 @@ impl SliceService {
                 report.crashed = fx.crashed();
                 if last_publish.is_some() {
                     self.last_publish = last_publish;
+                    quiet_cycle = false;
                 }
             }
         }
@@ -3434,9 +3489,16 @@ impl SliceService {
         if report.crashed {
             return Ok(report);
         }
-        let last_look = match self.observe_world(false) {
+        // Nothing changed since the look that just ran: a second look would only repeat it.
+        let last_look = match if quiet_cycle {
+            Ok(None)
+        } else {
+            self.observe_world_recent(false, &mut scanned_at).map(Some)
+        } {
             Ok(fresh) => {
-                w = fresh;
+                if let Some(fresh) = fresh {
+                    w = fresh;
+                }
                 None
             }
             Err(ServiceError::Cancelled) => None,

@@ -163,12 +163,33 @@ pub(crate) fn tree_hash(
     rel: &str,
     opts: &ScanOptions,
 ) -> Result<Option<Vec<ScannedFile>>, FsError> {
+    tree_hash_known(root, rel, opts, &|_, _, _| None)
+}
+
+/// Hash already known for (rel path, size, mtime_ns), if any.
+type KnownHash<'a> = dyn Fn(&str, u64, i128) -> Option<[u8; 32]> + 'a;
+
+/// Like `tree_hash`, but a file for which `known(rel, size, mtime_ns)` has a hash is not read.
+pub(crate) fn tree_hash_known(
+    root: &Root,
+    rel: &str,
+    opts: &ScanOptions,
+    known: &KnownHash<'_>,
+) -> Result<Option<Vec<ScannedFile>>, FsError> {
     let Some(snap) = tree_snapshot(root, rel, opts.max_files_per_folder)? else {
         return Ok(None);
     };
     let mut files = Vec::new();
-    for (p, is_dir, _, _) in &snap.entries {
+    for (p, is_dir, size, mtime) in &snap.entries {
         if *is_dir {
+            continue;
+        }
+        if let Some(sha256) = known(p, *size, *mtime) {
+            files.push(ScannedFile {
+                rel_path: p.clone(),
+                size: *size,
+                sha256,
+            });
             continue;
         }
         let full = format!("{rel}/{p}");
@@ -277,6 +298,9 @@ impl ScanCtl {
     }
 }
 
+/// Upper bound for the time a cache-only folder scan may take and still skip its second look.
+const QUIET_PASS_MS: u64 = 250;
+
 /// `None` = cancelled before the folder was complete.
 fn scan_folder_ctl(
     addons: &Root,
@@ -296,7 +320,9 @@ fn scan_folder_ctl(
         Err(e) => return Some(failed(name, status_of(&e))),
     };
     hook(ScanPhase::AfterFirstSnapshot);
-    let mut files = Vec::new();
+    let started = std::time::Instant::now();
+    let mut read_any = false;
+    let mut files = Vec::with_capacity(s1.entries.len());
     for (p, is_dir, snap_size, mtime) in &s1.entries {
         if *is_dir {
             continue;
@@ -316,6 +342,7 @@ fn scan_folder_ctl(
                 continue;
             }
         }
+        read_any = true;
         let hashed = addons
             .open_read(&rel, opts.max_file_bytes)
             .and_then(|mut f| {
@@ -355,18 +382,29 @@ fn scan_folder_ctl(
         });
     }
     hook(ScanPhase::AfterHashing);
-    let s2 = match snapshot_of(addons, name, opts.max_files_per_folder) {
-        Ok(Some(s)) => s,
-        Ok(None) => {
-            return Some(failed(
-                name,
-                ScanStatus::Unstable("folder removed during scan".into()),
-            ))
-        }
-        Err(e) => return Some(failed(name, status_of(&e))),
+    // A pass that read nothing (every file came from the cache) and took no time had no window
+    // in which the folder could change between two looks, so the first snapshot stands for both.
+    let quiet = !read_any
+        && started.elapsed() < std::time::Duration::from_millis(QUIET_PASS_MS)
+        && ctl.per_file_delay_ms == 0;
+    let second;
+    let s2 = if quiet {
+        &s1
+    } else {
+        second = match snapshot_of(addons, name, opts.max_files_per_folder) {
+            Ok(Some(s)) => s,
+            Ok(None) => {
+                return Some(failed(
+                    name,
+                    ScanStatus::Unstable("folder removed during scan".into()),
+                ))
+            }
+            Err(e) => return Some(failed(name, status_of(&e))),
+        };
+        &second
     };
     let fingerprint = Some(s2.fingerprint());
-    let status = if let Some(d) = s1.first_difference(&s2) {
+    let status = if let Some(d) = s1.first_difference(s2) {
         ScanStatus::Unstable(d)
     } else if let Some(newest) = s2
         .newest_mtime_ns()
@@ -492,7 +530,6 @@ fn scan_addons_pass(
         listing_stable: kinds(&l1) == kinds(&l2),
     }))
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileRead {
     Missing,

@@ -301,13 +301,25 @@ mod sys {
     }
 }
 
+/// Process-wide counts of directory listings, the entries they returned and single-entry stats;
+/// read by the speed lab to see how often a pass touches the file system.
+pub static LISTINGS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static LISTED_ENTRIES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub static STATS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Enumerates `dir`. No handle to any child is opened.
 pub fn list_dir(dir: &Path) -> Result<Vec<EntryMeta>, FsError> {
-    sys::list_dir(dir)
+    let r = sys::list_dir(dir);
+    LISTINGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if let Ok(v) = &r {
+        LISTED_ENTRIES.fetch_add(v.len() as u64, std::sync::atomic::Ordering::Relaxed);
+    }
+    r
 }
 
 /// The entry for one path, as its parent's record reports it.
 pub fn stat_entry(path: &Path) -> Result<EntryMeta, FsError> {
+    STATS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     if path.parent().is_none() {
         return Ok(EntryMeta {
             name: path.to_string_lossy().into_owned(),

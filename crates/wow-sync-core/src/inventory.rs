@@ -186,12 +186,12 @@ fn summarize(sel: TocSelection) -> TocSummary {
 
 fn build_ok(scan: FolderScan, key: FolderKey, v: &ConfirmedVariant) -> FolderState {
     let mut entries = Vec::with_capacity(scan.files.len());
-    let mut seen = BTreeMap::new();
+    let mut seen = std::collections::HashSet::with_capacity(scan.files.len());
     for f in &scan.files {
         let Ok(path) = validate_rel_path(&f.rel_path) else {
             return unusable(&scan.name, key, FolderStatus::Unsupported);
         };
-        if seen.insert(path.as_str().to_lowercase(), ()).is_some() {
+        if !seen.insert(path.as_str().to_lowercase()) {
             return unusable(&scan.name, key, FolderStatus::Unsupported);
         }
         entries.push(FileEntry {

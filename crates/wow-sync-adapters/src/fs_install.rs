@@ -4,16 +4,33 @@
 
 use crate::fs_safe::{validate_segment, ReparsePolicy, Root, WtfScope};
 use crate::fs_scan::{ScanOptions, ScannedFile, Snapshot};
+use crate::hash_cache::HashCache;
 use crate::{FsError, FsErrorKind};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 pub struct InstallArea {
     addons: Root,
     work: Root,
     variant_dir: std::path::PathBuf,
+    /// Hash cache of this install; installed files are seeded into it (see `stage_file`).
+    cache: Option<Arc<HashCache>>,
+    /// Files written to staging whose content hash is known: `<op>/<folder>` -> rel -> file.
+    staged: Mutex<HashMap<String, HashMap<String, StagedFile>>>,
+    /// The same for folders this area renamed into AddOns: folder -> rel -> file.
+    installed: Mutex<HashMap<String, HashMap<String, StagedFile>>>,
+}
+
+/// A staged file as it lay on disk right after it was written and verified.
+#[derive(Clone, Copy)]
+struct StagedFile {
+    size: u64,
+    mtime_ns: i128,
+    sha256: [u8; 32],
 }
 
 pub struct InstallLock {
@@ -102,7 +119,25 @@ impl InstallArea {
             addons,
             work,
             variant_dir: variant_dir.to_path_buf(),
+            cache: None,
+            staged: Mutex::new(HashMap::new()),
+            installed: Mutex::new(HashMap::new()),
         })
+    }
+
+    /// Files installed through this area are written into `cache` with the hash already known,
+    /// so the next scan need not read them again.
+    pub fn with_hash_cache(mut self, cache: Option<Arc<HashCache>>) -> InstallArea {
+        self.cache = cache;
+        self
+    }
+
+    fn staged(&self) -> std::sync::MutexGuard<'_, HashMap<String, HashMap<String, StagedFile>>> {
+        self.staged.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn installed(&self) -> std::sync::MutexGuard<'_, HashMap<String, HashMap<String, StagedFile>>> {
+        self.installed.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Exclusive lock excluding other WoW Sync instances only; a stale lock file with
@@ -159,7 +194,24 @@ impl InstallArea {
         seg(p, op)?;
         seg(p, folder)?;
         let rel_in_work = format!("staging/{op}/{folder}/{rel}");
-        self.stage_at(&rel_in_work, rel, src, expect, size)
+        self.stage_at(&rel_in_work, rel, src, expect, size)?;
+        let path = self.work.join(&rel_in_work)?;
+        if let Ok(m) = crate::fs_safe::stat_entry(&path) {
+            if !m.is_dir && m.size == size {
+                self.staged()
+                    .entry(format!("{op}/{folder}"))
+                    .or_default()
+                    .insert(
+                        rel.to_string(),
+                        StagedFile {
+                            size,
+                            mtime_ns: m.mtime_ns,
+                            sha256: expect,
+                        },
+                    );
+            }
+        }
+        Ok(())
     }
 
     fn stage_at(
@@ -224,7 +276,25 @@ impl InstallArea {
     /// Content of any slot; None = absent.
     pub fn hash_slot(&self, slot: Slot<'_>) -> Result<Option<Vec<ScannedFile>>, FsError> {
         let (root, rel) = self.locate(slot)?;
-        crate::fs_scan::tree_hash(root, &rel, &ScanOptions::with_defaults(0))
+        // A file this area wrote and verified, still with the size and mtime it had then, is
+        // not read again (the same trust the hash cache places in size and mtime).
+        let known = match slot {
+            Slot::Staging { op, folder } => self.staged().get(&format!("{op}/{folder}")).cloned(),
+            Slot::Live { folder } => self.installed().get(folder).cloned(),
+            Slot::Recovery { .. } => None,
+        }
+        .unwrap_or_default();
+        crate::fs_scan::tree_hash_known(
+            root,
+            &rel,
+            &ScanOptions::with_defaults(0),
+            &|p, size, mtime| {
+                known
+                    .get(p)
+                    .filter(|k| k.size == size && k.mtime_ns == mtime)
+                    .map(|k| k.sha256)
+            },
+        )
     }
 
     pub fn snapshot_slot(&self, slot: Slot<'_>) -> Result<Option<Snapshot>, FsError> {
@@ -272,7 +342,42 @@ impl InstallArea {
         }
         let parent_rel = trel.rsplit_once('/').map(|x| x.0).unwrap_or("");
         tr.ensure_dir(parent_rel)?;
-        std::fs::rename(&src, &dst).map_err(|e| FsError::from_io(&src, &e))
+        std::fs::rename(&src, &dst).map_err(|e| FsError::from_io(&src, &e))?;
+        match (from, to) {
+            (Slot::Staging { op, folder }, Slot::Live { folder: live }) => {
+                let known = self.staged().remove(&format!("{op}/{folder}"));
+                self.note_installed(live, known);
+            }
+            (Slot::Live { folder }, _) => {
+                self.installed().remove(folder);
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Remembers the hashes of a folder just renamed into AddOns and seeds the hash cache with
+    /// those that still match the files on disk (size and mtime), so the next scan reads none of
+    /// them. A file that differs from what was staged is left to be read.
+    fn note_installed(&self, folder: &str, known: Option<HashMap<String, StagedFile>>) {
+        let Some(known) = known else {
+            return;
+        };
+        if let Some(cache) = &self.cache {
+            let opts = ScanOptions::with_defaults(0);
+            if let Ok(Some(snap)) =
+                crate::fs_scan::tree_snapshot(&self.addons, folder, opts.max_files_per_folder)
+            {
+                for (p, is_dir, size, mtime) in &snap.entries {
+                    if let Some(k) = known.get(p).filter(|k| {
+                        !*is_dir && k.size == *size && k.mtime_ns == *mtime && *mtime != 0
+                    }) {
+                        cache.seed(&format!("{folder}/{p}"), k.size, k.mtime_ns, k.sha256);
+                    }
+                }
+            }
+        }
+        self.installed().insert(folder.to_string(), known);
     }
 
     /// Temp file, flush, fsync, rename.
@@ -370,6 +475,8 @@ impl InstallArea {
     /// Deletes `staging/<op>`. Idempotent.
     pub fn remove_staging(&self, op: &str) -> Result<(), FsError> {
         seg(self.work.path(), op)?;
+        let prefix = format!("{op}/");
+        self.staged().retain(|k, _| !k.starts_with(&prefix));
         self.work.remove_tree(&format!("staging/{op}"))
     }
 
@@ -771,6 +878,82 @@ mod tests {
             std::fs::read(inst.addons.join("Beta").join("a.lua")).unwrap(),
             b"live"
         );
+    }
+
+    #[test]
+    fn an_installed_folder_is_not_read_again_by_the_next_scan_unless_it_changed() {
+        use crate::fs_scan::{scan_addons_ctl, ScanCtl, ScanOptions};
+        use std::sync::atomic::Ordering;
+        let (t, inst, area) = setup();
+        let state = t.path().join("state");
+        std::fs::create_dir_all(&state).unwrap();
+        let cache = crate::hash_cache::HashCache::open(&state, "scope");
+        let area = area.with_hash_cache(Some(cache.clone()));
+        stage(&area, "op1", "Alpha", "a.lua", b"one");
+        stage(&area, "op1", "Alpha", "sub/b.lua", b"two");
+        stage(&area, "op1", "Alpha", "Alpha.toc", b"## T\n");
+        let staging = Slot::Staging {
+            op: "op1",
+            folder: "Alpha",
+        };
+        let live = Slot::Live { folder: "Alpha" };
+        area.rename(
+            live,
+            Slot::Recovery {
+                pkg: "Alpha",
+                op: "op1",
+                folder: "Alpha",
+            },
+        )
+        .unwrap();
+        area.rename(staging, live).unwrap();
+
+        // The files were just written, so the scan's own rules would not trust them.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        let opts = ScanOptions::with_defaults(now);
+        let root = Root::open(&inst.addons, ReparsePolicy::RejectAll).unwrap();
+        let ctl = ScanCtl {
+            cache: Some(cache.clone()),
+            ..ScanCtl::default()
+        };
+        let scan = scan_addons_ctl(&root, &opts, &mut |_| {}, &ctl)
+            .unwrap()
+            .unwrap();
+        assert_eq!(scan.folders[0].files.len(), 3);
+        assert_eq!(cache.hits.swap(0, Ordering::Relaxed), 3);
+        assert_eq!(cache.misses.swap(0, Ordering::Relaxed), 0);
+        let a = scan.folders[0]
+            .files
+            .iter()
+            .find(|f| f.rel_path == "a.lua")
+            .unwrap();
+        assert_eq!(a.sha256, sha(b"one"));
+
+        // A file edited after the install is read again, even with the same size.
+        let p = inst.addons.join("Alpha").join("a.lua");
+        std::fs::write(&p, b"uno").unwrap();
+        crate::testkit::set_mtime(
+            &p,
+            std::time::SystemTime::now() + std::time::Duration::from_secs(5),
+        );
+        let scan = scan_addons_ctl(&root, &opts, &mut |_| {}, &ctl)
+            .unwrap()
+            .unwrap();
+        assert_eq!(cache.misses.swap(0, Ordering::Relaxed), 1);
+        let a = scan.folders[0]
+            .files
+            .iter()
+            .find(|f| f.rel_path == "a.lua")
+            .unwrap();
+        assert_eq!(a.sha256, sha(b"uno"));
+
+        // "Check all files" still reads everything.
+        cache.request_full();
+        scan_addons_ctl(&root, &opts, &mut |_| {}, &ctl).unwrap();
+        assert_eq!(cache.misses.swap(0, Ordering::Relaxed), 3);
     }
 
     #[test]
