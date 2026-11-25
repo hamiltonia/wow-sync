@@ -24,8 +24,9 @@ use wow_sync_core::layout;
 use wow_sync_core::ledger::derive;
 use wow_sync_core::plan::{ExpectedLive, PackageApply};
 use wow_sync_core::records::{
-    decode, encode, CheckpointFile, KeptCopy, LocalUnitState, Location, OpKind, RecoverySlot,
-    RootState, SettingsCheckpointManifest, SettingsFileOp, SettingsLocal, SettingsRoot,
+    decode, encode, CheckpointFile, KeptCopy, KeptWhy, LocalUnitState, Location, OpKind,
+    RecoverySlot, RootState, SettingsCheckpointManifest, SettingsFileOp, SettingsLocal,
+    SettingsRoot,
 };
 use wow_sync_core::settings::{
     classify_capture, settings_scope, CaptureClass, DeclaringFolder, FileFact, LocalReason,
@@ -319,6 +320,8 @@ pub struct SettingsFacts {
     /// Older shared states whose saved copy is gone from the shared folder and from this
     /// computer (cleanup removed it): they are not offered for restore.
     pub unavailable: BTreeSet<CheckpointRef>,
+    /// Sizes of the competing shared states, by checkpoint.
+    pub sizes: std::collections::BTreeMap<CheckpointRef, u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -749,6 +752,7 @@ pub fn load_local(state: &LocalState, group: &GroupId) -> SettingsLocal {
             consent: false,
             first_adoption: None,
             share_when_ready: false,
+            paused_all: false,
         })
 }
 
@@ -788,6 +792,8 @@ pub struct SettingsSnapshot {
     pub to_share: Vec<ShareOffer>,
     /// Some computer has already shared settings revisions in this group.
     pub group_has_shared_settings: bool,
+    /// "Pause all settings" is on (`Command::PauseAllSettings`); it covers add-ons found later.
+    pub paused_all: bool,
 }
 
 /// One add-on's settings that could be shared now.
@@ -899,6 +905,7 @@ pub fn settings_snapshot(
         paused,
         available_accounts: Vec::new(),
         to_share: Vec::new(),
+        paused_all: local.paused_all,
         group_has_shared_settings: ledger.entries().any(|e| {
             derived.status.get(&e.hash) == Some(&wow_sync_core::ledger::Status::Valid)
                 && matches!(
@@ -1183,9 +1190,16 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
             }
         };
         let graph = graph_from_ledger(&plane.ledger, &derived, &unit);
+        if graph.head_states.len() > 1 {
+            for c in graph.head_states.keys() {
+                if let Some((_, size)) = manifest_unit(a.provider, c, &unit) {
+                    out.facts.sizes.insert(*c, size);
+                }
+            }
+        }
         let authority = authority_for(&heads, &unit.folder);
         let is_authority = matches!(&authority, Authority::Holder(h) if h == a.own);
-        let paused = local.paused_folders.contains(&unit.folder);
+        let paused = local.paused_all || local.paused_folders.contains(&unit.folder);
         dirty = true;
 
         // Becoming the authority starts a new epoch: the activation capture never publishes.
@@ -1358,6 +1372,7 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                 local.units[li].last_applied = live;
             }
             Case::FirstAdoption(to) | Case::Yield { to, .. } => {
+                let first_adoption = matches!(case, Case::FirstAdoption(_));
                 let Some(blob) = manifest_blob(a.provider, &to, &unit) else {
                     out.facts
                         .units
@@ -1377,6 +1392,28 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                 if let Some(l) = live.filter(|l| {
                     *l != to && Some(*l) != local.units[li].last_applied && !is_shared(*l)
                 }) {
+                    let incoming =
+                        plane
+                            .ledger
+                            .entries()
+                            .find_map(|e| match plane.ledger.record(&e.hash) {
+                                Some(AuthorityRecord::SettingsRevision(r))
+                                    if r.checkpoint == to && r.unit == unit =>
+                                {
+                                    Some(r)
+                                }
+                                _ => None,
+                            });
+                    let why = if first_adoption {
+                        KeptWhy::FirstAdoption
+                    } else if incoming.is_some_and(|r| issued_by_master(&plane.ledger, &derived, r))
+                    {
+                        KeptWhy::YieldedToMaster
+                    } else {
+                        KeptWhy::PeerReplaced
+                    };
+                    let from = incoming.map(|r| r.issuer.computer_id.clone());
+                    let size = local_file_fact(&store, &l, &unit).map(|(s, _)| s);
                     let kept = &mut local.units[li].kept;
                     if !kept.iter().any(|k| k.checkpoint == l) {
                         kept.insert(
@@ -1384,6 +1421,9 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                             KeptCopy {
                                 checkpoint: l,
                                 at_unix_ms: now_unix_ms() as u64,
+                                why: Some(why),
+                                from,
+                                size,
                             },
                         );
                         if kept.len() > KEEP_CAPTURES {
@@ -1536,6 +1576,17 @@ pub enum SettingsUnitStatus {
     Active,
 }
 
+/// What kind of state a competing choice is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HeadKind {
+    /// The master's revision.
+    MastersRevision,
+    /// This computer's own copy, shared from here.
+    ThisComputersCopy,
+    /// A share or push from another computer (`HeadChoice::source`).
+    SharedFrom,
+}
+
 /// One of the competing shared states Choose offers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeadChoice {
@@ -1543,6 +1594,36 @@ pub struct HeadChoice {
     pub checkpoint: wow_sync_core::ids::CheckpointRef,
     /// The revisions currently at this state (equal heads are one state).
     pub revisions: Vec<wow_sync_core::ids::Sha256>,
+    /// The display name of the computer that wrote the newest revision at this state; `None`
+    /// when its name is not known.
+    pub source: Option<String>,
+    pub kind: HeadKind,
+    /// When that revision was written (milliseconds since the Unix epoch), for date and time.
+    pub written_unix_ms: u64,
+    /// The saved file's size in bytes, when the copy can be read.
+    pub size_bytes: Option<u64>,
+}
+
+/// Why a local copy of this computer's settings was set aside.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryKind {
+    FirstAdoption,
+    YieldedToMaster,
+    PeerReplaced,
+    /// Kept by an older version, which did not record why.
+    Unknown,
+}
+
+/// A copy of this computer's settings that a shared copy replaced, restorable with
+/// `Command::RestoreSettings { checkpoint }`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecoveryCopy {
+    pub checkpoint: wow_sync_core::ids::CheckpointRef,
+    pub kind: RecoveryKind,
+    /// The computer whose settings replaced it, by display name.
+    pub source: Option<String>,
+    pub at_unix_ms: u64,
+    pub size_bytes: Option<u64>,
 }
 
 /// Everything the Settings screen needs for one unit.
@@ -1578,6 +1659,8 @@ pub struct SettingsUnitRow {
     pub local_copies: Vec<SettingsHistoryEntry>,
     /// With `LocalDifferent`: why the difference is held.
     pub local_reason: Option<LocalReason>,
+    /// The same copies as `local_copies`, with what replaced them (kind, source computer, size).
+    pub recovery_copies: Vec<RecoveryCopy>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1614,7 +1697,7 @@ pub fn settings_units(
                 .iter()
                 .find(|u| u.unit == unit)
                 .and_then(|u| u.captures.first().copied());
-            let paused = local.paused_folders.contains(&unit.folder);
+            let paused = local.paused_all || local.paused_folders.contains(&unit.folder);
             let blocked = matches!(authority, Authority::NotShared | Authority::Conflict);
             let actionable =
                 !retired_self && local.consent && cap_enabled && !heads.is_empty() && !blocked;
@@ -1622,9 +1705,33 @@ pub fn settings_units(
                 graph
                     .head_states
                     .iter()
-                    .map(|(c, r)| HeadChoice {
-                        checkpoint: *c,
-                        revisions: r.clone(),
+                    .map(|(c, r)| {
+                        // The newest revision at this state says who wrote it and when.
+                        let newest = r
+                            .iter()
+                            .filter_map(|h| match ledger.record(h) {
+                                Some(AuthorityRecord::SettingsRevision(rev)) => Some(rev),
+                                _ => None,
+                            })
+                            .max_by_key(|rev| rev.written_unix_ms);
+                        let kind = match newest {
+                            Some(rev) if issued_by_master(ledger, derived, rev) => {
+                                HeadKind::MastersRevision
+                            }
+                            Some(rev) if rev.issuer.computer_id == own.computer_id => {
+                                HeadKind::ThisComputersCopy
+                            }
+                            _ => HeadKind::SharedFrom,
+                        };
+                        HeadChoice {
+                            checkpoint: *c,
+                            revisions: r.clone(),
+                            source: newest
+                                .and_then(|rev| names.get(&rev.issuer.computer_id).cloned()),
+                            kind,
+                            written_unix_ms: newest.map_or(0, |rev| rev.written_unix_ms),
+                            size_bytes: facts.sizes.get(c).copied(),
+                        }
                     })
                     .collect()
             } else {
@@ -1664,6 +1771,28 @@ pub fn settings_units(
             } else {
                 SettingsUnitStatus::Active
             };
+            let recovery_copies: Vec<RecoveryCopy> = local
+                .units
+                .iter()
+                .find(|u| u.unit == unit)
+                .map(|u| {
+                    u.kept
+                        .iter()
+                        .map(|k| RecoveryCopy {
+                            checkpoint: k.checkpoint,
+                            kind: match k.why {
+                                Some(KeptWhy::FirstAdoption) => RecoveryKind::FirstAdoption,
+                                Some(KeptWhy::YieldedToMaster) => RecoveryKind::YieldedToMaster,
+                                Some(KeptWhy::PeerReplaced) => RecoveryKind::PeerReplaced,
+                                None => RecoveryKind::Unknown,
+                            },
+                            source: k.from.as_ref().and_then(|c| names.get(c).cloned()),
+                            at_unix_ms: k.at_unix_ms,
+                            size_bytes: k.size,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             let local_copies = local
                 .units
                 .iter()
@@ -1707,6 +1836,7 @@ pub fn settings_units(
                     _ => None,
                 },
                 local_copies,
+                recovery_copies,
                 local_reason: match fact {
                     Some(UnitFact::LocalDifferent(r)) => Some(*r),
                     _ => None,
@@ -1901,6 +2031,7 @@ mod tests {
             consent: true,
             first_adoption: None,
             share_when_ready: false,
+            paused_all: false,
         };
         let stable = suspect_units(t.path(), &store, &local, &scope.owned, 1024, &|| {});
         assert!(stable.is_empty(), "{stable:?}");

@@ -51,6 +51,8 @@ fn command_name(c: &Command) -> &'static str {
         Command::ShareSettingsWhenReady => "share-when-ready",
         Command::EnableSettings { .. } => "enable",
         Command::PauseSettings { .. } => "pause-settings",
+        Command::PauseAllSettings => "pause-all-settings",
+        Command::ResumeAllSettings => "resume-all-settings",
         Command::ResumeSettings { .. } => "resume-settings",
         Command::UseSharedSettings { .. } => "use-shared",
         Command::ChooseSettings { .. } => "choose",
