@@ -4135,6 +4135,100 @@ mod tests {
     }
 
     #[test]
+    fn g13_a_restore_right_after_choosing_the_peer_copy_converges_without_a_republish() {
+        g13(false);
+    }
+
+    #[test]
+    fn g13_a_restore_after_the_choice_was_applied_converges_without_a_republish() {
+        g13(true);
+    }
+
+    fn g13(pass_between: bool) {
+        use crate::settings_cycle::SettingsUnitStatus as S;
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let unit = alpha_unit();
+        let v1 = "AlphaDB = { v = 1 }\n";
+        let local = "AlphaDB = { local = 1 }\n";
+        let peer = "AlphaDB = { peer = true, longer = 1 }\n";
+        write_wtf(&a, "Alpha", v1);
+        synced(&mut a);
+        share_now(&mut a);
+        synced(&mut b);
+        synced(&mut b);
+        let v1_cp = stored_checkpoint(&a, &unit, v1.as_bytes());
+        // A makes an intentional local edit in a game session; B explicitly shares its copy.
+        a.act.set(Activity::Running { pids: vec![4242] });
+        write_wtf(&a, "Alpha", local);
+        synced(&mut a);
+        let cp = stored_checkpoint(&b, &unit, peer.as_bytes());
+        write_wtf(&b, "Alpha", peer);
+        synced(&mut b);
+        b.svc
+            .command(Command::ShareSettings {
+                unit: unit.clone(),
+                checkpoint: cp,
+            })
+            .unwrap();
+        synced(&mut b);
+        synced(&mut a);
+        a.act.set(Activity::NotRunning);
+        synced(&mut a);
+        let row = a.svc.status().settings_units.remove(0);
+        let pick = row
+            .competing
+            .iter()
+            .find(|c| c.checkpoint == cp)
+            .unwrap_or_else(|| panic!("{row:?}"))
+            .checkpoint;
+        a.svc
+            .command(Command::ChooseSettings {
+                unit: unit.clone(),
+                checkpoint: pick,
+                shown_heads: row.shown_heads.clone(),
+            })
+            .unwrap();
+        if pass_between {
+            synced(&mut a);
+            assert_eq!(read_wtf(&a, "Alpha").as_deref(), Some(peer));
+        }
+        // Seconds later, before a pass applied the choice: restore the earlier shared copy.
+        assert!(matches!(
+            a.svc.command(Command::RestoreSettings {
+                unit: unit.clone(),
+                checkpoint: v1_cp,
+            }),
+            Ok(CommandOutcome::Written(_))
+        ));
+        let st = a.svc.status();
+        assert!(
+            !matches!(st.settings_units[0].status, S::Active | S::InSync),
+            "up to date before the restore was applied: {:?}",
+            st.settings_units[0].status
+        );
+        let before = a.svc.status().settings_units[0].history.len();
+        for _ in 0..4 {
+            synced(&mut a);
+            let st = a.svc.status().settings_units.remove(0).status;
+            let on_disk = read_wtf(&a, "Alpha");
+            // Never up to date while the bytes on disk are not the selected copy.
+            assert!(
+                on_disk.as_deref() == Some(v1) || !matches!(st, S::Active | S::InSync),
+                "{st:?} {on_disk:?}"
+            );
+            synced(&mut b);
+        }
+        assert_eq!(read_wtf(&a, "Alpha").as_deref(), Some(v1));
+        assert_eq!(read_wtf(&b, "Alpha").as_deref(), Some(v1));
+        assert_eq!(
+            a.svc.status().settings_units[0].history.len(),
+            before,
+            "the master republished its own applied file"
+        );
+    }
+
+    #[test]
     fn a_master_restore_after_a_decision_does_not_create_a_decision_between_its_own_copies() {
         use crate::settings_cycle::SettingsUnitStatus as S;
         let lab = Lab::new();

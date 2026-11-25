@@ -349,6 +349,9 @@ pub struct SettingsFacts {
     pub unavailable: BTreeSet<CheckpointRef>,
     /// Sizes of the competing shared states, by checkpoint.
     pub sizes: std::collections::BTreeMap<CheckpointRef, u64>,
+    /// The head revisions each unit was evaluated against at the last cycle. A newer head
+    /// written since (an explicit choice, restore or push) has not been applied yet.
+    pub seen_heads: std::collections::BTreeMap<SettingsUnit, Vec<wow_sync_core::ids::Sha256>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1239,6 +1242,9 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
             }
         };
         let graph = graph_from_ledger(&plane.ledger, &derived, &unit);
+        out.facts
+            .seen_heads
+            .insert(unit.clone(), graph.heads.clone());
         for rev in graph.nodes.values() {
             if let Some(size) = checkpoint_size(a.provider, &rev.checkpoint, &unit) {
                 out.facts.sizes.insert(rev.checkpoint, size);
@@ -1305,6 +1311,27 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                 to: *graph.head_states.keys().next().expect("one head state"),
                 capture_first: true,
             },
+            _ => case,
+        };
+        // The master's own explicit choice, restore or push is the selected shared state. Its
+        // basis predates that record (the basis only advances once the copy is applied), so the
+        // not-yet-applied selection must not read as a concurrent local edit: apply it, and
+        // never republish the file the app is about to overwrite (G13).
+        let case = match (&case, graph.head_states.len()) {
+            (Case::LocalDifferent(LocalReason::ConcurrentPush), 1)
+                if is_authority
+                    && !graph.heads.is_empty()
+                    && graph.heads.iter().all(|h| {
+                        matches!(plane.ledger.record(h),
+                            Some(AuthorityRecord::SettingsRevision(r))
+                                if r.issuer.enrollment_id == a.own.enrollment_id)
+                    }) =>
+            {
+                Case::Yield {
+                    to: *graph.head_states.keys().next().expect("one head state"),
+                    capture_first: true,
+                }
+            }
             _ => case,
         };
         if !paused && use_shared.contains(&unit) {
@@ -1845,6 +1872,20 @@ pub fn settings_units(
                 SettingsUnitStatus::InSync
             } else {
                 SettingsUnitStatus::Active
+            };
+            // A head written since the last cycle (a choice or restore) is not applied yet:
+            // never report "up to date" against a selection this computer has not applied.
+            let status = if matches!(
+                status,
+                SettingsUnitStatus::Active | SettingsUnitStatus::InSync
+            ) && facts
+                .seen_heads
+                .get(&unit)
+                .is_some_and(|seen| *seen != graph.heads)
+            {
+                SettingsUnitStatus::WaitingForSharedCopy
+            } else {
+                status
             };
             let recovery_copies: Vec<RecoveryCopy> = local
                 .units
