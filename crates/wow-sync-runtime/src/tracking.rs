@@ -2,7 +2,8 @@
 //! every call is a few field updates.
 
 use crate::history::{
-    record_change, ChangeRecord, ChangeSource, IncomingSummary, Phase, ProgressEvent, ProgressHub,
+    record_change, ChangeKind, ChangeRecord, ChangeSource, IncomingSummary, Phase, ProgressEvent,
+    ProgressHub,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -179,7 +180,20 @@ impl ApplyProgress {
         current: Option<String>,
         source: Option<ChangeSource>,
     ) -> ProgressEvent {
-        let mut e = blank(self.pass_id, Phase::Installing);
+        let removal = |i: &Item| i.record.kind == ChangeKind::Removed;
+        let removing = match &current {
+            Some(name) => g
+                .items
+                .values()
+                .any(|i| i.record.name == *name && removal(i)),
+            None => !g.items.is_empty() && g.items.values().all(removal),
+        };
+        let phase = if removing {
+            Phase::Removing
+        } else {
+            Phase::Installing
+        };
+        let mut e = blank(self.pass_id, phase);
         e.current = current;
         e.source = source;
         e.items_done = g.items_done;
@@ -313,7 +327,7 @@ impl PublishProgress {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::history::{ChangeKind, ChangeReason, FileCounts, VersionLabel};
+    use crate::history::{ChangeReason, FileCounts, VersionLabel};
     use wow_sync_core::paths::validate_folder_name;
 
     fn item(name: &str, source: ChangeSource) -> (String, Item) {
@@ -390,6 +404,15 @@ mod tests {
             &[],
         );
         assert_eq!(mixed_with_self.incoming.unwrap().source, None);
+    }
+
+    #[test]
+    fn a_removal_pass_reports_removing_and_an_install_pass_installing() {
+        let mut rm = item("Alpha", from("a"));
+        rm.1.record.kind = ChangeKind::Removed;
+        assert_eq!(announced(vec![rm], &[]).phase, Phase::Removing);
+        let add = announced(vec![item("Alpha", from("a"))], &[]);
+        assert_eq!(add.phase, Phase::Installing);
     }
 
     #[test]
