@@ -55,14 +55,28 @@ Lab: synthetic two-computer lab prepared (synthetic add-ons, accounts and charac
 - Verify: offline PASS, native PASS.
 
 
+## Final live run (after merging 84b9beb)
+
+- Cycle note: the app ignored `SyncReport.apply_note`; now `backend` keeps notes starting "some saved settings were not shared" in `Shared.settings_note`, `World.settings_note` carries it, and Settings sync shows it as a sentence (test added; not mutation-checked).
+- Lab: A (accounts ACCOUNTONE/ACCOUNTTWO, a 34 MB Plater file) showed the guided offer, consent (both accounts ticked, this computer as master), Share settings; Add-ons then read "Settings are syncing here" for three add-ons and "Too large to share automatically (34.0 MB)" for Plater; Activity showed "Saved settings shared" with a detail row.
+- B joined, showed "A-demo is now the settings master. Use its add-on settings here?", consent with both accounts ticked, Use settings; Add-ons then read "Waiting for a character to log in on this computer" for all four add-ons (B lacks one character; the runtime reports it for every add-on) and Activity has no settings rows yet because nothing could be applied.
+- Not observed live: settings progress text (passes were too short to capture), the cycle note on screen, "Using settings from <computer>" (runtime source pending), an applied peer row with identity.
+- Lab bug found and fixed in the lab only: a stale `.wowsync\lock` directory made the first pass "held".
+- Verify: offline PASS earlier; native PASS; offline re-run after evidence links fixed (below).
+
+## Decisions made (final run)
+
+- Decision: carry the cycle note via Shared/World and show it on Settings sync only. Why: it is a settings-level notice, not an add-on status. Reversible: yes.
+- Decision: Add-ons list line stays generic, detail names the identity. Why: column width. Reversible: yes.
+- Decision: "Not now" persisted via `settings_offer_dismissed`. Why: runtime field exists. Reversible: yes.
+- Decision: narrowed the other Add-ons columns. Why: Name was squeezed to an ellipsis. Reversible: yes.
+
 ## Screenshots
 
-Each was viewed and contains only synthetic names (A-demo, B-demo, ACCOUNTONE, ACCOUNTTWO, Bagnon, Details, Plater, Questie) and no path. Directory: [R11-app/](R11-app/).
+Each was viewed and contains only synthetic names (A-demo, B-demo, ACCOUNTONE, ACCOUNTTWO, Bagnon, Details, Plater, Questie) and no path. Directory: [R11-app/](R11-app/). Overview shots were not kept because they show the lab folder path.
 
-- [a4-consent.png](R11-app/a4-consent.png): computer A, headline offer and consent, accounts ticked, this computer as master.
-- [a5-shared.png](R11-app/a5-shared.png): computer A after Share settings.
-- [b2-consent.png](R11-app/b2-consent.png): computer B, the other computer's offer and consent.
-- [b3-after-use.png](R11-app/b3-after-use.png): computer B after Use settings.
-- [b4-addons.png](R11-app/b4-addons.png): Add-ons list with the Settings column (names were squeezed to an ellipsis by the new column; fixed by narrowing the other columns and recaptured).
-- [b5-activity.png](R11-app/b5-activity.png): Activity (no settings rows yet; runtime data pending).
-
+- [a2-consent.png](R11-app/a2-consent.png): computer A, headline offer and consent.
+- [a3-addons.png](R11-app/a3-addons.png): A, Add-ons with syncing and too-large rows.
+- [a5-activity.png](R11-app/a5-activity.png): A, Activity with "Saved settings shared".
+- [b2-consent.png](R11-app/b2-consent.png): B, the other computer's offer and consent.
+- [b4-addons.png](R11-app/b4-addons.png): B, waiting-for-a-character rows.
