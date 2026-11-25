@@ -1756,6 +1756,10 @@ mod tests {
             "Product Flavor!STRING:0\nwow\n",
         )
         .unwrap();
+        // The scan calls a folder unstable when a file is not older than the clock's millisecond.
+        // Fine-grained file times (macOS) put a just-written file inside it, so the check before
+        // enrolling would skip the add-on and its digest would differ from the one enrolling sees.
+        std::thread::sleep(Duration::from_millis(25));
     }
 
     fn enroll_req(base: &Path, t: &Target) -> EnrollRequest {
