@@ -3657,6 +3657,57 @@ mod tests {
     }
 
     #[test]
+    fn one_missing_character_waits_alone_and_everything_else_still_applies() {
+        use crate::settings_cycle::SettingsUnitStatus as S;
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let vd = |pc: &Pc, rel: &str| pc.install.variant_dir.join(rel);
+        let there = "WTF/Account/ACC/Realm1/CharA1/SavedVariables/Alpha.lua";
+        let missing = "WTF/Account/ACC/Realm1/CharA2/SavedVariables/Alpha.lua";
+        for rel in [there, missing] {
+            let p = vd(&a, rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, "AlphaChar = { v = 1 }\n").unwrap();
+        }
+        // The peer has the first character but not the second.
+        std::fs::create_dir_all(vd(&b, "WTF/Account/ACC/Realm1/CharA1/SavedVariables")).unwrap();
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 1 }\n");
+        synced(&mut a);
+        for rel in [there, missing] {
+            std::fs::write(vd(&a, rel), "AlphaChar = { v = 2 }\n").unwrap();
+        }
+        write_wtf(&a, "Alpha", "AlphaDB = { v = 2 }\n");
+        synced(&mut a);
+        synced(&mut b);
+        synced(&mut b);
+        assert_eq!(
+            read_wtf(&b, "Alpha").as_deref(),
+            Some("AlphaDB = { v = 2 }\n"),
+            "the account-wide file applies"
+        );
+        assert_eq!(
+            std::fs::read_to_string(vd(&b, there)).ok().as_deref(),
+            Some("AlphaChar = { v = 2 }\n"),
+            "the character that exists applies"
+        );
+        assert!(!vd(&b, "WTF/Account/ACC/Realm1/CharA2").exists());
+        let rows = b.svc.status().settings_units;
+        let waiting: Vec<_> = rows
+            .iter()
+            .filter(|r| r.status == S::WaitingForIdentity)
+            .collect();
+        assert_eq!(
+            waiting.len(),
+            1,
+            "only the missing character waits: {rows:?}"
+        );
+        assert_eq!(
+            rows.iter().filter(|r| r.status == S::Active).count(),
+            rows.len() - 1
+        );
+    }
+
+    #[test]
     fn with_the_game_running_settings_wait_and_nothing_is_applied() {
         use crate::settings_cycle::SettingsUnitStatus as S;
         let lab = Lab::new();
