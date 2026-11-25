@@ -181,6 +181,9 @@ pub enum GroupAction {
         exceptions: Vec<PolicyRule>,
         included_accounts: Vec<String>,
         share_now: Vec<SettingsUnit>,
+        /// Settings sync is only now being enabled, so nothing can be listed yet: ask the
+        /// runtime to share every captured add-on without a shared copy once it has read them.
+        share_when_ready: bool,
     },
     PauseSettings {
         folder: FolderKey,
@@ -783,10 +786,7 @@ pub fn settings_unit_rows(
                     S::LocalDifferent(reason) => UnitStatus::LocalDifferent(reason),
                     S::NoSharedCopy => UnitStatus::NoSharedCopy,
                     S::InSync => UnitStatus::InSync {
-                        from: r
-                            .in_sync_from
-                            .clone()
-                            .unwrap_or_else(|| "another computer".into()),
+                        from: r.in_sync_from.clone(),
                     },
                     S::Active => UnitStatus::Active,
                 },
