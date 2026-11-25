@@ -17,7 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TreeAvail {
-    Ok(FolderTreeRecord),
+    Ok(std::sync::Arc<FolderTreeRecord>),
     Missing,
     CloudOnly,
     Corrupt,

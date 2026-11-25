@@ -2,7 +2,7 @@
 
 use crate::hash::tree_hash;
 use crate::ids::Sha256;
-use crate::paths::{validate_folder_name, validate_rel_path, FolderKey, RelPath};
+use crate::paths::{validate_folder_name, FolderKey, RelPath};
 use crate::toc::{select_toc, ExternalId, TocCandidate, TocSelection};
 use crate::variant::ConfirmedVariant;
 use serde::{Deserialize, Serialize};
@@ -30,7 +30,7 @@ pub enum ScanStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScannedFile {
-    pub rel_path: String,
+    pub rel_path: std::sync::Arc<str>,
     pub size: u64,
     pub sha256: Sha256,
 }
@@ -202,7 +202,7 @@ fn build_ok(scan: FolderScan, key: FolderKey, v: &ConfirmedVariant) -> FolderSta
     let mut entries = Vec::with_capacity(scan.files.len());
     let mut seen = std::collections::HashSet::with_capacity(scan.files.len());
     for f in scan.files.iter() {
-        let Ok(path) = validate_rel_path(&f.rel_path) else {
+        let Ok(path) = RelPath::share(&f.rel_path) else {
             return unusable(&scan.name, key, FolderStatus::Unsupported);
         };
         if !seen.insert(path.as_str().to_lowercase()) {

@@ -126,7 +126,7 @@ pub fn folder_scan(name: &str, files: &[(&str, &[u8])], tocs: &[&str]) -> Folder
     let files: Vec<ScannedFile> = files
         .iter()
         .map(|(p, b)| ScannedFile {
-            rel_path: (*p).to_string(),
+            rel_path: (*p).into(),
             size: b.len() as u64,
             sha256: sha256(b),
         })
@@ -386,10 +386,10 @@ impl Scenario {
             if let Some(t) = f.tree {
                 self.trees.insert(
                     t,
-                    TreeAvail::Ok(FolderTreeRecord {
+                    TreeAvail::Ok(std::sync::Arc::new(FolderTreeRecord {
                         tree: t,
                         files: f.file_entries.to_vec(),
-                    }),
+                    })),
                 );
             }
         }

@@ -78,11 +78,18 @@ impl<'de> Deserialize<'de> for FolderKey {
 
 /// Validated `/`-separated path relative to a folder.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct RelPath(String);
+pub struct RelPath(std::sync::Arc<str>);
 
 impl RelPath {
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Validates path and shares its allocation, so an inventory entry and the scan it came
+    /// from hold one string.
+    pub fn share(path: &std::sync::Arc<str>) -> Result<RelPath, PathError> {
+        check_rel_path(path)?;
+        Ok(RelPath(path.clone()))
     }
 }
 
@@ -101,7 +108,8 @@ impl Serialize for RelPath {
 impl<'de> Deserialize<'de> for RelPath {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let s = String::deserialize(d)?;
-        validate_rel_path(&s).map_err(serde::de::Error::custom)
+        check_rel_path(&s).map_err(serde::de::Error::custom)?;
+        Ok(RelPath(s.into()))
     }
 }
 
@@ -150,6 +158,11 @@ pub fn validate_folder_name(name: &str) -> Result<FolderKey, PathError> {
 }
 
 pub fn validate_rel_path(path: &str) -> Result<RelPath, PathError> {
+    check_rel_path(path)?;
+    Ok(RelPath(path.into()))
+}
+
+fn check_rel_path(path: &str) -> Result<(), PathError> {
     if path.is_empty() {
         return Err(PathError::Empty);
     }
@@ -166,7 +179,7 @@ pub fn validate_rel_path(path: &str) -> Result<RelPath, PathError> {
     for component in path.split('/') {
         validate_component(component)?;
     }
-    Ok(RelPath(path.to_string()))
+    Ok(())
 }
 
 /// A validated path relative to the variant's `WTF` folder naming exactly one settings file
