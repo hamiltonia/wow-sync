@@ -829,6 +829,14 @@ pub enum SettingsUnitStatus {
     /// yet. The app never creates it; the settings are applied once WoW creates the folder.
     /// `SettingsUnitRow::waiting_for` has the identity in plain words.
     WaitingForIdentity,
+    /// The file is larger than the saved-file size limit; it is never synced
+    /// (`SettingsUnitRow::size_bytes` has its size).
+    TooLarge,
+    /// Several add-ons declare the same saved variables; none of their files is synced
+    /// (`SettingsUnitRow::shared_with` names the other add-ons).
+    OwnedBySeveral,
+    /// WoW is running; settings are neither read nor replaced until it closes.
+    WaitingForWow,
     Active,
 }
 
@@ -861,6 +869,10 @@ pub struct SettingsUnitRow {
     /// Set with `WaitingForIdentity`: the missing identity in plain words, for the detail row
     /// only (it names an account or character, so it is never logged).
     pub waiting_for: Option<String>,
+    /// With `TooLarge`: the file size in bytes.
+    pub size_bytes: Option<u64>,
+    /// With `OwnedBySeveral`: the display names of the other add-ons that declare the variable.
+    pub shared_with: Vec<String>,
 }
 
 pub fn settings_units(
@@ -932,6 +944,8 @@ pub fn settings_units(
                 restore_possible: actionable && !history.is_empty(),
                 can_share: actionable && latest_capture.is_some(),
                 waiting_for: None,
+                size_bytes: None,
+                shared_with: Vec::new(),
                 latest_capture,
                 competing,
                 history,

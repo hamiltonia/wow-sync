@@ -917,6 +917,8 @@ mod tests {
             latest_capture: Some(Sha256([9; 32])),
             can_share: true,
             waiting_for: None,
+            size_bytes: None,
+            shared_with: Vec::new(),
         }
     }
 

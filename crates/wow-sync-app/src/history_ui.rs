@@ -375,6 +375,7 @@ pub(crate) mod tests {
             paths: vec!["Core.lua".into()],
             paths_more: 0,
             ms: 0,
+            identity: None,
         }
     }
 
