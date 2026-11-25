@@ -49,8 +49,7 @@ use wow_sync_core::decision::{
     DecideError, DecideOutcome, DecisionEffect, DecisionId, DecisionScope, FreshEvidence,
 };
 use wow_sync_core::exec::{
-    apply_report, recover_interrupted, run_apply, run_publish, ApplyEffects, PackageResult,
-    PublishOutcome,
+    apply_report, recover_interrupted, run_apply, ApplyEffects, PackageResult, PublishOutcome,
 };
 use wow_sync_core::explain;
 use wow_sync_core::hooks::RemovalHooks;
@@ -64,8 +63,7 @@ use wow_sync_core::ledger::{derive, Status as LedgerStatus};
 use wow_sync_core::package::ClientInfo;
 use wow_sync_core::paths::FolderKey;
 use wow_sync_core::plan::{
-    own_publish_slot, plan_apply, plan_publish, publish_needed, ApplyGate, PlanBlock,
-    PublishContext,
+    own_publish_slot, plan_apply, publish_needed, ApplyGate, PlanBlock, PublishContext,
 };
 use wow_sync_core::plan::{Activity, ApplyPlan, PackageApply};
 use wow_sync_core::records::{
@@ -4181,7 +4179,7 @@ impl SliceService {
             features,
             lineage,
         };
-        let plan = match plan_publish(&publishable, &ctx) {
+        let plan = match wow_sync_core::plan::plan_publish_state(&publishable, &ctx) {
             Ok(p) => p,
             Err(b) => {
                 report.publish_note = Some(format!("not published: {}", render_block(&b)));
@@ -4189,14 +4187,18 @@ impl SliceService {
             }
         };
         // The sequence number is persisted before anything is published so it is never reused.
-        track.0.set_total(plan.objects.len() as u64);
+        track
+            .0
+            .set_total(wow_sync_core::plan::count_publish_objects(&publishable));
         let mut le = w.enrollment.clone();
         le.next_seq = seq + 1;
         if state.write_atomic("enrollment.json", &encode(&le)).is_err() {
             report.publish_note = Some("not published: local state could not be saved".into());
             return;
         }
-        match run_publish(&plan, &mut ctx, fx) {
+        let group_for_objects = ctx.group.clone();
+        let objects = wow_sync_core::plan::publish_objects(&publishable, &group_for_objects);
+        match wow_sync_core::exec::run_publish_objects(&plan, objects, &mut ctx, fx) {
             PublishOutcome::Published { uploaded, .. } => {
                 // The earlier file lists are read only for the folders that changed.
                 let earlier = |h: &Sha256| {

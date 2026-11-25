@@ -227,9 +227,20 @@ pub fn run_publish(
     ctx: &mut PublishContext,
     fx: &mut impl PublishEffects,
 ) -> PublishOutcome {
+    run_publish_objects(plan, plan.objects.iter(), ctx, fx)
+}
+
+/// `run_publish` with the objects supplied one at a time (`plan::publish_objects`).
+pub fn run_publish_objects<O: std::borrow::Borrow<ObjectRef>>(
+    plan: &PublishPlan,
+    objects: impl IntoIterator<Item = O>,
+    ctx: &mut PublishContext,
+    fx: &mut impl PublishEffects,
+) -> PublishOutcome {
     debug_assert_eq!(plan.state.seq, ctx.seq);
     let mut uploaded = 0;
-    for o in &plan.objects {
+    for o in objects {
+        let o: &ObjectRef = o.borrow();
         match check_object(fx, &o.rel, &o.expect) {
             Ok(ObjectCheck::VerifiedOk) => continue,
             Ok(_) => {}
@@ -239,6 +250,12 @@ pub fn run_publish(
         if let Err(e) = fx.put_object(o) {
             if e.kind == EffectErrorKind::Yielded {
                 return PublishOutcome::Yielded;
+            }
+            // A live file that no longer matches its scan changed while publishing.
+            if e.kind == EffectErrorKind::HashMismatch
+                && matches!(o.source, crate::plan::ObjectSource::Folder { .. })
+            {
+                return PublishOutcome::Aborted(PlanBlock::Unstable);
             }
             return PublishOutcome::Failed(format!("uploading {}: {e}", o.rel));
         }

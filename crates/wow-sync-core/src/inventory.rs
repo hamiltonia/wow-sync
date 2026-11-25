@@ -115,6 +115,20 @@ impl FolderState {
         self.status == FolderStatus::Ok
     }
 
+    /// A copy without the local file list, which is never serialised.
+    pub fn without_entries(&self) -> FolderState {
+        FolderState {
+            name: self.name.clone(),
+            key: self.key.clone(),
+            status: self.status,
+            tree: self.tree,
+            fingerprint: self.fingerprint,
+            files: self.files,
+            bytes: self.bytes,
+            toc: self.toc.clone(),
+            file_entries: Vec::new(),
+        }
+    }
     /// Eligible, but no `.toc` was selected: the folder is synced by content lineage (R-05).
     pub fn unrecognised(&self) -> bool {
         self.status == FolderStatus::Ok && self.toc.kind != TocKind::Selected
