@@ -404,3 +404,65 @@ with the tests that were added for it, and I read the code paths they cover.
 | Recheck tests | `cargo test -p wow-sync-runtime --lib` (the ten settings tests named above), `cargo test -p wow-sync-core --lib settings_and_code_recovery`, `cargo test -p wow-sync-app` (six settings_ui tests) | All PASS. |
 | GC race probe | `cargo test -p wow-sync-runtime --lib rvprobe -- --nocapture --test-threads=1` | FAILED as expected, confirming RV11-12. Reverted; `git status` was clean before this file was edited. |
 | Offline | `cargo xtask verify --tier offline` | PASS (fmt, clippy, test, required-cases, deny, markdown-links) on `faddd5d` plus this file. Native not run (review-only change). |
+
+## Round 3: final recheck at `6da3e0f`
+
+- Revision: `main` at `6da3e0f`, merged into `run011/R11-review`. Since round 2 this brings in:
+  - the RV11-12, RV11-13 and RV11-14 fixes;
+  - `SharedFromHere` and unit-level versions in records;
+  - the lazy, per-folder code publish (`ea798cd`);
+  - OD-36 to OD-39.
+- Data boundaries: as before, synthetic labs only. The logs are
+  `D:\WoWSyncLab\R11-review\r3-*.log`.
+
+### Round 3 verdict
+
+**No open critical or major.** RV11-12 to RV11-14 are fixed. The lazy code publish is safe: it
+uploads in the right order and never writes a state that names missing objects. Its state bytes
+are unchanged on the wire, so v0.3.3 peers are unaffected. One new minor (RV11-16) is about
+memory headroom.
+
+### Status of the round-2 findings
+
+| ID | Was | Now | Evidence |
+| --- | --- | --- | --- |
+| RV11-12 | major | **Fixed** | I re-ran my round-2 race probe (Dropbox lag on a reused 60-day-old blob) unchanged. `b`'s sweep now keeps all 12 settings files, and `b` applies `v = 1` with status `InSync`; in round 2 it deleted 6 files and `b` stayed on `v = 5` as `Active`. Two later sweeps still keep everything. R11-runtime's regression tests `a_reused_old_copy_starts_its_age_again_when_content_returns_to_it` and `cleanup_keeps_every_copy_a_recent_revision_record_names_even_if_unread_here`, plus `WaitingForSharedCopy`, cover it. Log: `r3-gc.log`. |
+| RV11-13 | minor | **Fixed** | History leaves out entries whose copy is gone (test `settings_history_does_not_offer_a_copy_the_shared_folder_has_lost`). |
+| RV11-14 | note | **Fixed** | `is_settings_master` (`service.rs`) guards both `ShareSettingsWhenReady` and `ShareSettingsNow`. The deferred share goes through `ShareSettingsNow`, so the master check applies again when it runs. OD-37 records this. |
+| RV11-15 | note | Unchanged | It is still a note and needs nothing until a command that withdraws consent exists. |
+
+### Review of `ea798cd` (lazy, streamed code publish)
+
+I probed this with a temporary core test in `plan.rs`, since reverted. It drives
+`run_publish_objects` with `publish_objects` and a recording `PublishEffects`. Log: `r3-publish.log`.
+
+| Question | Result | Evidence |
+| --- | --- | --- |
+| Upload order: blobs, then the folder's tree, then the state record last | **Holds** | In the `publish_objects` stream, every tree comes after all its folder's blobs; a blob already produced for an earlier folder is not produced again (`plan.rs:96-136`, probe). `run_publish_objects` re-checks `source_fingerprints` and only then calls `write_record` (`exec.rs`). |
+| A crash or abort mid-publish never leaves a published state with missing objects | **Holds** | The probe made each of the 5 uploads fail in turn, with both `HashMismatch` and `Io`. No run wrote a state record. The only provider-visible result is content-addressed objects, which the next attempt reuses (as before). The sequence number is persisted before publishing, so it is never reused. |
+| A source hash that no longer matches aborts as `Unstable` and nothing partial is published | **Holds** | A `HashMismatch` on a `Folder` blob returns `Aborted(PlanBlock::Unstable)`. A failure on a tree (`Bytes`) or any other kind returns `Failed`. Neither writes a state. `put_object` hashes the temp file before the rename (`provider.rs` `put_stream`), so the mismatch is detected before the object is visible. |
+| Dropping local file lists from the state breaks nothing | **Holds** | `FolderState::file_entries` is `#[serde(skip)]` (`inventory.rs`), so it was never on the wire. The probe confirmed that `encode(plan_publish_state(..).state)` is byte-identical to `encode(plan_publish(..).state)`. After publishing, the change records use `publishable` and `w.inventory`, not `plan.state` (`service.rs` publish arm). Peers, recovery and rollback read file lists from tree records, which are still uploaded. |
+| v0.3.3 peers in the same group | **Compatible** | The state and tree record bytes are unchanged. Only the upload order differs, and readers follow the state record, which is still written last. |
+| Progress total | OK | `count_publish_objects` uses the same de-duplication as the stream. |
+
+### New findings
+
+#### RV11-16 (minor): memory headroom under the 100 MiB gate is thin and measured only once after the fix
+
+- In `evidence/R11-runtime.md`, the follow-up table records a settings pass at **99 MiB** private
+  working set (100 KB file), with idle varying from 57 to 94 MiB between runs. That measurement was
+  taken before `ea798cd`.
+- After `ea798cd` there is a single measurement: a peak of 83.2 MiB. OD-39 quotes that number as
+  the release figure.
+- The figure meets the gate (OD-38 measures private working set), but given the run-to-run spread
+  it is not yet robust evidence for A-25.
+- Suggestion: before release, repeat the full-lab pass at least three times on the release build
+  and record the maximum. The GUI-baseline reduction is already proposed as a future run.
+
+### Round 3 verification
+
+| Tier | Command (from the worktree root) | Result |
+| --- | --- | --- |
+| Publish probe | `cargo test -p wow-sync-core --lib rvprobe -- --nocapture` | PASS: ordering, the abort and failure matrix, and identical state bytes. Reverted. |
+| GC race probe | `cargo test -p wow-sync-runtime --lib rvprobe -- --nocapture --test-threads=1` | PASS (in round 2 the same probe failed). Reverted. |
+| Offline | `cargo xtask verify --tier offline` | PASS (fmt, clippy, test, required-cases, deny, markdown-links) on `6da3e0f` plus this file. Native not run (review-only change). |
