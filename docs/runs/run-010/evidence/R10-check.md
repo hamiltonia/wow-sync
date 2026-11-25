@@ -408,3 +408,193 @@ history/convergence, runtime
 model receipt, non-Windows native execution, and the separately larger
 2 GiB workload. No product fixes, relaxed assertions or public release were
 performed by this worker.
+
+## Recheck — candidate e3c1054, 2026-11-25
+
+### Scope, artifact and environment
+
+Merged `main` into `run010/R10-check` as instructed; the checkout was clean
+and fast-forwarded to `e3c10542cb521b27bfdac6b3f386a9942fae75e0`.
+Only this evidence file was edited in the repository. This section supersedes
+the original candidate's findings **only for the explicitly rechecked items**.
+
+Release dispatch [45540521958](https://github.com/hamiltonia/wow-sync/actions/runs/45540521958)
+was watched to successful completion; its reported head SHA matched exactly.
+Downloaded the new dispatch artifact into `$LAB\recheck-artifact`, checked
+the zip against its supplied `.sha256`, and extracted into
+`$LAB\recheck-candidate`. Every GUI check below used that extracted executable,
+not a locally built binary or the earlier dispatch.
+
+| Artifact | SHA-256 |
+|---|---|
+| Candidate zip | `1bc3a2ee47f08a8e24b77b17ec75991552ab18088296efe73542633d93323425` |
+| Extracted executable | `8d37bae4eb365120a83351aa8c5a9d36f9b5da72bf09767606879e34dcbc9d50` |
+
+Same Windows 11 Pro x64 Insider build 26300, i7-13700HX, local NVMe,
+dark GUI and `--zoom 0.75`. Reused the existing two synthetic installations,
+isolated states and synthetic provider. No real installation, settings,
+Dropbox group, owner process/state/log or demo was touched in this recheck.
+No Lua was executed, no WoW process was started/stopped, and no nested worker
+was launched. Actual model-routing receipt still requires the orchestrator's
+launch evidence.
+
+### Recheck result table
+
+| Item | Result | Actual observation |
+|---|---|---|
+| G1: add-on Recent changes sources | **PASS** | B's HistoryAddon page visibly names LabA on the new 2.0 → 3.0 row and both older rows. |
+| G3: receiving copy-choice reason | **PASS** | B receives A's chosen copy; record reason is `Choice("LabA")`. Expanded Activity says “a choice made on LabA”. |
+| G3: receiving rollback reason/kind | **PASS** | B receives 2.0 → 1.0, `rolled-back` / `Rollback`, source LabA; add-on Recent changes visibly shows those values. Activity's separate source omission is G6 below. |
+| G3: A's rollback version label | **PASS** | A's persisted record and settled add-on Recent changes show TOC 2.0 → 1.0, not a short content ID. |
+| G4: publishing phase/package/summary logs | **PASS** | Both a 1 GiB initial publication and a subsequent scheduled four-add-on publication emit phases, per-package `published` lines and non-zero summaries. |
+| Quick artifact smoke | **PASS** | Existing enrollment loads; GUI navigation, actual transfers, close explanation, hide, same-state duplicate reopening, clean GUI quit and history restart were executed. |
+| Quick apply memory sample | **PASS** | 2.0 GiB incoming batch: sampled apply private working set peak **39.14 MiB**, whole observation **40.66 MiB**, one owned app process. Sampling limits below. |
+| Native tier, run 1 | **PASS** | `cargo xtask verify --tier native`, exit 0, no allow-blocked flag. |
+| Native tier, run 2 | **PASS** | Same command, consecutive default-concurrency run, exit 0. G5 did not recur in either run; root cause is still unknown and no fix is established. |
+| Offline tier | **PASS** | fmt, clippy, workspace tests, required cases, deny and markdown links; exit 0, no allow-blocked flag. |
+| G2: settings history/convergence | **NOT RUN** | Deferred to run-011 per the orchestrator's OD-12 instruction; not fixed or independently reverified here. |
+| Actual tray progress | **BLOCKED** | Original direct-observation limitation remains; this round does not replace it with logs or headless evidence. |
+| New minor observations G6/G7 | **FAIL** | Receiving rollback Activity omits its source; local Keep history omits available version labels. Details below. |
+
+### Reproduction and retained evidence
+
+**G1.** Updated A's existing HistoryAddon to TOC 3.0 with inert changed
+content. B actually applied it. Opened **Add-ons → HistoryAddon**, scrolled
+to Recent changes and inspected `recheck-B-history-source.png`. The new row
+reads “from LabA · 2.0 → 3.0 · ~2 files · +12 B · newer release”; both older
+rows also name LabA. The account-bearing recovery area in this raw lab
+screenshot is not committed or reproduced in this evidence.
+
+**G3 choice.** Used fresh RecheckChoice to avoid inherited pins: established
+shared version 1.0, paused both, wrote different inert `main.lua` bytes with
+the same TOC version, resumed both and observed the ambiguity. Paused B;
+A chose **Keep this: Keep version 1.0. Held by This computer**. After
+publication, resumed B and checked its installed bytes and new persisted
+record. A/B selected file hashes matched. B's record has source LabA,
+TOC 1.0 → 1.0, one changed file, zero byte delta and `Choice("LabA")`,
+not `NewerRelease`. The expanded actual Activity row visibly says
+“a choice made on LabA” (`recheck-B-choice-detail.png`).
+
+**G3 rollback.** Used fresh RecheckRollback: B published 1.0, then 2.0;
+A actually received both. Paused B. A selected the GUI recovery copy
+labelled Version 1.0, then **Restore**; dismissed the remaining confirmation
+only after the command was accepted. A's completed record is
+`rolled-back`, `Rollback`, source this computer, TOC 2.0 → 1.0,
+two changed files and +2 B. The settled GUI row shows the same TOC labels
+(`recheck-A-rollback-label.png`).
+
+Resumed B. Its completed record is also `rolled-back` / `Rollback`,
+TOC 2.0 → 1.0, source LabA, two changed files and +2 B, not `NewerRelease`.
+Both restored files hash-match A. B's add-on Recent changes visibly names
+LabA and “rolled back for the group” (`recheck-B-rollback-source.png`).
+The Activity reason/version recheck passes, but its missing source is
+recorded separately as G6.
+
+**G4.** Four fresh RecheckLarge add-ons contain 64 random 4 MiB blobs each,
+plus TOC/main files. The initial publisher pass logged:
+
+```text
+03:54:54Z sync pass starting: start or after a change
+03:54:54Z phase: checking files
+03:54:57Z phase: deciding
+03:54:58Z phase: publishing
+03:55:00Z published RecheckLarge0 ... files +66 ~0 -0, 268435560 bytes
+03:55:00Z published RecheckLarge1 ... files +66 ~0 -0, 268435560 bytes
+03:55:00Z published RecheckLarge2 ... files +66 ~0 -0, 268435560 bytes
+03:55:00Z published RecheckLarge3 ... files +66 ~0 -0, 268435560 bytes
+03:55:00Z pass summary: 6 add-ons shared from this computer (6 change(s), 6367 ms)
+```
+
+The other two changes were HistoryAddon and the fresh choice baseline.
+To cover the originally failing **scheduled** quiet-pass path rather than
+only startup/manual logging, changed all four RecheckLarge TOCs to 2.0 and
+their inert main files while A remained running. Did not request Sync now.
+The scheduled pass at 03:59:50Z logs checking/deciding/publishing, four
+per-package 1.0 → 2.0 lines and:
+
+```text
+pass summary: 4 add-ons shared from this computer (4 change(s), 2817 ms)
+```
+
+It is not reported as “nothing changed”. Package `ms` is still 0 for these
+publication records; the actual non-zero pass duration is reported above.
+Checked new phase/package/summary lines for absolute/profile/account paths;
+none were present. Developer startup diagnostics retain the explicitly
+supplied synthetic state path, as before; this is not a claim that every
+developer-log line is path-free.
+
+**Memory and apply.** B resumed into ten incoming add-ons, displayed as
+2.0 GiB: four existing 256 MiB add-ons updated, four fresh 256 MiB add-ons,
+HistoryAddon and RecheckChoice. Phase log: 03:55:54Z installing; final
+installation completion: 03:56:07Z; pass summary: 03:56:12Z, 17,535 ms,
+ten received changes plus B's one local publication. All **264 fresh
+received files / 1,073,742,240 bytes** hash-matched A, checked independently
+after apply. Updated old payloads are not claimed as another newly
+downloaded GiB; they were part of the actual 2.0 GiB install workload.
+
+The PID-scoped MemLib sampler retained 37 samples across about 45 seconds,
+13 with an actual Installing headline, one owned process. Actual intervals
+were 768–1,383 ms, not the nominal 200 ms sleep: counter/UI reads add overhead.
+Installing-sample peak private working set: **39.14 MiB**; whole-window peak:
+**40.66 MiB**. This is a sampled quick recheck, not a bound on unsampled
+instantaneous peaks. First Installing headline was observed at
+03:55:55.563Z and changed throughout the apply. No tray result is inferred
+from that headline.
+
+**Smoke and persistence.** Enabled the next-close explanation in B's
+isolated App settings. Close displayed the actual explanation; **Hide
+window** left its captured HWND invisible. A same-state duplicate exited
+and reopened the original PID, which remained responsive. **Quit WoW Sync**
+exited it. Restarted B from the new artifact: its `changes.jsonl` SHA-256
+remained byte-identical,
+`eb6a53d7c0a2b60d0904d6d20cc3af64ab3abf4b4c2ec9040709d9d37621a092`,
+and the rollback history was visible again. Quit restarted B and A via the
+GUI. Captured PIDs 21384, 30316, 12336 and 35728 all exited; no surviving
+R10-check lab executable was found. No unrelated process was terminated.
+
+Raw evidence retained under `$LAB`: `recheck-dispatch-watch.log`,
+`recheck-native-1.log`, `recheck-native-2.log`, `recheck-offline.log`,
+`recheck-evidence-offline.log` (the post-edit tier, including markdown links),
+`recheck-samples.jsonl`, `recheck-start.json`, `recheck-A.log`,
+`recheck-B.log`, `recheck-A-changes.jsonl`, `recheck-B-changes.jsonl`,
+`recheck-pids.txt` and the named screenshots. Neither author completion
+claims nor new test names were substituted for these GUI/receipt checks.
+
+### Additional minor observations
+
+**G6 — minor: receiving rollback Activity omits the source computer.**
+In the completed peer rollback above, B's persisted source is LabA, and its
+add-on Recent changes correctly says “from LabA”. However B's expanded
+Activity group reads “1 add-on rolled back”; its row reads
+“RecheckRollback · rolled back, 2.0 → 1.0 · ~2 files · +2 B · rolled back
+for the group”, with no source. Reproduce by the G3 rollback flow, then open
+B's Activity and expand that group. Screenshot:
+`recheck-B-choice-top.png` (captured after the rollback arrived).
+The packet requires source visibility in Activity as well as the add-on
+page. This is a UI omission, not incorrect stored attribution or a failed
+rollback; source remains discoverable on the add-on page.
+
+**G7 — minor: the choosing computer's Keep history omits known versions.**
+After the fresh TOC-1.0 choice above, A's local `kept` record has
+`old_version: New`, `new_version: New`; expanded Activity reads
+“RecheckChoice · kept · you chose this computer's copy” without version
+labels. Reproduce by the G3 choice flow, then expand A's **Kept your choice**
+group. Screenshot: `recheck-A-own-choice-label.png`.
+The chosen addon is already installed/shared at 1.0, not a newly installed
+addon. D-32 goal 1 requests available versions for kept changes too.
+This is outside the specifically requested receiving-side G3 fix; no claim
+is made that round 6 introduced it. B's receiving choice is correct.
+
+### Release verdict
+
+**Requested G1/G3/G4 fixes: PASS.** New artifact smoke, sampled memory and
+both native runs PASS; G5 was not reproduced, not proven fixed. No new
+critical or major defect was found in this recheck. G6/G7 are minor
+history-display omissions, not silently passed requirements.
+
+**Unconditional full run-010 release gate: still BLOCKED.** The original
+actual-tray observation remains blocked, G6/G7 are not resolved, and this
+round does not re-run the whole original acceptance matrix or speed gate
+on e3c1054. G2 remains explicitly deferred per OD-12, not verified.
+The orchestrator must retain those dispositions/limits and any required
+owner acceptance; this worker does not grant a waiver or publish a release.
