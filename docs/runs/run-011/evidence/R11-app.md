@@ -168,3 +168,50 @@ After (shape): "Keep the restored copy from settings master <name> (25 November 
 How it came about comes from the revision kind of the choice's newest revision, looked up in the row's history (Restore = "restored copy", Choice = "chosen copy", Push = "pushed copy", Auto = "copy edited in game"); no runtime change needed. If a head's revision is not in the history the label falls back to "copy".
 Test `equal_choices_show_how_they_came_about_seconds_and_newer_older`; mutations (no tie-breaker, restored word dropped, minutes instead of seconds) each fail it.
 Screenshot: NOT captured. A two-choice list needs two diverged computers in my lab; I did not rebuild that setup this round. The label logic is covered by the test.
+
+## Fix round: G18, memory growth per UI cycle (main with OD-61)
+
+Result: no app-side retention found. The growth comes from the UI-automation client's queries, not from the app's UI code. No source change this round.
+
+Method: own small lab (release build, zoom 1.5, ShowWindow reopen), private working set sampled every 50 ms. Baseline here is about 36 MiB (the 113-add-on lab was too slow to onboard in my lab), so growth is easy to see.
+
+Bisect, driven through UI automation (each query walks the whole accessibility tree):
+
+| Surface (UIA-driven) | After each hide / cycle | Trend |
+|---|---|---|
+| show/hide only, 10 cycles | 36.0 to 36.5 | flat |
+| Settings sync page only, 10 cycles | 36.4 to 36.9 | about +0.05 per cycle |
+| add-on detail open/close, 10 cycles | 36.2 to 39.8, commit 100 to 103.6 | about +0.4 per cycle |
+| confirmation dialog open/cancel | 36.5 to 38.2 by cycle 5 | about +0.4 per cycle |
+| full path, 10 cycles | 36.9 to 41.8, commit 100.7 to 105.6 | about +0.5 per cycle |
+| detail without hiding, 5 opens per cycle, 8 cycles | 38.0 to 51.9 | about 0.4 per open |
+| detail, client forces GC each cycle | 38.1 to 48.0 over 6 cycles | unchanged |
+| NO navigation at all, 150 whole-tree queries per cycle, 6 cycles | 38.6 to 48.0, commit 102.7 to 112 | growth with no UI change |
+
+Isolation (same lab, same build):
+- Navigation and detail opens with no UIA queries, 8 cycles x 5 opens (40 detail opens): 35.8 to 36.5 (commit 99.6 to 101.0), flat. Done with posted mouse messages; a screenshot confirmed the detail opened.
+- Same, with one UIA query first so the accessibility adapter stays active, 40 opens: 36.0 to 37.0, flat. So building and sending the accessibility tree every frame is not the cause.
+- Four separate client processes, 150 whole-tree queries each, then exit: app commit 99.9, 100.3, 101.3, 100.4, 100.4, then 101.4 after 20 s. The growth disappears when the client exits; it is held while the client lives.
+
+Root cause: each whole-tree UIA query makes the client hold references to the app's accessibility provider objects (the harness's PowerShell process keeps them; forcing GC in the client does not release them). Memory grows with the number of queries, so a harness that queries more per cycle (find, click, find) shows 10 to 17 MiB per cycle on a larger tree. It is not tied to hide/show, to a surface, or to this app's data (no unbounded cache found: the app's maps are keyed by control and page names and are small).
+
+Proof without UIA, zoom 1.5, 10 cycles of [Computers, Activity, Overview, Add-ons, add-on detail x3, Settings sync, hide window, show window] by posted mouse messages and native hide/show:
+
+| Cycle | hidden quiet (MiB) | commit (MiB) | running peak (MiB) |
+|---|---|---|---|
+| 1 | 37.3 | 101.5 | 38.3 |
+| 2 | 36.8 | 100.9 | 38.3 |
+| 3 | 36.5 | 100.6 | 38.6 |
+| 4 | 36.5 | 100.6 | 38.6 |
+| 5 | 36.7 | 100.8 | 38.6 |
+| 6 | 36.5 | 100.5 | 38.6 |
+| 7 | 36.5 | 100.6 | 38.6 |
+| 8 | 36.5 | 100.6 | 38.6 |
+| 9 | 36.7 | 100.8 | 38.6 |
+| 10 | 36.5 | 100.6 | 38.6 |
+
+Flat; hidden peak far under 100 MiB. Not covered UIA-free: the restore confirmation dialog (its buttons sit below the visible area and need scrolling) and the tray-menu reopen (ShowWindow is what the tray does in-process). The dialog was covered only in the UIA-driven bisect, where it behaved like every other UIA-driven surface.
+
+Decision: no app change for G18. Why: the growth is reproduced with no UI activity at all and vanishes when the querying client exits; changing app code would hide nothing real. Reversible: yes.
+Recommendation to the checker (not an app fix): drive the cycle without whole-tree queries per step (query once for coordinates or use a fresh client process per cycle), or measure after the client exits. The same UIA retention with a real screen reader is the screen reader's own cost and is not distinguishable from this harness effect.
+Open, unverified: whether accesskit_windows itself releases provider objects promptly when a client disconnects; I only showed that exiting the client frees them. The harness scripts are in my lab (`mem\g18*.ps1`), not committed.
