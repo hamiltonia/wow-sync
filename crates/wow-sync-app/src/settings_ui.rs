@@ -1828,6 +1828,55 @@ mod tests {
     }
 
     #[test]
+    fn equal_choices_show_how_they_came_about_seconds_and_newer_older() {
+        use wow_sync_core::kinds::RevisionKind as RK;
+        use wow_sync_runtime::{HeadChoice, HeadKind as K, SettingsUnitStatus as S};
+        let t = 1_700_000_000_000;
+        let mut r = runtime_row(S::NeedsChoice);
+        let entry = |n: u8, kind: RK, ms: u64| {
+            let mut e = r.history[0].clone();
+            e.hash = Sha256([n; 32]);
+            e.kind = kind;
+            e.written_unix_ms = ms;
+            e
+        };
+        let (e1, e2, e3, e4) = (
+            entry(1, RK::Restore, t),
+            entry(2, RK::Auto, t + 5_000),
+            entry(3, RK::Auto, t + 20_000),
+            entry(4, RK::Auto, t + 20_000),
+        );
+        r.history = vec![e1, e2, e3, e4];
+        let head = |n: u8, ms: u64| HeadChoice {
+            checkpoint: Sha256([n; 32]),
+            revisions: vec![Sha256([n; 32])],
+            source: Some("Desk".into()),
+            kind: K::MastersRevision,
+            written_unix_ms: ms,
+            size_bytes: Some(49),
+        };
+        r.competing = vec![head(1, t), head(2, t + 5_000)];
+        let rows = crate::features::settings_unit_rows(&[r.clone()]);
+        let l: Vec<_> = rows[0].heads.iter().map(|c| c.label.clone()).collect();
+        assert!(l[0].contains("restored copy"), "{l:?}");
+        assert!(l[1].contains("copy edited in game"), "{l:?}");
+        assert!(
+            l[0].contains(&crate::world::date_time_seconds_text(t)),
+            "{l:?}"
+        );
+        assert!(l[0].contains("49 B") && l[0] != l[1]);
+        // Same kind, source, second and size: only newer/older can tell them apart.
+        r.competing = vec![head(3, t + 20_000), head(4, t + 20_000)];
+        let rows = crate::features::settings_unit_rows(&[r]);
+        let l: Vec<_> = rows[0].heads.iter().map(|c| c.label.clone()).collect();
+        assert_ne!(l[0], l[1]);
+        assert!(
+            l[0].ends_with("(older)") && l[1].ends_with("(newer)"),
+            "{l:?}"
+        );
+    }
+
+    #[test]
     fn competing_choices_name_their_source_kind_time_and_size() {
         use crate::features::{head_label, recovery_label};
         use wow_sync_runtime::{HeadKind as H, RecoveryKind as R};
