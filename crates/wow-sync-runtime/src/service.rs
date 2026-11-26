@@ -1553,6 +1553,22 @@ impl SliceService {
                 Ok(CommandOutcome::Local(l))
             }
             Routed::WriteNow(rec) => {
+                if let AuthorityRecord::SettingsRevision(r) = &*rec {
+                    // The file as last seen is the stale one this selection supersedes; an edit
+                    // made after it is a new change (RV11-17). Remembered before the write so a
+                    // failure to save it refuses the selection instead of losing the guard.
+                    let mut local = crate::settings_cycle::load_local(&self.state, &gid);
+                    if let Some(u) = local.units.iter_mut().find(|u| u.unit == r.unit) {
+                        u.pending_selection = u.captures.first().copied();
+                        crate::settings_cycle::save_local(&self.state, &gid, &local).map_err(
+                            |_| {
+                                CommandError::Service(
+                                    "the settings choice could not be remembered".into(),
+                                )
+                            },
+                        )?;
+                    }
+                }
                 // Parts first: a policy whose parts are missing stays pending for every reader.
                 for (_, bytes) in &policy_parts {
                     write_own_bytes(&mut self.plane, &provider, &gid, &w.own.computer_id, bytes)
@@ -1565,15 +1581,8 @@ impl SliceService {
                     .save(&self.state)
                     .map_err(|e| CommandError::Service(e.to_string()))?;
                 self.reserve_seq(&w, seq)?;
-                if let AuthorityRecord::SettingsRevision(r) = &*rec {
+                if matches!(&*rec, AuthorityRecord::SettingsRevision(_)) {
                     self.record_settings_write(&provider, &w.titles, &w.inventory, &h);
-                    // The file as last seen is the stale one this selection supersedes; an edit
-                    // made after it is a new change (RV11-17).
-                    let mut local = crate::settings_cycle::load_local(&self.state, &gid);
-                    if let Some(u) = local.units.iter_mut().find(|u| u.unit == r.unit) {
-                        u.pending_selection = u.captures.first().copied();
-                        let _ = crate::settings_cycle::save_local(&self.state, &gid, &local);
-                    }
                 }
                 if let AuthorityRecord::CodeChoice(c) = &*rec {
                     if let Some(k) =

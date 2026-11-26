@@ -483,3 +483,28 @@ Note: the restart test passes without the fix too; it guards against regression,
 
 - Decision: the edit made after the restore produces a decision (edit vs restore), not a silent win.
   Why: competing intentional choices are never merged. Reversible: yes.
+## Round RV11-20/22
+
+- RV11-20: the stale-file guard now accepts only the recorded `pending_selection` capture or this
+  computer's `last_applied` bytes. A shared version is no longer treated as stale just because it
+  is shared. To keep the applied selection recognised, the Yield apply plan now sets `last_applied`
+  to the selected checkpoint when a pending selection exists (local state only; a failed apply
+  leaves the stale file, which still equals `pending_selection`).
+- Restart test is now `g13(true, true)`: the choice is applied, the restore is accepted, the
+  computer restarts, then passes run.
+- RV11-22: the pending selection is saved before the record is written; if saving fails the
+  command fails with a plain message and nothing is written. Not unit-tested (no injectable save
+  failure); simplest safe option. A failed record write after a successful save leaves a harmless
+  pending value that is cleared on the next InSync pass.
+- RV11-21 left as is (note).
+
+| Test | Broad guard restored | pending_selection not persisted |
+|---|---|---|
+| a_master_edit_that_equals_an_older_shared_version_is_offered_not_reverted (new) | FAILS | passes |
+| g13_a_restart_between_the_selection_and_its_apply_... (g13(true,true)) | passes | FAILS |
+| g13_a_restore_after_the_choice_was_applied_... | passes | FAILS |
+| a_master_edit_made_after_its_own_restore_... , g13 restore right after | pass | pass |
+
+- Decision: set `last_applied` at plan time rather than after the file write. Why: apply results are
+  not fed back into the cycle; the stale-file case is still covered by `pending_selection`.
+  Reversible: yes.
