@@ -508,3 +508,23 @@ Note: the restart test passes without the fix too; it guards against regression,
 - Decision: set `last_applied` at plan time rather than after the file write. Why: apply results are
   not fed back into the cycle; the stale-file case is still covered by `pending_selection`.
   Reversible: yes.
+## Round G16 (headline while a selection is unapplied)
+
+Cause: the app's headline reads `StatusSnapshot.detail.view.headline` (the core `Headline` enum) and
+ignores the snapshot's `headline` string, so the unit-level override never reached it; the unit
+override also relied on in-memory `seen_heads`, which a pass records before the apply happens.
+Fix (runtime only): (1) the snapshot's `detail.view.headline` becomes `Working` ("Syncing") while
+any unit is `WaitingForSharedCopy` and the base headline is Ok and no unit needs a choice (a
+pending choice keeps its own headline); (2) a unit with a `pending_selection` is
+`WaitingForSharedCopy` regardless of `seen_heads`. No app change needed.
+
+| Test | Headline override reverted |
+|---|---|
+| g16_the_headline_is_not_up_to_date_until_an_accepted_choice_is_applied | FAILS ("headline says up to date") |
+
+Limits: the pending-selection status clause is not independently covered by a test (a pass between
+accept and apply that defers the apply cannot be produced in the e2e harness without the game
+running, where the unit shows WaitingForWow). While the game runs the unit row is WaitingForWow
+and the base headline is unchanged (pre-existing behaviour).
+- Decision: reuse `Headline::Working` rather than add a variant. Why: no app/core enum change;
+  the app already renders it as "Syncing". Reversible: yes.

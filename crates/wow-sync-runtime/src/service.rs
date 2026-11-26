@@ -3028,7 +3028,7 @@ impl SliceService {
         let removed: Vec<crate::detail::RemovedRow> = keyed.into_iter().map(|(r, _)| r).collect();
         let rejected_releases = crate::detail::rejected_releases(&self.plane.ledger, &derived);
         let older_peer = crate::detail::older_peer(&w.views, &peers);
-        let sv: StatusView = derive_status(&StatusInput {
+        let mut sv: StatusView = derive_status(&StatusInput {
             target: &w.target,
             members: &w.views,
             applied_here: &here,
@@ -3066,6 +3066,18 @@ impl SliceService {
             .iter()
             .filter_map(|r| Some((r.key.clone(), unrecognised_note(&r.folders)?)))
             .collect();
+        // A selected settings copy this computer has not applied yet is work in progress, never
+        // "up to date" (G16). A pending choice keeps its own headline.
+        if sv.headline == Headline::Ok
+            && !settings_units
+                .iter()
+                .any(|r| r.status == crate::settings_cycle::SettingsUnitStatus::NeedsChoice)
+            && settings_units.iter().any(|r| {
+                r.status == crate::settings_cycle::SettingsUnitStatus::WaitingForSharedCopy
+            })
+        {
+            sv.headline = Headline::Working;
+        }
         let detail = StatusDetail {
             view: sv.clone(),
             packages: rows,
