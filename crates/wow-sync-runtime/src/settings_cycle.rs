@@ -1323,10 +1323,7 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
         let stale_or_applied = live.is_some_and(|l| {
             local.units[li].pending_selection.is_some()
                 && (Some(l) == local.units[li].pending_selection
-                    || plane.ledger.entries().any(|e| {
-                        matches!(plane.ledger.record(&e.hash),
-                            Some(AuthorityRecord::SettingsRevision(r)) if r.checkpoint == l && r.unit == unit)
-                    }))
+                    || Some(l) == local.units[li].last_applied)
         });
         let case = match (&case, graph.head_states.len()) {
             (Case::LocalDifferent(LocalReason::ConcurrentPush), 1)
@@ -1555,6 +1552,10 @@ pub(crate) fn settings_cycle(plane: &mut Plane, a: &StepArgs, next_seq: &mut u64
                             identity: identity_text(&unit),
                         },
                     );
+                }
+                // The selected bytes are what this computer applies; a file equal to them is not an edit.
+                if local.units[li].pending_selection.is_some() {
+                    local.units[li].last_applied = Some(to);
                 }
                 out.applies.push(plan_settings_apply(
                     op,

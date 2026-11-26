@@ -4141,7 +4141,7 @@ mod tests {
 
     #[test]
     fn g13_a_restart_between_the_selection_and_its_apply_still_converges_without_a_republish() {
-        g13(false, true);
+        g13(true, true);
     }
 
     #[test]
@@ -4314,6 +4314,45 @@ mod tests {
         assert_eq!(read_wtf(&b, "Alpha").as_deref(), Some(ingame));
     }
 
+    #[test]
+    fn a_master_edit_that_equals_an_older_shared_version_is_offered_not_reverted() {
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let unit = alpha_unit();
+        let v0 = "AlphaDB = { v = 0 }\n";
+        let v1 = "AlphaDB = { v = 1 }\n";
+        let v2 = "AlphaDB = { v = 22 }\n";
+        for v in [v0, v1, v2] {
+            write_wtf(&a, "Alpha", v);
+            synced(&mut a);
+            share_now(&mut a);
+            synced(&mut b);
+        }
+        let v1_cp = stored_checkpoint(&a, &unit, v1.as_bytes());
+        a.act.set(Activity::Running { pids: vec![4242] });
+        assert!(matches!(
+            a.svc.command(Command::RestoreSettings {
+                unit: unit.clone(),
+                checkpoint: v1_cp,
+            }),
+            Ok(CommandOutcome::Written(_))
+        ));
+        synced(&mut a);
+        // In game the owner sets the file to exactly the bytes of an older shared version.
+        write_wtf(&a, "Alpha", v0);
+        a.act.set(Activity::NotRunning);
+        for _ in 0..4 {
+            synced(&mut a);
+            synced(&mut b);
+        }
+        assert_eq!(read_wtf(&a, "Alpha").as_deref(), Some(v0));
+        let row = a.svc.status().settings_units.remove(0);
+        let v0_cp = stored_checkpoint(&a, &unit, v0.as_bytes());
+        assert!(
+            row.competing.iter().any(|c| c.checkpoint == v0_cp),
+            "{row:?}"
+        );
+    }
     #[test]
     fn a_master_restore_after_a_decision_does_not_create_a_decision_between_its_own_copies() {
         use crate::settings_cycle::SettingsUnitStatus as S;
