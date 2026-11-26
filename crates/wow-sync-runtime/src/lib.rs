@@ -1,7 +1,9 @@
 //! Glue for the thin slice: implements the core port traits over the adapters and exposes
 //! [`SliceService`] (inspect / enroll / sync_once / status). It makes no policy decision:
 //! ordering, grouping, targets, plans and status all come from `wow-sync-core`.
-#![forbid(unsafe_code)]
+// Shipped code never uses unsafe; the test build allows one counting allocator (G18 heap test).
+#![cfg_attr(not(test), forbid(unsafe_code))]
+#![cfg_attr(test, deny(unsafe_code))]
 
 mod activity;
 mod changes;
