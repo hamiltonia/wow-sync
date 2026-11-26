@@ -1844,3 +1844,341 @@ measurement streams are included. A separate evidence/raw-data
 consistency check passed, explicitly retaining G16/G17 as expected
 product failures; it is **not** a substitute product test. All raw
 material remains local in LAB, not uploaded or committed.
+
+## Re-verification 5 (7a65a11)
+
+### Provenance, boundaries and scope
+
+- Worker: `D:\GitHub\wow-sync.worktrees\R11-check`,
+  `run011/R11-check`; fast-forwarded main to
+  `7a65a117ceca9a6952b3a9da62488f34e52336ff` before work.
+- Downloaded release dispatch **45749110502** into LAB `artifact5`;
+  its workflow and CI **45746459121** both report success at that SHA.
+  Every GUI observation used the extracted `candidate5\wow-sync.exe`,
+  not a local build. The GUI-generated diagnostics independently reports
+  the same build commit and app version `0.4.0`.
+- ZIP SHA-256, matching its downloaded sidecar:
+  `96968c9757c2b5726a605c4e76ec2e77a48593ac67ded3bca6347173f53d235e`.
+  EXE SHA-256:
+  `d2a90883ad52480682e6db4dcc661b18f110ce491efbd54299ba2ac8efbd1c0a`.
+- Actual host: Windows 11 Pro, `10.0.26300`, build `26300`, x64.
+  Native GUI says `World of Warcraft: Forever (wowf) / _forever_`;
+  this is not a Classic Era identity claim.
+- Retained A/B installs, provider and state under LAB `round2`, without
+  resetting history: **119 add-on folders / 36,154 files** in A's full
+  add-on tree. Initial A/B histories: **329 / 194** records; final A: **406**.
+  Created fresh C5/D5 installs and state with separate `consent5-provider`.
+  Legacy peer: the previously downloaded and verified published v0.3.3 EXE.
+- `r5-common.ps1` is the re-rooted retained launch guard. Every candidate
+  and legacy launch printed and checked its exact command with `--dev`,
+  `--install`, `--state`, `--provider`, all path arguments inside LAB.
+  Profiles/diagnostics destinations were also scoped into LAB.
+  No bare launch or `--help`; no imported Lua/SavedVariables/CMD execution.
+  Only recorded, creation-time-and-image-matched owned PIDs were stopped.
+- Read [OD-57–OD-60](../DECISIONS-FOR-REVIEW.md), current G16/G17
+  worker evidence and the verification packet. This is the owner's
+  **focused** round, not another complete eleven-gate sweep.
+  No product, tests, dependencies or CI were changed.
+
+Raw round-five data and screenshots are in LAB `round5`; named files below
+are relative to that directory unless stated otherwise.
+
+### Gate table
+
+| Focused obligation | Result | Observed evidence |
+|---|---|---|
+| Gate 1 artifact / smoke | PASS | Sidecar hash matches; native UI and GUI diagnostics show the candidate, variant and build SHA |
+| G16 prompt ≥5, delayed, restore-then-choose | PASS | Five prompt sequences plus 30-second delayed case; both byte copies converge, no extra decision/apply click, no automatic re-publication; zero false native headline/tray observations |
+| G17 / A-14 distinguishable equal-size choices | PASS | Two inspected screenshots show both complete buttons, different kinds and seconds, source and 49 B; selecting each kind yields its intended different bytes on A and B |
+| RV11-17 genuine later edit / RV11-20 older-byte edit | PASS | Live file protected while game runs; later edit retained and offered in Needs attention, then selected bytes converge |
+| Restart between selection and apply | PASS | Actual owned native tray Quit exits old A while the inert game is alive; guarded new A applies the pending selection, with zero automatic re-publications |
+| Gate 2 guided consent quick pass | PASS | Fresh C5 Share offer and D5 Use offer, explicit account exclusion, C5 master, Share these now, matching included settings; known-owned excluded files remain un-enrolled and local after restart |
+| Gate 11 all six v0.3.3 operations | PASS | Update / add / remove in both directions; full individual-file hash manifests match, or both folders absent |
+| Gate 10 hidden/background memory | **FAIL — G18 major** | Formal fresh runs and never-shown run are below 100 MiB, but subsequent GUI reuse at zoom 1.5 yields 175 hidden samples above the ceiling; maximum **134.5 MiB** |
+| Gate 8 current logs / GUI diagnostics privacy | PASS | 1,443 current-round product-log lines: no identity/content leaks or unaccepted paths; saved GUI export has none |
+| Scoped lab write audit | PASS | Watchers ready before first launch; 406,539 notifications / 71,349 distinct paths; no errors, overflow or unexpected paths |
+| OD-59 game-running residual | NOTE, accepted | Three settled game-running observations say up to date while A's file still differs; own add-on row explains that settings will be used when WoW closes |
+| Other original obligations / speed measurement | NOT RUN in this focused round | No new full recovery/retention/pause/cap/missing-character/speed/platform matrix claim; earlier OD-54 speed carry-forward is unchanged |
+
+### G16 native status and convergence corpus
+
+`convergence.jsonl` records A's file hash **before and after** reading its
+native UIA status bar and actual PID-owned Win32 tray menu, plus B's hash,
+timestamps and an identity-matched inert game-process check. A false-local
+sample requires both A hashes to differ from the accepted selection.
+No status is substituted from logs or a test model. Polling is nominally
+500 ms plus the actual UIA/menu/hash read time.
+
+There are **162 accepted-selection observations while the game is not
+running**, with **zero** false-local up-to-date headlines and **zero** false
+native tray up-to-date states. One light-restart startup sample has no
+accessible headline yet and tray `Set up this computer`; both files already
+match the selection in that sample. The G16 prompt/delayed/master-choice
+observations have actual headline and tray readings. The complete corpus
+has 175 rows, including baseline shares and the separate running-game note.
+
+| Run | Variant / actual process | Original restore convergence | Paired choice + restore observations | False headline / tray | Automatic A publications after restore |
+|---|---|---:|---:|---|---:|
+| 51 | prompt, fresh PID 28904, zoom 1.0 | 7.606 s | 22 | 0 / 0 | 0 |
+| 52 | prompt, fresh PID 19148, zoom 1.5 | 7.582 s | 23 | 0 / 0 | 0 |
+| 54 | prompt, reuse PID 19148, zoom 1.5 | 7.641 s | 22 | 0 / 0 | 0 |
+| 55 | prompt, reuse PID 19148, zoom 1.5 | 7.603 s | 22 | 0 / 0 | 0 |
+| 56 | prompt, reuse PID 19148, zoom 1.5 | 7.624 s | 23 | 0 / 0 | 0 |
+| 57 | delayed 30 s, reuse PID 19148, zoom 1.5 | 7.584 s | 22 | 0 / 0 | 0 |
+
+All six end with the original 49-byte checkpoint on A and B:
+`2bf169a7ea11b53003323b4b9cee897df79fb4655b4e8f705f355ffbe5cabd73`.
+The six primary choices and three master choices each produce **one
+intentional** settings-master publication, not an automatic echo.
+`choice-publication-counts.json` checks the choice-to-convergence-plus-16-second
+window; `g13-results.jsonl` checks the post-restore window. Intentional
+restores are not mislabelled as unwanted re-publications.
+
+Reproduction matches round four: explicitly share a new master baseline;
+run the inert game on A, make its dirty master copy, explicitly push B's
+copy, end the game, choose the copy shared from RecheckB, then promptly
+restore the original master checkpoint through add-on detail. The delayed
+case adds 30 seconds before the restore. No cleanup choice was needed.
+
+### G17 screenshots and master-choice variants
+
+Both images were actually viewed, with both entire choice buttons visible,
+orange decision headline and the one-item Needs attention badge:
+
+- `shots\RV11-20-choices-visible.png`:
+  **Keep the copy edited in game from settings master RecheckA
+  (25 November 20:30:49, 49 B)** versus
+  **Keep the restored copy from settings master RecheckA
+  (25 November 20:30:44, 49 B)**.
+- `shots\RV11-20-choose-restored-valid-choices-visible.png`:
+  the same distinguishable kinds/source/size, at **20:36:59** versus
+  **20:36:55**, again in the same minute.
+
+No content hash appears in the buttons. Kind and seconds already separate
+the labels; the optional older/newer tie-breaker was not needed in this
+observable case and is not claimed independently tested here.
+
+| Case | Selection through its readable kind label | Selected bytes on both computers |
+|---|---|---|
+| RV11-17 restore then choose genuine 144 B in-game edit | edited in game | `e6d7b64eef9b0317951df242c3f20dd3ccbe419f7488155bb4bb779a30dec642` |
+| RV11-20 restore then choose exact older shared 49 B edit | edited in game | `d3018600f8458a59e49106a63a93e6490dc0e68afe8f0067da78c47e136d01c5` |
+| RV11-20 repeat with a different live baseline | restored copy | original `2bf169…` 49 B above |
+
+In every valid probe, `after_restore_while_game == before` and
+`retained_at_decision == edited`. Needs attention visibly says a saved
+settings choice is needed and neither copy was replaced before choosing.
+`probe-results.jsonl` contains full before/after/selected hashes.
+
+Restart: old A **31056** actually exits via its real native tray Quit item,
+while the inert game remains alive. End that game, guard-launch A **20032**:
+both files reach original `2bf169…`; automatic publications: **0**.
+`restart-pending.json`, `tray-menu.txt`, actions and
+`shots\restart-converged.png` retain the evidence. No force-stop substitutes
+for this restart test.
+
+### Memory — G18 major
+
+Continuous native high-resolution 25 ms sampling includes **every captured
+full-lab candidate A/B hidden sample**, including subsequent UI reuse.
+Per sample, `EnumWindows` + `IsWindowVisible` counts all top-level windows
+owned by that PID; private working set and private commit come from Windows
+`PROCESS_MEMORY_COUNTERS_EX2`. Native/API counter and visibility fields are
+in `memory-native.csv`. Comparison v0.3.3 rows are separately labelled and
+not silently mixed into the candidate gate.
+
+The two formal fresh visible runs perform settings-page/detail use, share,
+choice and restore, hide, then 33,449,574-byte settings capture, code
+update/add/remove and exception-settings apply, with quiet waits.
+The third fresh process performs the full workload with `--start-hidden`;
+PID 26664 has **10,480 samples, all hidden, never shown in its life**.
+The extra G16 repetitions reuse the zoom-1.5 process to grow its history
+and exercise the GUI repeatedly rather than reset it.
+
+MiB (1,048,576 bytes); quiet is the maximum in labelled 30-second hidden
+idle/final-idle intervals, including routine checks, not a claim that all
+other hidden waits were individually classified:
+
+| Process / interval | Hidden peak | Hidden quiet after UI | Visible peak | Private commit peak, not gated |
+|---|---:|---:|---:|---:|
+| 28904 / formal 51, zoom 1.0 | 93.055 | 88.367 | 92.344 | 161.602 |
+| 19148 / formal 52 only, zoom 1.5 | 92.965 | 90.371 | 92.566 | 155.141 |
+| same PID / reuse 54 | 96.102 | not separately labelled | 104.430 | 166.035 |
+| same PID / reuse 55 | **107.250** | not separately labelled | 115.258 | 177.398 |
+| same PID / reuse 56 | **124.711** | not separately labelled | 126.668 | 188.488 |
+| same PID / reuse 57 | **134.500** | not separately labelled | 134.500 | 196.336 |
+| 26664 / full never-shown 53 | 63.664 | no UI use | no visible samples | 92.297 |
+| 23588 / extra OD-59 GUI / later hidden compatibility passes | 89.406 | not separately labelled | 87.070 | 157.746 |
+
+Other captured full-lab candidate processes: B 38664 hidden-startup peak
+40.590 / visible peak 104.016; focused A 31056 hidden-startup 32.996 /
+visible 136.727; restarted A 20032 hidden-startup 29.496 / visible 72.945.
+They have no higher hidden peak. Visible peaks and private commit are
+reported, **not** gated. Per-process median sampling intervals are about
+25 ms; the largest observed gap is **986.493 ms**. These gaps are disclosed
+under OD-53, not used to remove a failing observed value. No trimming,
+grace period, averaging or ceiling relaxation was used.
+
+**G18 (major): hidden memory exceeds 100 MiB after repeated UI use at zoom
+1.5.** This is an observed threshold violation; the allocation cause is
+not established by this worker.
+
+Reproduce on the accumulated full lab with settings on:
+
+1. Guard-launch A at zoom 1.5 (PID 19148) and run full sequence 52.
+2. Reopen and repeat the same share / choose-peer / restore-original
+   sequence on that process (54, 55, 56, then delayed 57), hiding after each.
+   The retained harness uses native `ShowWindow` to reopen; this detail is
+   disclosed, not replaced by a claim of a separately tested tray-open route.
+3. Sample private working set and native visibility continuously.
+   Reuse 55 has **27**, 56 **82**, 57 **66** hidden samples over 100 MiB:
+   **175 total**.
+4. Peak at **2026-11-26T04:28:08.8507723Z**:
+   PID 19148, `memory-57 / hide-to-tray`, **5 top-level windows / 0 visible**,
+   ever-visible true, private working set **141,033,472 bytes = 134.5 MiB**.
+   Private commit **205,873,152 bytes** is a separate, non-gated value.
+
+In the preceding minute A opens CheckSettings detail, closes the already
+used confirmation, selects the original 49 B checkpoint at 04:27:41,
+confirms Restore at 04:27:45, both files converge, waits 16 seconds, and
+enters hide-to-tray at 04:28:08.814Z. No game is running at this peak.
+The first over-limit hidden sample is 04:21:55.260Z; the last is
+04:28:11.383Z. The fresh-run values alone would pass, but dropping the
+later same-process hidden samples would violate OD-45's gate.
+
+### Consent, privacy, compatibility and write evidence
+
+Viewed `shots\C5-consent-controls.png` and `shots\D5-consent-controls.png`:
+C5 has the Share offer, LABCONSENT1 included / LABEXCLUDED1 not included,
+**RecheckC5 (this computer): master**, **Share these now: yes**, Share settings.
+D5 has the offer to use C5's settings, the same account selection and
+**Use settings**. Included CheckSettings bytes converge to
+`8da7a976fe552d7ed2cbc41a48f05018bb3ad5c244c1dfcad026fe124ea33a6e`
+on both. `guided-results.json` retains the result.
+
+The initial extra exclusion attempt had no owned files and is not evidence
+of exclusion. Created actual declared CheckSettings files in the excluded
+account with different C5/D5 canaries, restarted both guarded peers for
+22 seconds: both hashes stay unchanged and neither appears in persisted
+settings units (`excluded-owned-settings-results.json`):
+C5 `9c054ae8831a94721a01625f0d9f45cab04e9df728aeacb775e6ca738218bdfb`;
+D5 `350ead449c6f57eeb33d9f37292c5fab39e71f99a4759b68e507d522ececd69c`.
+
+Actual GUI diagnostics with settings on and character-scoped units present:
+Preview, scroll, **view the complete LAB destination** in
+`shots\export-destination-visible.png`, then Save. The saved 4,511-byte file
+is in B's LAB profile Documents, outside the provider; SHA-256
+`3c5bef856593920d6f640e3d43ef71df6a387b54d23bde94ebc7db344352361b`.
+Its entire contents were read as well as scanned: no account/realm/character
+names, user names/SIDs, paths or payload contents. Add-on folder names are
+included (the visible option was on); fingerprints are off. Local history
+identity fields are not treated as forbidden under OD-44.
+
+`audit-summary.json`: 1,443 new product-log lines including current legacy
+peer lines, zero synthetic identity/content leaks, zero unaccepted absolute
+paths. The **18** permitted paths are only developer startup / inspect
+lines, redacted in `accepted-path-log-lines.txt`:
+
+```text
+04:03:54Z pid=28904 startup state <LAB>\round2\A-state
+04:10:03Z pid=19148 startup state <LAB>\round2\A-state
+04:28:11Z pid=31056 startup state <LAB>\round2\A-state
+04:39:13Z pid=20032 startup state <LAB>\round2\A-state
+04:39:32Z pid=26664 startup state <LAB>\round2\A-state
+04:43:56Z pid=23588 startup state <LAB>\round2\A-state
+04:03:37Z pid=38664 startup state <LAB>\round2\B-state
+04:48:30Z pid=22104 v0.3.3 startup state <LAB>\round2\B-state
+04:45:35Z pid=27128 startup state <LAB>\round2\C5-state
+04:45:58Z pid=27128 inspect start <LAB>\round2\C5\_forever_
+04:45:58Z pid=27128 inspect done <LAB>\round2\C5\_forever_
+04:54:16Z pid=19952 startup state <LAB>\round2\C5-state
+04:56:01Z pid=38360 startup state <LAB>\round2\C5-state
+04:47:02Z pid=24544 startup state <LAB>\round2\D5-state
+04:47:26Z pid=24544 inspect start <LAB>\round2\D5\_forever_
+04:47:26Z pid=24544 inspect done <LAB>\round2\D5\_forever_
+04:54:16Z pid=26076 startup state <LAB>\round2\D5-state
+04:56:01Z pid=25552 startup state <LAB>\round2\D5-state
+```
+
+All six legacy operations pass; these are independent tree digests:
+SHA-256 of the ordered `filename:individual-file-SHA256` manifest string.
+The full per-file hashes and receiver before/after values are also retained
+in `code-results.jsonl`; removal means the actual folder is absent.
+
+| Operation | Source tree digest = receiver tree digest | Observed time |
+|---|---|---:|
+| candidate → v0.3.3 update, 101.1 | `c0c8cb194e694b22b5c6c492c1bd4e8d10f77b8cf9a9159678e5b951336d59ae` | 19 s |
+| candidate → v0.3.3 new R5CompatA | `c56b8d750254c3199f6b46fa36fa8bdba46b688db983d2a113bac0df15f2e021` | 18 s |
+| candidate → v0.3.3 removal | ABSENT = ABSENT | 44 s |
+| v0.3.3 → candidate update, 102.1 | `448807453d503172c053231bb832ef70ff2ec53a5e4fa1dc45310a35b48360a2` | 24 s |
+| v0.3.3 → candidate new R5CompatB | `f525a08dfd510aa74672ec152638dbba49f4a408afe5ba33deadec87f0bffa6b` | 16 s |
+| v0.3.3 → candidate removal | ABSENT = ABSENT | 40 s |
+
+Pre-launch watchers ready at 04:03:17.917Z. No overflow/errors, no unexpected
+paths: explicit state 7,841; variant-local `.wowsync` 62,396; provider 1,070;
+SavedVariables shapes 10; intentional code fixtures/applies 28; inert
+client fixture 2; directory notifications 2. These sum to the 71,349
+distinct audited paths. Raw verifier evidence/artifact writes are separately
+under LAB; no claim of a global system-filesystem audit is made.
+
+### Accepted note, qualifications and shutdown
+
+**OD-59 note, not a failure:** after a restore while the inert game is alive,
+three settled native observations have up-to-date headline and tray while
+A's bytes still differ. The own add-on row says
+**New settings will be used when WoW closes**. `game-note-uia.txt`,
+`convergence.jsonl` and `shots\game-running-residual.png` retain this.
+After game end, the selection converges without another apply click.
+These game-running samples are separated from G16's non-running corpus.
+
+Harness qualifications, preserved rather than converted into product
+passes (`harness-qualifications.json`):
+
+- The first attempt to choose the restored RV11-20 alternative rewrote D301
+  over an already live D301 copy, so had no genuine byte edit. No two-choice
+  decision appeared in 150 seconds; the original restore applied.
+  Its observations and original confirmation screenshot are retained.
+  The valid rerun starts from different bytes, edits to D301, captures both
+  distinguishable 49 B buttons, and chooses the restored 2BF copy.
+- The reused-run console prints its unused default zoom argument 1.0.
+  PID 19148's actual guarded launch remains **zoom 1.5** throughout 52–57.
+- Diagnostics body paragraphs are not exposed by UIA. The first save guard
+  stopped **before Save**; after scrolling, the actual screenshot visibly
+  confirmed the complete LAB path and Save was then clicked. This is not
+  a diagnostics failure or a substitute destination assumption.
+
+All owned apps/games stopped by **04:56:52Z**, matching survivor list empty,
+native sampler/watcher exited successfully and raw streams closed.
+No owner's PID was targeted. Owner log **metadata only**:
+
+| Observation UTC | Bytes | Last write UTC |
+|---|---:|---|
+| 04:01:02.386 | 85,067 | 04:00:59.041 |
+| 04:56:52.242 | 180,843 | 04:56:51.866 |
+
+Growth is 95,776 bytes; content attribution is explicitly the
+orchestrator's job, not replaced with a worker assumption.
+At shutdown, main had a concurrent modification to
+`docs\release\v0.4.0.md`; the worker did not touch, revert, stage or commit it.
+Worker changes are limited to this evidence appendix.
+
+**Disposition:** G16 and G17 focused fixes pass observable re-verification.
+**G18 major is new and the hidden-memory gate fails; this report does not
+approve release.**
+
+### Verification and evidence seal
+
+Ran `cargo xtask verify --tier offline` in this worker worktree with Cargo
+on PATH and scratch scoped under the worker's `target\verification-work`.
+**PASS, exit 0:** fmt, clippy, workspace tests, required cases, deny and
+markdown links. `round5\offline-verify.log` retains the actual output.
+No dependency installation was needed. This is repository validation,
+not a way to override the independently observed product memory failure.
+
+Evidence/raw-data consistency **PASS**, explicitly expecting **G18 FAIL**;
+this is not a substitute product test. The closed measurement streams,
+screenshots, final local-state copies, harnesses, actual GUI export,
+artifact files, both binaries and offline log are sealed by
+`round5\raw-evidence-sha256.txt`: **969 files**, manifest SHA-256
+`9cd9095746cac9e7fd69613373f3a4af50d168b13bad18f000a5e0980d3e811d`.
+Every sealed file was rehashed successfully; the manifest excludes itself.
+Everything remains local in LAB; no raw data was uploaded or committed.
