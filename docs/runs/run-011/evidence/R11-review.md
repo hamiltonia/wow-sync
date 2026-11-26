@@ -606,3 +606,117 @@ the window as "the few seconds before the apply"; here it lasts the whole game s
 | --- | --- | --- |
 | RV11-17 probe | `cargo test -p wow-sync-runtime --lib rvprobe -- --nocapture --test-threads=1` | FAILED as expected: both computers on v1, the master InSync, the in-game edit only in `local_copies`. Reverted. |
 | Offline | `cargo xtask verify --tier offline` | PASS (fmt, clippy, test, required-cases, deny, markdown-links) on `6bd5d54` plus this file. |
+
+## RV11-17 re-check (`14d65d8`, main with `02dca62`)
+
+- **Scope.** Only `git diff 38dd505..main -- crates/`:
+  - `pending_selection` in `LocalUnitState` (`wow-sync-core/src/records.rs`);
+  - the guarded Yield (`settings_cycle.rs:1321-1367`);
+  - service recording (`service.rs:1568-1577`);
+  - the RV11-19 status (`settings_cycle.rs:1899-1910`);
+  - the new and changed e2e tests.
+- **Context read.** `R11-runtime.md` "Round RV11-17".
+- **Probes.** Synthetic e2e lab, reverted. Log: `D:\WoWSyncLab\R11-review\rv17-probe.log`.
+
+### RV11-17 re-check verdict
+
+**RV11-17, RV11-18 and RV11-19 are closed. No critical or major is open.** One new minor
+(RV11-20) is a narrower form of RV11-17 that the new "any shared revision" clause still lets
+through. Two notes follow it.
+
+### Answers
+
+1. **RV11-17 is closed for genuine new edits.** I re-ran my RV11-17 probe in the same order:
+   - `a` (the master) publishes v0, v1 and v2.
+   - WoW starts on `a`, and `RestoreSettings(v1)` is accepted.
+   - The owner makes an in-game edit (`{ played = true }`), and WoW closes.
+   - Four passes later, `a` keeps the edit on disk, the unit is **NeedsChoice**, and the edit is
+     offered in `competing` next to the restore. `b` stays on v2 until the owner chooses.
+   - The edit is no longer silently reverted. R11-runtime's
+     `a_master_edit_made_after_its_own_restore_is_published_not_reverted` also passes; it goes on
+     to choose the edit and checks that both computers converge on it.
+2. **The G13 order still converges without a republish.** These pass:
+   - `g13_a_restore_right_after_choosing_the_peer_copy_…` (choose, then an immediate restore,
+     with no pass in between);
+   - `g13_a_restore_after_the_choice_was_applied_…`;
+   - `g13_a_restart_between_the_selection_and_its_apply_…`.
+
+   Each checks the history length (nothing republished) and that both computers end on v1. It
+   then checks the RV11-18 obligation: the displaced earlier master copy can be restored and
+   converges.
+3. **Can `pending_selection` go stale and wrongly yield later?** I found no case of its own.
+   Every remaining wrong yield comes from the ledger clause instead (RV11-20).
+   - **A peer's newer head.** The override still needs every head issued by this enrollment
+     (`settings_cycle.rs:1337-1342`), so a head from a peer disables it. A stale value is
+     overwritten by the master's next selection (`service.rs:1574`).
+   - **Authority moves away.** `is_authority` is still required. If authority returns while the
+     master's own unapplied selection is still the head, yielding to it is correct.
+   - **Paused.** The value is only read in the ConcurrentPush override and only cleared on
+     evaluation, so a paused unit keeps it without effect.
+   - **File deleted.** With `live == None`, `stale_or_applied` is false, so the value is cleared
+     (`:1363-1367`).
+   - **Restart.** See point 4.
+   - Clearing happens only on InSync or a different live file (`:1363-1367`). A selection that
+     stays unapplied for long, for example while WoW runs or the copy is missing, keeps its
+     value, which is intended.
+4. **The restart test, and is persistence needed?**
+   - The weakness is real and has a simple cause: in the `g13(false, …)` order the override never
+     fires.
+     - `a`'s pre-choice `local` file was auto-published when WoW closed; that is what created the
+       competing heads. So `live == basis_checkpoint`, and `target_case` returns a plain Yield,
+       not ConcurrentPush.
+     - Even if it were ConcurrentPush, `local` is a shared revision, so the ledger clause would
+       match without any pending value.
+     - So that test proves neither the override nor persistence.
+   - Persistence *is* needed. R11-runtime's table shows that `g13(true, false)` fails when the
+     pending selection is not recorded. A restart between the selection and its apply must
+     therefore keep the value, or the master republishes the stale file (G13 again).
+   - It is persisted correctly. `pending_selection` is part of `LocalUnitState` and is serialised
+     with `#[serde(default)]` (`records.rs`); it is saved by `save_local` (`service.rs:1575`) and
+     by the cycle's save.
+   - **Probe:** `g13(true, true)`, the applied-choice order with a restart before the restore is
+     applied, **passes**.
+   - Suggestion (note): make the committed restart test use `g13(true, true)` so it actually
+     depends on persistence.
+
+### Findings
+
+#### RV11-20 (minor): a master edit that returns to an older shared revision is still silently reverted
+
+- **Cause.** `stale_or_applied` (`settings_cycle.rs:1323-1331`) is true whenever the live file
+  equals the pending selection *or any* `SettingsRevision` checkpoint of the unit in the ledger.
+  An in-game edit that brings the file back, byte for byte, to an older shared revision is
+  therefore treated as the stale file, and the master yields to its own restore.
+- **Probe** (`rvprobe_rv11_17_edit_back_to_an_older_revision`, reverted):
+  - Same sequence as above, but the in-game edit sets the file to the v0 bytes.
+  - Result: both computers end on **v1**, the master is **InSync**, and the edit is neither
+    offered nor in `local_copies`.
+  - It survives only as the old v0 revision in history while that revision is retained.
+- **Why minor.** It needs a byte-identical return to an older shared state; that is plausible for
+  simple add-ons that serialise deterministically. The bytes stay restorable from history while
+  retained. It is still a silent revert reported as up to date.
+- **Fix.** Narrow the second clause to the bytes this computer applied itself:
+  `Some(l) == local.units[li].last_applied`, not any revision in the ledger. That is what the code
+  comment and the R11-runtime design ("the already-applied selected bytes") describe. Then re-run
+  `g13(true, false)`, which is the case the clause exists for, and add this probe as a test.
+
+#### RV11-21 (note): the pending value is taken from the last capture, not the file at command time
+
+- `service.rs:1574` records `captures.first()`. If the master edits in game and then selects
+  while WoW is still running, that edit was never captured. After WoW closes it counts as a
+  post-selection edit and is offered as a competing choice.
+- This errs on the safe side (nothing is lost or reverted), so no change is needed. Note it for
+  the checker's wording.
+
+#### RV11-22 (note): a failed save of the pending value is ignored
+
+- `service.rs:1575` ignores the `save_local` result. If the save fails, the next pass behaves as
+  before G13 and republishes the stale file, which undoes the selection on peers.
+- Rare. Suggest surfacing the failure as a note or refusing the command.
+
+### RV11-17 re-check verification
+
+| Check | Command (from the worktree root) | Result |
+| --- | --- | --- |
+| Changed and new tests plus probes | `cargo test -p wow-sync-runtime --lib -- rvprobe g13 a_master_edit_made_after --nocapture --test-threads=1` | 6 passed, including my RV11-17 probe and `g13(true, true)`. 1 failed as expected (RV11-20). Probes reverted. |
+| Offline | `cargo xtask verify --tier offline` | PASS (fmt, clippy, test, required-cases, deny, markdown-links) on `14d65d8` plus this file. |
