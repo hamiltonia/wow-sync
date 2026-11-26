@@ -1283,3 +1283,564 @@ SHA-256:
 The subsequently generated post-appendix offline log is explicitly
 excluded from that seal; all measured CSV/event streams were closed before
 sealing. These files remain local and were not uploaded or committed.
+
+## Re-verification 4 (65fcfd3)
+
+### Candidate, authority and retained state
+
+Focused independent GUI re-verification of dispatch **45730389080**,
+head `65fcfd30f6e358777b50e0158a7a174697430c41`, downloaded into LAB
+`artifact4` and extracted into `candidate4`. No locally built app was
+used. ZIP SHA-256 matched the supplied sidecar:
+`b846692bc7f5294332b232536b00f4d09b994b18e8df22202fddfeb5ef850f73`.
+Extracted EXE SHA-256:
+`4f1e2344b2ab25388c34cfc2dc9c0716dbc72af643a43c985bdbb5224c8b4e3a`.
+Dispatch and CI **45727396299** both reported success.
+Worker `D:\GitHub\wow-sync.worktrees\R11-check`, branch
+`run011/R11-check`, first merged main by fast-forward to 65fcfd3.
+Windows host/toolchain are unchanged from round 3.
+
+Read [OD-52–OD-56](../DECISIONS-FOR-REVIEW.md), runtime “Round G13”
+and subsequent sections, review “G13 review” and “RV11-17 re-check”.
+OD-52 closes round-3 G14 by the orchestrator's PID attribution; OD-53
+accepts the sampled-value memory gate despite disclosed gaps; OD-54
+carries the speed gate forward. None is represented here as newly
+measured evidence. OD-56 supersedes the broad OD-55 stale-file rule.
+
+The full accumulated A/B `round2` installations/state/provider were
+retained, not reset: initial A/B history **236/134** records
+(`round4\baseline.json` is authoritative for the exact counts).
+Fresh small C4/D4 consent computers copied only synthetic C/D add-ons,
+SavedVariables and synthetic installation markers, with new independent
+state and `consent4-provider`; full A/B history was unaffected.
+Raw evidence and screenshots are under LAB `round4`.
+
+All starts, including v0.3.3, use the retained mandatory launch guard,
+copied as `r4-common.ps1`: exact command printed/recorded before launch,
+`--dev --install --state --provider`, all paths under LAB, scoped child
+profile. There were no bare launches/help probes or imported code
+execution. The original prelaunch watcher was extended to all existing
+lab roots; C4/D4 had their own watcher ready before their first launch.
+Only expressly authorized owner-log metadata was read. Contents and
+process attribution remain the orchestrator's responsibility.
+
+### Harness qualification, not product failures
+
+Two preliminary attempts are retained but are **not counted** among the
+five valid prompt repetitions:
+
+- The first stopped before any choose/restore, because “Sync now” was
+  unavailable while B completed an existing pass. An A pass eventually
+  logged **462,251 ms**, zero file reads. The apps subsequently completed
+  ordinary passes again. No approved speed gate is replaced by this
+  outlier or by an invented ratio.
+- Run 11 selected **shared-from-B 07:22:30, 49 B**, whose actual payload
+  SHA-256 is
+  `d3018600f8458a59e49106a63a93e6490dc0e68afe8f0067da78c47e136d01c5`,
+  while the harness incorrectly expected the original master's 49-byte
+  checkpoint. A/B actually reached the selected D301 bytes. This
+  wrong-expectation corpus is retained and explicitly excluded from
+  product false-headline counts, not silently deleted.
+
+The **original exact checkpoint** was then selected through the GUI:
+**settings master RecheckA, 25 November 07:18:26, 49 B**. Actual restored
+file SHA-256 independently verified:
+`2bf169a7ea11b53003323b4b9cee897df79fb4655b4e8f705f355ffbe5cabd73`.
+Valid prompt repetitions use that exact control and expected hash.
+The older D301 payload was separately preserved from the provider,
+hash-verified, and used for the RV11-20 byte-identical-old-version probe.
+
+An additional run-22 observer interruption occurred when `Get-FileHash`
+hit the transient absence of A's file during replacement. It was not a
+150-second application non-convergence result. The observer now records
+missing/locked-file observations and retries within the **original**
+150-second deadline, without an application action. The interrupted
+corpus is retained separately; new complete repetitions replace it.
+
+### G16 — minor: main headline still says up to date before own selection applies
+
+The byte-convergence part of the old G13 case now succeeds in the valid
+completed observations below. However, the separately requested truthful
+headline assertion still fails:
+
+1. Perform the original competing-settings sequence on master A.
+2. Click “Keep the copy shared from RecheckB”.
+3. Before A's next settings apply, poll A's actual file SHA-256 and its
+   native UIA StatusBar in the same observation.
+4. Repeat after confirming the original 49-byte restore.
+
+A's **main headline** says **“This computer is up to date”** for several
+500 ms observations while **A's own bytes**, not just B's, still differ
+from the just-selected bytes. The local file subsequently converges.
+The application log independently records the tray becoming up to date
+after a choice was accepted and before the matching settings-applied line.
+For example, completed valid run 31 accepted ChooseSettings at
+**01:46:37Z**, logged tray up to date at **01:46:38Z**, and applied
+the peer bytes at **01:46:42Z**.
+
+This is rated **minor**, rather than reasserting the former long-lived
+major divergence: bytes now converge without an extra choice in the
+completed valid cases. It nevertheless fails this round's explicit
+“headline never says up to date while A's own bytes differ” criterion.
+Per-unit waiting wording is not substituted for the observed main
+headline. Exact valid-corpus counts and repetition results follow.
+
+### Lighter regression: guided consent and pause
+
+Fresh C4/D4 both displayed the guided settings offer. C4 account controls,
+“Share these now: yes” and “RecheckC4 (this computer): master” were
+observed and captured. With both accounts not included, the action read
+**“Share settings, Choose at least one account.”** (UIA still reported
+the explanatory action enabled; this is not described as an observed
+native-disabled control.) Only LABCONSENT1 was included; LABEXCLUDED1
+remained out. D4 joined the discovered group, saw C4 as master, selected
+the matching account and accepted “Use settings”. The matching final
+hashes and screenshots are retained in `guided-results.json` and
+`C4-guided-offer`, `C4-no-account`, `C4-consent-master`,
+`D4-guided-offer`, `D4-consent-applied`.
+
+C4/D4 pause tests used their separate provider, independent of the full
+A/B workload. Global pause on **both** computers protected the actual
+local hashes for 20 seconds, with publication counts unchanged **4→4**
+on C4 and **0→0** on D4:
+
+| Scope | Paused bytes SHA-256, unchanged while paused |
+|---|---|
+| C4 master | `864bf87726cb6d26d3e988fca6844d7b81d8165f50fa6e4de1c2ebe08e810fda` |
+| D4 peer | `6693de8aa6b4767c7d07f051da745d265dbf5d52b274cdd966a854bcaf021644` |
+
+After Resume all settings, C4 offered **“Share my settings”** and
+**“Use shared settings”**. The recorded explicit Share my settings action
+at **01:44:58Z** brought the pair to C4's bytes. These are the observed
+resume choices, not a “Keep…” competing-publication chooser. The latter
+is separately exercised by all G13 repetitions and the RV11 probes.
+
+Per-add-on pause on D4 then protected its
+`864bf877…` bytes while C4 changed to
+`cd129c3bd02e73afd2790e7027b8641307fb38b196261f6d202a6054f1fbce3d`.
+The resume chooser offered **“Use shared settings”** / **“Stay paused”**.
+Selecting Use shared settings brought both to that exact CD129C3B hash.
+An earlier harness expected the longer “Use shared, keep mine as a
+recovery copy” wording and stopped before acting; it was corrected to
+the actual offered action and the complete case rerun.
+`pause-results.json` and `global-pause-checkpoint.json` retain the
+before/after hashes, publication counts and actual UI text.
+
+On the small pair, a newly installed settings addon completed **two
+synthetic game sessions**. Its first session remained local (D4 file
+absent); its second propagated automatically, with no Share click:
+`749c2312c5b606db9145e65f0f7386fc0d6109449d739a361713fc79d8a136f3`
+on both computers. D4 then made a routine, unshared edit
+`9c362f4d6335f6fef065fb88dcd5ab1b4f2836c18188ac625c281287fae8ac16`;
+it stayed local for 15 seconds, with D4 publications **0→0**.
+A later completed C4 master session automatically replaced it, reaching
+`4812728a979b2c5cd7292c849734827f16ad03d6c4019ff2e6653083f8af4eb2`
+on both. D4's GUI offered its replaced **59 B** recovery copy, with
+source, reason and time (`routine-peer-recovery.png`,
+`session-results.json`). The inert C4 game fixture was separately owned
+and PID-scoped; no addon Lua/settings was executed.
+
+### G13 repetitions and convergence corpus
+
+Each valid prompt run used the exact original 07:18:26/49 B checkpoint
+identified above, **after** the peer choice had reached both files.
+No cleanup click was needed in any completed valid case. Times below
+run from the recorded restore action through the first observed
+matching A/B bytes, within the unchanged **150 s** deadline.
+
+| Run | Sequence | A/B convergence | Automatic A republications after restore | False-local up-to-date samples after restore |
+|---|---|---:|---:|---:|
+| 21 | Prompt | 7.203 s | 0 | 8 |
+| 31 | Prompt | 7.300 s | 0 | 8 |
+| 32, zoom 1.5 | Prompt | 7.250 s | 0 | 8 |
+| 33 | Prompt | 7.798 s | 0 | 8 |
+| 34 | Prompt | 7.263 s | 0 | 8 |
+| 35 | Extra 30 s delay before restore | 7.224 s | 0 | 8 |
+
+All six ended at the exact original `2bf169a7…` SHA-256 on both
+computers. The five prompt repetitions plus delayed variant contain
+**117** choice/share/restore observations, with **98** false-local
+up-to-date observations: **50** after primary choices and **48** after
+restores. These are not remote-only waits. Run 33 additionally sampled
+one non-up-to-date mismatch. The interrupted/wrong-expectation attempts
+are excluded from those counts, but retained in the raw corpus.
+
+The intentional ChooseSettings command writes a SettingsMaster history
+publication, and RestoreSettings writes RestoredFromRecovery. Those
+explicit command publications are **not** being misreported as absent;
+no extra automatic stale-byte publication was observed after restore
+and its 16-second settling interval. Accepted-command logs correlate the
+intentional history rows. `g13-results.jsonl`, `convergence.jsonl`,
+`focused-summary.json` and source action logs retain the actual records.
+Thus the former **persistent divergence** was not reproduced in these
+six complete sequences; the combined G13 gate still **FAILS G16**.
+
+### Gameplay-edit probes, RV11-17 and RV11-20
+
+On A, restore the original shared checkpoint while the synthetic game
+process is running, then edit A before ending the session. In both
+cases the RestoreSettings command was accepted while the live file
+remained unchanged; after the session, the edit was retained and the
+GUI displayed **“Choose which saved settings to keep”**, a Needs
+attention badge and a corresponding Needs attention item.
+
+| Probe | Bytes retained until decision | Result after explicitly choosing the edited master copy |
+|---|---|---|
+| RV11-17, genuine 144 B edit | `4b9102c54262effaa29b91bd76174c5c02d4f52f7e1f72eeb16520616914da41` | Same SHA-256 on A and B; PASS |
+| RV11-20, exactly the older shared 49 B payload | `d3018600f8458a59e49106a63a93e6490dc0e68afe8f0067da78c47e136d01c5` | Same SHA-256 on A and B; PASS |
+
+No experiment was silently reverted to the pending original 49 B
+restore. The master edit was offered, not lost. The first probe also
+exercises restore → a later master choice, with the explicit extra
+game/edit steps stated rather than hidden. `probe-results.jsonl`,
+`probe-observations.jsonl`, accepted-action logs, Needs attention
+screenshots and convergence hashes preserve these observations.
+
+The initial second-probe attempt encountered the previous restore
+confirmation still expanded, so its original list button was absent.
+It stopped without a second restore command. The verifier closed that
+old **UI confirmation** with Cancel, then reran the complete RV11-20
+case; it did not cancel an operating pending selection or change
+product code.
+
+An additional **restore → choose the restored master copy** variant
+also completed: repeat the game-held restore/old-byte edit, then select
+the second master choice. A/B both reached the original `2bf169a7…`
+without a further click. This complements the two edited-master-choice
+probes; it is not substituted for the five exact prompt repetitions.
+
+### G17 — minor: equal-size, same-minute master choices are indistinguishable
+
+The RV11-20 negative case creates two **different 49-byte payloads**,
+both from master A within one minute: the original restored `2bf169a7…`
+and the genuine edited-old-version `d3018600…`. The Settings sync page
+renders both buttons identically:
+
+> Keep the copy from settings master RecheckA (25 November 18:26, 49 B)
+
+The visible screenshot
+`RV11-20-master-restore-choice-choices-visible.png` shows **both entire
+buttons**, the pending headline and Needs attention badge. The earlier
+18:12 case has the same duplicated labels in native UIA. There is no
+visible payload/kind/time discriminator between these two choices.
+The first 18:12 choice was selected by index and verified as D301; the
+second 18:26 choice was selected by index and verified as original 2BF.
+Both operations converged, but the owner cannot identify which of the
+identical choices represents the intended bytes. This fails A-14's
+distinguishable-choice obligation, not the underlying byte-retention
+checks. No content preview or timestamp policy change is prescribed.
+
+### Restart between selection and apply
+
+With the game fixture running on A, restore original 49 B while A still
+has D301. A's on-disk bytes remain D301. Quit through A's **actual native
+tray Quit menu command**, then end the game fixture and start a fresh,
+guarded A process. PID **32136** exited while fixture PID **37864**
+was still alive; fresh PID **26288** adopted original `2bf169a7…`,
+identical to B, with **zero automatic CheckSettings republications**.
+The one intentional restore history publication is retained separately.
+
+Native tray automation needed harness repairs: the UIA harness did not
+locate the popup item; stale/hidden-menu and pointer/DPI attempts were refused
+before a click to an unverified process. The successful method
+enumerated the PID-owned tray menu, read the actual **Quit WoW Sync**
+item/ID, invoked its Win32 menu command, then dismissed native menu
+mode on the same owned window (`WM_CANCELMODE`). The log records
+**“tray: quit”**; actual process exit, the still-running fixture and
+fresh-process convergence were observed. No force-stop substitutes for
+this quit. This is native GUI-menu invocation, not a bare executable,
+backend command or claimed physical tray click.
+
+The original PowerShell-derived start timestamp accidentally added the
+local offset after an implicit DateTime/string conversion. It was
+recomputed from the **raw ISO-8601 JSON UTC strings**, and the bounded
+history query rerun: one intentional restore, zero automatic
+publications. The pre-correction JSON is retained. The corrected
+`restart-pending.json`, source actions and `r4-fix-restart-time.py`
+make that correction auditable rather than relying on an empty
+future-dated query.
+
+### History, recovery labels and diagnostics privacy
+
+Actual Add-ons detail Recent changes shows settings rows, source,
+time, changed files/size and reason. On B, restore rows read
+**“restored a copy from RecheckA”**, including after restart; A's
+viewed Recent changes screenshot reads **“restored this computer's
+earlier copy”** (`A-recent-settings-restores.png`). Its accepted restores
+and settings-applied history retain RestoredFromRecovery.
+Activity also shows settings share/update
+entries. Rich shared recovery controls remain visible, including
+source, kind, seconds and size (`memory31-after-restore.png`);
+D4's replaced-peer-copy control includes time, size and replacement
+source.
+
+B's guarded restart preserved **186 history records / 72,423 bytes**
+exactly: before and after-prefix SHA-256
+`f369d451ea65b334faf0e48b9662f7ca76782ff01dfff051fc6770cab675fdb5`.
+Screenshots `B-recent-persisted.png` and `B-shared-after-restart.png`
+were viewed: rich restore reasons survived and shared ownership still
+reads **“Shared with CheckSharedTwo, not synced”**, not “Not shared yet”.
+The oversized unit reads **“Too large to share automatically (32.0 MB)”**.
+
+A fresh diagnostics export was performed on B through **App settings →
+Export diagnostics → Preview → Save**, with settings enabled and the
+synthetic character-scoped unit present. The destination was read from
+the actual screenshot before Save; it was inside B's lab profile:
+`round2\B-state\profile\Documents\wow-sync-diagnostics-20261126-020652-957.txt`.
+Actual saved file: **4,576 bytes**, SHA-256
+`f6a1b50d6dd583e28e0867bccfeb06e0ceef1ed1d4ca6a153e4d52fc11df041e`.
+It has no tested account/realm/character canary, drive/UNC path, or
+synthetic file-content canary. Default options included addon folder
+names, not file fingerprints. `current-export.json` retains the scan;
+older exports do not substitute for this current-round GUI action.
+
+### Missing-character negative case
+
+The verifier removed B's synthetic character directory, then changed
+the corresponding shared character settings on A. B did **not** create
+the missing character folder. In the repeated, properly scrolled GUI
+capture, Add-ons → CheckSettings → Settings reads:
+
+> Waiting for LABMISSING on LABREALM1 to log in on this computer
+
+`missing-character-visible-waiting.png` was viewed; that complete
+waiting sentence is visible. UIA does not expose this plain body text,
+so the harness's `waiting_observed_in_uia: false` is not being silently
+changed into a true accessibility observation. After the verifier
+manually created the character's SavedVariables directory, B applied
+the shared file and A/B both had SHA-256
+`fd58224fbe5a59259a01fb72e519e9e9280cc3b66319e05b3d92e3480dc56211`.
+The earlier repeat also converged, but its unscrolled settings-page
+capture is not used as visual waiting evidence.
+
+### Full-lab memory, including every extra candidate process
+
+The accumulated **119-addon / 36,154-file** A/B lab was not reset.
+Three fresh visible processes completed Settings sync, addon detail,
+explicit peer sharing, intentional choice and restore, then hid to the
+tray. Each completed a **33,449,574-byte** settings capture/apply,
+CheckSettings code update, temporary-addon addition/removal, incoming
+CheckPause exception settings and initial/final 30-second user-idle
+phases. `settings-results.jsonl` has matching A/B hashes for all eight
+large-settings/exception results; code hashes are retained as well.
+Run 32 stayed at **zoom 1.5**. Run 36 started hidden, performed the full
+hidden workload and had **no observed visible top-level window**.
+
+All values below are MiB, conservatively taking the higher value from
+the native audit/sampler and independent sampler-only streams. Idle
+means the explicitly labelled no-intentional-edit intervals; periodic
+background checks continued. “N/P” counts the two independent streams,
+not deduplicated observations.
+
+| Fresh run / PID / zoom | Hidden rows N/P | Never-shown peak | Hidden after UI peak | Labelled hidden idle after UI peak | Visible peak | Private commit peak |
+|---|---:|---:|---:|---:|---:|---:|
+| 21 / 15032 / 1.0 | 6,888 / 6,882 | 41.434 | 91.199 | 87.207 | 90.105 | 160.805 |
+| 31 / 25748 / 1.0 | 7,322 / 7,322 | 42.074 | 89.465 | 87.449 | 89.070 | 157.688 |
+| 32 / 24564 / 1.5 | 7,043 / 7,043 | 39.664 | 88.961 | 86.031 | 87.895 | 157.512 |
+| 36 / 15272 / 1.0, start-hidden | 7,594 / 7,594 | **64.730** | Not shown | Not shown | None observed | 96.848 |
+| Extra functional probes / 32136 / 0.85 | 13,465 / 13,464 | 45.082 | **95.164** | No dedicated phase; bounded above by 95.164 | 92.418 | 160.762 |
+
+**Gate maximum over ALL candidate hidden samples is 99,786,752 bytes /
+95.1640625 MiB**, not just the three formal rows' 91.199 MiB.
+The extra functional run's peak occurred at **02:15:19.534Z**
+(independent stream: **02:15:19.556Z**), with all top-level windows
+hidden after prior UI use, during the game-held/tray-automation work.
+It is included, not discarded as “only a probe”. The highest labelled
+formal hidden-idle peak is 87.449 MiB; for unlabelled functional waiting,
+95.164 MiB is the conservative all-hidden/idle upper bound rather than
+an invented exact idle classification. No allocation/GC cause is claimed.
+
+Across candidate A/B there are **368,273 native rows**, including
+42,639 hidden, plus **276,866 independent rows**, including 42,592
+hidden. **Zero hidden rows exceed 100 MiB in either stream.**
+Every preliminary/interrupted process is retained in those totals.
+Candidate visible reference peak was **102.770 MiB on B**, not gated;
+private commit is recorded separately, never compared with 100 MiB.
+The v0.3.3 peer is separately labelled and excluded from candidate
+measurements, not relabelled as a candidate.
+
+Sampling requests **25 ms** using a high-resolution native waitable
+timer and monotonic clock, with EnumWindows/IsWindowVisible on every
+row and native private working set/private commit. Formal process
+medians were **24.997–25.005 ms**. There are still gaps: maximum formal
+gap **983.749 ms**, maximum formal hidden gap **978.899 ms**;
+all-candidate maximum gap **983.796 ms**, hidden **982.768 ms**.
+The cheap isolation experiment put the sampler in its own process
+without FileSystemWatcher allocations; it **did not eliminate** the
+gaps. Independent clocks are analysed separately, not concatenated.
+This is **PASS on sampled values under OD-53**, not a claim that no
+unsampled spike is possible. No trimming, limit change or working-set
+median was used as the gate value.
+
+A history count at the fresh full-run starts grew **248 → 264 → 275**,
+then **304** for start-hidden, and ended at **329**. Partial run 22
+between the first two full runs is disclosed above; the full workloads
+ran sequentially, not concurrently or on reset state. Full-run hidden
+peaks decreased **91.199 → 89.465 → 88.961 MiB**, despite growing
+history; that is an observation over these runs, not an unlimited
+growth guarantee. The separate small C4/D4 consent/session pair
+sometimes ran alongside them, on a separate provider.
+
+### All six v0.3.3 code compatibility operations
+
+The guarded published v0.3.3 peer ran as B, PID **34776**. All six
+operations completed again on this candidate. Each listed TOC and Lua
+SHA-256 was identical on source and receiver; removals ended ABSENT on
+both. Full before/after hashes and actual timings are in
+`code-results.jsonl`.
+
+| Direction | Operation | Identical after hashes: TOC; main.lua | Wait |
+|---|---|---|---:|
+| Candidate → v0.3.3 | CheckSettings 20.36 → 30.1 | `103f2f463e8819f3cfd1340383af896f3da4c2cf337c22ca327b3574b3889233`; `aca4ab4a01a4d173939e71b13fc7bac439f8b86d65e2cbf3e9ebb5f61f81651f` | 18 s |
+| Candidate → v0.3.3 | Add R4CompatA 1.0 | `bc09d653179a573edc0a0fcb4f79162ee22c2fda20c346dedd1634edda81ba64`; `312117078926c07274924a7054ee57a7fef6fb52ba3a031cc123c984598982dc` | 20 s |
+| Candidate → v0.3.3 | Remove R4CompatA | ABSENT / ABSENT; receiver before-hashes are the addition row | 42 s |
+| v0.3.3 → candidate | CheckSettings 30.1 → 31.1 | `c28e1807aabaf6cb655002e1ae138774e815bc5a0f0b8f91b8b6ac59e3a9df99`; `1191e2c4248a52dc9547754cafada99522e4a7a2aec71981f26223b02b253849` | 40 s |
+| v0.3.3 → candidate | Add R4CompatB 1.0 | `1261b7467d0430d53ae02e0dfa497f314e1200c79625fe7f620e9f2dc5ba69cc`; `59599ec4ea09e3dced94dba333963a40717082ba6d5caf1364a6591cb60c9826` | 20 s |
+| v0.3.3 → candidate | Remove R4CompatB | ABSENT / ABSENT; receiver before-hashes are the addition row | 40 s |
+
+### Privacy scan and prelaunch write audit
+
+The scan covered **1,887 new scoped application-log lines**, including
+all candidate restarts and the old peer. It found **zero** tested
+account/realm/character canaries or file-content canaries, and **zero**
+unaccepted absolute-path lines. Local changes.jsonl identity names
+remain allowed by OD-44; this is not a claim that provider protocol
+identities are absent.
+
+All **31** accepted absolute-path lines are listed below. LAB replaces
+the lab root. Startup lines are developer startup; inspect lines are
+setup/inspect. None is a sync/settings/runtime path disclosure.
+
+```text
+2026-11-26T01:12:19Z pid=36392 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\A-state
+2026-11-26T01:13:31Z pid=35976 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\A-state
+2026-11-26T01:25:44Z pid=12408 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\A-state
+2026-11-26T01:31:07Z pid=15032 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\A-state
+2026-11-26T01:36:55Z pid=14940 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\A-state
+2026-11-26T01:44:32Z pid=25748 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\A-state
+2026-11-26T01:50:21Z pid=24564 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\A-state
+2026-11-26T01:56:06Z pid=21476 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\A-state
+2026-11-26T01:58:57Z pid=12396 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\A-state
+2026-11-26T02:01:43Z pid=37684 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\A-state
+2026-11-26T02:05:03Z pid=15272 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\A-state
+2026-11-26T02:08:15Z pid=32136 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\A-state
+2026-11-26T02:24:41Z pid=26288 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\A-state
+2026-11-26T01:12:19Z pid=3700 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\B-state
+2026-11-26T02:25:48Z pid=16432 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\B-state
+2026-11-26T02:28:10Z pid=34776 INFO WoW Sync 0.3.3 starting, dev=true, state <LAB>\round2\B-state
+2026-11-26T01:16:49Z pid=4496 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\C4-state
+2026-11-26T01:17:28Z pid=4496 INFO inspect start <LAB>\round2\C4\_forever_
+2026-11-26T01:17:28Z pid=4496 INFO inspect done <LAB>\round2\C4\_forever_ in 21 ms: 5 add-on(s) eligible, 0 blocked, 10 file(s) read
+2026-11-26T01:40:04Z pid=38392 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\C4-state
+2026-11-26T01:43:44Z pid=36596 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\C4-state
+2026-11-26T02:01:54Z pid=34528 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\C4-state
+2026-11-26T01:16:49Z pid=7088 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\D4-state
+2026-11-26T01:17:34Z pid=7088 INFO inspect start <LAB>\round2\D4\_forever_
+2026-11-26T01:17:34Z pid=7088 INFO inspect done <LAB>\round2\D4\_forever_ in 20 ms: 5 add-on(s) eligible, 0 blocked, 10 file(s) read
+2026-11-26T01:24:04Z pid=29800 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\D4-state
+2026-11-26T01:24:27Z pid=29800 INFO inspect start <LAB>\round2\D4\_forever_
+2026-11-26T01:24:27Z pid=29800 INFO inspect done <LAB>\round2\D4\_forever_ in 1 ms: 5 add-on(s) eligible, 0 blocked, 10 file(s) read
+2026-11-26T01:40:04Z pid=7160 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\D4-state
+2026-11-26T01:43:44Z pid=16148 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\D4-state
+2026-11-26T02:01:54Z pid=9428 INFO WoW Sync 0.4.0 starting, dev=true, state <LAB>\round2\D4-state
+```
+
+Watchers were ready **01:12:08Z**, before the first A/B launch;
+the additional C4/D4/provider watcher was ready **01:16:45Z** before
+their first launch. They closed cleanly with **512,802 notifications**,
+**90,509 distinct notified paths**, **zero watcher errors/overflows**
+and **zero unexpected paths**. This is a bounded lab-filesystem audit,
+not machine-wide/PID-attributed tracing or proof about OS cache writes.
+
+| Allowed category | Distinct notified paths |
+|---|---:|
+| Explicit lab state | 11,551 |
+| Synthetic provider | 1,368 |
+| Variant `.wowsync` local state, OD-42 | 77,520 |
+| SavedVariables shapes | 15 |
+| Authorized synthetic code fixture/apply paths | 48 |
+| Install-directory notifications | 3 |
+| WTF directory notifications | 3 |
+| Verifier's inert game fixture | 1 |
+
+The code writes are confined to synthetic Check* fixtures,
+R3NewSettings, R4NewSettings, R4Mem21/31/32/36, R4CompatA/B and their
+AddOns parents, not the 113 original copied addon folders.
+Code-test writes are explicitly separated from settings-write scope.
+Both **33,554,433-byte** blocked files and both shared-owner files
+retained their **different per-computer baseline hashes**, with
+**zero blocked-file notifications** and **zero blocked settings
+revisions** in the provider. `blocked-before.json` and
+`audit-summary.json` retain all four full before/after hashes.
+
+| Blocked fixture | Bytes | SHA-256 before = after |
+|---|---:|---|
+| A CheckLarge | 33,554,433 | `bdf7fbb54387c24608fd757a1b31c32cabcd7b6bee8ff3345c897139fffc072a` |
+| B CheckLarge | 33,554,433 | `e017d0ade6150ffd8758d064697f21a276d2e0776fbcc7f480a566c2b3e25f30` |
+| A CheckShared | 38 | `c7682b0077be011c72e8f265b0985f170e1650fcdb5c5a9c0028a8ee6f68af49` |
+| B CheckShared | 57 | `5399d1d3ab0cf81f7acd5849826a6271e4454fe46dec1a81ade0b26112783aee` |
+
+### Round-4 gate table
+
+This is the authorized **focused/lighter** round, not a claim that
+every standalone scenario from round 3 was rerun.
+
+| Gate | Result | Current-round evidence / boundary |
+|---|---|---|
+| 1 — artifact and smoke | PASS | Dispatch SHA-256 sidecar match; guarded release GUI/runtime used throughout |
+| 2 — guided offers/consent/master | PASS | Fresh C4/D4 offers, selected account, Share these now, master and peer consent |
+| 3 — A-11–A-15 | **FAIL** | Positive automatic-session, routine-yield, peer-choice, exception and pause checks passed; G16 premature headline and G17 indistinguishable choices fail explicit GUI assertions |
+| 4 — missing character | PASS | Visible waiting; folder never app-created; matching hash after verifier creates it |
+| 5 — cap/shared ownership | PASS | Rich blocked wording, restart persistence, four unchanged distinct hashes, no blocked revisions |
+| 6 — Activity/history/recovery labels | PASS | Both GUIs show restore reasons; rich controls; B's exact history survives restart |
+| 7 — full standalone GUI recovery matrix | NOT RUN | Excluded from lighter sweep; shared-checkpoint GUI restores were repeatedly rerun, but the standalone replaced-peer-copy restore was not |
+| 8 — logs/history/diagnostics privacy | PASS | New scoped log scan and actual current GUI export; OD-43/44 exceptions explicit |
+| 9 — write audit | PASS, scoped | Prelaunch watchers, allowed `.wowsync`, no unexpected path; owner attribution remains orchestrator-owned under OD-52 |
+| 10 — hidden private working set | PASS, sampled | All hidden rows ≤100 MiB; maximum **95.1640625 MiB**, gaps disclosed under OD-53 |
+| 11 — v0.3.3 code compatibility | PASS | All six fresh update/add/remove operations, both directions, actual hashes |
+| Focused G13 prompt/delayed/master-choice cases | **FAIL overall** | Byte convergence and no automatic stale-byte republish passed; truthful-headline assertion fails G16 |
+| RV11-17 / RV11-20 gameplay edits | PASS | Retained edits offered as decisions, including exact older shared bytes |
+| Restart selection-before-apply | PASS | Native tray quit, game ends after old process exits, fresh process converges without republish |
+| R10 warm speed gate | PASS, carried | OD-54; not remeasured or inferred from this round's outlier |
+
+New findings are **G16 minor** and **G17 minor**, described with
+reproductions above. No new critical/major byte-loss or long-lived
+divergence was observed in the completed scoped cases. That does not
+turn either failed GUI obligation into a pass.
+
+### Shutdown, owner metadata and local verification
+
+All matching owned application/game-fixture processes were stopped;
+final identity-checked survivors list is **empty**. Samplers/watchers
+all exited 0 after final application shutdown. No owner PID was stopped
+or selected. The main checkout's status was **empty**; the worker's
+only tracked change was this evidence file. No push or product change.
+
+Authorized owner-log **metadata only**:
+
+| Observation | Bytes | Last-write UTC |
+|---|---:|---|
+| Before, 01:11:22Z | 835,148 | 2026-11-26T01:11:21.6782925Z |
+| After, 02:31:33Z | 973,343 | 2026-11-26T02:31:30.4301834Z |
+
+Its size changed **138,195 bytes**. Contents were not read or attributed
+by this worker; the orchestrator explicitly owns that attribution
+and instructed that metadata growth alone not block gate 9. The guard
+ledger contains only lab-scoped starts.
+
+Local `cargo xtask verify --tier offline` on the worker checkout:
+**PASS**, exit 0, `allow-blocked: false`; fmt, clippy, workspace tests,
+required cases, deny and markdown links all passed. Verification
+scratch was scoped under the worker's target directory. No dependency
+install was needed. This round did not separately rerun the native
+inventory tier; the offline command itself ran the workspace tests.
+
+Raw evidence, final scoped local-state copies, exact harnesses,
+downloaded artifact files and both tested binaries are sealed by
+`round4\raw-evidence-sha256.txt`: **867 files**, manifest SHA-256
+`04617773c61a4efabdf2ab3cba6e2b767247abbdf88eb478504de52b4159b569`.
+Its own file is excluded from the seal. The offline log and all closed
+measurement streams are included. A separate evidence/raw-data
+consistency check passed, explicitly retaining G16/G17 as expected
+product failures; it is **not** a substitute product test. All raw
+material remains local in LAB, not uploaded or committed.
