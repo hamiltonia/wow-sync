@@ -4314,6 +4314,176 @@ mod tests {
         assert_eq!(read_wtf(&b, "Alpha").as_deref(), Some(ingame));
     }
 
+    #[allow(unsafe_code)]
+    mod heap {
+        use std::alloc::{GlobalAlloc, Layout, System};
+        use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
+
+        pub static LIVE: AtomicUsize = AtomicUsize::new(0);
+        pub static PEAK: AtomicUsize = AtomicUsize::new(0);
+
+        struct Counting;
+
+        // SAFETY: forwards every call to the system allocator and only adds a counter.
+        unsafe impl GlobalAlloc for Counting {
+            unsafe fn alloc(&self, l: Layout) -> *mut u8 {
+                let p = System.alloc(l);
+                if !p.is_null() {
+                    let now = LIVE.fetch_add(l.size(), Relaxed) + l.size();
+                    PEAK.fetch_max(now, Relaxed);
+                }
+                p
+            }
+            unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+                LIVE.fetch_sub(l.size(), Relaxed);
+                System.dealloc(p, l)
+            }
+            unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
+                let q = System.realloc(p, l, n);
+                if !q.is_null() {
+                    let now = LIVE.fetch_add(n, Relaxed) + n - l.size();
+                    LIVE.fetch_sub(l.size(), Relaxed);
+                    PEAK.fetch_max(now, Relaxed);
+                }
+                q
+            }
+        }
+
+        #[global_allocator]
+        static A: Counting = Counting;
+    }
+
+    /// A saved-variables file of `size` bytes written in chunks, so the harness itself never
+    /// holds the file in memory.
+    fn write_big(pc: &Pc, folder: &str, tag: usize, size: usize) {
+        use std::io::Write;
+        let p = wtf_file(pc, folder);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        let mut f = std::io::BufWriter::new(std::fs::File::create(&p).unwrap());
+        write!(f, "AlphaDB = {{ tag = {tag}, pad = \"").unwrap();
+        let chunk = vec![b'x'; 1 << 20];
+        let mut left = size;
+        while left > 0 {
+            let n = left.min(chunk.len());
+            f.write_all(&chunk[..n]).unwrap();
+            left -= n;
+        }
+        f.write_all(b"\" }\n").unwrap();
+    }
+
+    fn big_tag(pc: &Pc, folder: &str) -> Option<String> {
+        use std::io::Read;
+        let mut head = [0u8; 40];
+        let mut f = std::fs::File::open(wtf_file(pc, folder)).ok()?;
+        let n = f.read(&mut head).ok()?;
+        Some(String::from_utf8_lossy(&head[..n]).into_owned())
+    }
+
+    fn latest_capture_of(pc: &mut Pc) -> Sha256 {
+        pc.svc.status().settings_units[0]
+            .latest_capture
+            .expect("a capture")
+    }
+
+    /// G18: one long-lived service repeating share -> choose the peer copy -> restore -> apply
+    /// with a large settings file must not retain memory per cycle. `WOWSYNC_G18_BYTES` and
+    /// `WOWSYNC_G18_CYCLES` scale the lab run; the default is small.
+    #[test]
+    fn g18_repeated_choose_restore_cycles_do_not_retain_heap_per_cycle() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let size: usize = std::env::var("WOWSYNC_G18_BYTES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1 << 20);
+        let cycles: usize = std::env::var("WOWSYNC_G18_CYCLES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(8);
+        let pause: u64 = std::env::var("WOWSYNC_G18_PAUSE_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some((size as u64) * 2));
+        let unit = alpha_unit();
+        write_big(&a, "Alpha", 0, size);
+        synced(&mut a);
+        share_now(&mut a);
+        synced(&mut b);
+        synced(&mut b);
+        let orig_cp = latest_capture_of(&mut a);
+        let mut live = Vec::new();
+        for n in 1..=cycles {
+            // The owner edits in a game session while the other computer shares its copy.
+            a.act.set(Activity::Running { pids: vec![4242] });
+            write_big(&a, "Alpha", 10_000 + n, size);
+            synced(&mut a);
+            write_big(&b, "Alpha", n, size);
+            synced(&mut b);
+            let cp = latest_capture_of(&mut b);
+            b.svc
+                .command(Command::ShareSettings {
+                    unit: unit.clone(),
+                    checkpoint: cp,
+                })
+                .unwrap();
+            synced(&mut b);
+            synced(&mut a);
+            a.act.set(Activity::NotRunning);
+            synced(&mut a);
+            let row = a.svc.status().settings_units.remove(0);
+            a.svc
+                .command(Command::ChooseSettings {
+                    unit: unit.clone(),
+                    checkpoint: cp,
+                    shown_heads: row.shown_heads.clone(),
+                })
+                .unwrap();
+            for _ in 0..3 {
+                synced(&mut a);
+                synced(&mut b);
+            }
+            assert!(
+                big_tag(&a, "Alpha").is_some_and(|t| t.contains(&format!("tag = {n},"))),
+                "cycle {n}: the choice was not applied"
+            );
+            a.svc
+                .command(Command::RestoreSettings {
+                    unit: unit.clone(),
+                    checkpoint: orig_cp,
+                })
+                .unwrap();
+            for _ in 0..3 {
+                synced(&mut a);
+                synced(&mut b);
+            }
+            assert!(
+                big_tag(&a, "Alpha").is_some_and(|t| t.contains("tag = 0,")),
+                "cycle {n}: the restore was not applied"
+            );
+            let _ = a.svc.status();
+            live.push(heap::LIVE.load(Relaxed));
+            eprintln!(
+                "G18 cycle {n}: live heap {:.2} MiB, peak during the cycle {:.2} MiB",
+                live[n - 1] as f64 / 1048576.0,
+                heap::PEAK.swap(heap::LIVE.load(Relaxed), Relaxed) as f64 / 1048576.0
+            );
+            if pause > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(pause));
+            }
+        }
+        // History legitimately adds small records per cycle; a retained copy of the file, or any
+        // growth proportional to it, is the regression.
+        if live.len() > 3 {
+            let early = live[2];
+            let last = *live.last().unwrap();
+            let allowed = size / 4 + 96 * 1024;
+            assert!(
+                last <= early + allowed,
+                "live heap grew from {early} to {last} bytes over {cycles} cycles"
+            );
+        }
+    }
     #[test]
     fn g16_the_headline_is_not_up_to_date_until_an_accepted_choice_is_applied() {
         use crate::settings_cycle::SettingsUnitStatus as S;

@@ -528,3 +528,56 @@ running, where the unit shows WaitingForWow). While the game runs the unit row i
 and the base headline is unchanged (pre-existing behaviour).
 - Decision: reuse `Headline::Working` rather than add a variant. Why: no app/core enum change;
   the app already renders it as "Syncing". Reversible: yes.
+## Round G18 (memory growth over repeated choose / restore / apply cycles)
+
+Result: the runtime does NOT grow per cycle. No runtime change was needed; the growth the checker
+saw (93 -> 134.5 MiB hidden) is outside the runtime service. Evidence:
+
+Harness: `e2e::tests::g18_repeated_choose_restore_cycles_do_not_retain_heap_per_cycle` runs one
+long-lived pair of services through [owner edit during a game session -> peer shares its copy ->
+ChooseSettings (peer) -> 3 apply passes -> RestoreSettings (original) -> 3 apply passes] with
+a counting global allocator (test build only; `unsafe_code` is `deny` in the test build and
+`forbid` in shipped code). The harness writes the large files in 1 MiB chunks, so it never holds a
+file itself. `WOWSYNC_G18_BYTES`, `WOWSYNC_G18_CYCLES`, `WOWSYNC_G18_PAUSE_MS` scale it.
+
+Live heap after each cycle, release build, 33,449,574-byte settings file, 20 cycles. Numbers are
+from the first version of the harness, which held the original file (31.92 MiB) itself; that
+amount is subtracted here (raw: 31.94, 31.94, 31.98, 32.03, 32.07, 32.14). The final harness
+streams its files and was run at 2 MiB (12 cycles, debug: 0.04 -> 0.16 MiB live, peak in a
+cycle about 1.1 MiB = the 1 MiB harness chunk) and as the 33 MB process run below.
+
+| Cycle | 1 | 2 | 5 | 10 | 15 | 20 |
+|---|---:|---:|---:|---:|---:|---:|
+| runtime live heap (MiB) | 0.02 | 0.02 | 0.06 | 0.11 | 0.15 | 0.22 |
+
+Growth is about 10 KiB per cycle (history and ledger records), independent of file size. In
+that run the largest peak (95.7 MiB) was exactly the three 31.9 MiB strings the old harness held
+itself, so the runtime's own transient was negligible: 33 MiB files are streamed in 1 MiB
+buffers (OD-30). Nothing keeps the file, a decoded payload, a recovery copy or a snapshot.
+Whole-process counters, same run as a real long-lived process (release test binary, no GUI),
+sampled every 250 ms, 1.5 s pause between cycles:
+
+| Cycle | 0 | 1 | 5 | 10 | 15 | 20 |
+|---|---:|---:|---:|---:|---:|---:|
+| peak working set (MiB) | 9.0 | 9.4 | 10.3 | 10.7 | 11.1 | 10.8 |
+| end private commit (MiB) | 1.6 | 1.6 | 2.8 | 3.4 | 3.5 | 3.4 |
+
+The whole process stays near 10 MiB working set over 20 cycles with a 31.9 MiB file; +1.8 MiB
+over the run is the history growth plus allocator warm-up. The checker's +10-17 MiB per cycle
+(working set and commit) therefore comes from the GUI process's own allocations (renderer,
+retained view models/snapshots, per-open page state, textures) and is for R11-app to bisect.
+
+Guard: the test fails when the runtime retains memory per cycle. Proven by injecting a leak of
+300 KiB into `sync_once` and reverting it: the test fails ("live heap grew from 18500952 to
+44674236 bytes over 8 cycles") and passes on the real code. Default run: 1 MiB file, 8 cycles,
+allowed growth size/4 + 96 KiB between cycle 3 and the last.
+
+Not covered: the full 113-add-on lab with the GUI (no GUI in this worker's harness); the control
+surface needed for a GUI-driven loop belongs to R11-app. Suggested R11-app probes: heap/commit
+before and after each reopen with the Settings page and detail views, per-open view model
+rebuilds, and any per-snapshot clones held by the UI thread or an undrained channel.
+
+- Decision: no speculative runtime change. Why: measurements show no growth; trimming or caching
+  changes would be unprovable. Reversible: n/a.
+- Decision: allow a test-only `unsafe` allocator via `cfg_attr(test, deny)`. Why: needed for an
+  in-process heap assertion; shipped code stays `forbid(unsafe_code)`. Reversible: yes.

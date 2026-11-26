@@ -1069,6 +1069,7 @@ tests = [
     "e2e::tests::a_master_edit_made_after_its_own_restore_is_published_not_reverted",
     "e2e::tests::a_master_edit_that_equals_an_older_shared_version_is_offered_not_reverted",
     "e2e::tests::g16_the_headline_is_not_up_to_date_until_an_accepted_choice_is_applied",
+    "e2e::tests::g18_repeated_choose_restore_cycles_do_not_retain_heap_per_cycle",
     "e2e::tests::a_master_restore_then_a_choice_leaves_both_computers_on_the_selected_bytes",
     "e2e::tests::history_entries_carry_origin_source_size_and_sequence",
     "e2e::tests::two_addons_declaring_one_variable_both_get_rows_even_without_their_own_files",
