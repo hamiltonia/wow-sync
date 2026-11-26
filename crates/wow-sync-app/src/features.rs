@@ -761,14 +761,53 @@ fn apply_settings(f: &mut FeatureData, s: &wow_sync_runtime::SettingsSnapshot) {
 }
 
 /// Names a competing copy by who it came from, so two choices never read alike.
+#[cfg(test)]
 pub fn head_label(kind: wow_sync_runtime::HeadKind, source: Option<&str>, detail: &str) -> String {
+    head_label_of(None, kind, source, detail)
+}
+
+/// Like `head_label`, also saying how the copy came about when the revision kind is known.
+pub fn head_label_of(
+    how: Option<wow_sync_core::kinds::RevisionKind>,
+    kind: wow_sync_runtime::HeadKind,
+    source: Option<&str>,
+    detail: &str,
+) -> String {
+    use wow_sync_core::kinds::RevisionKind as R;
     use wow_sync_runtime::HeadKind as K;
+    let copy = match how {
+        Some(R::Restore) => "restored copy",
+        Some(R::Choice) => "chosen copy",
+        Some(R::Push) => "pushed copy",
+        Some(R::Auto) => "copy edited in game",
+        None => "copy",
+    };
     match (kind, source) {
-        (K::MastersRevision, Some(n)) => format!("the copy from settings master {n} ({detail})"),
-        (K::MastersRevision, None) => format!("the copy from the settings master ({detail})"),
-        (K::ThisComputersCopy, _) => format!("the copy from this computer ({detail})"),
-        (K::SharedFrom, Some(n)) => format!("the copy shared from {n} ({detail})"),
-        (K::SharedFrom, None) => format!("the copy shared from another computer ({detail})"),
+        (K::MastersRevision, Some(n)) => format!("the {copy} from settings master {n} ({detail})"),
+        (K::MastersRevision, None) => format!("the {copy} from the settings master ({detail})"),
+        (K::ThisComputersCopy, _) => format!("the {copy} from this computer ({detail})"),
+        (K::SharedFrom, Some(n)) => format!("the {copy} shared from {n} ({detail})"),
+        (K::SharedFrom, None) => format!("the {copy} shared from another computer ({detail})"),
+    }
+}
+
+/// Gives choices that still read the same "(newer)"/"(older)" (or "(1 of N)"), by time then
+/// the order given. Never shows a hash.
+pub fn tell_apart(labels: &mut [String], order: &[(u64, usize)]) {
+    let base = labels.to_vec();
+    for i in 0..base.len() {
+        let mut same: Vec<usize> = (0..base.len()).filter(|&j| base[j] == base[i]).collect();
+        if same.len() < 2 {
+            continue;
+        }
+        same.sort_by_key(|&j| (order[j].0, order[j].1));
+        let pos = same.iter().position(|&j| j == i).unwrap_or(0);
+        let tag = match (same.len(), pos) {
+            (2, 0) => "older".to_string(),
+            (2, _) => "newer".to_string(),
+            (n, p) => format!("{} of {n}", p + 1),
+        };
+        labels[i] = format!("{} ({tag})", base[i]);
     }
 }
 
@@ -842,6 +881,41 @@ pub fn history_copies(
         .collect()
 }
 
+fn head_copies(r: &wow_sync_runtime::SettingsUnitRow) -> Vec<crate::settings_ui::Copy> {
+    let mut labels: Vec<String> = r
+        .competing
+        .iter()
+        .map(|h| {
+            let how = r
+                .history
+                .iter()
+                .filter(|e| h.revisions.contains(&e.hash))
+                .max_by_key(|e| (e.written_unix_ms, e.seq))
+                .map(|e| e.kind);
+            let mut when = crate::world::date_time_seconds_text(h.written_unix_ms);
+            if let Some(b) = h.size_bytes {
+                when = format!("{when}, {}", crate::history_ui::size_text(b));
+            }
+            head_label_of(how, h.kind, h.source.as_deref(), &when)
+        })
+        .collect();
+    let order: Vec<(u64, usize)> = r
+        .competing
+        .iter()
+        .enumerate()
+        .map(|(i, h)| (h.written_unix_ms, i))
+        .collect();
+    tell_apart(&mut labels, &order);
+    r.competing
+        .iter()
+        .zip(labels)
+        .map(|(h, label)| crate::settings_ui::Copy {
+            checkpoint: h.checkpoint,
+            label,
+        })
+        .collect()
+}
+
 /// The settings rows as the screen shows them.
 pub fn settings_unit_rows(
     rows: &[wow_sync_runtime::SettingsUnitRow],
@@ -887,18 +961,7 @@ pub fn settings_unit_rows(
                 live: r.live,
                 latest_capture: r.latest_capture,
                 can_share: r.can_share,
-                heads: r
-                    .competing
-                    .iter()
-                    .map(|h| Copy {
-                        checkpoint: h.checkpoint,
-                        label: head_label(
-                            h.kind,
-                            h.source.as_deref(),
-                            &detail(h.written_unix_ms, h.size_bytes),
-                        ),
-                    })
-                    .collect(),
+                heads: head_copies(r),
                 shown_heads: r.shown_heads.clone(),
                 history: history_copies(&r.history),
                 restore_possible: r.restore_possible,
