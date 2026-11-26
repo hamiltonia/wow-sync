@@ -44,8 +44,16 @@ Run-010 (D-32) published the `v0.3.3`
 ([notes](docs/release/v0.3.3.md)). It adds a per-add-on change history that
 shows what changed, from which computer, and why. It also adds live sync
 progress, and makes quiet idle passes about three times faster. Report:
-[docs/runs/run-010/REPORT.md](docs/runs/run-010/REPORT.md). The latest release
-is `v0.3.3`. Run-011 (D-33, add-on settings sync) is in progress.
+[docs/runs/run-010/REPORT.md](docs/runs/run-010/REPORT.md).
+Run-011 (D-33) published the `v0.4.0`
+[pre-release](https://github.com/hamiltonia/wow-sync/releases/tag/v0.4.0)
+([notes](docs/release/v0.4.0.md)). It adds add-on settings (WTF
+`SavedVariables`) sync. Setup is guided, with consent per account, a
+settings master, plain-language statuses, pause, and recovery from the
+GUI. Its decisions await owner review in
+[DECISIONS-FOR-REVIEW.md](docs/runs/run-011/DECISIONS-FOR-REVIEW.md). Report:
+[docs/runs/run-011/REPORT.md](docs/runs/run-011/REPORT.md). The latest release
+is `v0.4.0`.
 Repository layout: [docs/REPO-MAP.md](docs/REPO-MAP.md).
 
 This repository (`hamiltonia/wow-sync`) is the permanent project home. It is not
