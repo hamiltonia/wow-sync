@@ -4315,6 +4315,73 @@ mod tests {
     }
 
     #[test]
+    fn g16_the_headline_is_not_up_to_date_until_an_accepted_choice_is_applied() {
+        use crate::settings_cycle::SettingsUnitStatus as S;
+        use wow_sync_core::status::Headline;
+        let lab = Lab::new();
+        let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));
+        let unit = alpha_unit();
+        let v1 = "AlphaDB = { v = 1 }\n";
+        let local = "AlphaDB = { local = 1 }\n";
+        let peer = "AlphaDB = { peer = true, longer = 1 }\n";
+        write_wtf(&a, "Alpha", v1);
+        synced(&mut a);
+        share_now(&mut a);
+        synced(&mut b);
+        synced(&mut b);
+        a.act.set(Activity::Running { pids: vec![4242] });
+        write_wtf(&a, "Alpha", local);
+        synced(&mut a);
+        let cp = stored_checkpoint(&b, &unit, peer.as_bytes());
+        write_wtf(&b, "Alpha", peer);
+        synced(&mut b);
+        b.svc
+            .command(Command::ShareSettings {
+                unit: unit.clone(),
+                checkpoint: cp,
+            })
+            .unwrap();
+        synced(&mut b);
+        synced(&mut a);
+        a.act.set(Activity::NotRunning);
+        synced(&mut a);
+        let row = a.svc.status().settings_units.remove(0);
+        a.svc
+            .command(Command::ChooseSettings {
+                unit: unit.clone(),
+                checkpoint: cp,
+                shown_heads: row.shown_heads.clone(),
+            })
+            .unwrap();
+        let not_ok = |a: &mut Pc| {
+            let st = a.svc.status();
+            let h = st.detail.as_ref().map(|d| d.view.headline);
+            assert_ne!(h, Some(Headline::Ok), "headline says up to date");
+            assert_eq!(st.settings_units[0].status, S::WaitingForSharedCopy);
+        };
+        not_ok(&mut a);
+        // A pass while the game runs observes the new head but cannot apply it.
+        a.act.set(Activity::Running { pids: vec![4242] });
+        synced(&mut a);
+        let st = a.svc.status();
+
+        assert!(!matches!(
+            st.settings_units[0].status,
+            S::Active | S::InSync
+        ));
+        a.act.set(Activity::NotRunning);
+        for _ in 0..4 {
+            synced(&mut a);
+        }
+        assert_eq!(read_wtf(&a, "Alpha").as_deref(), Some(peer));
+        let st = a.svc.status();
+        assert_eq!(
+            st.detail.as_ref().map(|d| d.view.headline),
+            Some(Headline::Ok)
+        );
+        assert!(matches!(st.settings_units[0].status, S::Active | S::InSync));
+    }
+    #[test]
     fn a_master_edit_that_equals_an_older_shared_version_is_offered_not_reverted() {
         let lab = Lab::new();
         let (mut a, mut b, _g) = settings_pair(&lab, true, Some(1 << 20));

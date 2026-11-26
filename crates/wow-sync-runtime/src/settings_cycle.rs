@@ -1897,18 +1897,22 @@ pub fn settings_units(
             let status = if matches!(
                 status,
                 SettingsUnitStatus::Active | SettingsUnitStatus::InSync
-            ) && match facts.seen_heads.get(&unit) {
-                Some(seen) => *seen != graph.heads,
-                // Not evaluated since the start: up to date only once the basis names the heads.
-                None => {
-                    !graph.heads.is_empty()
-                        && local
-                            .units
-                            .iter()
-                            .find(|u| u.unit == unit)
-                            .is_some_and(|u| u.basis != graph.heads)
-                }
-            } {
+            ) && (local
+                .units
+                .iter()
+                .any(|u| u.unit == unit && u.pending_selection.is_some())
+                || match facts.seen_heads.get(&unit) {
+                    Some(seen) => *seen != graph.heads,
+                    // Not evaluated since the start: up to date only once the basis names the heads.
+                    None => {
+                        !graph.heads.is_empty()
+                            && local
+                                .units
+                                .iter()
+                                .find(|u| u.unit == unit)
+                                .is_some_and(|u| u.basis != graph.heads)
+                    }
+                }) {
                 SettingsUnitStatus::WaitingForSharedCopy
             } else {
                 status
