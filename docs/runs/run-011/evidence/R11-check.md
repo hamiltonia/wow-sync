@@ -2182,3 +2182,253 @@ artifact files, both binaries and offline log are sealed by
 `9cd9095746cac9e7fd69613373f3a4af50d168b13bad18f000a5e0980d3e811d`.
 Every sealed file was rehashed successfully; the manifest excludes itself.
 Everything remains local in LAB; no raw data was uploaded or committed.
+
+## Re-verification 6 — G18 (artifact 45749110502)
+
+### Scope and measurement protocol
+
+Merged main into `run011/R11-check` in
+`D:\GitHub\wow-sync.worktrees\R11-check`; checkout starting point
+`8ebce62`. Read OD-61–OD-63 and the app/runtime G18 evidence. No product
+fix was authorized or made. Reused the **same release dispatch 45749110502**
+at `7a65a117ceca9a6952b3a9da62488f34e52336ff`, not a local build.
+Rehashed its ZIP against its original sidecar:
+`96968c9757c2b5726a605c4e76ec2e77a48593ac67ded3bca6347173f53d235e`;
+rehashed EXE:
+`d2a90883ad52480682e6db4dcc661b18f110ce491efbd54299ba2ac8efbd1c0a`.
+
+Same Windows host and accumulated A/B full lab, retained histories/provider
+and settings policy, no lab reset. Both app starts use the existing
+`candidate5` EXE through the re-rooted `r6-common.ps1` exact-command guard:
+`--dev --install <LAB> --state <LAB> --provider <LAB>`, zoom **1.5**.
+No other candidate launch, probe or help command. B is visible for its
+peer-share controls; A is the single long-lived subject throughout the
+completed control and treatment. No real WoW, Dropbox, demo or owner state
+is used; owner-log access is metadata only.
+
+The independent native monitor starts before either app. It continuously
+samples private working set/private commit at nominal **25 ms**, plus
+`EnumWindows` / `IsWindowVisible` for every top-level window of each
+owned app PID. No working-set trimming, explicit GC or restart between
+control and treatment. Peak resident values are not substituted by commit.
+
+Control runs the retained 54–57 script path four times, in **one long-lived
+UIA client**, including full-tree navigation and native headline/tray
+convergence reads. Its fourth restore has the same 30-second delay. Each
+cycle ends hidden with a labelled quiet wait. After all four, the client
+is terminated by its exact PID after creation-time validation; A stays
+hidden and running for a **60-second release observation**.
+
+Treatment runs the same share / choose-peer / restore-original user path
+eight further times on that A process. Each dump, find/invoke and screenshot
+uses a **fresh separate PowerShell client**, exits and is waited on before
+the next step. The driver never calls UIA APIs. Show/close use owned native
+window messages; all clients exit **before hide-to-tray**. Convergence is
+file-hash polling without UIA in the driver; unlike control, it does not
+retain native UIA status objects between polls. Each hidden treatment
+quiet wait is 60 seconds.
+
+Before each UIA-client creation, an atomic conservative marker is set;
+it is cleared only after confirmed process exit. The sampler records that
+marker **on each sample**, conservatively labelling reserved/unknown states
+as active in the raw marker column. `client-lifetimes.jsonl` additionally records
+the actual PID and bracketing lifetime of every worker; post-analysis
+cross-checks that no sample inside these intervals is called client-free.
+This only attests the verifier-owned clients; it is not an assertion that
+all third-party accessibility tools are absent.
+
+The final classification uses **actual OS process creation/exit timestamps**,
+not the conservative marker alone. In particular, a sample after the
+client's real exit is client-free even if the driver has not yet cleared its
+marker. Such transition samples are included in the hard gate; no
+post-exit grace period is assumed.
+
+An initial preflight stopped before the control client was started: atomic
+marker replacement met a file-sharing race with the sampler reader.
+Cleanup stopped both owned apps and the monitor. Its raw files are retained
+in LAB `round6-preflight-aborted`, not counted as control/treatment cycles.
+The reader now permits delete sharing and marker replacement retries;
+this is a verifier-harness correction, not a product change. The final
+measurement starts fresh apps once and retains A thereafter.
+
+The first full control attempt then reached the first treatment's restore,
+but a hash read hit the peer's atomic apply replacement: the watcher records
+the file Deleted at 07:08:21.507Z and Created at 07:08:21.521Z. The missing
+file read, followed by another hash in its error recorder, aborted that
+harness attempt and triggered cleanup. Data is retained in
+`round6-attempt1-aborted`. The reader now retries bounded observation-only
+reads without resetting the convergence deadline or adding application
+actions. The entire four-plus-eight sequence is repeated on a single new A
+process, not spliced across app restarts. Valid no-client release samples
+from the interrupted attempt are still reported, not discarded.
+
+### Results and verdict
+
+**G18: FAIL under the requested every-hidden-sample / no-client-alive
+rule.** The long-lived-client growth reproduces and the fresh-client
+treatment removes its large per-cycle trend, but the memory is **not**
+below 100 MiB immediately upon the client's process exit. This report does
+not invent a release/GC grace period or retroactively classify a dead
+client as alive.
+
+| Obligation | Result | Observation |
+|---|---|---|
+| Same verified release artifact | PASS | Both ZIP/sidecar and EXE rehash match round five |
+| One accumulated full-lab A, zoom 1.5 | PASS | PID **18784**, no restart during all 12 completed cycles; B PID **15588** |
+| Four long-lived-client control cycles | PASS, reproduced | Hidden peaks **92.691 → 106.371 → 118.422 → 130.105 MiB** |
+| Terminate client, observe 60 seconds hidden | PASS, measured release | Client **27256** actually exits; A drops to **61.770 MiB** by 60 s, but has a short over-limit interval first |
+| Eight fresh-client-per-step cycles | PASS | **198** short-lived client sessions, all exited; zero client-alive hidden samples within treatment |
+| No control-like per-cycle growth in treatment | PASS at observed noise scale | Quiet medians **61.449–63.562 MiB**, non-monotonic; first-to-last +1.113 MiB, fitted slope +0.128 MiB/cycle, not the control's roughly 12 MiB/cycle |
+| Every no-client hidden sample ≤100 MiB | **FAIL — G18 major remains** | Completed measurement: **29** samples over, peak **114.422 MiB**, in the first 0.715 s after client exit; preserved interrupted attempt: **38**, peak **118.129 MiB** |
+| Share / choose-peer / restore path actually completes | PASS | **12/12** A/B original-byte convergence results; zero automatic post-restore A publications |
+
+This supports the **UIA-client-lifetime/querying explanation** for the large
+growth, not an assertion that the app itself has an independently identified
+leak. Treatment also removes long-lived status polling, so it is not a
+matched-query-count allocator experiment. No screen-reader process was
+tested; memory while a real assistive client remains connected is still
+the explicit OD-62 owner-policy question.
+
+### Per-cycle memory
+
+All values MiB (1,048,576 bytes). **Hidden peak** includes every hidden
+sample in the cycle, without discarding in-progress settings passes.
+**Quiet** is the median resident private working set in the last 30 hidden
+seconds of the labelled quiet interval. **Commit end** is the last private
+commit sample in that interval, not resident memory and not a hard gate.
+Routine checks can still cause transient spikes during quiet waits.
+
+| Raw run / cycle | Hidden peak | Quiet private WS | Commit end | Hidden client state |
+|---|---:|---:|---:|---|
+| 61 / C1 | 92.691 | 71.270 | 137.309 | long-lived client alive |
+| 62 / C2 | 106.371 | 83.875 | 165.594 | long-lived client alive |
+| 63 / C3 | 118.422 | 96.449 | 160.441 | long-lived client alive |
+| 64 / C4 | 130.105 | 108.832 | 174.656 | long-lived client; first actual-exit sample also retained |
+| 65 / T1 | 87.465 | 61.449 | 127.063 | no client alive |
+| 66 / T2 | 89.195 | 61.605 | 125.621 | no client alive |
+| 67 / T3 | 88.152 | 63.562 | 129.586 | no client alive |
+| 68 / T4 | 86.059 | 62.238 | 126.750 | no client alive |
+| 69 / T5 | 88.547 | 63.391 | 131.531 | no client alive |
+| 70 / T6 | 89.094 | 62.262 | 143.137 | no client alive |
+| 71 / T7 | 86.680 | 62.754 | 132.480 | no client alive |
+| 72 / T8 | 87.383 | 62.562 | 130.344 | no client alive |
+
+Treatment's hidden maximum is **89.195 MiB**, with **zero** over-limit
+samples. No monotonic control-sized retained staircase remains. The
+nonzero fitted slope and observed 2.113 MiB quiet-median range are
+disclosed rather than called proof of exactly zero allocation growth
+over an unlimited lifetime.
+
+For the complete measurement, separate actual-client-state aggregates:
+
+| A hidden samples | Count | Private WS peak | Private commit peak | Samples >100 MiB |
+|---|---:|---:|---:|---:|
+| Actual client alive | 5,205 | 130.105 | 196.055 | 1,866 |
+| No actual client alive, **including exit transition** | 24,461 | **114.422** | 179.133 | **29** |
+
+The raw conservative marker agrees with every actual alive interval
+(zero false-free rows). There are 368 A/B rows conservatively marked
+active outside actual process lifetimes; their actual client-free state
+is used in analysis, not hidden behind the marker.
+Median sample interval for A: **25.0001 ms**; maximum observed gap:
+**989.495 ms**. As in OD-53, these are sampled maxima, not claims about
+unmeasured intervals. The file watcher reports zero overflow/errors.
+
+### Client-exit boundary — continuing G18 (major)
+
+Actual long-lived client's OS lifetime:
+**07:11:10.146270Z–07:25:38.007930Z**.
+All the following post-exit samples have **5 owned top-level windows,
+0 visible** and A PID **18784**:
+
+| UTC on 26 November | State / observed values |
+|---|---|
+| 07:25:38.022796 | First actual-client-free over-limit sample: **110.367 MiB** private WS; raw marker still conservatively says client active |
+| 07:25:38.547772 | Client-free peak: **119,980,032 bytes = 114.421875 MiB**; private commit **187,834,368 bytes**; marker also says none |
+| 07:25:38.722395 | Last over-limit sample, **0.714465 s after actual client exit** |
+| End of 60-second hidden wait | **61.770 MiB** private WS / **125.934 MiB** private commit |
+
+Before any control-client queries, the hidden baseline's last-30-second
+median is **51.855 MiB**, final value **51.426 MiB** / commit **115.430 MiB**.
+After termination, the final-30-second median is **63.301 MiB**; the final
+resident value falls by about **48.6 MiB** from the control's final quiet
+sample, but remains **10.344 MiB above the original final baseline**.
+Thus: **substantial release, close to the later treatment's quiet range,
+not an exact return to the original baseline**. The residual allocation
+source is not established by this measurement.
+
+The first interrupted attempt independently retains valid release evidence:
+client exit had already been confirmed by **07:04:26.490009Z**; **38**
+marker-none hidden samples exceed 100 MiB between **07:04:26.507079Z**
+and **07:04:27.418914Z**, peak **118.128906 MiB**. A later transient
+hash-read failure does not invalidate these earlier samples.
+Accordingly, the **highest valid no-client hidden peak across round-six
+attempts is 118.129 MiB**, not just the completed sequence's 114.422 MiB.
+No new product finding number is assigned: this is the remaining G18
+threshold failure, with a much narrower, transient reproduction.
+
+### Functional path, raw evidence and shutdown
+
+`g13-results.jsonl`: all control/treatment cycles select the peer copy,
+restore the original **49 B** checkpoint, and end with A and B hash
+`2bf169a7ea11b53003323b4b9cee897df79fb4655b4e8f705f355ffbe5cabd73`,
+with no automatic post-restore publication. A's initial history:
+**435 records / 166,298 bytes**; final: **508 / 194,896**.
+B: **260 / 101,047 → 296 / 115,543**. The lab genuinely accumulated data.
+
+Viewed `shots\memory65-choice.png` (decision headline) and
+`shots\memory65-restore-controls.png` (the complete original 49 B checkpoint
+description with Restore and Cancel controls). The former screenshot's
+viewport is scrolled away from the actual choice buttons; it is **not**
+claimed as another G17 full-button screenshot. Action logs and per-step
+worker requests/responses retain the exact successful peer choice.
+
+Four fresh worker attempts found a temporarily unavailable control:
+three `Sync now`, one peer-choice button. Each exited, then the existing
+bounded readiness logic retried through a **new process**; no failed cycle
+is reported as a successful click. All 198 sessions exited.
+The driver loads UIA assemblies as metadata through the PowerShell/
+Add-Type environment, but **does not call UIA APIs**; only the separately
+registered step workers and the control do. Exact scripts are retained.
+
+Raw `memory-native.csv`, actual `client-lifetimes.jsonl`, requests/responses,
+convergence hashes, GUI actions, screenshots and `summary.json` are in
+LAB `round6`. Prior aborted attempts remain in their named sibling folders.
+No raw data was uploaded.
+
+All owned app/game processes and the sampler/watcher stopped; monitor
+exit **0**, shutdown **08:01:19.321Z**. The final ownership-matched
+survivor check is empty, including both earlier aborted attempts.
+The main checkout was clean after shutdown and was never modified by
+this worker.
+
+Owner log metadata only, for the completed measurement:
+
+| Observation UTC | Bytes | Last-write UTC |
+|---|---:|---|
+| 07:09:46.843 | 412,753 | 07:09:44.533 |
+| 08:01:19.321 | 500,895 | 08:01:17.769 |
+
+Growth **88,142 bytes**; content attribution remains the orchestrator's
+responsibility. Earlier attempt metadata is preserved with its raw data.
+This focused G18 round does not repeat the other acceptance matrices or
+approve a release.
+
+Final full-lab count rechecked: **119 add-on folders / 36,154 add-on files**.
+Ran `cargo xtask verify --tier offline` in this worker worktree after
+measurement shutdown: **PASS, exit 0**, including fmt, clippy, workspace
+tests, required cases, deny and markdown links. Scratch stayed under
+`target\verification-work`; no dependency install was needed.
+`round6\offline-verify.log` retains the output. No separate native-tier or
+platform acceptance run is claimed for this focused measurement.
+
+Evidence/raw-data consistency **PASS**, explicitly retaining **G18 FAIL**
+and **67 established client-free over-limit samples** across the complete
+measurement and preserved interrupted attempt. This is a consistency
+check, not a substitute product test. The closed raw streams, screenshots,
+client requests/responses/lifetimes, final A/B local state, both aborted
+attempts, exact harnesses, artifact files and offline log are sealed by
+`round6\raw-evidence-sha256.txt`: **1,570 files**, manifest SHA-256
+`95f458c76c4cf0eff59d5da79c36dc78b9753bb16f2ea50eb4a16e4d74cff810`.
+Every sealed file was successfully rehashed; the manifest excludes itself.
+All material stays local in LAB; only this evidence file is committed.
